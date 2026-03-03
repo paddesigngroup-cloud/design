@@ -1,0 +1,1098 @@
+:root {
+  /* Palette (per user) */
+  --c-bg: #e8eaec; /* light gray under the whole page */
+  --menuGlass: #dfaabc; /* glass tint for the opened menu panels */
+  /* Fixed right menu color (per user) */
+  --c-menu: #762d47; /* menu base */
+  --c-menu-dark: #5b2235;
+  --c-menu-deep: #3e1724;
+
+  --bg: var(--c-bg);
+  --panel: rgba(255, 255, 255, 0.84);
+  --panel2: rgba(255, 255, 255, 0.74);
+  --line: rgba(11, 34, 48, 0.14);
+  --text: #34141f;
+  --muted: rgba(52, 20, 31, 0.68);
+  --shadow: 0 12px 28px rgba(11, 34, 48, 0.12);
+  --radius: 12px;
+  --toolrail: var(--c-menu);
+  --toolrail2: var(--c-menu-dark);
+  --accent: var(--c-menu-deep);
+  /* Layout widths (CabBuilder-like) */
+  --attrW: 280px; /* Attributes panel (left) */
+  --toolsW: 240px; /* Tools panel (right, next to rail) */
+  --railW: 49px; /* Fixed rail (far right) (5% smaller) */
+  --dockGap: 10px;
+  /* Submenus (except the main menu which uses shrink-wrap) */
+  --menuPanelW: 260px;
+  --subRailW: 46px;
+  --subRailGap: 0px;
+
+  /* Icon button backgrounds (Topbar + Design Toolbar) */
+  --iconBg: #ffffff; /* inactive */
+  --iconBgActive: #f3dee6; /* active (lighter pink) */
+  --topLeftW: 250px; /* reserved space for the small left icons */
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#app {
+  height: 100%;
+}
+html,
+body,
+#app {
+  font-family: Vazirmatn, sans-serif;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 500;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+.ltr {
+  direction: ltr;
+  text-align: left;
+}
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  direction: rtl;
+}
+.topbar {
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--dockGap);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  direction: ltr;
+  position: relative;
+  backdrop-filter: blur(10px);
+}
+.topbar__icons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  direction: ltr;
+  position: absolute;
+  left: 50%;
+  transform: translateX(calc(-50% + var(--shiftPx, 0px)));
+  /* allow full row of icons; only reserve space for the right logo */
+  max-width: calc(
+    100% - (var(--railW) + var(--dockGap) + 8px + var(--topLeftW))
+  );
+  overflow: visible;
+  white-space: nowrap;
+}
+.topbar__leftIcons {
+  position: absolute;
+  left: var(--dockGap);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  direction: ltr;
+}
+.topbar__railLogo {
+  position: absolute;
+  width: var(--railW);
+  height: var(--railW);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  right: var(--dockGap);
+  top: calc((54px - var(--railW)) / 2);
+}
+.topbar__railLogo img {
+  /* logo icon 5% smaller than the rail slot */
+  width: calc(var(--railW) - 10px);
+  height: calc(var(--railW) - 10px);
+  display: block;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background:
+    radial-gradient(
+      120% 100% at 30% 20%,
+      rgba(255, 255, 255, 0.26) 0%,
+      rgba(255, 255, 255, 0) 55%
+    ),
+    linear-gradient(180deg, var(--c-menu), var(--c-menu-dark));
+  padding: 6px;
+  object-fit: contain;
+}
+.topbar__railLogo:hover img {
+  filter: brightness(1.08);
+}
+.topbar__railLogo:focus {
+  outline: none;
+}
+.topbar__railLogo:focus img {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+.iconbtn {
+  border: 1px solid var(--line);
+  background: var(--iconBg);
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.iconbtn--sm {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+}
+.iconbtn--pop img {
+  /* Keep original icon colors, make it punchier. */
+  opacity: 1 !important;
+  filter: none !important;
+}
+.iconbtn--pop {
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 10px 18px rgba(118, 45, 71, 0.1);
+}
+.iconbtn--pop::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+  /* Pink glass + shimmer band */
+  background:
+    radial-gradient(
+      140% 120% at 30% 20%,
+      rgba(255, 255, 255, 0.55) 0%,
+      rgba(255, 255, 255, 0) 55%
+    ),
+    linear-gradient(
+      120deg,
+      rgba(223, 170, 188, 0.78) 0%,
+      rgba(255, 255, 255, 0.66) 18%,
+      rgba(223, 170, 188, 0.6) 38%,
+      rgba(255, 255, 255, 0.44) 55%,
+      rgba(223, 170, 188, 0.46) 100%
+    );
+  background-size:
+    100% 100%,
+    220% 220%;
+  background-position:
+    center,
+    0% 0%;
+}
+.iconbtn--pop:hover::before {
+  opacity: 1;
+  filter: saturate(1.55) contrast(1.16);
+  animation: popShimmer 0.85s linear infinite;
+}
+.iconbtn--pop:hover img {
+  transform: scale(1.06);
+}
+.iconbtn--pop img {
+  position: relative;
+  transition: transform 0.12s ease;
+}
+
+@keyframes popShimmer {
+  0% {
+    background-position:
+      center,
+      0% 0%;
+  }
+  100% {
+    background-position:
+      center,
+      100% 100%;
+  }
+}
+
+.main {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  direction: ltr;
+}
+
+/* Slim rail that sticks to the left of submenu panels (or the main menu when none open). */
+.subRail {
+  position: absolute;
+  top: var(--subRailTop, 10px);
+  right: var(--subRailRight, calc(10px + var(--railW) + 10px));
+  z-index: 3;
+  width: var(--subRailW);
+  max-height: calc(100% - 20px);
+  padding: 6px 5px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 14px 28px rgba(11, 34, 48, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+}
+.subRail--panel {
+}
+.subRail--main {
+}
+.subTool {
+  width: 100%;
+  aspect-ratio: 1/1;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--iconBg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.subTool:hover {
+  background: rgba(255, 255, 255, 0.92);
+}
+.subTool.is-active {
+  background: var(--iconBgActive);
+  border-color: rgba(118, 45, 71, 0.18);
+}
+.subTool img {
+  width: 22px;
+  height: 22px;
+  display: block;
+  object-fit: contain;
+  opacity: 0.55;
+  filter: brightness(1.35);
+}
+.subTool:hover img {
+  opacity: 0.85;
+  filter: brightness(1.05);
+}
+.subTool:active img {
+  opacity: 1;
+  filter: none;
+}
+.subTool.is-active img {
+  opacity: 1;
+  filter: none;
+}
+
+/* Slide-out menu panel (opens over the 2D stage, never pushes layout) */
+.menuPanel {
+  position: absolute;
+  top: var(--menuPanelTop, 10px);
+  bottom: auto;
+  right: calc(10px + var(--railW) + 10px);
+  width: var(--menuPanelW);
+  max-height: calc(100% - 20px);
+  z-index: 3;
+  direction: rtl;
+  /* Glass panel: slightly more transparent so 2D is visible under it */
+  background:
+    radial-gradient(
+      120% 90% at 30% 15%,
+      rgba(255, 255, 255, 0.055) 0%,
+      rgba(255, 255, 255, 0) 62%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(223, 170, 188, 0.028) 0%,
+      rgba(223, 170, 188, 0.02) 55%,
+      rgba(223, 170, 188, 0.016) 100%
+    );
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.menuPanel--auto {
+  /* Main menu only: shrink-wrap to the widest item (no wasted empty space). */
+  width: max-content;
+  max-width: min(92vw, 360px);
+}
+.menuPanel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  font-family: Vazirmatn, sans-serif;
+}
+.menuPanel__titleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.menuPanel__icon {
+  width: 22px;
+  height: 22px;
+  display: block;
+  object-fit: contain;
+  /* tint to user color (#762D47) */
+  filter: invert(20%) sepia(27%) saturate(2642%) hue-rotate(297deg)
+    brightness(92%) contrast(92%);
+  opacity: 0.95;
+}
+.menuPanel__title {
+  font-family: Vazirmatn, sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+}
+.menuPanel__close {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text);
+}
+.menuPanel__close:hover {
+  filter: brightness(1.05);
+}
+.menuPanel__body {
+  padding: 12px;
+  overflow: auto;
+}
+.menuPanel__hint {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* =============================
+   Design Menu (tools grid + presets)
+============================= */
+.designMenu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.designMenu__grid {
+  display: grid;
+  /* Fixed squares (requested): panel width is adjusted so these stay close to square. */
+  grid-template-columns: repeat(3, 54px);
+  justify-content: center;
+  gap: 10px;
+  direction: rtl;
+}
+.designToolBtn {
+  height: 54px;
+  border-radius: 14px;
+  border: 1px solid rgba(11, 34, 48, 0.1);
+  background: var(--iconBg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 18px rgba(11, 34, 48, 0.06);
+}
+.designToolBtn:hover {
+  filter: brightness(1.02);
+}
+.designToolBtn.is-active {
+  background: color-mix(in srgb, var(--iconBgActive) 92%, #fff 8%);
+  border-color: rgba(118, 45, 71, 0.18);
+}
+.designToolBtn--empty {
+  pointer-events: none;
+  opacity: 0;
+}
+.designToolBtn img {
+  width: 26px;
+  height: 26px;
+  display: block;
+  opacity: 0.55;
+  filter: brightness(1.35);
+}
+.designToolBtn:hover img {
+  opacity: 0.85;
+  filter: brightness(1.05);
+}
+.designToolBtn:active img {
+  opacity: 1;
+  filter: none;
+}
+.designToolBtn.is-active img {
+  opacity: 1;
+  filter: none;
+}
+
+.designMenu__sep {
+  height: 1px;
+  background: rgba(11, 34, 48, 0.1);
+  margin: 2px 0;
+}
+.designMenu__presetsHead {
+  font-family: Vazirmatn, sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--text);
+  opacity: 0.9;
+}
+.designMenu__presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.presetTile {
+  aspect-ratio: 1/1;
+  border-radius: 14px;
+  border: 1px solid rgba(11, 34, 48, 0.1);
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 18px rgba(11, 34, 48, 0.06);
+}
+.presetTile:hover {
+  filter: brightness(1.02);
+}
+.presetTile:active {
+  filter: brightness(0.99);
+}
+.presetTile__svg {
+  width: 38px;
+  height: 38px;
+  display: block;
+}
+.menuList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.menuRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.menuItem {
+  border: 1px solid rgba(52, 20, 31, 0.14);
+  background: rgba(248, 237, 241, 0.1);
+  color: var(--text);
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+  cursor: pointer;
+}
+.menuItem:hover {
+  filter: brightness(1.03);
+}
+.menuItem:active {
+  filter: brightness(0.98);
+}
+.menuItem--grow {
+  flex: 1;
+}
+.menuItem--danger {
+  background: rgba(118, 45, 71, 0.1);
+  border-color: rgba(118, 45, 71, 0.2);
+}
+
+/* Stage fills the available space; panels are docked above it (overlay). */
+.stage {
+  position: absolute;
+  inset: 10px;
+  background: transparent;
+  padding: 0;
+  z-index: 1;
+  direction: ltr;
+}
+.stage {
+  /* Reserve space so content is never hidden under the fixed right rail */
+  right: calc(10px + var(--railW) + 10px);
+}
+.stage__card {
+  height: 100%;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  direction: rtl;
+  position: relative;
+  isolation: isolate;
+  margin-right: 3rem;
+}
+/* Soft edge fade (vignette) to make borders feel "melted"/blurred without affecting canvas interaction */
+.stage__card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 1px rgba(9, 65, 82, 0.08),
+    inset 0 0 70px rgba(9, 65, 82, 0.1);
+  background: radial-gradient(
+    140% 140% at 50% 45%,
+    rgba(255, 255, 255, 0) 62%,
+    rgba(191, 198, 204, 0.88) 100%
+  );
+}
+
+.settin_panel {
+  padding: 14px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+.glbWidget {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  direction: ltr; /* keep resize handle on the bottom-right in RTL layouts */
+  width: 260px;
+  height: 190px;
+  min-width: 180px;
+  min-height: 130px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
+  resize: both;
+  overflow: hidden;
+  z-index: 4;
+  border-radius: 16px;
+  border: 1px solid rgba(11, 34, 48, 0.12);
+  background:
+    radial-gradient(
+      120% 110% at 30% 15%,
+      rgba(255, 255, 255, 0.22) 0%,
+      rgba(255, 255, 255, 0) 58%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(223, 170, 188, 0.03) 0%,
+      rgba(223, 170, 188, 0.018) 100%
+    );
+  box-shadow: 0 18px 34px rgba(11, 34, 48, 0.12);
+  backdrop-filter: blur(12px);
+}
+.glbWidget__head {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  border-bottom: 1px solid rgba(11, 34, 48, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-family: Vazirmatn, sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  user-select: none;
+}
+.glbWidget__headBtns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  direction: ltr;
+}
+.glbWidget__btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+  border: 1px solid rgba(11, 34, 48, 0.14);
+  background: rgba(255, 255, 255, 0.28);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(52, 20, 31, 0.82);
+  font-weight: 700;
+  line-height: 1;
+}
+.glbWidget__btn:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+.glbWidget__btn:active {
+  transform: translateY(1px);
+}
+.glbWidget__host {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 28px;
+  bottom: 0;
+}
+.glbWidget__canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.glbWidget__view {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  /* Ensure opening the menu doesn't affect the button position */
+  width: 28px;
+  height: 28px;
+}
+.glbWidget__viewBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  border: 1px solid rgba(11, 34, 48, 0.14);
+  background: rgba(255, 255, 255, 0.24);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.glbWidget__viewBtn:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+.glbWidget__viewIcon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  object-fit: contain;
+  /* match topbar icon behavior (inactive -> hover brighter) */
+  opacity: 0.55;
+  filter: brightness(1.35);
+  transition:
+    opacity 0.12s ease,
+    filter 0.12s ease;
+}
+.glbWidget__viewBtn:hover .glbWidget__viewIcon {
+  opacity: 0.85;
+  filter: brightness(1.05);
+}
+.glbWidget__viewBtn:active .glbWidget__viewIcon {
+  opacity: 1;
+  filter: none;
+}
+.glbWidget__viewMenu {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: auto;
+  max-width: 220px;
+  padding: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(11, 34, 48, 0.12);
+  background:
+    radial-gradient(
+      120% 110% at 30% 15%,
+      rgba(255, 255, 255, 0.22) 0%,
+      rgba(255, 255, 255, 0) 58%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(223, 170, 188, 0.02) 0%,
+      rgba(223, 170, 188, 0.012) 100%
+    );
+  box-shadow: 0 18px 34px rgba(11, 34, 48, 0.12);
+  backdrop-filter: blur(12px);
+  direction: rtl;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+}
+.glbWidget__viewItem {
+  width: auto;
+  text-align: right;
+  padding: 6px 9px;
+  border-radius: 12px;
+  border: 1px solid rgba(11, 34, 48, 0.08);
+  background: rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  font-family: Vazirmatn, sans-serif;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--text);
+  margin-bottom: 6px;
+  white-space: nowrap;
+}
+.glbWidget__viewItem:last-child {
+  margin-bottom: 0;
+}
+.glbWidget__viewItem:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.glbWidget__viewSep {
+  height: 1px;
+  background: rgba(11, 34, 48, 0.1);
+  margin: 6px 2px 10px;
+}
+
+.stageQuickBar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+  display: flex;
+  direction: rtl;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(11, 34, 48, 0.12);
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(10px);
+  max-width: calc(100% - 24px);
+}
+.stageQuickBar__btn {
+  flex: 0 0 auto;
+}
+.stageQuickBar__ddWrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+.stageQuickDrop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 230px;
+  max-width: min(310px, calc(100vw - 72px));
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(11, 34, 48, 0.13);
+  background: rgba(255, 255, 255, 0.93);
+  box-shadow: 0 16px 30px rgba(11, 34, 48, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  direction: rtl;
+}
+.stageQuickDrop__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.stageQuickDrop__headBtn {
+  border: 1px solid rgba(11, 34, 48, 0.15);
+  background: rgba(118, 45, 71, 0.08);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 10px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.stageQuickDrop__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.stageQuickDrop__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text);
+}
+.stageQuickDrop__label img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  opacity: 0.9;
+}
+.snapToggle {
+  border: 1px solid rgba(11, 34, 48, 0.18);
+  background: rgba(11, 34, 48, 0.14);
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  padding: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.snapToggle.is-on {
+  background: rgba(47, 191, 113, 0.24);
+  justify-content: flex-end;
+}
+.snapToggle__knob {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(11, 34, 48, 0.25);
+}
+.stageQuickDrop--steps {
+  min-width: 190px;
+}
+.stepModeBtn {
+  border: 1px solid rgba(11, 34, 48, 0.14);
+  border-radius: 12px;
+  background: #fff;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+.stepModeBtn img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+.stepModeBtn.is-active {
+  background: var(--iconBgActive);
+  border-color: rgba(118, 45, 71, 0.28);
+}
+
+.stageBottom {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(11, 34, 48, 0.1);
+  background: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 14px 28px rgba(11, 34, 48, 0.1);
+  direction: ltr;
+}
+
+/* Slim fixed right dock (logo above, rail below) */
+.toolDock {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  bottom: 10px;
+  width: var(--railW);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toolRail {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Glossy dark gradient (under the fixed right menu) */
+  background:
+    radial-gradient(
+      120% 55% at 50% 10%,
+      rgba(255, 255, 255, 0.18) 0%,
+      rgba(255, 255, 255, 0) 58%
+    ),
+    linear-gradient(
+      180deg,
+      var(--c-menu-deep) 0%,
+      var(--c-menu-dark) 52%,
+      var(--c-menu) 100%
+    );
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 16px;
+  overflow: hidden;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 18px 38px rgba(11, 34, 48, 0.14);
+}
+.toolRail__main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding-top: 10px;
+}
+.toolRail__bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  align-items: center;
+  width: 100%;
+  padding-bottom: 10px;
+}
+.tool {
+  /* Buttons are slightly smaller than the rail width (user request: 20% smaller squares) */
+  width: 80%;
+  aspect-ratio: 1/1;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tool:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.tool.is-active {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+.tool:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+.tool img {
+  width: 18px;
+  height: 18px;
+  display: block;
+  filter: brightness(0) invert(1) brightness(1.35);
+  opacity: 0.55;
+}
+.tool:hover img {
+  filter: brightness(0) invert(1) brightness(1.05);
+  opacity: 0.85;
+}
+.tool.is-active img {
+  filter: brightness(0) invert(1);
+  opacity: 1;
+}
+.tool__emoji {
+  font-size: 16px;
+  line-height: 1;
+  color: #fff;
+  opacity: 0.8;
+}
+.tool.is-active .tool__emoji {
+  opacity: 1;
+}
+
+/* Close/open arrow flips based on whether a panel is open. */
+.tool--collapse img {
+  transition: transform 0.12s ease;
+}
+.tool--collapse.is-open img {
+  transform: scaleX(-1);
+}
+.tool--small {
+  width: 70%;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.panel--flat {
+  box-shadow: none;
+  background: var(--panel2);
+}
+.panel__title {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.input {
+  border: 1px solid var(--line);
+  padding: 9px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+  background: #fff;
+  direction: rtl;
+  text-align: right;
+}
+
+/* Icons */
+.iconbtn img {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+/* Active/inactive tint:
+   inactive = 3 steps lighter via opacity+brightness
+*/
+.iconbtn img {
+  opacity: 0.55;
+  filter: brightness(1.35);
+}
+.iconbtn:hover img {
+  opacity: 0.85;
+  filter: brightness(1.05);
+}
+.iconbtn:active img {
+  opacity: 1;
+  filter: none;
+}
+.iconbtn.is-active img {
+  opacity: 1;
+  filter: none;
+}
+
+/* Top icon active background (per user) */
+.iconbtn.is-active {
+  background: var(--iconBgActive);
+}
+
+/* FloorPlan Stage (embedded engine) */
+.fpHost {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  direction: ltr;
+}
+.fpCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+/* Use system cursors (no custom cursor icons). */

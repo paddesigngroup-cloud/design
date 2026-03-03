@@ -1,0 +1,5 @@
+cd C:\DesignKP\2d\ui
+& "C:\Program Files\nodejs\npm.cmd" run dev -- --port 5174
+
+https://htmlcolorcodes.com/
+4F1E2F

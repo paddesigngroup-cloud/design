@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>طراحی دیوار</title>
+  <style>
+    html, body {
+      margin:0; padding:0; width:100%; height:100%; overflow:hidden;
+      background:#ffffff;
+      font-family: sans-serif;
+      direction: rtl;
+    }
+    #canvas { display:block; width:100vw; height:100vh; }
+
+    .topbar{
+      position:fixed; right:12px; top:12px;
+      display:flex; gap:10px; align-items:center;
+      z-index:10;
+      background:rgba(255,255,255,.85);
+      border:1px solid rgba(0,0,0,.08);
+      backdrop-filter: blur(6px);
+      border-radius:10px;
+      padding:8px 10px;
+      box-shadow: 0 8px 20px rgba(0,0,0,.08);
+      direction: rtl;
+    }
+    .btn{
+      border:1px solid rgba(0,0,0,.12);
+      background:#fff;
+      border-radius:10px;
+      padding:8px 10px;
+      cursor:pointer;
+      font-size:14px;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn.tool.active{
+      border-color: rgba(0,0,0,.28);
+      box-shadow: 0 6px 18px rgba(0,0,0,.12);
+      background: #f2f2f2;
+      font-weight: 700;
+    }
+    .btn.toggleOn{
+      border-color: rgba(232,165,89,.65);
+      box-shadow: 0 6px 18px rgba(232,165,89,.18);
+      background: rgba(232,165,89,.12);
+      font-weight: 700;
+    }
+
+    /* modal */
+    #modalOverlay{
+      position:fixed; inset:0;
+      display:none;
+      justify-content:center;
+      align-items:center;
+      background:rgba(0,0,0,.25);
+      z-index:50;
+    }
+    .modal{
+      width:min(880px, 92vw);
+      background:#fff;
+      border-radius:14px;
+      box-shadow: 0 18px 60px rgba(0,0,0,.22);
+      overflow:hidden;
+      border:1px solid rgba(0,0,0,.12);
+      direction: rtl;
+      text-align: right;
+    }
+    .modalHeader{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:12px 14px;
+      border-bottom:1px solid rgba(0,0,0,.08);
+      background:#fafafa;
+      font-weight:600;
+      direction: rtl;
+    }
+    .modalBody{
+      display:flex;
+      flex-direction: row-reverse; /* ✅ تب‌ها سمت راست */
+      min-height:380px;
+      direction: rtl;
+    }
+
+    .tabs{
+      width:190px;
+      border-right:1px solid rgba(0,0,0,.08);
+      background:#fbfbfb;
+      padding:10px;
+      direction: rtl;
+    }
+    .tab{
+      display:block;
+      width:100%;
+      text-align:right;
+      border:1px solid rgba(0,0,0,.10);
+      background:#fff;
+      border-radius:10px;
+      padding:10px;
+      margin-bottom:10px;
+      cursor:pointer;
+      font-size:14px;
+    }
+    .tab.active{
+      border-color: rgba(255,0,0,.35);
+      box-shadow: 0 6px 20px rgba(255,0,0,.12);
+    }
+
+    .sections{
+      flex:1;
+      padding:14px;
+      direction: rtl;
+      text-align: right;
+    }
+    .section{ display:none; }
+    .section.active{ display:block; }
+
+    /* ✅ لیبل‌ها سمت راست / ورودی‌ها سمت چپ */
+    .row{
+      display:grid;
+      grid-template-columns: 1fr 260px; /* input | label */
+      gap:12px;
+      align-items:center;
+      margin-bottom:12px;
+      direction: rtl;
+    }
+    .row label{
+      grid-column: 2;
+      color:#222;
+      font-size:14px;
+      text-align:right;
+      line-height:1.4;
+    }
+    .row .field{
+      grid-column: 1;
+    }
+
+    input[type="number"], select{
+      width:100%;
+      padding:9px 10px;
+      border-radius:10px;
+      border:1px solid rgba(0,0,0,.15);
+      outline:none;
+      font-size:14px;
+      background:#fff;
+      text-align: left;
+      direction: ltr;
+    }
+    input[type="checkbox"]{ transform: scale(1.1); }
+
+    .hint{
+      color:#666;
+      font-size:12px;
+      margin-top:6px;
+      line-height:1.6;
+      text-align:right;
+    }
+
+    .split{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:12px;
+      direction: rtl;
+    }
+
+    /* color picker: small rounded square swatch + hex text */
+    .colorCtl{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      justify-content:flex-start;
+      direction: ltr;
+    }
+    .swatch{
+      width:26px;
+      height:26px;
+      border-radius:8px;
+      border:1px solid rgba(0,0,0,.18);
+      box-shadow: 0 2px 10px rgba(0,0,0,.08);
+      cursor:pointer;
+      flex: 0 0 auto;
+    }
+    .hex{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+      color:#333;
+      direction:ltr;
+      padding: 4px 8px;
+      border-radius: 10px;
+      border:1px solid rgba(0,0,0,.10);
+      background:#fff;
+      cursor:pointer;
+    }
+    .hiddenColorInput{
+      position:absolute;
+      opacity:0;
+      pointer-events:none;
+      width:1px; height:1px;
+    }
+  </style>
+</head>
+  <body>
+    <div class="topbar">
+      <button class="btn tool active" id="toolWallBtn">دیوار</button>
+      <button class="btn tool" id="toolHiddenBtn">هیدن</button>
+      <button class="btn tool" id="toolDimBtn">دایمنشن</button>
+      <button class="btn toggleOn" id="snapBtn">Snap: ON</button>
+      <button class="btn" id="clearBtn">پاک کردن</button>
+      <button class="btn" id="settingsBtn">تنظیمات</button>
+      <button class="btn" id="resetZoom">ریست زوم</button>
+      <button class="btn" id="goOrigin">رفتن به مبدا</button>
+    </div>
+
+  <canvas id="canvas"></canvas>
+
+  <div id="modalOverlay">
+    <div class="modal" id="modalBox">
+      <div class="modalHeader">
+        <div>تنظیمات</div>
+        <button class="btn" id="closeModal">بستن</button>
+      </div>
+
+      <div class="modalBody">
+        <!-- Tabs RIGHT -->
+        <div class="tabs">
+          <button class="tab active" data-tab="tabUnits">واحدها</button>
+          <button class="tab" data-tab="tabFonts">فونت</button>
+          <button class="tab" data-tab="tabColors">رنگ‌ها</button>
+          <button class="tab" data-tab="tabGrid">گرید</button>
+        </div>
+
+        <!-- Content LEFT -->
+        <div class="sections">
+          <div class="section active" id="tabUnits">
+            <div class="row">
+              <label>واحد نمایش</label>
+              <div class="field">
+                <select id="unitSelect" style="text-align:right; direction:rtl;">
+                  <option value="mm">میلی‌متر</option>
+                  <option value="cm">سانتی‌متر</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="row">
+              <label>ضخامت دیوار (سانتی‌متر)</label>
+              <div class="field">
+                <input id="wallThicknessCm" type="number" min="1" step="0.5" value="12">
+              </div>
+            </div>
+
+            <div class="row">
+              <label>فاصله دایمنشن از دیوار (میلی‌متر)<br><span class="hint">مثلاً 100 یعنی 10cm</span></label>
+              <div class="field">
+                <input id="dimOffsetMm" type="number" min="0" step="10" value="150">
+              </div>
+            </div>
+
+            <div class="row">
+              <label>فعال بودن خط آفست داخلی</label>
+              <div class="field" style="display:flex; justify-content:flex-start; direction:ltr;">
+                <input id="offsetWallEnabled" type="checkbox" checked>
+              </div>
+            </div>
+
+            <div class="row">
+              <label>فاصله آفست داخلی (میلی‌متر)</label>
+              <div class="field">
+                <input id="offsetWallDistanceMm" type="number" min="0" step="10" value="600">
+              </div>
+            </div>
+
+            <div class="hint">
+              دایمنشن همیشه بیرون دیوار می‌افتد و آفست dashed همیشه داخل (برعکس بیرون) است.
+            </div>
+          </div>
+
+          <div class="section" id="tabFonts">
+            <div class="row">
+              <label>فونت</label>
+              <div class="field">
+                <select id="fontFamily" style="text-align:left; direction:ltr;">
+                  <option value="Tahoma">Tahoma</option>
+                  <option value="Arial">Arial</option>
+                  <option value="sans-serif">پیش‌فرض</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="split">
+              <div>
+                <div class="row">
+                  <label>اندازه فونت دایمنشن (px)</label>
+                  <div class="field"><input id="dimFontPx" type="number" min="8" step="1" value="15"></div>
+                </div>
+                <div class="row">
+                  <label>اندازه فونت زاویه (px)</label>
+                  <div class="field"><input id="angleFontPx" type="number" min="8" step="1" value="12"></div>
+                </div>
+              </div>
+              <div>
+                <div class="row">
+                  <label>اندازه فونت نام دیوار (px)</label>
+                  <div class="field"><input id="wallNameFontPx" type="number" min="8" step="1" value="15"></div>
+                </div>
+                <div class="row">
+                  <label>ضخامت خط دایمنشن (px)</label>
+                  <div class="field"><input id="dimLineWidthPx" type="number" min="1" step="1" value="2"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="hint">
+              همه فونت‌ها و ضخامت‌ها بر حسب px هستند و با زوم تغییر اندازه نمی‌کنند.
+            </div>
+          </div>
+
+          <div class="section" id="tabColors">
+            <div class="split">
+              <div>
+                <div class="row">
+                  <label>رنگ پر دیوار</label>
+                  <div class="field"><div class="colorCtl" data-color="wallFillColor"></div></div>
+                </div>
+                <div class="row">
+                  <label>رنگ لبه دیوار</label>
+                  <div class="field"><div class="colorCtl" data-color="wallEdgeColor"></div></div>
+                </div>
+                <div class="row">
+                  <label>رنگ متن دیوار</label>
+                  <div class="field"><div class="colorCtl" data-color="wallTextColor"></div></div>
+                </div>
+                <div class="row">
+                  <label>رنگ دایمنشن</label>
+                  <div class="field"><div class="colorCtl" data-color="dimColor"></div></div>
+                </div>
+                <div class="row">
+                  <label>رنگ آفست داخلی</label>
+                  <div class="field"><div class="colorCtl" data-color="offsetWallColor"></div></div>
+                </div>
+              </div>
+
+              <div>
+                <div class="row">
+                  <label>رنگ پس‌زمینه</label>
+                  <div class="field"><div class="colorCtl" data-color="bgColor"></div></div>
+                </div>
+                <div class="row">
+                  <label>رنگ گرید ریز</label>
+                  <div class="field"><div class="colorCtl" data-color="minorColor"></div></div>
+                </div>
+                <div class="row">
+                  <label>رنگ گرید درشت</label>
+                  <div class="field"><div class="colorCtl" data-color="majorColor"></div></div>
+                </div>
+                <div class="row">
+                  <label>رنگ محور X</label>
+                  <div class="field"><div class="colorCtl" data-color="axisXColor"></div></div>
+                </div>
+                <div class="row">
+                  <label>رنگ محور Y</label>
+                  <div class="field"><div class="colorCtl" data-color="axisYColor"></div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="hint">
+              مربع رنگ + کد HEX همیشه آخرین مقدار انتخاب‌شده را نشان می‌دهند (حتی بعد از رفرش).
+            </div>
+          </div>
+
+          <div class="section" id="tabGrid">
+            <div class="row">
+              <label>تقسیمات هر متر</label>
+              <div class="field"><input id="meterDivisions" type="number" min="2" step="1" value="10"></div>
+            </div>
+            <div class="row">
+              <label>هر چند خانه یک خط درشت</label>
+              <div class="field"><input id="majorEvery" type="number" min="2" step="1" value="10"></div>
+            </div>
+            <div class="hint">هر ۱ متر چند مربع ریز و هر چند مربع یک خط درشت.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // If you open this file via file://, ES module imports will be blocked in most browsers.
+    // Use a local server instead (e.g. `python -m http.server 5173` from C:\DesignKP\2d).
+    (function () {
+      function showBootError(msg) {
+        var el = document.getElementById("bootError");
+        if (!el) {
+          el = document.createElement("div");
+          el.id = "bootError";
+          el.style.position = "fixed";
+          el.style.left = "12px";
+          el.style.bottom = "12px";
+          el.style.zIndex = "9999";
+          el.style.maxWidth = "min(720px, calc(100vw - 24px))";
+          el.style.padding = "12px 14px";
+          el.style.border = "1px solid rgba(0,0,0,.12)";
+          el.style.borderRadius = "12px";
+          el.style.background = "rgba(255,255,255,.92)";
+          el.style.backdropFilter = "blur(6px)";
+          el.style.boxShadow = "0 18px 60px rgba(0,0,0,.20)";
+          el.style.font = "13px/1.6 sans-serif";
+          el.style.direction = "ltr";
+          el.style.textAlign = "left";
+          document.body.appendChild(el);
+        }
+        el.textContent = msg;
+      }
+
+      if (location.protocol === "file:") {
+        showBootError("This app must be opened via http:// (local server). Example: cd C:\\\\DesignKP\\\\2d ; python -m http.server 5173 ; open http://localhost:5173/index.html");
+        return;
+      }
+
+      // If the module fails to load, show a hint.
+      setTimeout(function () {
+        if (!window.__WALL_APP_BOOT_OK__) {
+          showBootError("App did not start. Check DevTools Console for module load errors. Make sure you're opening http://localhost:5173/index.html");
+        }
+      }, 1500);
+    })();
+  </script>
+
+  <script type="module">
+    import { createWallApp } from "./main.js";
+    const canvas = document.getElementById("canvas");
+    const app = createWallApp({ canvas, container: document.body });
+    app.attach();
+  </script>
+</body>
+</html>

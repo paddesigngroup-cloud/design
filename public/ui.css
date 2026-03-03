@@ -1,0 +1,353 @@
+:root{
+  --bg:#f3f4f6;
+  --panel:#ffffff;
+  --panel2:#fbfbfc;
+  --line:#e5e7eb;
+  --text:#111827;
+  --muted:#6b7280;
+  --shadow: 0 8px 22px rgba(0,0,0,.06);
+  --radius: 12px;
+
+  --toolrail:#1f2937;
+  --toolrail2:#111827;
+  --accent:#3b82f6;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  font-family: Tahoma, Vazirmatn, system-ui, -apple-system, Segoe UI, sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  direction: rtl;
+}
+
+.ltr{direction:ltr;text-align:left}
+.mt12{margin-top:12px}
+
+.app{
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+
+/* ---------------- Topbar ---------------- */
+.topbar{
+  height:54px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 10px;
+  background:var(--panel);
+  border-bottom:1px solid var(--line);
+}
+
+.topbar__right, .topbar__left{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.topbar__title{
+  font-weight:700;
+  font-size:14px;
+}
+
+.topbar__sep{
+  width:1px;height:22px;background:var(--line);
+}
+
+.iconbtn{
+  border:1px solid var(--line);
+  background:#fff;
+  width:36px;height:36px;
+  border-radius:10px;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  box-shadow:none;
+}
+
+.btn{
+  border:1px solid var(--line);
+  background: var(--text);
+  color:#fff;
+  padding:8px 12px;
+  border-radius:10px;
+  cursor:pointer;
+  font-size:13px;
+}
+.btn--ghost{
+  background:#fff;
+  color:var(--text);
+}
+
+.select{
+  border:1px solid var(--line);
+  background:#fff;
+  padding:8px 10px;
+  border-radius:10px;
+}
+
+.chip{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  border:1px solid var(--line);
+  padding:6px 10px;
+  border-radius:999px;
+  background:#fff;
+  font-size:13px;
+  user-select:none;
+}
+
+/* ---------------- Main Layout (RTL) ----------------
+   visual order: [props | stage | tools]
+*/
+.main{
+  flex:1;
+  display:grid;
+  grid-template-columns: 320px 1fr 360px;
+  min-height:0;
+}
+
+/* ---------------- Left: Properties ---------------- */
+.props{
+  background:var(--bg);
+  border-left:1px solid var(--line);
+  padding:10px;
+  overflow:auto;
+}
+
+.panel{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  padding:12px;
+  margin-bottom:10px;
+}
+
+.panel--flat{
+  box-shadow:none;
+  background:var(--panel2);
+}
+
+.panel__title{
+  font-weight:700;
+  font-size:13px;
+  margin-bottom:10px;
+  color:var(--text);
+}
+
+.row{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  margin-bottom:10px;
+}
+
+.row--2{
+  flex-direction:row;
+  gap:10px;
+}
+.row--2 > div{flex:1}
+
+.row--actions{
+  flex-direction:row;
+  gap:10px;
+  justify-content:flex-start;
+}
+
+.label{
+  font-size:12px;
+  color:var(--muted);
+}
+
+.input{
+  border:1px solid var(--line);
+  padding:9px 10px;
+  border-radius:10px;
+  font-size:14px;
+  background:#fff;
+  direction: rtl;
+  text-align: right;
+}
+
+.divider{
+  height:1px;
+  background:var(--line);
+  margin:10px 0;
+}
+
+.hint{
+  font-size:13px;
+  color:var(--muted);
+  line-height:1.6;
+}
+
+/* Preview block similar vibe to CabBuilder */
+.preview{
+  height:140px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:#fff;
+  position:relative;
+  overflow:hidden;
+}
+.preview__box{
+  position:absolute; inset:0;
+  background: linear-gradient(135deg, #f1f5f9, #ffffff);
+}
+.preview__icons{
+  position:absolute;
+  bottom:8px; left:8px;
+  display:flex;
+  gap:8px;
+}
+
+/* ---------------- Center: Stage / Canvas ---------------- */
+.stage{
+  min-height:0;
+  background:var(--bg);
+}
+.stage__inner{
+  position:relative;
+  width:100%;
+  height:100%;
+  padding:10px;
+}
+#canvas{
+  width:100%;
+  height:100%;
+  display:block;
+  border-radius:14px;
+  border:1px solid var(--line);
+
+  /* subtle CAD grid */
+  background:
+    linear-gradient(#eef0f3 1px, transparent 1px),
+    linear-gradient(90deg, #eef0f3 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.stage__hud{
+  position:absolute;
+  top:18px;
+  left:18px;
+  display:flex;
+  gap:8px;
+}
+.badge{
+  background:#ffffffcc;
+  border:1px solid var(--line);
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:700;
+}
+
+/* ---------------- Right: Tools ---------------- */
+.tools{
+  background:var(--panel);
+  border-right:1px solid var(--line);
+  display:grid;
+  grid-template-columns: 62px 1fr;
+  min-height:0;
+}
+
+.tools__rail{
+  background:linear-gradient(180deg, var(--toolrail), var(--toolrail2));
+  padding:10px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.tool{
+  height:44px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.06);
+  color:#fff;
+  cursor:pointer;
+  font-size:18px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.tool.is-active{
+  background:rgba(59,130,246,.25);
+  border-color:rgba(59,130,246,.8);
+  box-shadow:0 0 0 2px rgba(59,130,246,.15) inset;
+}
+.tool--danger{background:rgba(239,68,68,.16); border-color:rgba(239,68,68,.5)}
+
+.tools__panel{
+  padding:10px;
+  overflow:auto;
+  background:var(--panel2);
+}
+
+.toolcards{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:10px;
+}
+
+.card{
+  border:1px solid var(--line);
+  background:#fff;
+  border-radius:14px;
+  padding:12px;
+  cursor:pointer;
+  display:flex;
+  gap:10px;
+  align-items:center;
+}
+.card.is-active{
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(59,130,246,.12);
+}
+.card__icon{font-size:18px}
+.card__text{font-size:13px; font-weight:700}
+
+.shapes{
+  display:grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap:10px;
+}
+.shape{
+  height:54px;
+  border-radius:12px;
+  border:1px solid var(--line);
+  background:#fff;
+  cursor:pointer;
+  position:relative;
+}
+.shape::after{
+  content:"";
+  position:absolute;
+  inset:12px;
+  border:2px solid #9ca3af;
+  border-radius:6px;
+  opacity:.9;
+}
+
+/* ---------------- Status Bar ---------------- */
+.status{
+  height:34px;
+  background:var(--panel);
+  border-top:1px solid var(--line);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 10px;
+  font-size:12px;
+  color:var(--muted);
+}
+.status__right{display:flex; gap:10px; align-items:center}
+.status__left{display:flex; gap:10px; align-items:center}
