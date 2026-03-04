@@ -141,8 +141,11 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   wallFillColor: "#A6A6A6",
   wallEdgeColor: "#000000",
   wallTextColor: "#FFFFFF",
+  wallHeightColor: "#4B5563",
   // Global wall thickness (world millimeters). UI shows cm.
   wallThicknessMm: 120,
+  // Global wall height (world millimeters). UI shows cm.
+  wallHeightMm: 3000,
 
   // Hidden walls (dashed guide-like lines)
   hiddenWallColor: "#D8D4D4",
@@ -441,6 +444,13 @@ function resolveOffsetSideSign(edge) {
   return chooseInsideSideSignForWall(edge);
 }
 
+function getOffsetAxisDistanceMm(edge) {
+  const wallThickness = (typeof edge?.thickness === "number" && isFinite(edge.thickness))
+    ? Math.max(0, edge.thickness)
+    : Math.max(0, state.wallThicknessMm || 0);
+  return Math.max(0, state.offsetWallDistanceMm || 0) + wallThickness / 2;
+}
+
 /* =============================
    Dimension placement
 ============================= */
@@ -531,6 +541,7 @@ const modelDrag = {
   startOutline: null,
   startOffsetXmm: 0,
   startOffsetYmm: 0,
+  startSnap: null,
   moved: false,
 };
 
@@ -554,6 +565,7 @@ function startModelDrag(offsetX, offsetY) {
   modelDrag.startOutline = _cloneModel2dOutline(model2d.outline);
   modelDrag.startOffsetXmm = model2d.offsetXmm || 0;
   modelDrag.startOffsetYmm = model2d.offsetYmm || 0;
+  modelDrag.startSnap = snapshotModel2d(model2d);
   modelDrag.moved = false;
   return true;
 }
@@ -595,6 +607,7 @@ function stopModelDrag(keepMovedGeometry = true) {
   modelDrag.startOutline = null;
   modelDrag.startOffsetXmm = 0;
   modelDrag.startOffsetYmm = 0;
+  modelDrag.startSnap = null;
   modelDrag.moved = false;
 }
 
@@ -1291,7 +1304,7 @@ function recomputeModel2dOutline() {
   model2d.outline = convexHull(pts);
 }
 
-function setModel2dLines(lines, opts = null) {
+function _applyModel2dLines(lines, opts = null) {
   if (!Array.isArray(lines)) return;
   stopModelDrag(true);
   model2d.lines = lines
@@ -1312,7 +1325,18 @@ function setModel2dLines(lines, opts = null) {
   emitModel2dTransform();
 }
 
-function clearModel2dLines() {
+function setModel2dLines(lines, opts = null, recordUndo = true) {
+  if (!Array.isArray(lines)) return;
+  if (!recordUndo) {
+    _applyModel2dLines(lines, opts);
+    return;
+  }
+  undo.runAction(() => {
+    _applyModel2dLines(lines, opts);
+  });
+}
+
+function _clearModel2dLines() {
   stopModelDrag(true);
   model2d.lines.length = 0;
   model2d.outline.length = 0;
@@ -1321,6 +1345,16 @@ function clearModel2dLines() {
   hoverModelOutline = false;
   selectedModelOutline = false;
   emitModel2dTransform();
+}
+
+function clearModel2dLines(recordUndo = true) {
+  if (!recordUndo) {
+    _clearModel2dLines();
+    return;
+  }
+  undo.runAction(() => {
+    _clearModel2dLines();
+  });
 }
 
 /* =============================
@@ -1788,7 +1822,7 @@ function computeOffsetMidpoint(edge) {
 
   const sign = resolveOffsetSideSign(edge);
 
-  const off = state.offsetWallDistanceMm;
+  const off = getOffsetAxisDistanceMm(edge);
 
   const mx = (ax+bx)/2;
   const my = (ay+by)/2;
@@ -1837,7 +1871,7 @@ function drawOffsetWalls(nodeMap) {
     const pref = e.offsetSide || "auto";
     const sign = resolveOffsetSideSign(e);
 
-    const off = state.offsetWallDistanceMm;
+    const off = getOffsetAxisDistanceMm(e);
 
     offsets.push({
       A: { x: ax + nWorldLeft.x*off*sign, y: ay + nWorldLeft.y*off*sign },
@@ -3843,8 +3877,17 @@ function onWindowMouseUp() {
     }
   }
   if (modelDrag.active) {
+    const startSnap = modelDrag.startSnap;
     const moved = !!modelDrag.moved;
+    const endSnap = snapshotModel2d(model2d);
     stopModelDrag(true);
+    if (moved && startSnap) {
+      restoreModel2d(model2d, startSnap);
+      undo.runAction(() => {
+        restoreModel2d(model2d, endSnap);
+        emitModel2dTransform();
+      });
+    }
     // Keep the model selected after drag.
     selectedModelOutline = true;
     hoverModelOutline = moved ? true : hoverModelOutline;
@@ -4396,7 +4439,7 @@ function clearAll() {
     hiddenGraph.clear();
     dimensions.length = 0;
     guides.length = 0;
-    clearModel2dLines();
+    clearModel2dLines(false);
 
     tool.wallIndex = 0;
     tool.stopChaining();
@@ -4414,13 +4457,17 @@ function clearAll() {
 }
 
 function getState() {
+  const graphSnap = snapshotGraph(graph);
+  const hiddenGraphSnap = snapshotGraph(hiddenGraph);
   return {
     state: { ...state },
+    graphSnap,
+    hiddenGraphSnap,
     counts: {
-      solidNodes: graph.nodes.size,
-      solidWalls: graph.walls.size,
-      hiddenNodes: hiddenGraph.nodes.size,
-      hiddenWalls: hiddenGraph.walls.size,
+      solidNodes: graphSnap.nodes.length,
+      solidWalls: graphSnap.walls.length,
+      hiddenNodes: hiddenGraphSnap.nodes.length,
+      hiddenWalls: hiddenGraphSnap.walls.length,
       dimensions: dimensions.length,
     },
     model2d: {
@@ -4555,6 +4602,9 @@ function bindStandaloneUiIfPresent() {
     const wallThicknessCm = byId("wallThicknessCm");
     if (wallThicknessCm) wallThicknessCm.value = (state.wallThicknessMm || 120) / 10;
 
+    const wallHeightCm = byId("wallHeightCm");
+    if (wallHeightCm) wallHeightCm.value = (state.wallHeightMm || 3000) / 10;
+
     const dimOffsetMm = byId("dimOffsetMm");
     if (dimOffsetMm) dimOffsetMm.value = state.dimOffsetMm;
 
@@ -4599,6 +4649,14 @@ function bindStandaloneUiIfPresent() {
     if (!isFinite(cm) || cm <= 0) return;
     const mm = Math.max(1, cm * 10);
     setState({ wallThicknessMm: mm });
+  };
+
+  const wallHeightCm = byId("wallHeightCm");
+  if (wallHeightCm) wallHeightCm.onchange = (e) => {
+    const cm = +e.target.value;
+    if (!isFinite(cm) || cm <= 0) return;
+    const mm = Math.max(1, cm * 10);
+    setState({ wallHeightMm: mm });
   };
 
   const dimOffsetMm = byId("dimOffsetMm");

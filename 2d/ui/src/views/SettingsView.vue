@@ -7,6 +7,7 @@ const hasEditor = computed(() => !!editorRef.value);
 const model = reactive({
   unit: "cm",
   wallThicknessMm: 120,
+  wallHeightMm: 3000,
 
   dimOffsetMm: 150,
   dimFontPx: 15,
@@ -36,6 +37,7 @@ const model = reactive({
   wallFillColor: "#A6A6A6",
   wallEdgeColor: "#000000",
   wallTextColor: "#FFFFFF",
+  wallHeightColor: "#4B5563",
 
   dimColor: "#E8A559",
   hiddenWallColor: "#D8D4D4",
@@ -88,6 +90,17 @@ function applyPatch(patch) {
           step="0.5"
           :value="(model.wallThicknessMm || 120) / 10"
           @change="applyPatch({ wallThicknessMm: Math.max(1, (+$event.target.value || 12) * 10) })"
+        />
+      </div>
+      <div class="row">
+        <label class="label">ارتفاع دیوار (سانتی‌متر)</label>
+        <input
+          class="input ltr"
+          type="number"
+          min="1"
+          step="1"
+          :value="(model.wallHeightMm || 3000) / 10"
+          @change="applyPatch({ wallHeightMm: Math.max(1, (+$event.target.value || 300) * 10) })"
         />
       </div>
     </div>
@@ -308,6 +321,12 @@ function applyPatch(patch) {
           <input type="color" :value="model.wallFillColor" @input="applyPatch({ wallFillColor: $event.target.value })" />
           <input type="color" :value="model.wallEdgeColor" @input="applyPatch({ wallEdgeColor: $event.target.value })" />
           <input type="color" :value="model.wallTextColor" @input="applyPatch({ wallTextColor: $event.target.value })" />
+        </div>
+      </div>
+      <div class="row">
+        <label class="label">Wall Height (Temp)</label>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <input type="color" :value="model.wallHeightColor" @input="applyPatch({ wallHeightColor: $event.target.value })" />
         </div>
       </div>
       <div class="row">

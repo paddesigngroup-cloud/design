@@ -8,6 +8,7 @@ const activeTool = ref("select");
 const snapOn = ref(true);
 const showDimensions = ref(true);
 const showOffsetWalls = ref(true);
+const walls3dSnapshot = ref({ nodes: [], walls: [] });
 const stepDrawMode = ref("line"); // "line" | "degree"
 const snapModes = ref({
   corner: true,
@@ -139,11 +140,16 @@ function applyEditorPatch(patch) {
 }
 
 function syncQuickStateFromEditor() {
-  const s = editorRef.value?.getState?.()?.state;
+  const full = editorRef.value?.getState?.();
+  const s = full?.state;
   if (!s) return;
   snapOn.value = !!s.snapOn;
   showDimensions.value = s.showDimensions !== false;
   showOffsetWalls.value = !!s.offsetWallEnabled;
+  walls3dSnapshot.value = {
+    nodes: Array.isArray(full?.graphSnap?.nodes) ? full.graphSnap.nodes : [],
+    walls: Array.isArray(full?.graphSnap?.walls) ? full.graphSnap.walls : [],
+  };
   stepDrawMode.value = (s.stepDrawMode === "degree") ? "degree" : "line";
   snapModes.value = {
     corner: s.snapCornerEnabled !== false,
@@ -1014,6 +1020,7 @@ onBeforeUnmount(() => {
           <GlbViewerWidget
             src="/models/1_z1.glb"
             :model2d-transform="model2dTransformRef"
+            :walls2d="walls3dSnapshot"
             @model2d="onGlbModel2d"
             @mouseenter="disable2dInput"
             @mouseleave="enable2dInput"

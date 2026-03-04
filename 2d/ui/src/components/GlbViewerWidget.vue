@@ -10,6 +10,10 @@ const props = defineProps({
     type: Object,
     default: () => ({ x: 0, y: 0 }),
   },
+  walls2d: {
+    type: Object,
+    default: () => ({ nodes: [], walls: [] }),
+  },
 });
 
 const emit = defineEmits(["mouseenter", "mouseleave", "model2d"]);
@@ -25,13 +29,130 @@ let controls = null;
 let raf = 0;
 let ro = null;
 let modelRoot = null;
-let axesHelper = null;
 let modelBasePosition = null;
+let wallsRoot = null;
+
+let axesHelper = null;
+
+const DEFAULT_WALL_HEIGHT_M = 2.8;
+
+function clearWalls3d() {
+  if (!scene || !wallsRoot) return;
+  wallsRoot.traverse((n) => {
+    if (n.geometry) n.geometry.dispose?.();
+    if (n.material) {
+      const mats = Array.isArray(n.material) ? n.material : [n.material];
+      for (const m of mats) m.dispose?.();
+    }
+  });
+  scene.remove(wallsRoot);
+  wallsRoot = null;
+}
+
+function rebuildWalls3d(snapshot) {
+  if (!scene) return;
+  clearWalls3d();
+
+  const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
+  const walls = Array.isArray(snapshot?.walls) ? snapshot.walls : [];
+  if (!nodes.length || !walls.length) return;
+
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const root = new THREE.Group();
+  root.name = "walls2d-extruded";
+  const wallMat = new THREE.MeshStandardMaterial({
+    color: 0xc7ccd1,
+    roughness: 0.86,
+    metalness: 0.05,
+  });
+
+  for (const w of walls) {
+    const a = byId.get(w.a);
+    const b = byId.get(w.b);
+    if (!a || !b) continue;
+
+    const dx = (b.x - a.x) * 0.001;
+    const dz = -(b.y - a.y) * 0.001;
+    const length = Math.hypot(dx, dz);
+    if (!Number.isFinite(length) || length <= 0.001) continue;
+
+    const thicknessM = Math.max(0.02, (Number(w.thickness) || 120) * 0.001);
+    const g = new THREE.BoxGeometry(length, DEFAULT_WALL_HEIGHT_M, thicknessM);
+    const mesh = new THREE.Mesh(g, wallMat.clone());
+
+    const midX = ((a.x + b.x) * 0.5) * 0.001;
+    const midZ = -((a.y + b.y) * 0.5) * 0.001;
+    mesh.position.set(midX, DEFAULT_WALL_HEIGHT_M * 0.5, midZ);
+    mesh.rotation.y = Math.atan2(dz, dx);
+    root.add(mesh);
+  }
+
+  if (!root.children.length) return;
+  wallsRoot = root;
+  scene.add(root);
+}
+
+function computeRenderableSceneBounds() {
+  if (!scene) return null;
+  const bounds = new THREE.Box3();
+  let hasRenderable = false;
+
+  scene.traverse((obj) => {
+    if (!obj?.visible) return;
+    if (axesHelper && obj === axesHelper) return;
+    if (!obj.isMesh && !obj.isLine && !obj.isPoints) return;
+    if (!obj.geometry) return;
+    bounds.expandByObject(obj);
+    hasRenderable = true;
+  });
+
+  if (!hasRenderable || bounds.isEmpty()) return null;
+  return bounds;
+}
+
+function fitCameraToBounds(bounds, viewDir = null) {
+  if (!camera || !controls || !bounds) return;
+
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  bounds.getSize(size);
+  bounds.getCenter(center);
+
+  const fov = THREE.MathUtils.degToRad(camera.fov || 45);
+  const fitHeight = size.y / Math.max(Math.tan(fov * 0.5), 1e-3);
+  const fitWidth =
+    size.x /
+    Math.max(Math.tan(fov * 0.5) * Math.max(camera.aspect, 1e-3), 1e-3);
+  const fitDepth = size.z;
+  const distance = Math.max(fitHeight, fitWidth, fitDepth, 0.5) * 0.7;
+
+  const dir = (viewDir || new THREE.Vector3(1, 0.65, 1)).clone().normalize();
+
+  camera.up.set(0, 1, 0);
+  if (Math.abs(dir.y) > 0.9) camera.up.set(0, 0, -1);
+
+  camera.position.copy(center).addScaledVector(dir, distance * 1.5);
+  controls.target.copy(center);
+  camera.near = Math.max(distance / 500, 0.01);
+  camera.far = Math.max(distance * 50, 100);
+  camera.updateProjectionMatrix();
+  controls.update();
+
+  if (axesHelper) {
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    const a = THREE.MathUtils.clamp(maxDim * 0.35, 0.25, 6);
+    axesHelper.scale.setScalar(a);
+  }
+}
+
+function fitCameraToAll(viewDir = null) {
+  fitCameraToBounds(computeRenderableSceneBounds(), viewDir);
+}
 
 const isMax = ref(false);
 const viewOpen = ref(false);
-let prevSize = null; // {w,h}
-let baseSize = { w: 260, h: 190 }; // "original" (captured on mount)
+let prevSize = null;
+let baseSize = { w: 260, h: 190 };
 
 function stop() {
   if (raf) cancelAnimationFrame(raf);
@@ -85,8 +206,6 @@ function getMaxSizePx() {
   const parent = widgetEl.value?.offsetParent;
   if (!parent) return { w: 520, h: 420 };
   const r = parent.getBoundingClientRect();
-  // Keep a visible margin from the stage edges when maximized, and
-  // avoid going under overlay UI (like the design toolbar/sub-rail).
   let rightLimit = r.right - pad;
 
   const blockers = [
@@ -99,7 +218,6 @@ function getMaxSizePx() {
     const b = el.getBoundingClientRect();
     const overlapsY = b.bottom > r.top && b.top < r.bottom;
     if (!overlapsY) continue;
-    // If the blocker is inside the stage area, cap our right edge before it.
     if (b.left > r.left + pad && b.left < rightLimit) {
       rightLimit = b.left - pad;
     }
@@ -111,7 +229,6 @@ function getMaxSizePx() {
 }
 
 function goSmall() {
-  // "Small" button returns the widget to its original default size (not a collapsed bar).
   viewOpen.value = false;
   isMax.value = false;
   setWidgetSizePx(baseSize.w, baseSize.h);
@@ -123,7 +240,6 @@ function toggleMax() {
     if (prevSize) setWidgetSizePx(prevSize.w, prevSize.h);
     return;
   }
-  // Save current size and expand to max allowed (with margins).
   prevSize = getWidgetSizePx();
   isMax.value = true;
   viewOpen.value = false;
@@ -133,19 +249,12 @@ function toggleMax() {
 
 function setViewDir(dx, dy, dz) {
   if (!camera || !controls) return;
-  const target = controls.target?.clone?.() || new THREE.Vector3(0, 0, 0);
-  const dist = Math.max(0.25, camera.position.distanceTo(target));
   const v = new THREE.Vector3(dx, dy, dz).normalize();
+  fitCameraToAll(v);
+}
 
-  camera.up.set(0, 1, 0);
-  if (Math.abs(v.y) > 0.9) {
-    // When looking from top/bottom, keep "up" stable to avoid spins.
-    camera.up.set(0, 0, -1);
-  }
-
-  camera.position.copy(target).addScaledVector(v, dist);
-  controls.target.copy(target);
-  controls.update();
+function onCanvasDoubleClick() {
+  fitCameraToAll();
 }
 
 function toggleViewMenu() {
@@ -165,12 +274,10 @@ function applyModel2dTransformTo3d(transform) {
   const yMm = Number.isFinite(transform?.y) ? transform.y : 0;
   const mPerMm = 0.001;
 
-  // 2D world uses X right and Y up, while 3D plan uses X right and Z forward.
-  // Projected mapping is Y2D = -Z3D, so apply Z with opposite sign.
   modelRoot.position.set(
     modelBasePosition.x + xMm * mPerMm,
     modelBasePosition.y,
-    modelBasePosition.z - yMm * mPerMm,
+    modelBasePosition.z - yMm * mPerMm
   );
 }
 
@@ -179,18 +286,24 @@ watch(
   (t) => {
     applyModel2dTransformTo3d(t);
   },
-  { immediate: true },
+  { immediate: true }
+);
+
+watch(
+  () => props.walls2d,
+  (snap) => {
+    rebuildWalls3d(snap);
+  },
+  { immediate: true, deep: true }
 );
 
 function projectModelTo2DLines(root) {
   if (!root) return [];
   root.updateMatrixWorld(true);
 
-  // Assume glTF units are meters -> convert to mm for the 2D engine (world is mm).
-  // If your assets are authored in mm, we can expose this as a setting later.
   const mmPerUnit = 1000;
 
-  const uniq = new Map(); // key -> {ax,ay,bx,by}
+  const uniq = new Map();
   const tmpA = new THREE.Vector3();
   const tmpB = new THREE.Vector3();
   const tmpAw = new THREE.Vector3();
@@ -201,7 +314,6 @@ function projectModelTo2DLines(root) {
   root.traverse((obj) => {
     if (!obj || !obj.isMesh || !obj.geometry) return;
     const geom = obj.geometry;
-    // Reduce clutter: only keep "feature" edges.
     const edges = new THREE.EdgesGeometry(geom, 15);
     const pos = edges.attributes?.position;
     if (!pos || !pos.array) return;
@@ -214,20 +326,22 @@ function projectModelTo2DLines(root) {
       tmpAw.copy(tmpA).applyMatrix4(m);
       tmpBw.copy(tmpB).applyMatrix4(m);
 
-      // Plan projection: XZ plane. In glTF, forward is typically -Z, so to match the
-      // 2D editor's convention (X right, Y up), we map Z -> -Y.
       const ax = Math.round(tmpAw.x * mmPerUnit);
       const ay = Math.round(-tmpAw.z * mmPerUnit);
       const bx = Math.round(tmpBw.x * mmPerUnit);
       const by = Math.round(-tmpBw.z * mmPerUnit);
 
-      // Skip tiny segments.
       if (ax === bx && ay === by) continue;
 
-      // Normalize orientation for de-dup.
-      let x1 = ax, y1 = ay, x2 = bx, y2 = by;
+      let x1 = ax,
+        y1 = ay,
+        x2 = bx,
+        y2 = by;
       if (x1 > x2 || (x1 === x2 && y1 > y2)) {
-        x1 = bx; y1 = by; x2 = ax; y2 = ay;
+        x1 = bx;
+        y1 = by;
+        x2 = ax;
+        y2 = ay;
       }
       const key = `${x1},${y1},${x2},${y2}`;
       if (!uniq.has(key)) {
@@ -254,13 +368,11 @@ onMounted(async () => {
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 
   scene = new THREE.Scene();
-  // Transparent background so it looks like a glass widget.
   scene.background = null;
 
-  // World axes at origin (X=red, Y=green, Z=blue). Size is tuned after model load.
+  // ✅ محورهای X/Y/Z
   axesHelper = new THREE.AxesHelper(1);
   axesHelper.renderOrder = 999;
-  // Keep axes visible even when model is in front.
   axesHelper.traverse((o) => {
     if (!o.material) return;
     o.material.depthTest = false;
@@ -287,6 +399,8 @@ onMounted(async () => {
   dir.position.set(3, 6, 4);
   scene.add(dir);
 
+  rebuildWalls3d(props.walls2d);
+
   try {
     const gltf = await loadGlb(props.src);
     const root = gltf.scene || gltf.scenes?.[0];
@@ -296,7 +410,6 @@ onMounted(async () => {
       scene.add(root);
       applyModel2dTransformTo3d(props.model2dTransform);
 
-      // Send the projected 2D edges to the main 2D engine (same origin 0,0).
       try {
         const lines = projectModelTo2DLines(root);
         emit("model2d", {
@@ -305,35 +418,18 @@ onMounted(async () => {
         });
       } catch (_) {}
 
-      // Frame camera to model bounds.
-      const box = new THREE.Box3().setFromObject(root);
-      const size = new THREE.Vector3();
-      const center = new THREE.Vector3();
-      box.getSize(size);
-      box.getCenter(center);
-      const maxDim = Math.max(size.x, size.y, size.z) || 1;
-
-       // Scale axes to something readable relative to the model size.
-      if (axesHelper) {
-        const a = THREE.MathUtils.clamp(maxDim * 0.35, 0.25, 6);
-        axesHelper.scale.setScalar(a);
-      }
-
-      const dist = maxDim * 1.2;
-      camera.position.set(center.x + dist, center.y + dist * 0.65, center.z + dist);
-      controls.target.copy(center);
-      controls.update();
+      fitCameraToAll();
     }
   } catch (_) {
-    // ignore: widget will just be empty if load fails
+    // ignore
   }
 
-  // Capture the "original" widget size from CSS/layout (used by the small button).
   baseSize = getWidgetSizePx();
 
   resizeToHost();
   ro = new ResizeObserver(() => resizeToHost());
   ro.observe(host);
+  canvas.addEventListener("dblclick", onCanvasDoubleClick);
 
   const loop = () => {
     raf = requestAnimationFrame(loop);
@@ -345,6 +441,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stop();
+  canvasEl.value?.removeEventListener?.("dblclick", onCanvasDoubleClick);
   if (ro) ro.disconnect();
   ro = null;
 
@@ -365,8 +462,13 @@ onBeforeUnmount(() => {
   scene = null;
   camera = null;
   modelRoot = null;
-  axesHelper = null;
   modelBasePosition = null;
+  clearWalls3d();
+
+  try {
+    axesHelper?.removeFromParent?.();
+  } catch (_) {}
+  axesHelper = null;
 });
 </script>
 
