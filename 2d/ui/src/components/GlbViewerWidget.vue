@@ -35,6 +35,182 @@ let wallsRoot = null;
 let axesHelper = null;
 
 const DEFAULT_WALL_HEIGHT_M = 2.8;
+const DEFAULT_MITER_LIMIT = 10;
+
+function v(x, z) {
+  return { x, z };
+}
+
+function add(a, b) {
+  return v(a.x + b.x, a.z + b.z);
+}
+
+function sub(a, b) {
+  return v(a.x - b.x, a.z - b.z);
+}
+
+function mul(a, s) {
+  return v(a.x * s, a.z * s);
+}
+
+function len(a) {
+  return Math.hypot(a.x, a.z);
+}
+
+function norm(a) {
+  const l = len(a);
+  if (l <= 1e-9) return v(0, 0);
+  return v(a.x / l, a.z / l);
+}
+
+function perpLeft(a) {
+  return v(-a.z, a.x);
+}
+
+function cross2(a, b) {
+  return a.x * b.z - a.z * b.x;
+}
+
+function lineLineIntersection2d(p, r, q, s, eps = 1e-9) {
+  const rxs = cross2(r, s);
+  if (Math.abs(rxs) < eps) return null;
+  const qmp = sub(q, p);
+  const t = cross2(qmp, s) / rxs;
+  return add(p, mul(r, t));
+}
+
+function angleDeg2d(a, b) {
+  const na = norm(a);
+  const nb = norm(b);
+  const d = THREE.MathUtils.clamp(na.x * nb.x + na.z * nb.z, -1, 1);
+  return (Math.acos(d) * 180) / Math.PI;
+}
+
+function buildNodeEndpointMap(walls) {
+  const map = new Map();
+  for (const e of walls) {
+    if (!map.has(e.a)) map.set(e.a, []);
+    if (!map.has(e.b)) map.set(e.b, []);
+    map.get(e.a).push({ edge: e, at: "a" });
+    map.get(e.b).push({ edge: e, at: "b" });
+  }
+  return map;
+}
+
+function computeGammaAtJoint(nodeId, edge1, edge2, side1, side2, byId) {
+  const makeRay = (edge, side) => {
+    const A = byId.get(edge.a);
+    const B = byId.get(edge.b);
+    if (!A || !B) return null;
+
+    const sharedIsA = edge.a === nodeId;
+    const J = sharedIsA ? v(A.x * 0.001, -A.y * 0.001) : v(B.x * 0.001, -B.y * 0.001);
+    const O = sharedIsA ? v(B.x * 0.001, -B.y * 0.001) : v(A.x * 0.001, -A.y * 0.001);
+    const dir = norm(sub(O, J));
+    const n = norm(side === "left" ? perpLeft(dir) : mul(perpLeft(dir), -1));
+    const half = Math.max(0.01, (Number(edge.thickness) || 120) * 0.001 * 0.5);
+    return { J, dir, bJ: add(J, mul(n, half)), half };
+  };
+
+  const r1 = makeRay(edge1, side1);
+  const r2 = makeRay(edge2, side2);
+  if (!r1 || !r2) return null;
+
+  const gamma = lineLineIntersection2d(r1.bJ, r1.dir, r2.bJ, r2.dir);
+  if (!gamma) return null;
+
+  const miterLen = len(sub(gamma, r1.J));
+  const h = Math.max(r1.half, r2.half);
+  if (h > 0 && miterLen > h * DEFAULT_MITER_LIMIT) return null;
+
+  return { ok: true, gamma, angleDeg: angleDeg2d(r1.dir, r2.dir) };
+}
+
+function buildJointGammaMap(walls, byId) {
+  const map = new Map();
+  const nodeMap = buildNodeEndpointMap(walls);
+
+  for (const [nodeId, arr] of nodeMap.entries()) {
+    if (arr.length !== 2) continue;
+    const e1 = arr[0].edge;
+    const e2 = arr[1].edge;
+
+    const gLR = computeGammaAtJoint(nodeId, e1, e2, "left", "right", byId);
+    const gRL = computeGammaAtJoint(nodeId, e1, e2, "right", "left", byId);
+
+    const m = new Map();
+    m.set(`${e1.id}|L`, gLR);
+    m.set(`${e1.id}|R`, gRL);
+    m.set(`${e2.id}|L`, gRL);
+    m.set(`${e2.id}|R`, gLR);
+    map.set(nodeId, m);
+  }
+
+  return map;
+}
+
+function computeTrimmedWallCorners(edge, byId, jointGammaMap) {
+  const A = byId.get(edge.a);
+  const B = byId.get(edge.b);
+  if (!A || !B) return null;
+
+  const ax = A.x * 0.001;
+  const az = -A.y * 0.001;
+  const bx = B.x * 0.001;
+  const bz = -B.y * 0.001;
+
+  const d = norm(v(bx - ax, bz - az));
+  if (len(d) <= 1e-9) return null;
+  const n = perpLeft(d);
+  const h = Math.max(0.01, (Number(edge.thickness) || 120) * 0.001 * 0.5);
+
+  let AL = v(ax + n.x * h, az + n.z * h);
+  let AR = v(ax - n.x * h, az - n.z * h);
+  let BL = v(bx + n.x * h, bz + n.z * h);
+  let BR = v(bx - n.x * h, bz - n.z * h);
+
+  const gA = jointGammaMap?.get(edge.a);
+  if (gA?.size) {
+    const gl = gA.get(`${edge.id}|L`);
+    if (gl?.ok) AL = gl.gamma;
+    const gr = gA.get(`${edge.id}|R`);
+    if (gr?.ok) AR = gr.gamma;
+  }
+
+  const gB = jointGammaMap?.get(edge.b);
+  if (gB?.size) {
+    const gl = gB.get(`${edge.id}|L`);
+    if (gl?.ok) BR = gl.gamma;
+    const gr = gB.get(`${edge.id}|R`);
+    if (gr?.ok) BL = gr.gamma;
+  }
+
+  return { AL, AR, BL, BR };
+}
+
+function makeWallExtrudedMesh(corners, heightM, material) {
+  const pts = [corners.AL, corners.BL, corners.BR, corners.AR];
+  const h = Math.max(0.1, Number(heightM) || DEFAULT_WALL_HEIGHT_M);
+
+  // Build a 2D face from wall corners (plan view), then extrude it by wall height.
+  // Shape is authored in (x, -z) so after rotateX(-90deg):
+  // - shape plane maps to XZ
+  // - extrusion depth maps to +Y (wall height)
+  const shape = new THREE.Shape();
+  shape.moveTo(pts[0].x, -pts[0].z);
+  for (let i = 1; i < pts.length; i += 1) shape.lineTo(pts[i].x, -pts[i].z);
+  shape.closePath();
+
+  const g = new THREE.ExtrudeGeometry(shape, {
+    depth: h,
+    bevelEnabled: false,
+    steps: 1,
+    curveSegments: 1,
+  });
+  g.rotateX(-Math.PI / 2);
+  g.computeVertexNormals();
+  return new THREE.Mesh(g, material);
+}
 
 function clearWalls3d() {
   if (!scene || !wallsRoot) return;
@@ -62,28 +238,16 @@ function rebuildWalls3d(snapshot) {
   root.name = "walls2d-extruded";
   const wallMat = new THREE.MeshStandardMaterial({
     color: 0xc7ccd1,
-    roughness: 0.86,
+        roughness: 0.86,
     metalness: 0.05,
   });
 
+  const jointGammaMap = buildJointGammaMap(walls, byId);
+
   for (const w of walls) {
-    const a = byId.get(w.a);
-    const b = byId.get(w.b);
-    if (!a || !b) continue;
-
-    const dx = (b.x - a.x) * 0.001;
-    const dz = -(b.y - a.y) * 0.001;
-    const length = Math.hypot(dx, dz);
-    if (!Number.isFinite(length) || length <= 0.001) continue;
-
-    const thicknessM = Math.max(0.02, (Number(w.thickness) || 120) * 0.001);
-    const g = new THREE.BoxGeometry(length, DEFAULT_WALL_HEIGHT_M, thicknessM);
-    const mesh = new THREE.Mesh(g, wallMat.clone());
-
-    const midX = ((a.x + b.x) * 0.5) * 0.001;
-    const midZ = -((a.y + b.y) * 0.5) * 0.001;
-    mesh.position.set(midX, DEFAULT_WALL_HEIGHT_M * 0.5, midZ);
-    mesh.rotation.y = Math.atan2(dz, dx);
+    const corners = computeTrimmedWallCorners(w, byId, jointGammaMap);
+    if (!corners) continue;
+    const mesh = makeWallExtrudedMesh(corners, DEFAULT_WALL_HEIGHT_M, wallMat.clone());
     root.add(mesh);
   }
 
@@ -314,7 +478,7 @@ function projectModelTo2DLines(root) {
   root.traverse((obj) => {
     if (!obj || !obj.isMesh || !obj.geometry) return;
     const geom = obj.geometry;
-    const edges = new THREE.EdgesGeometry(geom, 15);
+        const edges = new THREE.EdgesGeometry(geom, 15);
     const pos = edges.attributes?.position;
     if (!pos || !pos.array) return;
 
