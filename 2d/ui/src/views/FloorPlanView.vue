@@ -17,7 +17,8 @@ onMounted(() => {
       onModel2dTransformChange: (t) => {
         const x = Number.isFinite(t?.x) ? t.x : 0;
         const y = Number.isFinite(t?.y) ? t.y : 0;
-        model2dTransformRef.value = { x, y };
+        const rotRad = Number.isFinite(t?.rotRad) ? t.rotRad : 0;
+        model2dTransformRef.value = { x, y, rotRad };
       },
     });
     // Vue shell starts in "no drawing" mode.

@@ -8,6 +8,7 @@ const activeTool = ref("select");
 const snapOn = ref(true);
 const showDimensions = ref(true);
 const showOffsetWalls = ref(true);
+const showObjectAxes = ref(false);
 const walls3dSnapshot = ref({ nodes: [], walls: [] });
 const stepDrawMode = ref("line"); // "line" | "degree"
 const snapModes = ref({
@@ -146,6 +147,7 @@ function syncQuickStateFromEditor() {
   snapOn.value = !!s.snapOn;
   showDimensions.value = s.showDimensions !== false;
   showOffsetWalls.value = !!s.offsetWallEnabled;
+  showObjectAxes.value = !!s.showObjectAxes;
   walls3dSnapshot.value = {
     nodes: Array.isArray(full?.graphSnap?.nodes) ? full.graphSnap.nodes : [],
     walls: Array.isArray(full?.graphSnap?.walls) ? full.graphSnap.walls : [],
@@ -177,6 +179,12 @@ function toggleOffsets() {
   const next = !showOffsetWalls.value;
   showOffsetWalls.value = next;
   applyEditorPatch({ offsetWallEnabled: next });
+}
+
+function toggleObjectAxes() {
+  const next = !showObjectAxes.value;
+  showObjectAxes.value = next;
+  applyEditorPatch({ showObjectAxes: next });
 }
 
 function toggleSnapMaster() {
@@ -940,6 +948,15 @@ onBeforeUnmount(() => {
               @click="toggleOffsets"
             >
               <img src="/icons/turn_offset.png" alt="" />
+            </button>
+
+            <button
+              class="iconbtn iconbtn--sm stageQuickBar__btn"
+              :class="{ 'is-active': showObjectAxes }"
+              title="محورها"
+              @click="toggleObjectAxes"
+            >
+              <img src="/icons/ax_point.png" alt="" />
             </button>
 
             <div class="stageQuickBar__ddWrap">

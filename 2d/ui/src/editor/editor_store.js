@@ -4,5 +4,5 @@ import { shallowRef } from "vue";
 export const editorRef = shallowRef(null);
 
 // Latest 2D transform of the projected 3D model (millimeters in 2D world).
-export const model2dTransformRef = shallowRef({ x: 0, y: 0 });
+export const model2dTransformRef = shallowRef({ x: 0, y: 0, rotRad: 0 });
 

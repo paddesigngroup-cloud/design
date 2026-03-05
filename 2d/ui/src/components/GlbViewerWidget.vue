@@ -8,7 +8,7 @@ const props = defineProps({
   src: { type: String, required: true },
   model2dTransform: {
     type: Object,
-    default: () => ({ x: 0, y: 0 }),
+    default: () => ({ x: 0, y: 0, rotRad: 0 }),
   },
   walls2d: {
     type: Object,
@@ -30,6 +30,7 @@ let raf = 0;
 let ro = null;
 let modelRoot = null;
 let modelBasePosition = null;
+let modelBaseRotationY = 0;
 let wallsRoot = null;
 
 let axesHelper = null;
@@ -436,6 +437,7 @@ function applyModel2dTransformTo3d(transform) {
 
   const xMm = Number.isFinite(transform?.x) ? transform.x : 0;
   const yMm = Number.isFinite(transform?.y) ? transform.y : 0;
+  const rotRad = Number.isFinite(transform?.rotRad) ? transform.rotRad : 0;
   const mPerMm = 0.001;
 
   modelRoot.position.set(
@@ -443,6 +445,7 @@ function applyModel2dTransformTo3d(transform) {
     modelBasePosition.y,
     modelBasePosition.z - yMm * mPerMm
   );
+  modelRoot.rotation.y = modelBaseRotationY + rotRad;
 }
 
 watch(
@@ -571,6 +574,7 @@ onMounted(async () => {
     if (root) {
       modelRoot = root;
       modelBasePosition = root.position.clone();
+      modelBaseRotationY = root.rotation.y || 0;
       scene.add(root);
       applyModel2dTransformTo3d(props.model2dTransform);
 

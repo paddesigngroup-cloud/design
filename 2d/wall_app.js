@@ -137,6 +137,7 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   majorColor: "#A3A3A3",
   axisXColor: "#9CC9B4",
   axisYColor: "#BCC8EB",
+  showObjectAxes: false,
 
   wallFillColor: "#A6A6A6",
   wallEdgeColor: "#000000",
@@ -541,9 +542,22 @@ const modelDrag = {
   startOutline: null,
   startOffsetXmm: 0,
   startOffsetYmm: 0,
+  startRotationRad: 0,
   startSnap: null,
   moved: false,
 };
+const axisDrag = {
+  active: false,
+  axis: null, // "x" | "y"
+  targetType: null, // "wall" | "hidden" | "dim" | "model"
+  startMouseWorld: null,
+  startGraphSnap: null,
+  startHiddenGraphSnap: null,
+  startDimensionsSnap: null,
+  startModelSnap: null,
+  moved: false,
+};
+let hoverObjectAxis = null; // "x" | "y" | null
 
 function clearGroupSelection() {
   selectedWallIds = [];
@@ -565,6 +579,7 @@ function startModelDrag(offsetX, offsetY) {
   modelDrag.startOutline = _cloneModel2dOutline(model2d.outline);
   modelDrag.startOffsetXmm = model2d.offsetXmm || 0;
   modelDrag.startOffsetYmm = model2d.offsetYmm || 0;
+  modelDrag.startRotationRad = model2d.rotationRad || 0;
   modelDrag.startSnap = snapshotModel2d(model2d);
   modelDrag.moved = false;
   return true;
@@ -575,6 +590,7 @@ function emitModel2dTransform() {
     onModel2dTransformChange({
       x: model2d.offsetXmm || 0,
       y: model2d.offsetYmm || 0,
+      rotRad: model2d.rotationRad || 0,
     });
   } catch (_) {}
 }
@@ -582,15 +598,81 @@ function applyModelDrag(targetWorld) {
   if (!modelDrag.active || !modelDrag.startMouseWorld) return;
   const dx = targetWorld.x - modelDrag.startMouseWorld.x;
   const dy = targetWorld.y - modelDrag.startMouseWorld.y;
-  model2d.lines = (modelDrag.startLines || []).map((l) => ({
-    ax: l.ax + dx, ay: l.ay + dy, bx: l.bx + dx, by: l.by + dy,
-  }));
-  model2d.outline = (modelDrag.startOutline || []).map((p) => ({
-    x: p.x + dx, y: p.y + dy,
-  }));
-  model2d.offsetXmm = (modelDrag.startOffsetXmm || 0) + dx;
-  model2d.offsetYmm = (modelDrag.startOffsetYmm || 0) + dy;
+
+  let rotRad = 0;
+  let snapTx = 0;
+  let snapTy = 0;
+  if (state.snapOn && (modelDrag.startOutline || []).length >= 2 && graph.walls.size > 0) {
+    const movedOutline = (modelDrag.startOutline || []).map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    const nearest = nearestWallToPoints(movedOutline);
+    if (nearest && nearest.dist <= MODEL_WALL_SNAP_DIST_MM) {
+      const wallAng = Math.atan2(nearest.dir.y, nearest.dir.x);
+      const modelAng = dominantModelAngle(modelDrag.startLines || []);
+      if (isFinite(modelAng)) {
+        const d0 = wrapAnglePi(wallAng - modelAng);
+        const d1 = wrapAnglePi(d0 + Math.PI);
+        rotRad = Math.abs(d1) < Math.abs(d0) ? d1 : d0;
+      }
+
+      transformModelFromStart(dx, dy, rotRad, 0, 0);
+      const nearestAfterRotate = nearestWallToPoints(model2d.outline || []);
+      if (nearestAfterRotate && nearestAfterRotate.dist <= MODEL_WALL_SNAP_DIST_MM) {
+        snapTx = nearestAfterRotate.wallPoint.x - nearestAfterRotate.modelPoint.x;
+        snapTy = nearestAfterRotate.wallPoint.y - nearestAfterRotate.modelPoint.y;
+      }
+    }
+  }
+
+  transformModelFromStart(dx, dy, rotRad, snapTx, snapTy);
+  model2d.offsetXmm = (modelDrag.startOffsetXmm || 0) + dx + snapTx;
+  model2d.offsetYmm = (modelDrag.startOffsetYmm || 0) + dy + snapTy;
+  model2d.rotationRad = wrapAnglePi((modelDrag.startRotationRad || 0) + rotRad);
   emitModel2dTransform();
+}
+function resolveModelDragTargetWorld(rawTargetWorld) {
+  if (!modelDrag.active || !modelDrag.startMouseWorld) return rawTargetWorld;
+
+  const tolMm = Math.max(8, (SNAP_TOL_PX * 1.5) / Math.max(state.zoom, 1e-6));
+  const baseDx = rawTargetWorld.x - modelDrag.startMouseWorld.x;
+  const baseDy = rawTargetWorld.y - modelDrag.startMouseWorld.y;
+
+  let best = null;
+  function considerAnchor(anchorX, anchorY) {
+    const candidates = collectSnapCandidatesWorld(anchorX, anchorY, tolMm);
+    for (const c of candidates) {
+      const shiftX = c.x - anchorX;
+      const shiftY = c.y - anchorY;
+      const score = {
+        priority: c.priority,
+        d2: c.d2,
+      };
+      if (!best) {
+        best = { shiftX, shiftY, score };
+        continue;
+      }
+      if (score.priority > best.score.priority || (score.priority === best.score.priority && score.d2 < best.score.d2)) {
+        best = { shiftX, shiftY, score };
+      }
+    }
+  }
+
+  considerAnchor(rawTargetWorld.x, rawTargetWorld.y);
+
+  const pts = modelDrag.startOutline || [];
+  if (pts.length >= 2) {
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      considerAnchor(a.x + baseDx, a.y + baseDy);
+      considerAnchor((a.x + b.x) / 2 + baseDx, (a.y + b.y) / 2 + baseDy);
+    }
+  }
+
+  if (!best) return rawTargetWorld;
+  return {
+    x: rawTargetWorld.x + best.shiftX,
+    y: rawTargetWorld.y + best.shiftY,
+  };
 }
 function stopModelDrag(keepMovedGeometry = true) {
   if (!modelDrag.active) return;
@@ -599,6 +681,7 @@ function stopModelDrag(keepMovedGeometry = true) {
     model2d.outline = _cloneModel2dOutline(modelDrag.startOutline);
     model2d.offsetXmm = modelDrag.startOffsetXmm || 0;
     model2d.offsetYmm = modelDrag.startOffsetYmm || 0;
+    model2d.rotationRad = modelDrag.startRotationRad || 0;
     emitModel2dTransform();
   }
   modelDrag.active = false;
@@ -607,6 +690,7 @@ function stopModelDrag(keepMovedGeometry = true) {
   modelDrag.startOutline = null;
   modelDrag.startOffsetXmm = 0;
   modelDrag.startOffsetYmm = 0;
+  modelDrag.startRotationRad = 0;
   modelDrag.startSnap = null;
   modelDrag.moved = false;
 }
@@ -971,6 +1055,7 @@ function snapshotModel2d(model) {
     outline: (model?.outline || []).map((p) => ({ x: p.x, y: p.y })),
     offsetXmm: (typeof model?.offsetXmm === "number" && isFinite(model.offsetXmm)) ? model.offsetXmm : 0,
     offsetYmm: (typeof model?.offsetYmm === "number" && isFinite(model.offsetYmm)) ? model.offsetYmm : 0,
+    rotationRad: (typeof model?.rotationRad === "number" && isFinite(model.rotationRad)) ? model.rotationRad : 0,
   };
 }
 
@@ -980,6 +1065,7 @@ function restoreModel2d(model, snap) {
   model.outline = (snap?.outline || []).map((p) => ({ x: p.x, y: p.y }));
   model.offsetXmm = (typeof snap?.offsetXmm === "number" && isFinite(snap.offsetXmm)) ? snap.offsetXmm : 0;
   model.offsetYmm = (typeof snap?.offsetYmm === "number" && isFinite(snap.offsetYmm)) ? snap.offsetYmm : 0;
+  model.rotationRad = (typeof snap?.rotationRad === "number" && isFinite(snap.rotationRad)) ? snap.rotationRad : 0;
 }
 
 function _stateSignature(snap) {
@@ -1192,6 +1278,7 @@ const model2d = {
   alpha: 0.55,
   offsetXmm: 0,
   offsetYmm: 0,
+  rotationRad: 0,
 };
 let hoverModelOutline = false;
 let selectedModelOutline = false;
@@ -1313,6 +1400,7 @@ function _applyModel2dLines(lines, opts = null) {
   recomputeModel2dOutline();
   model2d.offsetXmm = 0;
   model2d.offsetYmm = 0;
+  model2d.rotationRad = 0;
   hoverModelOutline = false;
   selectedModelOutline = false;
   if (opts && typeof opts === "object") {
@@ -1342,6 +1430,7 @@ function _clearModel2dLines() {
   model2d.outline.length = 0;
   model2d.offsetXmm = 0;
   model2d.offsetYmm = 0;
+  model2d.rotationRad = 0;
   hoverModelOutline = false;
   selectedModelOutline = false;
   emitModel2dTransform();
@@ -1467,6 +1556,283 @@ function drawGrid() {
   ctx.fillStyle = "#000";
   ctx.arc(origin.x, origin.y, 4, 0, Math.PI*2);
   ctx.fill();
+}
+
+function getBoundsCenterWorld(points) {
+  if (!Array.isArray(points) || points.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of points) {
+    if (!p || !isFinite(p.x) || !isFinite(p.y)) continue;
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) return null;
+  return { x: (minX + maxX) * 0.5, y: (minY + maxY) * 0.5 };
+}
+
+function getSelectedObjectTargetInfo() {
+  const wallIds = [];
+  if (selectedWallId) wallIds.push(selectedWallId);
+  for (const id of selectedWallIds) wallIds.push(id);
+  if (wallIds.length) {
+    const uniq = [];
+    const seen = new Set();
+    const pts = [];
+    for (const id of wallIds) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const w = graph.getWall(id);
+      if (!w) continue;
+      uniq.push(id);
+      const a = graph.getNode(w.a);
+      const b = graph.getNode(w.b);
+      if (a) pts.push({ x: a.x, y: a.y });
+      if (b) pts.push({ x: b.x, y: b.y });
+    }
+    const center = getBoundsCenterWorld(pts);
+    if (center && uniq.length) return { type: "wall", center, ids: uniq };
+  }
+
+  const hiddenIds = [];
+  if (selectedHiddenId) hiddenIds.push(selectedHiddenId);
+  for (const id of selectedHiddenIds) hiddenIds.push(id);
+  if (hiddenIds.length) {
+    const uniq = [];
+    const seen = new Set();
+    const pts = [];
+    for (const id of hiddenIds) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const w = hiddenGraph.getWall(id);
+      if (!w) continue;
+      uniq.push(id);
+      const a = hiddenGraph.getNode(w.a);
+      const b = hiddenGraph.getNode(w.b);
+      if (a) pts.push({ x: a.x, y: a.y });
+      if (b) pts.push({ x: b.x, y: b.y });
+    }
+    const center = getBoundsCenterWorld(pts);
+    if (center && uniq.length) return { type: "hidden", center, ids: uniq };
+  }
+
+  const dimIds = [];
+  if (selectedDimId) dimIds.push(selectedDimId);
+  for (const id of selectedDimIds) dimIds.push(id);
+  if (dimIds.length) {
+    const uniq = [];
+    const seen = new Set();
+    const pts = [];
+    for (const id of dimIds) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const d = dimensions.find((x) => x && x.id === id);
+      if (!d) continue;
+      uniq.push(id);
+      if (d.a) pts.push({ x: d.a.x, y: d.a.y });
+      if (d.b) pts.push({ x: d.b.x, y: d.b.y });
+    }
+    const center = getBoundsCenterWorld(pts);
+    if (center && uniq.length) return { type: "dim", center, ids: uniq };
+  }
+
+  if (selectedModelOutline && Array.isArray(model2d.outline) && model2d.outline.length >= 1) {
+    const center = getBoundsCenterWorld(model2d.outline);
+    if (center) return { type: "model", center, ids: [] };
+  }
+
+  return null;
+}
+
+function getObjectAxesGeometryScreen() {
+  if (!state.showObjectAxes) return null;
+  const target = getSelectedObjectTargetInfo();
+  if (!target?.center) return null;
+
+  const lenPx = 72;
+  const lenWorld = lenPx / Math.max(0.001, state.zoom);
+  const originWorld = target.center;
+  const xEndWorld = { x: originWorld.x + lenWorld, y: originWorld.y };
+  const yEndWorld = { x: originWorld.x, y: originWorld.y + lenWorld };
+
+  return {
+    target,
+    originWorld,
+    originScreen: worldToScreen(originWorld.x, originWorld.y),
+    xEndScreen: worldToScreen(xEndWorld.x, xEndWorld.y),
+    yEndScreen: worldToScreen(yEndWorld.x, yEndWorld.y),
+  };
+}
+
+function hitTestObjectAxesScreen(x, y) {
+  const g = getObjectAxesGeometryScreen();
+  if (!g) return null;
+  const tolPx = 11;
+  const dx = pointToSegmentDistancePx(x, y, g.originScreen.x, g.originScreen.y, g.xEndScreen.x, g.xEndScreen.y);
+  const dy = pointToSegmentDistancePx(x, y, g.originScreen.x, g.originScreen.y, g.yEndScreen.x, g.yEndScreen.y);
+  const hitX = dx <= tolPx;
+  const hitY = dy <= tolPx;
+  if (hitX && hitY) return { axis: "x", geometry: g };
+  if (hitX) return { axis: "x", geometry: g };
+  if (hitY) return { axis: "y", geometry: g };
+  return null;
+}
+
+function beginAxisDrag(axis, offsetX, offsetY) {
+  const target = getSelectedObjectTargetInfo();
+  if (!target) return false;
+  axisDrag.active = true;
+  axisDrag.axis = (axis === "y") ? "y" : "x";
+  axisDrag.targetType = target.type;
+  axisDrag.startMouseWorld = screenToWorld(offsetX, offsetY);
+  axisDrag.startGraphSnap = snapshotGraph(graph);
+  axisDrag.startHiddenGraphSnap = snapshotGraph(hiddenGraph);
+  axisDrag.startDimensionsSnap = snapshotDimensions(dimensions);
+  axisDrag.startModelSnap = snapshotModel2d(model2d);
+  axisDrag.moved = false;
+  hoverObjectAxis = axisDrag.axis;
+  return true;
+}
+
+function stopAxisDrag() {
+  axisDrag.active = false;
+  axisDrag.axis = null;
+  axisDrag.targetType = null;
+  axisDrag.startMouseWorld = null;
+  axisDrag.startGraphSnap = null;
+  axisDrag.startHiddenGraphSnap = null;
+  axisDrag.startDimensionsSnap = null;
+  axisDrag.startModelSnap = null;
+  axisDrag.moved = false;
+}
+
+function applyAxisDrag(targetWorld) {
+  if (!axisDrag.active || !axisDrag.startMouseWorld) return;
+  const start = axisDrag.startMouseWorld;
+  const deltaRaw = { x: targetWorld.x - start.x, y: targetWorld.y - start.y };
+  const axisUnit = axisDrag.axis === "y" ? { x: 0, y: 1 } : { x: 1, y: 0 };
+  const t = dot(deltaRaw.x, deltaRaw.y, axisUnit.x, axisUnit.y);
+  const delta = { x: axisUnit.x * t, y: axisUnit.y * t };
+
+  restoreGraph(graph, axisDrag.startGraphSnap);
+  restoreGraph(hiddenGraph, axisDrag.startHiddenGraphSnap);
+  restoreDimensions(dimensions, axisDrag.startDimensionsSnap);
+  restoreModel2d(model2d, axisDrag.startModelSnap);
+
+  if (axisDrag.targetType === "wall") {
+    const info = getSelectedObjectTargetInfo();
+    const ids = info?.type === "wall" ? info.ids : [];
+    const nodeIds = new Set();
+    for (const id of ids) {
+      const w = graph.getWall(id);
+      if (!w) continue;
+      nodeIds.add(w.a);
+      nodeIds.add(w.b);
+    }
+    for (const nid of nodeIds) {
+      const n = graph.getNode(nid);
+      if (!n) continue;
+      n.x += delta.x;
+      n.y += delta.y;
+    }
+    graph.mergeCloseNodes(1);
+    graph.deleteTinyEdges(1);
+  } else if (axisDrag.targetType === "hidden") {
+    const info = getSelectedObjectTargetInfo();
+    const ids = info?.type === "hidden" ? info.ids : [];
+    const nodeIds = new Set();
+    for (const id of ids) {
+      const w = hiddenGraph.getWall(id);
+      if (!w) continue;
+      nodeIds.add(w.a);
+      nodeIds.add(w.b);
+    }
+    for (const nid of nodeIds) {
+      const n = hiddenGraph.getNode(nid);
+      if (!n) continue;
+      n.x += delta.x;
+      n.y += delta.y;
+    }
+    hiddenGraph.mergeCloseNodes(1);
+    hiddenGraph.deleteTinyEdges(1);
+  } else if (axisDrag.targetType === "dim") {
+    const info = getSelectedObjectTargetInfo();
+    const ids = new Set(info?.type === "dim" ? info.ids : []);
+    for (const d of dimensions) {
+      if (!d || !ids.has(d.id)) continue;
+      if (d.a) { d.a.x += delta.x; d.a.y += delta.y; }
+      if (d.b) { d.b.x += delta.x; d.b.y += delta.y; }
+    }
+  } else if (axisDrag.targetType === "model") {
+    model2d.lines = model2d.lines.map((l) => ({
+      ax: l.ax + delta.x, ay: l.ay + delta.y, bx: l.bx + delta.x, by: l.by + delta.y,
+    }));
+    model2d.outline = model2d.outline.map((pt) => ({ x: pt.x + delta.x, y: pt.y + delta.y }));
+    model2d.offsetXmm = (model2d.offsetXmm || 0) + delta.x;
+    model2d.offsetYmm = (model2d.offsetYmm || 0) + delta.y;
+    emitModel2dTransform();
+  }
+
+  if (Math.hypot(delta.x, delta.y) > 0.5) axisDrag.moved = true;
+}
+
+function drawSelectedObjectAxes() {
+  if (!state.showObjectAxes) return;
+  const g = getObjectAxesGeometryScreen();
+  if (!g) return;
+
+  const drawAxis = (from, to, color, label, active) => {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const dl = Math.hypot(dx, dy) || 1;
+    const ux = dx / dl;
+    const uy = dy / dl;
+    const px = -uy;
+    const py = ux;
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = active ? 1 : 0.88;
+    ctx.lineWidth = active ? 4 : 3;
+
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+
+    const ah = active ? 11 : 9;
+    const aw = active ? 6 : 5;
+    ctx.beginPath();
+    ctx.moveTo(to.x, to.y);
+    ctx.lineTo(to.x - ux * ah + px * aw, to.y - uy * ah + py * aw);
+    ctx.lineTo(to.x - ux * ah - px * aw, to.y - uy * ah - py * aw);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.font = `bold ${active ? 14 : 13}px ${state.fontFamily || "Tahoma"}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, to.x + ux * 12 + px * 2, to.y + uy * 12 + py * 2);
+    ctx.restore();
+  };
+
+  const xActive = hoverObjectAxis === "x" || (axisDrag.active && axisDrag.axis === "x");
+  const yActive = hoverObjectAxis === "y" || (axisDrag.active && axisDrag.axis === "y");
+
+  drawAxis(g.originScreen, g.xEndScreen, state.axisXColor, "X", xActive);
+  drawAxis(g.originScreen, g.yEndScreen, state.axisYColor, "Y", yActive);
+
+  ctx.save();
+  ctx.fillStyle = "#111";
+  ctx.beginPath();
+  ctx.arc(g.originScreen.x, g.originScreen.y, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 /* =============================
@@ -2737,6 +3103,7 @@ function drawToolCursor() {
   initCursorImagesOnce();
 
   const isHoverAny =
+    !!hoverObjectAxis || !!axisDrag.active ||
     !!hoverModelOutline ||
     !!hoverWallId || !!hoverHiddenId || !!hoverDimId ||
     !!selectedWallId || !!selectedHiddenId || !!selectedDimId || !!selectedModelOutline ||
@@ -3065,6 +3432,7 @@ function loop() {
       hoverId: hoverHiddenId,
     });
     drawWallsNodeBased(tool);
+    drawSelectedObjectAxes();
     drawStandaloneDimensions();
     drawSnapOverlay();
     if (state.activeTool === "hidden") drawHiddenToolOverlay(hiddenTool);
@@ -3161,6 +3529,7 @@ function onMouseLeave() {
   isMouseOverCanvas = false;
   hoverDimTextWallId = null;
   hoverWallHandle = null;
+  hoverObjectAxis = null;
   updateSnapPreview(NaN, NaN);
 }
 function onContextMenu(e) { e.preventDefault(); }
@@ -3613,6 +3982,13 @@ function onMouseDown(e) {
   }
   if (e.button !== 0) return;
 
+// 0) Axis hit => drag selected object on chosen axis.
+  const axisHit = hitTestObjectAxesScreen(e.offsetX, e.offsetY);
+  if (axisHit) {
+    beginAxisDrag(axisHit.axis, e.offsetX, e.offsetY);
+    return;
+  }
+
   // 1) UI hit => handle and STOP (does not start drawing)
   const t = hitTest(e.offsetX, e.offsetY) || hitTestSelectedWallUiFallback(e.offsetX, e.offsetY);
   if (t) {
@@ -3801,6 +4177,7 @@ function onMouseDown(e) {
     hoverHiddenId = null;
     hoverDimId = null;
     hoverModelOutline = false;
+    hoverObjectAxis = null;
     return;
   }
 
@@ -3892,6 +4269,32 @@ function onWindowMouseUp() {
     selectedModelOutline = true;
     hoverModelOutline = moved ? true : hoverModelOutline;
   }
+  if (axisDrag.active) {
+    const moved = !!axisDrag.moved;
+    const endGraphSnap = snapshotGraph(graph);
+    const endHiddenGraphSnap = snapshotGraph(hiddenGraph);
+    const endDimensionsSnap = snapshotDimensions(dimensions);
+    const endModelSnap = snapshotModel2d(model2d);
+    const startGraphSnap = axisDrag.startGraphSnap;
+    const startHiddenGraphSnap = axisDrag.startHiddenGraphSnap;
+    const startDimensionsSnap = axisDrag.startDimensionsSnap;
+    const startModelSnap = axisDrag.startModelSnap;
+    stopAxisDrag();
+    if (moved && startGraphSnap && startHiddenGraphSnap && startDimensionsSnap && startModelSnap) {
+      restoreGraph(graph, startGraphSnap);
+      restoreGraph(hiddenGraph, startHiddenGraphSnap);
+      restoreDimensions(dimensions, startDimensionsSnap);
+      restoreModel2d(model2d, startModelSnap);
+      emitModel2dTransform();
+      undo.runAction(() => {
+        restoreGraph(graph, endGraphSnap);
+        restoreGraph(hiddenGraph, endHiddenGraphSnap);
+        restoreDimensions(dimensions, endDimensionsSnap);
+        restoreModel2d(model2d, endModelSnap);
+        emitModel2dTransform();
+      });
+    }
+  }
   isPanning = false;
 }
 
@@ -3926,6 +4329,8 @@ function onWindowMouseMove(e) {
     hoverWallId = null;
     hoverHiddenId = null;
     hoverDimId = null;
+    hoverObjectAxis = null;
+  
     return;
   }
 
@@ -3945,10 +4350,17 @@ function onWindowMouseMove(e) {
   }
   updateSnapPreview(ox, oy);
 
+  if (axisDrag.active) {
+    const target = screenToWorld(ox, oy);
+    applyAxisDrag(target);
+    hoverObjectAxis = axisDrag.axis;
+    return;
+  }
+
   if (modelDrag.active) {
     let target = screenToWorld(ox, oy);
     if (state.snapOn) {
-      target = resolveSnapPointWorld(target.x, target.y) || target;
+      target = resolveModelDragTargetWorld(target);
     }
     applyModelDrag(target);
     const movedMm = modelDrag.startMouseWorld
@@ -4062,6 +4474,9 @@ function onWindowMouseMove(e) {
   if (state.activeTool === "dim") dimTool.onPointerMove({ offsetX: ox, offsetY: oy, shiftKey: e.shiftKey }, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld });
   else if (state.activeTool === "hidden") hiddenTool.onPointerMove({ offsetX: ox, offsetY: oy, shiftKey: e.shiftKey }, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld });
   else tool.onPointerMove({ offsetX: ox, offsetY: oy, shiftKey: e.shiftKey });
+
+  const axisHoverHit = inside ? hitTestObjectAxesScreen(ox, oy) : null;
+  hoverObjectAxis = axisHoverHit ? axisHoverHit.axis : null;
 
   const ht = inside ? hitTest(ox, oy) : null;
   if (
