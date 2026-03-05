@@ -594,6 +594,7 @@ function emitModel2dTransform() {
     });
   } catch (_) {}
 }
+<<<<<<< ours
 function applyModelDrag(targetWorld) {
   if (!modelDrag.active || !modelDrag.startMouseWorld) return;
   const dx = targetWorld.x - modelDrag.startMouseWorld.x;
@@ -627,6 +628,73 @@ function applyModelDrag(targetWorld) {
   model2d.offsetXmm = (modelDrag.startOffsetXmm || 0) + dx + snapTx;
   model2d.offsetYmm = (modelDrag.startOffsetYmm || 0) + dy + snapTy;
   model2d.rotationRad = wrapAnglePi((modelDrag.startRotationRad || 0) + rotRad);
+=======
+function transformModelFromStart(dx, dy) {
+  model2d.lines = (modelDrag.startLines || []).map((l) => ({
+    ax: l.ax + dx,
+    ay: l.ay + dy,
+    bx: l.bx + dx,
+    by: l.by + dy,
+  }));
+  model2d.outline = (modelDrag.startOutline || []).map((p) => ({
+    x: p.x + dx,
+    y: p.y + dy,
+  }));
+  model2d.offsetXmm = (modelDrag.startOffsetXmm || 0) + dx;
+  model2d.offsetYmm = (modelDrag.startOffsetYmm || 0) + dy;
+}
+
+function getNearestPointOnWallSegments(x, y) {
+  let best = null;
+  for (const w of graph.walls.values()) {
+    const A = graph.getNode(w.a);
+    const B = graph.getNode(w.b);
+    if (!A || !B) continue;
+    const vx = B.x - A.x;
+    const vy = B.y - A.y;
+    const ll = vx * vx + vy * vy;
+    if (ll <= 1e-9) continue;
+    const tRaw = ((x - A.x) * vx + (y - A.y) * vy) / ll;
+    const t = clamp(tRaw, 0, 1);
+    const px = A.x + vx * t;
+    const py = A.y + vy * t;
+    const d = Math.hypot(x - px, y - py);
+    if (!best || d < best.dist) best = { x: px, y: py, dist: d };
+  }
+  return best;
+}
+
+function resolveModelDragDelta(targetWorld) {
+  const start = modelDrag.startMouseWorld;
+  const rawDx = targetWorld.x - start.x;
+  const rawDy = targetWorld.y - start.y;
+
+  const outline = modelDrag.startOutline || [];
+  if (outline.length === 0) return { dx: rawDx, dy: rawDy };
+
+  let bestPair = null;
+  for (const p of outline) {
+    const movedX = p.x + rawDx;
+    const movedY = p.y + rawDy;
+    const near = getNearestPointOnWallSegments(movedX, movedY);
+    if (!near) continue;
+    if (!bestPair || near.dist < bestPair.dist) {
+      bestPair = { movedX, movedY, wallX: near.x, wallY: near.y, dist: near.dist };
+    }
+  }
+  if (!bestPair) return { dx: rawDx, dy: rawDy };
+
+  return {
+    dx: rawDx + (bestPair.wallX - bestPair.movedX),
+    dy: rawDy + (bestPair.wallY - bestPair.movedY),
+  };
+}
+
+function applyModelDrag(targetWorld) {
+  if (!modelDrag.active || !modelDrag.startMouseWorld || !targetWorld) return;
+  const delta = resolveModelDragDelta(targetWorld);
+  transformModelFromStart(delta.dx, delta.dy);
+>>>>>>> theirs
   emitModel2dTransform();
 }
 function resolveModelDragTargetWorld(rawTargetWorld) {
@@ -3982,7 +4050,11 @@ function onMouseDown(e) {
   }
   if (e.button !== 0) return;
 
+<<<<<<< ours
 // 0) Axis hit => drag selected object on chosen axis.
+=======
+  // 0) Axis hit => drag selected object on chosen axis.
+>>>>>>> theirs
   const axisHit = hitTestObjectAxesScreen(e.offsetX, e.offsetY);
   if (axisHit) {
     beginAxisDrag(axisHit.axis, e.offsetX, e.offsetY);
@@ -4330,7 +4402,10 @@ function onWindowMouseMove(e) {
     hoverHiddenId = null;
     hoverDimId = null;
     hoverObjectAxis = null;
+<<<<<<< ours
   
+=======
+>>>>>>> theirs
     return;
   }
 
