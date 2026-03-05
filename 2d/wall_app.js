@@ -594,7 +594,6 @@ function emitModel2dTransform() {
     });
   } catch (_) {}
 }
-<<<<<<< ours
 function applyModelDrag(targetWorld) {
   if (!modelDrag.active || !modelDrag.startMouseWorld) return;
   const dx = targetWorld.x - modelDrag.startMouseWorld.x;
@@ -3983,11 +3982,7 @@ function onMouseDown(e) {
   }
   if (e.button !== 0) return;
 
-<<<<<<< ours
 // 0) Axis hit => drag selected object on chosen axis.
-=======
-  // 0) Axis hit => drag selected object on chosen axis.
->>>>>>> theirs
   const axisHit = hitTestObjectAxesScreen(e.offsetX, e.offsetY);
   if (axisHit) {
     beginAxisDrag(axisHit.axis, e.offsetX, e.offsetY);
@@ -4335,10 +4330,7 @@ function onWindowMouseMove(e) {
     hoverHiddenId = null;
     hoverDimId = null;
     hoverObjectAxis = null;
-<<<<<<< ours
   
-=======
->>>>>>> theirs
     return;
   }
 
