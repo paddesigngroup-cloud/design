@@ -484,6 +484,20 @@ textarea {
   height: 38px;
   display: block;
 }
+.presetTile--cta {
+  grid-column: 1 / -1;
+  aspect-ratio: auto;
+  min-height: 52px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+}
+.presetTile__label {
+  font-family: Vazirmatn, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
 .menuList {
   display: flex;
   flex-direction: column;

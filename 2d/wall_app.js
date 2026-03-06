@@ -242,6 +242,158 @@ function normalize(x, y) { const l = Math.hypot(x, y) || 1; return { x:x/l, y:y/
 function dot(ax, ay, bx, by) { return ax*bx + ay*by; }
 function radToDeg(r) { return r * 180 / Math.PI; }
 
+const MODEL_WALL_SNAP_DIST_MM = 140;
+const MODEL_AXIS_SNAP_PULL_MM = 28;
+
+function wrapAnglePi(a) {
+  let ang = a;
+  while (ang <= -Math.PI) ang += Math.PI * 2;
+  while (ang > Math.PI) ang -= Math.PI * 2;
+  return ang;
+}
+
+function dominantModelAngle(lines) {
+  if (!Array.isArray(lines) || lines.length === 0) return NaN;
+  let bestLen = 0;
+  let bestAng = NaN;
+  for (const l of lines) {
+    const dx = (l?.bx ?? 0) - (l?.ax ?? 0);
+    const dy = (l?.by ?? 0) - (l?.ay ?? 0);
+    const L = Math.hypot(dx, dy);
+    if (!isFinite(L) || L <= bestLen || L < 1e-6) continue;
+    bestLen = L;
+    bestAng = Math.atan2(dy, dx);
+  }
+  return bestAng;
+}
+
+function modelSnapProbePoints(outline) {
+  const pts = Array.isArray(outline) ? outline : [];
+  if (pts.length < 2) return [];
+  const probes = [];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    probes.push({ x: a.x, y: a.y });
+    probes.push({ x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 });
+  }
+  return probes;
+}
+
+function nearestWallToPoints(outline) {
+  const probes = modelSnapProbePoints(outline);
+  if (probes.length === 0 || !graph || !graph.walls || graph.walls.size === 0) return null;
+
+  function nearestOnSegment(p, a, b) {
+    const vx = b.x - a.x;
+    const vy = b.y - a.y;
+    const L2 = vx * vx + vy * vy;
+    if (!isFinite(L2) || L2 < 1e-6) return null;
+    let t = ((p.x - a.x) * vx + (p.y - a.y) * vy) / L2;
+    t = clamp(t, 0, 1);
+    const x = a.x + vx * t;
+    const y = a.y + vy * t;
+    const dx = x - p.x;
+    const dy = y - p.y;
+    const dist = Math.hypot(dx, dy);
+    const L = Math.sqrt(L2);
+    return {
+      dist,
+      wallPoint: { x, y },
+      dir: { x: vx / L, y: vy / L },
+    };
+  }
+
+  let best = null;
+  for (const w of graph.walls.values()) {
+    const A = graph.getNode(w.a);
+    const B = graph.getNode(w.b);
+    if (!A || !B) continue;
+
+    const vx = B.x - A.x;
+    const vy = B.y - A.y;
+    const L = Math.hypot(vx, vy);
+    if (!isFinite(L) || L < 1e-6) continue;
+
+    const nx = -vy / L;
+    const ny = vx / L;
+    const wallThickness = (typeof w?.thickness === "number" && isFinite(w.thickness))
+      ? Math.max(0, w.thickness)
+      : Math.max(0, state.wallThicknessMm || 0);
+    const half = wallThickness * 0.5;
+
+    const segments = wallThickness > 0
+      ? [
+          { a: { x: A.x + nx * half, y: A.y + ny * half }, b: { x: B.x + nx * half, y: B.y + ny * half } },
+          { a: { x: A.x - nx * half, y: A.y - ny * half }, b: { x: B.x - nx * half, y: B.y - ny * half } },
+        ]
+      : [{ a: { x: A.x, y: A.y }, b: { x: B.x, y: B.y } }];
+
+    for (const p of probes) {
+      for (const seg of segments) {
+        const cand = nearestOnSegment(p, seg.a, seg.b);
+        if (!cand) continue;
+        if (!best || cand.dist < best.dist) {
+          best = {
+            dist: cand.dist,
+            wallPoint: cand.wallPoint,
+            modelPoint: { x: p.x, y: p.y },
+            dir: cand.dir,
+            wallId: w.id,
+          };
+        }
+      }
+    }
+  }
+  return best;
+}
+
+function transformModelFromStart(dx, dy, rotRad = 0, extraTx = 0, extraTy = 0) {
+  const startLines = modelDrag.startLines || [];
+  const startOutline = modelDrag.startOutline || [];
+
+  let cx = 0;
+  let cy = 0;
+  if (startOutline.length > 0) {
+    for (const p of startOutline) {
+      cx += p.x;
+      cy += p.y;
+    }
+    cx /= startOutline.length;
+    cy /= startOutline.length;
+  }
+
+  const c = Math.cos(rotRad);
+  const s = Math.sin(rotRad);
+  const rotatePoint = (x, y) => {
+    const rx = x - cx;
+    const ry = y - cy;
+    return {
+      x: cx + (rx * c - ry * s),
+      y: cy + (rx * s + ry * c),
+    };
+  };
+
+  model2d.lines = startLines.map((l) => {
+    const a = rotatePoint(l.ax, l.ay);
+    const b = rotatePoint(l.bx, l.by);
+    return {
+      ax: a.x + dx + extraTx,
+      ay: a.y + dy + extraTy,
+      bx: b.x + dx + extraTx,
+      by: b.y + dy + extraTy,
+    };
+  });
+
+  model2d.outline = startOutline.map((p) => {
+    const rp = rotatePoint(p.x, p.y);
+    return {
+      x: rp.x + dx + extraTx,
+      y: rp.y + dy + extraTy,
+    };
+  });
+}
+
 function angleBetween(ax, ay, bx, by) {
   const na = normalize(ax, ay);
   const nb = normalize(bx, by);
@@ -1446,6 +1598,41 @@ function clearModel2dLines(recordUndo = true) {
   });
 }
 
+function addRectModel2dPreset({ widthMm = 900, heightMm = 550, center = null } = {}, recordUndo = true) {
+  const w = Math.max(10, Number(widthMm) || 900);
+  const h = Math.max(10, Number(heightMm) || 550);
+  const c = (center && isFinite(center.x) && isFinite(center.y))
+    ? { x: +center.x, y: +center.y }
+    : screenToWorld(viewportW * 0.5, viewportH * 0.5);
+  const hw = w * 0.5;
+  const hh = h * 0.5;
+  const lines = [
+    { ax: c.x - hw, ay: c.y - hh, bx: c.x + hw, by: c.y - hh },
+    { ax: c.x + hw, ay: c.y - hh, bx: c.x + hw, by: c.y + hh },
+    { ax: c.x + hw, ay: c.y + hh, bx: c.x - hw, by: c.y + hh },
+    { ax: c.x - hw, ay: c.y + hh, bx: c.x - hw, by: c.y - hh },
+  ];
+
+  const apply = () => {
+    _applyModel2dLines(lines, null);
+    clearGroupSelection();
+    selectedWallId = null;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    selectedModelOutline = true;
+    hoverModelOutline = true;
+    state.showObjectAxes = true;
+  };
+
+  if (!recordUndo) {
+    apply();
+    return;
+  }
+  undo.runAction(() => {
+    apply();
+  });
+}
+
 /* =============================
    Node endpoint map
 ============================= */
@@ -1678,8 +1865,8 @@ function hitTestObjectAxesScreen(x, y) {
   return null;
 }
 
-function beginAxisDrag(axis, offsetX, offsetY) {
-  const target = getSelectedObjectTargetInfo();
+function beginAxisDrag(axis, offsetX, offsetY, resolvedTarget = null) {
+  const target = resolvedTarget || getSelectedObjectTargetInfo();
   if (!target) return false;
   axisDrag.active = true;
   axisDrag.axis = (axis === "y") ? "y" : "x";
@@ -1763,16 +1950,42 @@ function applyAxisDrag(targetWorld) {
       if (d.a) { d.a.x += delta.x; d.a.y += delta.y; }
       if (d.b) { d.b.x += delta.x; d.b.y += delta.y; }
     }
-
-    if (moveModel) {
-      model2d.lines = model2d.lines.map((l) => ({
-        ax: l.ax + delta.x, ay: l.ay + delta.y, bx: l.bx + delta.x, by: l.by + delta.y,
-      }));
-      model2d.outline = model2d.outline.map((pt) => ({ x: pt.x + delta.x, y: pt.y + delta.y }));
-      model2d.offsetXmm = (model2d.offsetXmm || 0) + delta.x;
-      model2d.offsetYmm = (model2d.offsetYmm || 0) + delta.y;
-      emitModel2dTransform();
+  } else if (axisDrag.targetType === "model") {
+    let snapDelta = { x: delta.x, y: delta.y };
+    const userAxisMove = t;
+    if (state.snapOn && Array.isArray(model2d.outline) && model2d.outline.length >= 2 && graph.walls.size > 0) {
+      const movedOutline = (axisDrag.startModelSnap?.outline || []).map((pt) => ({ x: pt.x + delta.x, y: pt.y + delta.y }));
+      const nearest = nearestWallToPoints(movedOutline);
+      if (nearest && nearest.dist <= MODEL_WALL_SNAP_DIST_MM) {
+        const snapVec = {
+          x: nearest.wallPoint.x - nearest.modelPoint.x,
+          y: nearest.wallPoint.y - nearest.modelPoint.y,
+        };
+        const axisSnap = dot(snapVec.x, snapVec.y, axisUnit.x, axisUnit.y);
+        const opposesUserDrag = (Math.abs(userAxisMove) > 0.5) && (axisSnap * userAxisMove < 0);
+        if (!opposesUserDrag && Math.abs(axisSnap) <= MODEL_AXIS_SNAP_PULL_MM) {
+          snapDelta = {
+            x: delta.x + axisUnit.x * axisSnap,
+            y: delta.y + axisUnit.y * axisSnap,
+          };
+        }
+      }
     }
+
+    const snapAxisMove = dot(snapDelta.x, snapDelta.y, axisUnit.x, axisUnit.y);
+    const userIsDragging = Math.abs(userAxisMove) > 0.5;
+    const lostUserMotion = Math.abs(snapAxisMove) < 0.1;
+    if (userIsDragging && lostUserMotion) {
+      snapDelta = { x: delta.x, y: delta.y };
+    }
+
+    model2d.lines = model2d.lines.map((l) => ({
+      ax: l.ax + snapDelta.x, ay: l.ay + snapDelta.y, bx: l.bx + snapDelta.x, by: l.by + snapDelta.y,
+    }));
+    model2d.outline = model2d.outline.map((pt) => ({ x: pt.x + snapDelta.x, y: pt.y + snapDelta.y }));
+    model2d.offsetXmm = (model2d.offsetXmm || 0) + snapDelta.x;
+    model2d.offsetYmm = (model2d.offsetYmm || 0) + snapDelta.y;
+    emitModel2dTransform();
   }
 
   if (Math.hypot(delta.x, delta.y) > 0.5) axisDrag.moved = true;
@@ -3955,8 +4168,8 @@ function onMouseDown(e) {
   // 0) Axis hit => drag selected object on chosen axis.
   const axisHit = hitTestObjectAxesScreen(e.offsetX, e.offsetY);
   if (axisHit) {
-    beginAxisDrag(axisHit.axis, e.offsetX, e.offsetY);
-    return;
+    const started = beginAxisDrag(axisHit.axis, e.offsetX, e.offsetY, axisHit.geometry?.target || null);
+    if (started) return;
   }
 
   // 1) UI hit => handle and STOP (does not start drawing)
@@ -5122,6 +5335,7 @@ return {
   setInputEnabled,
   setModel2dLines,
   clearModel2dLines,
+  addRectModel2dPreset,
   setUiCursorMode,
 
   undo: () => { if (dimEditor.active) closeDimEditor(true); undo.undo(); },

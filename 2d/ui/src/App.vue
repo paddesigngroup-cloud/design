@@ -411,6 +411,11 @@ function onGlbModel2d(payload) {
   editorRef.value?.setModel2dLines?.(lines, payload?.opts || null);
 }
 
+function addReadyRect90x55() {
+  editorRef.value?.addRectModel2dPreset?.({ widthMm: 900, heightMm: 550 });
+  closeMenuPanel();
+}
+
 function toggleMenu(menuId, e) {
   // While drawing, keep submenus closed (AutoCAD-like).
   if (drawUiLock.value) return;
@@ -890,6 +895,20 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="designMenu__sep" role="separator"></div>
+
+              <button
+                type="button"
+                class="presetTile presetTile--cta"
+                title="مستطیل آماده 90×55"
+                @click="addReadyRect90x55"
+              >
+                <svg class="presetTile__svg" viewBox="0 0 44 44" aria-hidden="true">
+                  <g fill="none" stroke="rgba(52,20,31,.72)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M7 12H37V32H7Z" />
+                  </g>
+                </svg>
+                <span class="presetTile__label">مستطیل آماده 90×55</span>
+              </button>
 
               <div class="designMenu__presetsHead">مدل های آماده دیوار</div>
               <div class="designMenu__presets" aria-label="Wall Presets">
