@@ -1959,46 +1959,48 @@ function applyAxisDrag(targetWorld) {
   restoreDimensions(dimensions, axisDrag.startDimensionsSnap);
   restoreModel2d(model2d, axisDrag.startModelSnap);
 
-  const moveWallsByIds = (selectedIds) => {
+  const normalizeIds = (ids) => Array.isArray(ids) ? ids : [];
+
+  const collectNodeIdsFromWalls = (wallIds, getWall, getNode) => {
     const nodeIds = new Set();
-    const ids = Array.isArray(selectedIds) ? selectedIds : [];
-    for (const id of ids) {
-      const w = graph.getWall(id);
+    for (const id of normalizeIds(wallIds)) {
+      const w = getWall(id);
       if (!w) continue;
       nodeIds.add(w.a);
       nodeIds.add(w.b);
     }
-    for (const nid of nodeIds) {
-      const n = graph.getNode(nid);
+    const out = [];
+    for (const nodeId of nodeIds) {
+      const n = getNode(nodeId);
       if (!n) continue;
+      out.push(n);
+    }
+    return out;
+  };
+
+  const translateNodes = (nodes) => {
+    for (const n of nodes) {
       n.x += delta.x;
       n.y += delta.y;
     }
+  };
+
+  const moveWallsByIds = (wallIds) => {
+    const nodes = collectNodeIdsFromWalls(wallIds, (id) => graph.getWall(id), (id) => graph.getNode(id));
+    translateNodes(nodes);
     graph.mergeCloseNodes(1);
     graph.deleteTinyEdges(1);
   };
 
-  const moveHiddenByIds = (selectedIds) => {
-    const nodeIds = new Set();
-    const ids = Array.isArray(selectedIds) ? selectedIds : [];
-    for (const id of ids) {
-      const w = hiddenGraph.getWall(id);
-      if (!w) continue;
-      hiddenNodeIds.add(w.a);
-      hiddenNodeIds.add(w.b);
-    }
-    for (const nid of hiddenNodeIds) {
-      const n = hiddenGraph.getNode(nid);
-      if (!n) continue;
-      n.x += delta.x;
-      n.y += delta.y;
-    }
+  const moveHiddenByIds = (wallIds) => {
+    const nodes = collectNodeIdsFromWalls(wallIds, (id) => hiddenGraph.getWall(id), (id) => hiddenGraph.getNode(id));
+    translateNodes(nodes);
     hiddenGraph.mergeCloseNodes(1);
     hiddenGraph.deleteTinyEdges(1);
   };
 
-  const moveDimsByIds = (selectedIds) => {
-    const dimIdSet = new Set(Array.isArray(selectedIds) ? selectedIds : []);
+  const moveDimsByIds = (dimIds) => {
+    const dimIdSet = new Set(normalizeIds(dimIds));
     for (const d of dimensions) {
       if (!d || !dimIdSet.has(d.id)) continue;
       if (d.a) { d.a.x += delta.x; d.a.y += delta.y; }
@@ -2007,39 +2009,37 @@ function applyAxisDrag(targetWorld) {
   };
 
   const moveModelSelection = () => {
-    const snapDelta = { x: delta.x, y: delta.y };
     const lines = Array.isArray(model2d.lines) ? model2d.lines : [];
     const outline = Array.isArray(model2d.outline) ? model2d.outline : [];
 
     model2d.lines = lines.map((l) => ({
-      ax: l.ax + snapDelta.x, ay: l.ay + snapDelta.y, bx: l.bx + snapDelta.x, by: l.by + snapDelta.y,
+      ax: l.ax + delta.x, ay: l.ay + delta.y, bx: l.bx + delta.x, by: l.by + delta.y,
     }));
-    model2d.outline = outline.map((pt) => ({ x: pt.x + snapDelta.x, y: pt.y + snapDelta.y }));
-    model2d.offsetXmm = (model2d.offsetXmm || 0) + snapDelta.x;
-    model2d.offsetYmm = (model2d.offsetYmm || 0) + snapDelta.y;
+    model2d.outline = outline.map((pt) => ({ x: pt.x + delta.x, y: pt.y + delta.y }));
+    model2d.offsetXmm = (model2d.offsetXmm || 0) + delta.x;
+    model2d.offsetYmm = (model2d.offsetYmm || 0) + delta.y;
     emitModel2dTransform();
   };
 
   const snap = axisDrag.selectionSnapshot || buildAxisDragSelectionSnapshot();
+  const movers = {
+    wall: () => moveWallsByIds(snap.wallIds),
+    hidden: () => moveHiddenByIds(snap.hiddenIds),
+    dim: () => moveDimsByIds(snap.dimIds),
+    model: () => { if (snap.hasModel) moveModelSelection(); },
+  };
 
-  if (axisDrag.targetType === "wall") {
-    moveWallsByIds(snap.wallIds || []);
-  } else if (axisDrag.targetType === "hidden") {
-    moveHiddenByIds(snap.hiddenIds || []);
-  } else if (axisDrag.targetType === "dim") {
-    moveDimsByIds(snap.dimIds || []);
-  } else if (axisDrag.targetType === "model") {
-    if (snap.hasModel) moveModelSelection();
-  } else if (axisDrag.targetType === "mixed") {
-    moveWallsByIds(snap.wallIds || []);
-    moveHiddenByIds(snap.hiddenIds || []);
-    moveDimsByIds(snap.dimIds || []);
-    if (snap.hasModel) moveModelSelection();
+  if (axisDrag.targetType === "mixed") {
+    movers.wall();
+    movers.hidden();
+    movers.dim();
+    movers.model();
+  } else if (movers[axisDrag.targetType]) {
+    movers[axisDrag.targetType]();
   }
 
   if (Math.hypot(delta.x, delta.y) > 0.5) axisDrag.moved = true;
 }
-
 function drawSelectedObjectAxes() {
   if (!state.showObjectAxes) return;
   const g = getObjectAxesGeometryScreen();
