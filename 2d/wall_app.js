@@ -1577,75 +1577,71 @@ function getBoundsCenterWorld(points) {
 
 function getSelectedObjectTargetInfo() {
   const wallIds = [];
-  if (selectedWallId) wallIds.push(selectedWallId);
-  for (const id of selectedWallIds) wallIds.push(id);
-  if (wallIds.length) {
-    const uniq = [];
-    const seen = new Set();
-    const pts = [];
-    for (const id of wallIds) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const w = graph.getWall(id);
-      if (!w) continue;
-      uniq.push(id);
-      const a = graph.getNode(w.a);
-      const b = graph.getNode(w.b);
-      if (a) pts.push({ x: a.x, y: a.y });
-      if (b) pts.push({ x: b.x, y: b.y });
-    }
-    const center = getBoundsCenterWorld(pts);
-    if (center && uniq.length) return { type: "wall", center, ids: uniq };
-  }
-
   const hiddenIds = [];
-  if (selectedHiddenId) hiddenIds.push(selectedHiddenId);
-  for (const id of selectedHiddenIds) hiddenIds.push(id);
-  if (hiddenIds.length) {
-    const uniq = [];
-    const seen = new Set();
-    const pts = [];
-    for (const id of hiddenIds) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const w = hiddenGraph.getWall(id);
-      if (!w) continue;
-      uniq.push(id);
-      const a = hiddenGraph.getNode(w.a);
-      const b = hiddenGraph.getNode(w.b);
-      if (a) pts.push({ x: a.x, y: a.y });
-      if (b) pts.push({ x: b.x, y: b.y });
-    }
-    const center = getBoundsCenterWorld(pts);
-    if (center && uniq.length) return { type: "hidden", center, ids: uniq };
-  }
-
   const dimIds = [];
-  if (selectedDimId) dimIds.push(selectedDimId);
-  for (const id of selectedDimIds) dimIds.push(id);
-  if (dimIds.length) {
-    const uniq = [];
-    const seen = new Set();
-    const pts = [];
-    for (const id of dimIds) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const d = dimensions.find((x) => x && x.id === id);
-      if (!d) continue;
-      uniq.push(id);
-      if (d.a) pts.push({ x: d.a.x, y: d.a.y });
-      if (d.b) pts.push({ x: d.b.x, y: d.b.y });
-    }
-    const center = getBoundsCenterWorld(pts);
-    if (center && uniq.length) return { type: "dim", center, ids: uniq };
-  }
+  const wallSeen = new Set();
+  const hiddenSeen = new Set();
+  const dimSeen = new Set();
+  const pts = [];
 
+  const pushWall = (id) => {
+    if (!id || wallSeen.has(id)) return;
+    wallSeen.add(id);
+    const w = graph.getWall(id);
+    if (!w) return;
+    wallIds.push(id);
+    const a = graph.getNode(w.a);
+    const b = graph.getNode(w.b);
+    if (a) pts.push({ x: a.x, y: a.y });
+    if (b) pts.push({ x: b.x, y: b.y });
+  };
+  const pushHidden = (id) => {
+    if (!id || hiddenSeen.has(id)) return;
+    hiddenSeen.add(id);
+    const w = hiddenGraph.getWall(id);
+    if (!w) return;
+    hiddenIds.push(id);
+    const a = hiddenGraph.getNode(w.a);
+    const b = hiddenGraph.getNode(w.b);
+    if (a) pts.push({ x: a.x, y: a.y });
+    if (b) pts.push({ x: b.x, y: b.y });
+  };
+  const pushDim = (id) => {
+    if (!id || dimSeen.has(id)) return;
+    dimSeen.add(id);
+    const d = dimensions.find((x) => x && x.id === id);
+    if (!d) return;
+    dimIds.push(id);
+    if (d.a) pts.push({ x: d.a.x, y: d.a.y });
+    if (d.b) pts.push({ x: d.b.x, y: d.b.y });
+  };
+
+  pushWall(selectedWallId);
+  for (const id of selectedWallIds) pushWall(id);
+  pushHidden(selectedHiddenId);
+  for (const id of selectedHiddenIds) pushHidden(id);
+  pushDim(selectedDimId);
+  for (const id of selectedDimIds) pushDim(id);
   if (selectedModelOutline && Array.isArray(model2d.outline) && model2d.outline.length >= 1) {
-    const center = getBoundsCenterWorld(model2d.outline);
-    if (center) return { type: "model", center, ids: [] };
+    for (const p of model2d.outline) pts.push({ x: p.x, y: p.y });
   }
 
-  return null;
+  const center = getBoundsCenterWorld(pts);
+  const hasAny =
+    wallIds.length > 0 ||
+    hiddenIds.length > 0 ||
+    dimIds.length > 0 ||
+    !!selectedModelOutline;
+  if (!hasAny || !center) return null;
+
+  return {
+    type: "mixed",
+    center,
+    wallIds,
+    hiddenIds,
+    dimIds,
+    hasModel: !!selectedModelOutline,
+  };
 }
 
 function getObjectAxesGeometryScreen() {
@@ -1723,11 +1719,15 @@ function applyAxisDrag(targetWorld) {
   restoreDimensions(dimensions, axisDrag.startDimensionsSnap);
   restoreModel2d(model2d, axisDrag.startModelSnap);
 
-  if (axisDrag.targetType === "wall") {
+  if (axisDrag.targetType === "mixed") {
     const info = getSelectedObjectTargetInfo();
-    const ids = info?.type === "wall" ? info.ids : [];
+    const wallIds = info?.wallIds || [];
+    const hiddenIds = info?.hiddenIds || [];
+    const dimIds = new Set(info?.dimIds || []);
+    const moveModel = !!info?.hasModel;
+
     const nodeIds = new Set();
-    for (const id of ids) {
+    for (const id of wallIds) {
       const w = graph.getWall(id);
       if (!w) continue;
       nodeIds.add(w.a);
@@ -1741,17 +1741,15 @@ function applyAxisDrag(targetWorld) {
     }
     graph.mergeCloseNodes(1);
     graph.deleteTinyEdges(1);
-  } else if (axisDrag.targetType === "hidden") {
-    const info = getSelectedObjectTargetInfo();
-    const ids = info?.type === "hidden" ? info.ids : [];
-    const nodeIds = new Set();
-    for (const id of ids) {
+
+    const hiddenNodeIds = new Set();
+    for (const id of hiddenIds) {
       const w = hiddenGraph.getWall(id);
       if (!w) continue;
-      nodeIds.add(w.a);
-      nodeIds.add(w.b);
+      hiddenNodeIds.add(w.a);
+      hiddenNodeIds.add(w.b);
     }
-    for (const nid of nodeIds) {
+    for (const nid of hiddenNodeIds) {
       const n = hiddenGraph.getNode(nid);
       if (!n) continue;
       n.x += delta.x;
@@ -1759,22 +1757,22 @@ function applyAxisDrag(targetWorld) {
     }
     hiddenGraph.mergeCloseNodes(1);
     hiddenGraph.deleteTinyEdges(1);
-  } else if (axisDrag.targetType === "dim") {
-    const info = getSelectedObjectTargetInfo();
-    const ids = new Set(info?.type === "dim" ? info.ids : []);
+
     for (const d of dimensions) {
-      if (!d || !ids.has(d.id)) continue;
+      if (!d || !dimIds.has(d.id)) continue;
       if (d.a) { d.a.x += delta.x; d.a.y += delta.y; }
       if (d.b) { d.b.x += delta.x; d.b.y += delta.y; }
     }
-  } else if (axisDrag.targetType === "model") {
-    model2d.lines = model2d.lines.map((l) => ({
-      ax: l.ax + delta.x, ay: l.ay + delta.y, bx: l.bx + delta.x, by: l.by + delta.y,
-    }));
-    model2d.outline = model2d.outline.map((pt) => ({ x: pt.x + delta.x, y: pt.y + delta.y }));
-    model2d.offsetXmm = (model2d.offsetXmm || 0) + delta.x;
-    model2d.offsetYmm = (model2d.offsetYmm || 0) + delta.y;
-    emitModel2dTransform();
+
+    if (moveModel) {
+      model2d.lines = model2d.lines.map((l) => ({
+        ax: l.ax + delta.x, ay: l.ay + delta.y, bx: l.bx + delta.x, by: l.by + delta.y,
+      }));
+      model2d.outline = model2d.outline.map((pt) => ({ x: pt.x + delta.x, y: pt.y + delta.y }));
+      model2d.offsetXmm = (model2d.offsetXmm || 0) + delta.x;
+      model2d.offsetYmm = (model2d.offsetYmm || 0) + delta.y;
+      emitModel2dTransform();
+    }
   }
 
   if (Math.hypot(delta.x, delta.y) > 0.5) axisDrag.moved = true;
@@ -3696,42 +3694,14 @@ function applyBoxSelection(x1, y1, x2, y2) {
     }
   }
 
-  if (wallHits.length) {
+  if (wallHits.length || hiddenHits.length || dimHits.length || modelHit) {
+    selectedWallId = null;
+    selectedHiddenId = null;
+    selectedDimId = null;
     selectedWallIds = wallHits.slice();
-    selectedWallId = null;
-    selectedHiddenId = null;
-    selectedDimId = null;
-    selectedHiddenIds = [];
-    selectedDimIds = [];
-    selectedModelOutline = false;
-    return true;
-  }
-  if (hiddenHits.length) {
-    selectedWallId = null;
-    selectedHiddenId = null;
-    selectedDimId = null;
-    selectedWallIds = [];
     selectedHiddenIds = hiddenHits.slice();
-    selectedDimIds = [];
-    selectedModelOutline = false;
-    return true;
-  }
-  if (dimHits.length) {
-    selectedWallId = null;
-    selectedHiddenId = null;
-    selectedDimId = null;
-    selectedWallIds = [];
-    selectedHiddenIds = [];
     selectedDimIds = dimHits.slice();
-    selectedModelOutline = false;
-    return true;
-  }
-  if (modelHit) {
-    selectedWallId = null;
-    selectedHiddenId = null;
-    selectedDimId = null;
-    clearGroupSelection();
-    selectedModelOutline = true;
+    selectedModelOutline = !!modelHit;
     return true;
   }
   return false;
@@ -3982,7 +3952,7 @@ function onMouseDown(e) {
   }
   if (e.button !== 0) return;
 
-// 0) Axis hit => drag selected object on chosen axis.
+  // 0) Axis hit => drag selected object on chosen axis.
   const axisHit = hitTestObjectAxesScreen(e.offsetX, e.offsetY);
   if (axisHit) {
     beginAxisDrag(axisHit.axis, e.offsetX, e.offsetY);
@@ -4552,21 +4522,54 @@ function onWindowKeyDown(e) {
     return;
   }
 
-  // Delete selected wall/object
+  // Delete selected wall/object(s)
   if (key === "Delete") {
     if (isEditableTarget(e.target)) return;
     if (dimEditor.active) closeDimEditor(true);
-    if (selectedWallIds.length) {
+    const hasGroupSelection =
+      selectedWallIds.length > 0 ||
+      selectedHiddenIds.length > 0 ||
+      selectedDimIds.length > 0 ||
+      selectedModelOutline;
+
+    if (hasGroupSelection) {
       e.preventDefault();
       const wallIds = selectedWallIds.slice();
+      const hiddenIds = selectedHiddenIds.slice();
+      const dimIds = new Set(selectedDimIds);
+      const deleteModel = !!selectedModelOutline;
       undo.runAction(() => {
         for (const wallId of wallIds) {
           const w = graph.getWall(wallId);
           if (!w) continue;
           graph.deleteWall(wallId);
         }
+        for (const wallId of hiddenIds) {
+          const w = hiddenGraph.getWall(wallId);
+          if (!w) continue;
+          hiddenGraph.deleteWall(wallId);
+        }
+        if (dimIds.size) {
+          for (let i = dimensions.length - 1; i >= 0; i--) {
+            const d = dimensions[i];
+            if (!d || !dimIds.has(d.id)) continue;
+            dimensions.splice(i, 1);
+          }
+        }
+        if (deleteModel) {
+          model2d.lines = [];
+          model2d.outline = [];
+          model2d.name = "";
+          model2d.unitToMm = 1;
+          model2d.offsetXmm = 0;
+          model2d.offsetYmm = 0;
+          model2d.rotationRad = 0;
+          emitModel2dTransform();
+        }
         deleteOrphanNodes(graph, tool.pendingStartNodeId ? new Set([tool.pendingStartNodeId]) : null);
         if (tool.pendingStartNodeId && !graph.getNode(tool.pendingStartNodeId)) tool.stopChaining();
+        deleteOrphanNodes(hiddenGraph, hiddenTool.pendingStartNodeId ? new Set([hiddenTool.pendingStartNodeId]) : null);
+        if (hiddenTool.pendingStartNodeId && !hiddenGraph.getNode(hiddenTool.pendingStartNodeId)) hiddenTool.stopChaining();
         enforceLockedInsideLengths();
       });
       hoverWallId = null;
@@ -4575,42 +4578,8 @@ function onWindowKeyDown(e) {
       hoverHiddenId = null;
       selectedDimId = null;
       hoverDimId = null;
-      clearGroupSelection();
-    } else if (selectedHiddenIds.length) {
-      e.preventDefault();
-      const wallIds = selectedHiddenIds.slice();
-      undo.runAction(() => {
-        for (const wallId of wallIds) {
-          const w = hiddenGraph.getWall(wallId);
-          if (!w) continue;
-          hiddenGraph.deleteWall(wallId);
-        }
-        deleteOrphanNodes(hiddenGraph, hiddenTool.pendingStartNodeId ? new Set([hiddenTool.pendingStartNodeId]) : null);
-        if (hiddenTool.pendingStartNodeId && !hiddenGraph.getNode(hiddenTool.pendingStartNodeId)) hiddenTool.stopChaining();
-      });
-      hoverHiddenId = null;
-      selectedHiddenId = null;
-      selectedWallId = null;
-      hoverWallId = null;
-      selectedDimId = null;
-      hoverDimId = null;
-      clearGroupSelection();
-    } else if (selectedDimIds.length) {
-      e.preventDefault();
-      const dimIds = new Set(selectedDimIds);
-      undo.runAction(() => {
-        for (let i = dimensions.length - 1; i >= 0; i--) {
-          const d = dimensions[i];
-          if (!d || !dimIds.has(d.id)) continue;
-          dimensions.splice(i, 1);
-        }
-      });
-      hoverDimId = null;
-      selectedDimId = null;
-      selectedWallId = null;
-      hoverWallId = null;
-      selectedHiddenId = null;
-      hoverHiddenId = null;
+      hoverModelOutline = false;
+      selectedModelOutline = false;
       clearGroupSelection();
     } else if (selectedWallId) {
       e.preventDefault();
