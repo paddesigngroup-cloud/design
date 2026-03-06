@@ -1763,73 +1763,77 @@ function getBoundsCenterWorld(points) {
 }
 
 function getSelectedObjectTargetInfo() {
-  const wallIds = [];
-  const hiddenIds = [];
-  const dimIds = [];
-  const wallSeen = new Set();
-  const hiddenSeen = new Set();
-  const dimSeen = new Set();
-  const pts = [];
-
-  const pushWall = (id) => {
-    if (!id || wallSeen.has(id)) return;
-    wallSeen.add(id);
-    const w = graph.getWall(id);
-    if (!w) return;
-    wallIds.push(id);
-    const a = graph.getNode(w.a);
-    const b = graph.getNode(w.b);
-    if (a) pts.push({ x: a.x, y: a.y });
-    if (b) pts.push({ x: b.x, y: b.y });
-  };
-  const pushHidden = (id) => {
-    if (!id || hiddenSeen.has(id)) return;
-    hiddenSeen.add(id);
-    const w = hiddenGraph.getWall(id);
-    if (!w) return;
-    hiddenIds.push(id);
-    const a = hiddenGraph.getNode(w.a);
-    const b = hiddenGraph.getNode(w.b);
-    if (a) pts.push({ x: a.x, y: a.y });
-    if (b) pts.push({ x: b.x, y: b.y });
-  };
-  const pushDim = (id) => {
-    if (!id || dimSeen.has(id)) return;
-    dimSeen.add(id);
-    const d = dimensions.find((x) => x && x.id === id);
-    if (!d) return;
-    dimIds.push(id);
-    if (d.a) pts.push({ x: d.a.x, y: d.a.y });
-    if (d.b) pts.push({ x: d.b.x, y: d.b.y });
+  const collectIds = (singleId, multiIds) => {
+    const ids = [];
+    if (singleId) ids.push(singleId);
+    if (Array.isArray(multiIds)) {
+      for (const id of multiIds) ids.push(id);
+    }
+    return ids;
   };
 
-  pushWall(selectedWallId);
-  for (const id of selectedWallIds) pushWall(id);
-  pushHidden(selectedHiddenId);
-  for (const id of selectedHiddenIds) pushHidden(id);
-  pushDim(selectedDimId);
-  for (const id of selectedDimIds) pushDim(id);
+  const collectCenterForIds = (ids, collectPointsById) => {
+    if (!Array.isArray(ids) || ids.length === 0) return null;
+
+    const uniqueIds = [];
+    const seen = new Set();
+    const points = [];
+    for (const id of ids) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      if (!collectPointsById(id, points)) continue;
+      uniqueIds.push(id);
+    }
+
+    if (!uniqueIds.length) return null;
+    const targetCenter = getBoundsCenterWorld(points);
+    if (!targetCenter) return null;
+    return { center: targetCenter, ids: uniqueIds };
+  };
+
   if (selectedModelOutline && Array.isArray(model2d.outline) && model2d.outline.length >= 1) {
-    for (const p of model2d.outline) pts.push({ x: p.x, y: p.y });
+    const modelCenter = getBoundsCenterWorld(model2d.outline);
+    if (modelCenter) return { type: "model", center: modelCenter, ids: [] };
   }
 
-  const center = getBoundsCenterWorld(pts);
-  const hasAny =
-    wallIds.length > 0 ||
-    hiddenIds.length > 0 ||
-    dimIds.length > 0 ||
-    !!selectedModelOutline;
-  if (!hasAny || !center) return null;
+  const dimIds = collectIds(selectedDimId, selectedDimIds);
+  const dimTarget = collectCenterForIds(dimIds, (id, points) => {
+    const d = dimensions.find((x) => x && x.id === id);
+    if (!d) return false;
+    if (d.a) points.push({ x: d.a.x, y: d.a.y });
+    if (d.b) points.push({ x: d.b.x, y: d.b.y });
+    return true;
+  });
+  if (dimTarget) return { type: "dim", center: dimTarget.center, ids: dimTarget.ids };
 
-  return {
-    type: "mixed",
-    center,
-    wallIds,
-    hiddenIds,
-    dimIds,
-    hasModel: !!selectedModelOutline,
-  };
+  const hiddenIds = collectIds(selectedHiddenId, selectedHiddenIds);
+  const hiddenTarget = collectCenterForIds(hiddenIds, (id, points) => {
+    const w = hiddenGraph.getWall(id);
+    if (!w) return false;
+    const a = hiddenGraph.getNode(w.a);
+    const b = hiddenGraph.getNode(w.b);
+    if (a) points.push({ x: a.x, y: a.y });
+    if (b) points.push({ x: b.x, y: b.y });
+    return true;
+  });
+  if (hiddenTarget) return { type: "hidden", center: hiddenTarget.center, ids: hiddenTarget.ids };
+
+  const wallIds = collectIds(selectedWallId, selectedWallIds);
+  const wallTarget = collectCenterForIds(wallIds, (id, points) => {
+    const w = graph.getWall(id);
+    if (!w) return false;
+    const a = graph.getNode(w.a);
+    const b = graph.getNode(w.b);
+    if (a) points.push({ x: a.x, y: a.y });
+    if (b) points.push({ x: b.x, y: b.y });
+    return true;
+  });
+  if (wallTarget) return { type: "wall", center: wallTarget.center, ids: wallTarget.ids };
+
+  return null;
 }
+
+
 
 function getObjectAxesGeometryScreen() {
   if (!state.showObjectAxes) return null;
