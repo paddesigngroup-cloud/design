@@ -701,7 +701,8 @@ const modelDrag = {
 const axisDrag = {
   active: false,
   axis: null, // "x" | "y"
-  targetType: null, // "wall" | "hidden" | "dim" | "model"
+  targetType: null, // "wall" | "hidden" | "dim" | "model" | "mixed"
+  selectionSnapshot: null,
   startMouseWorld: null,
   startGraphSnap: null,
   startHiddenGraphSnap: null,
@@ -1765,61 +1766,35 @@ function getBoundsCenterWorld(points) {
 function getSelectedObjectTargetInfo() {
   const collectIds = (singleId, multiIds) => {
     const ids = [];
-    if (singleId) ids.push(singleId);
+    if (singleId !== null && singleId !== undefined) ids.push(singleId);
     if (Array.isArray(multiIds)) {
       for (const id of multiIds) ids.push(id);
     }
     return ids;
   };
 
-  const collectCenterForIds = (ids, collectPointsById) => {
+  const collectTargetForIds = (ids, collectPointsById) => {
     if (!Array.isArray(ids) || ids.length === 0) return null;
 
     const uniqueIds = [];
     const seen = new Set();
     const points = [];
     for (const id of ids) {
-      if (!id || seen.has(id)) continue;
+      if (id === null || id === undefined || seen.has(id)) continue;
       seen.add(id);
       if (!collectPointsById(id, points)) continue;
       uniqueIds.push(id);
     }
 
     if (!uniqueIds.length) return null;
-    const targetCenter = getBoundsCenterWorld(points);
-    if (!targetCenter) return null;
-    return { center: targetCenter, ids: uniqueIds };
+    const center = getBoundsCenterWorld(points);
+    if (!center) return null;
+    return { center, ids: uniqueIds, points };
   };
 
-  if (selectedModelOutline && Array.isArray(model2d.outline) && model2d.outline.length >= 1) {
-    const modelCenter = getBoundsCenterWorld(model2d.outline);
-    if (modelCenter) return { type: "model", center: modelCenter, ids: [] };
-  }
+  const targets = [];
 
-  const dimIds = collectIds(selectedDimId, selectedDimIds);
-  const dimTarget = collectCenterForIds(dimIds, (id, points) => {
-    const d = dimensions.find((x) => x && x.id === id);
-    if (!d) return false;
-    if (d.a) points.push({ x: d.a.x, y: d.a.y });
-    if (d.b) points.push({ x: d.b.x, y: d.b.y });
-    return true;
-  });
-  if (dimTarget) return { type: "dim", center: dimTarget.center, ids: dimTarget.ids };
-
-  const hiddenIds = collectIds(selectedHiddenId, selectedHiddenIds);
-  const hiddenTarget = collectCenterForIds(hiddenIds, (id, points) => {
-    const w = hiddenGraph.getWall(id);
-    if (!w) return false;
-    const a = hiddenGraph.getNode(w.a);
-    const b = hiddenGraph.getNode(w.b);
-    if (a) points.push({ x: a.x, y: a.y });
-    if (b) points.push({ x: b.x, y: b.y });
-    return true;
-  });
-  if (hiddenTarget) return { type: "hidden", center: hiddenTarget.center, ids: hiddenTarget.ids };
-
-  const wallIds = collectIds(selectedWallId, selectedWallIds);
-  const wallTarget = collectCenterForIds(wallIds, (id, points) => {
+  const wallTarget = collectTargetForIds(collectIds(selectedWallId, selectedWallIds), (id, points) => {
     const w = graph.getWall(id);
     if (!w) return false;
     const a = graph.getNode(w.a);
@@ -1828,9 +1803,53 @@ function getSelectedObjectTargetInfo() {
     if (b) points.push({ x: b.x, y: b.y });
     return true;
   });
-  if (wallTarget) return { type: "wall", center: wallTarget.center, ids: wallTarget.ids };
+  if (wallTarget) targets.push({ type: "wall", ...wallTarget });
 
-  return null;
+  const hiddenTarget = collectTargetForIds(collectIds(selectedHiddenId, selectedHiddenIds), (id, points) => {
+    const w = hiddenGraph.getWall(id);
+    if (!w) return false;
+    const a = hiddenGraph.getNode(w.a);
+    const b = hiddenGraph.getNode(w.b);
+    if (a) points.push({ x: a.x, y: a.y });
+    if (b) points.push({ x: b.x, y: b.y });
+    return true;
+  });
+  if (hiddenTarget) targets.push({ type: "hidden", ...hiddenTarget });
+
+  const dimTarget = collectTargetForIds(collectIds(selectedDimId, selectedDimIds), (id, points) => {
+    const d = dimensions.find((x) => x && x.id === id);
+    if (!d) return false;
+    if (d.a) points.push({ x: d.a.x, y: d.a.y });
+    if (d.b) points.push({ x: d.b.x, y: d.b.y });
+    return true;
+  });
+  if (dimTarget) targets.push({ type: "dim", ...dimTarget });
+
+  if (selectedModelOutline && Array.isArray(model2d.outline) && model2d.outline.length >= 1) {
+    const modelPoints = model2d.outline.map((pt) => ({ x: pt.x, y: pt.y }));
+    const modelCenter = getBoundsCenterWorld(modelPoints);
+    if (modelCenter) targets.push({ type: "model", center: modelCenter, ids: [], points: modelPoints });
+  }
+
+  if (!targets.length) return null;
+  if (targets.length === 1) {
+    const t = targets[0];
+    return { type: t.type, center: t.center, ids: t.ids };
+  }
+
+  const mixedPoints = [];
+  const mixed = {
+    type: "mixed",
+    wallIds: wallTarget ? wallTarget.ids : [],
+    hiddenIds: hiddenTarget ? hiddenTarget.ids : [],
+    dimIds: dimTarget ? dimTarget.ids : [],
+    hasModel: !!targets.find((t) => t.type === "model"),
+  };
+  for (const t of targets) {
+    for (const p of t.points) mixedPoints.push(p);
+  }
+  mixed.center = getBoundsCenterWorld(mixedPoints);
+  return mixed.center ? mixed : null;
 }
 
 
@@ -1869,12 +1888,41 @@ function hitTestObjectAxesScreen(x, y) {
   return null;
 }
 
-function beginAxisDrag(axis, offsetX, offsetY, resolvedTarget = null) {
-  const target = resolvedTarget || getSelectedObjectTargetInfo();
+function buildAxisDragSelectionSnapshot() {
+  const collectIds = (singleId, multiIds) => {
+    const out = [];
+    if (singleId !== null && singleId !== undefined) out.push(singleId);
+    if (Array.isArray(multiIds)) {
+      for (const id of multiIds) out.push(id);
+    }
+    const seen = new Set();
+    const deduped = [];
+    for (const id of out) {
+      if (id === null || id === undefined || seen.has(id)) continue;
+      seen.add(id);
+      deduped.push(id);
+    }
+    return deduped;
+  };
+
+  return {
+    wallIds: collectIds(selectedWallId, selectedWallIds),
+    hiddenIds: collectIds(selectedHiddenId, selectedHiddenIds),
+    dimIds: collectIds(selectedDimId, selectedDimIds),
+    hasModel: !!selectedModelOutline,
+  };
+}
+
+function beginAxisDrag(axis, offsetX, offsetY) {
+  const target = getSelectedObjectTargetInfo();
   if (!target) return false;
+
+  const selectionSnapshot = buildAxisDragSelectionSnapshot();
+
   axisDrag.active = true;
   axisDrag.axis = (axis === "y") ? "y" : "x";
   axisDrag.targetType = target.type;
+  axisDrag.selectionSnapshot = selectionSnapshot;
   axisDrag.startMouseWorld = screenToWorld(offsetX, offsetY);
   axisDrag.startGraphSnap = snapshotGraph(graph);
   axisDrag.startHiddenGraphSnap = snapshotGraph(hiddenGraph);
@@ -1889,6 +1937,7 @@ function stopAxisDrag() {
   axisDrag.active = false;
   axisDrag.axis = null;
   axisDrag.targetType = null;
+  axisDrag.selectionSnapshot = null;
   axisDrag.startMouseWorld = null;
   axisDrag.startGraphSnap = null;
   axisDrag.startHiddenGraphSnap = null;
@@ -1910,15 +1959,10 @@ function applyAxisDrag(targetWorld) {
   restoreDimensions(dimensions, axisDrag.startDimensionsSnap);
   restoreModel2d(model2d, axisDrag.startModelSnap);
 
-  if (axisDrag.targetType === "mixed") {
-    const info = getSelectedObjectTargetInfo();
-    const wallIds = info?.wallIds || [];
-    const hiddenIds = info?.hiddenIds || [];
-    const dimIds = new Set(info?.dimIds || []);
-    const moveModel = !!info?.hasModel;
-
+  const moveWallsByIds = (selectedIds) => {
     const nodeIds = new Set();
-    for (const id of wallIds) {
+    const ids = Array.isArray(selectedIds) ? selectedIds : [];
+    for (const id of ids) {
       const w = graph.getWall(id);
       if (!w) continue;
       nodeIds.add(w.a);
@@ -1932,9 +1976,12 @@ function applyAxisDrag(targetWorld) {
     }
     graph.mergeCloseNodes(1);
     graph.deleteTinyEdges(1);
+  };
 
-    const hiddenNodeIds = new Set();
-    for (const id of hiddenIds) {
+  const moveHiddenByIds = (selectedIds) => {
+    const nodeIds = new Set();
+    const ids = Array.isArray(selectedIds) ? selectedIds : [];
+    for (const id of ids) {
       const w = hiddenGraph.getWall(id);
       if (!w) continue;
       hiddenNodeIds.add(w.a);
@@ -1948,48 +1995,46 @@ function applyAxisDrag(targetWorld) {
     }
     hiddenGraph.mergeCloseNodes(1);
     hiddenGraph.deleteTinyEdges(1);
+  };
 
+  const moveDimsByIds = (selectedIds) => {
+    const dimIdSet = new Set(Array.isArray(selectedIds) ? selectedIds : []);
     for (const d of dimensions) {
-      if (!d || !dimIds.has(d.id)) continue;
+      if (!d || !dimIdSet.has(d.id)) continue;
       if (d.a) { d.a.x += delta.x; d.a.y += delta.y; }
       if (d.b) { d.b.x += delta.x; d.b.y += delta.y; }
     }
-  } else if (axisDrag.targetType === "model") {
-    let snapDelta = { x: delta.x, y: delta.y };
-    const userAxisMove = t;
-    if (state.snapOn && Array.isArray(model2d.outline) && model2d.outline.length >= 2 && graph.walls.size > 0) {
-      const movedOutline = (axisDrag.startModelSnap?.outline || []).map((pt) => ({ x: pt.x + delta.x, y: pt.y + delta.y }));
-      const nearest = nearestWallToPoints(movedOutline);
-      if (nearest && nearest.dist <= MODEL_WALL_SNAP_DIST_MM) {
-        const snapVec = {
-          x: nearest.wallPoint.x - nearest.modelPoint.x,
-          y: nearest.wallPoint.y - nearest.modelPoint.y,
-        };
-        const axisSnap = dot(snapVec.x, snapVec.y, axisUnit.x, axisUnit.y);
-        const opposesUserDrag = (Math.abs(userAxisMove) > 0.5) && (axisSnap * userAxisMove < 0);
-        if (!opposesUserDrag && Math.abs(axisSnap) <= MODEL_AXIS_SNAP_PULL_MM) {
-          snapDelta = {
-            x: delta.x + axisUnit.x * axisSnap,
-            y: delta.y + axisUnit.y * axisSnap,
-          };
-        }
-      }
-    }
+  };
 
-    const snapAxisMove = dot(snapDelta.x, snapDelta.y, axisUnit.x, axisUnit.y);
-    const userIsDragging = Math.abs(userAxisMove) > 0.5;
-    const lostUserMotion = Math.abs(snapAxisMove) < 0.1;
-    if (userIsDragging && lostUserMotion) {
-      snapDelta = { x: delta.x, y: delta.y };
-    }
+  const moveModelSelection = () => {
+    const snapDelta = { x: delta.x, y: delta.y };
+    const lines = Array.isArray(model2d.lines) ? model2d.lines : [];
+    const outline = Array.isArray(model2d.outline) ? model2d.outline : [];
 
-    model2d.lines = model2d.lines.map((l) => ({
+    model2d.lines = lines.map((l) => ({
       ax: l.ax + snapDelta.x, ay: l.ay + snapDelta.y, bx: l.bx + snapDelta.x, by: l.by + snapDelta.y,
     }));
-    model2d.outline = model2d.outline.map((pt) => ({ x: pt.x + snapDelta.x, y: pt.y + snapDelta.y }));
+    model2d.outline = outline.map((pt) => ({ x: pt.x + snapDelta.x, y: pt.y + snapDelta.y }));
     model2d.offsetXmm = (model2d.offsetXmm || 0) + snapDelta.x;
     model2d.offsetYmm = (model2d.offsetYmm || 0) + snapDelta.y;
     emitModel2dTransform();
+  };
+
+  const snap = axisDrag.selectionSnapshot || buildAxisDragSelectionSnapshot();
+
+  if (axisDrag.targetType === "wall") {
+    moveWallsByIds(snap.wallIds || []);
+  } else if (axisDrag.targetType === "hidden") {
+    moveHiddenByIds(snap.hiddenIds || []);
+  } else if (axisDrag.targetType === "dim") {
+    moveDimsByIds(snap.dimIds || []);
+  } else if (axisDrag.targetType === "model") {
+    if (snap.hasModel) moveModelSelection();
+  } else if (axisDrag.targetType === "mixed") {
+    moveWallsByIds(snap.wallIds || []);
+    moveHiddenByIds(snap.hiddenIds || []);
+    moveDimsByIds(snap.dimIds || []);
+    if (snap.hasModel) moveModelSelection();
   }
 
   if (Math.hypot(delta.x, delta.y) > 0.5) axisDrag.moved = true;
