@@ -4330,7 +4330,6 @@ function onWindowMouseMove(e) {
     hoverHiddenId = null;
     hoverDimId = null;
     hoverObjectAxis = null;
-  
     return;
   }
 
