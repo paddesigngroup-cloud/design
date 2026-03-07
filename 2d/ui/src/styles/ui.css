@@ -582,20 +582,21 @@ textarea {
   max-height: 100%;
 }
 
+
 .glbWidget {
   position: absolute;
   top: 12px;
   left: 12px;
+  z-index: 8;
   direction: ltr; /* keep resize handle on the bottom-right in RTL layouts */
   width: 260px;
   height: 190px;
   min-width: 180px;
   min-height: 130px;
-  max-width: calc(100% - 24px);
+  max-width: calc(100vw - 150px);
   max-height: calc(100% - 24px);
   resize: both;
   overflow: hidden;
-  z-index: 4;
   border-radius: 16px;
   border: 1px solid rgba(11, 34, 48, 0.12);
   background:
@@ -763,6 +764,56 @@ textarea {
   height: 1px;
   background: rgba(11, 34, 48, 0.1);
   margin: 6px 2px 10px;
+}
+
+
+.glbWallAttrs--panel {
+  position: absolute;
+  top: 210px;
+  left: 12px;
+  width: 260px;
+  z-index: 7;
+  max-width: calc(100% - 24px);
+}
+
+.glbWidget.is-max {
+  z-index: 10;
+}
+.glbWallAttrs {
+  border-radius: 14px;
+  border: 1px solid rgba(11, 34, 48, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 24px rgba(11, 34, 48, 0.1);
+  backdrop-filter: blur(8px);
+  padding: 10px;
+  color: var(--text);
+  font-family: Vazirmatn, sans-serif;
+}
+.glbWallAttrs__title {
+  margin-bottom: 8px;
+}
+.glbWallAttrs__title--secondary {
+  margin-top: 2px;
+}
+.glbWallAttrs__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.glbWallAttrs__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  font-size: 11px;
+  border: 1px solid rgba(11, 34, 48, 0.08);
+  border-radius: 9px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.7);
+}
+.glbWallAttrs__row strong {
+  font-size: 11px;
 }
 
 .stageQuickBar {

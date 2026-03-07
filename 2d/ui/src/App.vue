@@ -9,7 +9,12 @@ const snapOn = ref(true);
 const showDimensions = ref(true);
 const showOffsetWalls = ref(true);
 const showObjectAxes = ref(false);
-const walls3dSnapshot = ref({ nodes: [], walls: [] });
+const walls3dSnapshot = ref({
+  nodes: [],
+  walls: [],
+  selection: { selectedWallId: null },
+  state: { wallHeightMm: 2800 },
+});
 const stepDrawMode = ref("line"); // "line" | "degree"
 const snapModes = ref({
   corner: true,
@@ -151,6 +156,13 @@ function syncQuickStateFromEditor() {
   walls3dSnapshot.value = {
     nodes: Array.isArray(full?.graphSnap?.nodes) ? full.graphSnap.nodes : [],
     walls: Array.isArray(full?.graphSnap?.walls) ? full.graphSnap.walls : [],
+    selection: {
+      selectedWallId: full?.selection?.selectedWallId || null,
+      selectedWallIds: Array.isArray(full?.selection?.selectedWallIds) ? full.selection.selectedWallIds : [],
+    },
+    state: {
+      wallHeightMm: Number.isFinite(s?.wallHeightMm) ? s.wallHeightMm : 2800,
+    },
   };
   stepDrawMode.value = (s.stepDrawMode === "degree") ? "degree" : "line";
   snapModes.value = {

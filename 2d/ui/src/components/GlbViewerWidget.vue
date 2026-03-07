@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -21,6 +21,7 @@ const emit = defineEmits(["mouseenter", "mouseleave", "model2d"]);
 const widgetEl = ref(null);
 const hostEl = ref(null);
 const canvasEl = ref(null);
+const attrsStyle = ref({ left: "12px", top: "210px", width: "260px" });
 
 let renderer = null;
 let scene = null;
@@ -28,6 +29,7 @@ let camera = null;
 let controls = null;
 let raf = 0;
 let ro = null;
+let widgetRo = null;
 let modelRoot = null;
 let modelBasePosition = null;
 let modelBaseRotationY = 0;
@@ -37,6 +39,46 @@ let axesHelper = null;
 
 const DEFAULT_WALL_HEIGHT_M = 2.8;
 const DEFAULT_MITER_LIMIT = 10;
+
+const wallMetrics = computed(() => {
+  const snapshot = props.walls2d || {};
+  const nodes = Array.isArray(snapshot.nodes) ? snapshot.nodes : [];
+  const walls = Array.isArray(snapshot.walls) ? snapshot.walls : [];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+
+  const selectedIds = Array.isArray(snapshot?.selection?.selectedWallIds)
+    ? snapshot.selection.selectedWallIds
+    : [];
+  const selectedId = snapshot?.selection?.selectedWallId || selectedIds[0] || null;
+
+  let wall = selectedId ? walls.find((w) => w.id === selectedId) : null;
+  if (!wall && walls.length > 0) wall = walls[0];
+  if (!wall) return null;
+
+  const a = byId.get(wall.a);
+  const b = byId.get(wall.b);
+  if (!a || !b) return null;
+
+  const thicknessMm = Math.max(1, Number(wall.thickness) || 120);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthMm = Math.hypot(dx, dy);
+  const fallbackHeight = Number(snapshot?.state?.wallHeightMm);
+  const heightMm = Number.isFinite(Number(wall.heightMm))
+    ? Number(wall.heightMm)
+    : (Number.isFinite(fallbackHeight) ? fallbackHeight : 2800);
+
+  const mmToCm = (v) => (Math.round((v * 0.1) * 10) / 10);
+
+  return {
+    id: wall.id,
+    thicknessCm: mmToCm(thicknessMm),
+    lengthCm: mmToCm(lengthMm),
+    heightCm: mmToCm(heightMm),
+    a: { x: mmToCm(a.x), y: mmToCm(a.y) },
+    b: { x: mmToCm(b.x), y: mmToCm(b.y) },
+  };
+});
 
 function v(x, z) {
   return { x, z };
@@ -316,6 +358,7 @@ function fitCameraToAll(viewDir = null) {
 
 const isMax = ref(false);
 const viewOpen = ref(false);
+
 let prevSize = null;
 let baseSize = { w: 260, h: 190 };
 
@@ -366,6 +409,24 @@ function getWidgetSizePx() {
   return { w: r.width, h: r.height };
 }
 
+function updateAttrsPosition() {
+  if (!widgetEl.value) return;
+  const parent = widgetEl.value.offsetParent || widgetEl.value.parentElement;
+  if (!(parent instanceof Element)) return;
+
+  const wr = widgetEl.value.getBoundingClientRect();
+  const pr = parent.getBoundingClientRect();
+
+  const left = Math.max(0, Math.round(wr.left - pr.left));
+  const top = Math.max(0, Math.round(wr.bottom - pr.top + 8));
+  const width = Math.max(180, Math.round(wr.width));
+  attrsStyle.value = {
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${width}px`,
+  };
+}
+
 function getMaxSizePx() {
   const pad = 12;
   const parent = widgetEl.value?.offsetParent;
@@ -397,12 +458,14 @@ function goSmall() {
   viewOpen.value = false;
   isMax.value = false;
   setWidgetSizePx(baseSize.w, baseSize.h);
+  updateAttrsPosition();
 }
 
 function toggleMax() {
   if (isMax.value) {
     isMax.value = false;
     if (prevSize) setWidgetSizePx(prevSize.w, prevSize.h);
+    updateAttrsPosition();
     return;
   }
   prevSize = getWidgetSizePx();
@@ -410,6 +473,7 @@ function toggleMax() {
   viewOpen.value = false;
   const mx = getMaxSizePx();
   setWidgetSizePx(mx.w, mx.h);
+  updateAttrsPosition();
 }
 
 function setViewDir(dx, dy, dz) {
@@ -595,8 +659,20 @@ onMounted(async () => {
   baseSize = getWidgetSizePx();
 
   resizeToHost();
-  ro = new ResizeObserver(() => resizeToHost());
+  ro = new ResizeObserver(() => {
+    resizeToHost();
+    updateAttrsPosition();
+  });
   ro.observe(host);
+
+  widgetRo = new ResizeObserver(() => {
+    resizeToHost();
+    updateAttrsPosition();
+  });
+  widgetRo.observe(widgetEl.value);
+
+  window.addEventListener("resize", updateAttrsPosition);
+  updateAttrsPosition();
   canvas.addEventListener("dblclick", onCanvasDoubleClick);
 
   const loop = () => {
@@ -612,6 +688,9 @@ onBeforeUnmount(() => {
   canvasEl.value?.removeEventListener?.("dblclick", onCanvasDoubleClick);
   if (ro) ro.disconnect();
   ro = null;
+  if (widgetRo) widgetRo.disconnect();
+  widgetRo = null;
+  window.removeEventListener("resize", updateAttrsPosition);
 
   try {
     controls?.dispose?.();
@@ -641,40 +720,59 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div
-    ref="widgetEl"
-    class="glbWidget"
-    :class="{ 'is-max': isMax }"
-    @mouseenter="$emit('mouseenter')"
-    @mouseleave="$emit('mouseleave')"
-  >
+  <div ref="widgetEl" class="glbWidget" :class="{ 'is-max': isMax }" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
     <div class="glbWidget__head" dir="rtl">
       <div class="glbWidget__headBtns">
         <button type="button" class="glbWidget__btn" title="کوچک" @click="goSmall">–</button>
         <button type="button" class="glbWidget__btn" title="بزرگ" @click="toggleMax">□</button>
       </div>
-    </div>
-    <div ref="hostEl" class="glbWidget__host">
-      <canvas ref="canvasEl" class="glbWidget__canvas"></canvas>
+      <div ref="hostEl" class="glbWidget__host">
+        <canvas ref="canvasEl" class="glbWidget__canvas"></canvas>
 
-      <div class="glbWidget__view" @mouseenter.stop @mouseleave.stop>
-        <button type="button" class="glbWidget__viewBtn" title="نما" @click="toggleViewMenu">
-          <img class="glbWidget__viewIcon" src="/icons/viewpoint.png" alt="" />
-        </button>
-        <div v-if="viewOpen" class="glbWidget__viewMenu">
-          <button class="glbWidget__viewItem" type="button" @click="setViewDir(0, 0, 1)">روبه‌رو</button>
-          <button class="glbWidget__viewItem" type="button" @click="setViewDir(0, 0, -1)">پشت</button>
-          <button class="glbWidget__viewItem" type="button" @click="setViewDir(1, 0, 0)">راست</button>
-          <button class="glbWidget__viewItem" type="button" @click="setViewDir(-1, 0, 0)">چپ</button>
-          <button class="glbWidget__viewItem" type="button" @click="setViewDir(0, 1, 0)">بالا</button>
-          <button class="glbWidget__viewItem" type="button" @click="setViewDir(0, -1, 0)">پایین</button>
-          <div class="glbWidget__viewSep"></div>
-          <button class="glbWidget__viewItem" type="button" @click="setViewDir(1, 1, 1)">ایزو NE</button>
-          <button class="glbWidget__viewItem" type="button" @click="setViewDir(-1, 1, 1)">ایزو NW</button>
-          <button class="glbWidget__viewItem" type="button" @click="setViewDir(1, 1, -1)">ایزو SE</button>
-          <button class="glbWidget__viewItem" type="button" @click="setViewDir(-1, 1, -1)">ایزو SW</button>
+        <div class="glbWidget__view" @mouseenter.stop @mouseleave.stop>
+          <button type="button" class="glbWidget__viewBtn" title="نما" @click="toggleViewMenu">
+            <img class="glbWidget__viewIcon" src="/icons/viewpoint.png" alt="" />
+          </button>
+          <div v-if="viewOpen" class="glbWidget__viewMenu">
+            <button class="glbWidget__viewItem" type="button" @click="setViewDir(0, 0, 1)">روبه‌رو</button>
+            <button class="glbWidget__viewItem" type="button" @click="setViewDir(0, 0, -1)">پشت</button>
+            <button class="glbWidget__viewItem" type="button" @click="setViewDir(1, 0, 0)">راست</button>
+            <button class="glbWidget__viewItem" type="button" @click="setViewDir(-1, 0, 0)">چپ</button>
+            <button class="glbWidget__viewItem" type="button" @click="setViewDir(0, 1, 0)">بالا</button>
+            <button class="glbWidget__viewItem" type="button" @click="setViewDir(0, -1, 0)">پایین</button>
+            <div class="glbWidget__viewSep"></div>
+            <button class="glbWidget__viewItem" type="button" @click="setViewDir(1, 1, 1)">ایزو NE</button>
+            <button class="glbWidget__viewItem" type="button" @click="setViewDir(-1, 1, 1)">ایزو NW</button>
+            <button class="glbWidget__viewItem" type="button" @click="setViewDir(1, 1, -1)">ایزو SE</button>
+            <button class="glbWidget__viewItem" type="button" @click="setViewDir(-1, 1, -1)">ایزو SW</button>
+          </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div class="glbWallAttrs glbWallAttrs--panel" dir="rtl" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
+    <div class="menuPanel__title glbWallAttrs__title">صفات</div>
+    <div class="glbWallAttrs__rows">
+      <template v-if="wallMetrics">
+        <div class="glbWallAttrs__row"><span>ضخامت</span><strong>{{ wallMetrics.thicknessCm }} cm</strong></div>
+        <div class="glbWallAttrs__row"><span>طول</span><strong>{{ wallMetrics.lengthCm }} cm</strong></div>
+        <div class="glbWallAttrs__row"><span>ارتفاع</span><strong>{{ wallMetrics.heightCm }} cm</strong></div>
+      </template>
+      <template v-else>
+        <div class="glbWallAttrs__row"><span>...</span></div>
+      </template>
+    </div>
+
+    <div class="menuPanel__title glbWallAttrs__title glbWallAttrs__title--secondary">مختصات</div>
+    <div class="glbWallAttrs__rows">
+      <template v-if="wallMetrics">
+        <div class="glbWallAttrs__row"><span>A</span><strong>X: {{ wallMetrics.a.x }} / Y: {{ wallMetrics.a.y }}</strong></div>
+        <div class="glbWallAttrs__row"><span>B</span><strong>X: {{ wallMetrics.b.x }} / Y: {{ wallMetrics.b.y }}</strong></div>
+      </template>
+      <template v-else>
+        <div class="glbWallAttrs__row"><span>...</span></div>
+      </template>
     </div>
   </div>
 </template>

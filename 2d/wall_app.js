@@ -752,22 +752,13 @@ function applyModelDrag(targetWorld) {
   const dx = targetWorld.x - modelDrag.startMouseWorld.x;
   const dy = targetWorld.y - modelDrag.startMouseWorld.y;
 
-  let rotRad = 0;
   let snapTx = 0;
   let snapTy = 0;
   if (state.snapOn && (modelDrag.startOutline || []).length >= 2 && graph.walls.size > 0) {
     const movedOutline = (modelDrag.startOutline || []).map((p) => ({ x: p.x + dx, y: p.y + dy }));
     const nearest = nearestWallToPoints(movedOutline);
     if (nearest && nearest.dist <= MODEL_WALL_SNAP_DIST_MM) {
-      const wallAng = Math.atan2(nearest.dir.y, nearest.dir.x);
-      const modelAng = dominantModelAngle(modelDrag.startLines || []);
-      if (isFinite(modelAng)) {
-        const d0 = wrapAnglePi(wallAng - modelAng);
-        const d1 = wrapAnglePi(d0 + Math.PI);
-        rotRad = Math.abs(d1) < Math.abs(d0) ? d1 : d0;
-      }
-
-      transformModelFromStart(dx, dy, rotRad, 0, 0);
+      transformModelFromStart(dx, dy, 0, 0, 0);
       const nearestAfterRotate = nearestWallToPoints(model2d.outline || []);
       if (nearestAfterRotate && nearestAfterRotate.dist <= MODEL_WALL_SNAP_DIST_MM) {
         snapTx = nearestAfterRotate.wallPoint.x - nearestAfterRotate.modelPoint.x;
@@ -776,10 +767,10 @@ function applyModelDrag(targetWorld) {
     }
   }
 
-  transformModelFromStart(dx, dy, rotRad, snapTx, snapTy);
+  transformModelFromStart(dx, dy, 0, snapTx, snapTy);
   model2d.offsetXmm = (modelDrag.startOffsetXmm || 0) + dx + snapTx;
   model2d.offsetYmm = (modelDrag.startOffsetYmm || 0) + dy + snapTy;
-  model2d.rotationRad = wrapAnglePi((modelDrag.startRotationRad || 0) + rotRad);
+  model2d.rotationRad = wrapAnglePi(modelDrag.startRotationRad || 0);
   emitModel2dTransform();
 }
 function resolveModelDragTargetWorld(rawTargetWorld) {
