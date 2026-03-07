@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { editorRef, model2dTransformRef } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
+import { useDialogService } from "./dialog_service.js";
 
 const activeTool = ref("select");
 const snapOn = ref(true);
@@ -23,6 +24,8 @@ const snapModes = ref({
   edge: true,
 });
 const quickMenuOpen = ref(null); // "snaps" | "steps" | null
+const { dialogState, alert: showAlert, confirm: showConfirm, prompt: showPrompt, resolveConfirm, close: closeDialog } = useDialogService();
+
 const activeMenu = ref(null); // menuId | null
 const openMenuPanel = ref(null); // menuId | null
 const drawUiLock = ref(false); // while drawing, keep submenus closed until Esc
@@ -158,6 +161,7 @@ function syncQuickStateFromEditor() {
   showObjectAxes.value = !!s.showObjectAxes;
   const walls = Array.isArray(full?.graphSnap?.walls) ? full.graphSnap.walls : [];
   const selectedIds = Array.isArray(full?.selection?.selectedWallIds) ? full.selection.selectedWallIds : [];
+  const selectedCount = selectedIds.length;
   const selectedId = full?.selection?.selectedWallId || selectedIds[0] || null;
   const selectedWall = selectedId ? walls.find((w) => w.id === selectedId) : null;
 
@@ -170,6 +174,10 @@ function syncQuickStateFromEditor() {
     },
     state: {
       wallHeightMm: Number.isFinite(s?.wallHeightMm) ? s.wallHeightMm : 2800,
+      wallFillColor: (typeof s?.wallFillColor === "string" && s.wallFillColor) ? s.wallFillColor : "#A6A6A6",
+      wall3dColor: (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1",
+      activeTool: s?.activeTool || "select",
+      isWallDrawing: !!full?.tools?.wall?.isDrawing,
     },
   };
 
@@ -177,18 +185,32 @@ function syncQuickStateFromEditor() {
     wallStyleDraft.value = {
       thicknessCm: (Number.isFinite(Number(s?.wallThicknessMm)) ? Number(s.wallThicknessMm) : 120) / 10,
       heightCm: (Number.isFinite(Number(s?.wallHeightMm)) ? Number(s.wallHeightMm) : 3000) / 10,
-      color: (typeof s?.wallFillColor === "string" && s.wallFillColor) ? s.wallFillColor : "#A6A6A6",
+      color: (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1",
     };
   }
 
-  selectedWallStyle.value = selectedWall ? {
-    id: selectedWall.id,
-    thicknessCm: (Number(selectedWall.thickness) || 120) / 10,
-    heightCm: (Number(selectedWall.heightMm) || Number(s?.wallHeightMm) || 3000) / 10,
-    color: (typeof selectedWall.fillColor === "string" && selectedWall.fillColor)
-      ? selectedWall.fillColor
-      : ((typeof s?.wallFillColor === "string" && s.wallFillColor) ? s.wallFillColor : "#A6A6A6"),
-  } : null;
+  if (selectedWall) {
+    const byId = new Map((Array.isArray(full?.graphSnap?.nodes) ? full.graphSnap.nodes : []).map((n) => [n.id, n]));
+    const na = byId.get(selectedWall.a);
+    const nb = byId.get(selectedWall.b);
+    const lenMm = (na && nb) ? Math.hypot(nb.x - na.x, nb.y - na.y) : 0;
+    selectedWallStyle.value = {
+      id: selectedWall.id,
+      name: selectedWall.name || selectedWall.id,
+      thicknessCm: (Number(selectedWall.thickness) || 120) / 10,
+      heightCm: (Number(selectedWall.heightMm) || Number(s?.wallHeightMm) || 3000) / 10,
+      lengthCm: lenMm / 10,
+      color: (typeof selectedWall.color3d === "string" && selectedWall.color3d)
+        ? selectedWall.color3d
+        : ((typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1"),
+      a: selectedWall.a,
+      b: selectedWall.b,
+      selectedCount,
+      isGroupEdit: selectedCount > 1,
+    };
+  } else {
+    selectedWallStyle.value = null;
+  }
   stepDrawMode.value = (s.stepDrawMode === "degree") ? "degree" : "line";
   snapModes.value = {
     corner: s.snapCornerEnabled !== false,
@@ -217,23 +239,38 @@ function updateWallStyleDraft(next) {
 
   const thicknessMm = Math.max(1, wallStyleDraft.value.thicknessCm * 10);
   const heightMm = Math.max(1, wallStyleDraft.value.heightCm * 10);
-  const fillColor = wallStyleDraft.value.color;
+  const color3d = wallStyleDraft.value.color;
+  const lengthMm = Number.isFinite(Number(next?.lengthCm)) ? Math.max(10, Number(next.lengthCm) * 10) : null;
 
   editorRef.value?.setState?.({
     wallThicknessMm: thicknessMm,
     wallHeightMm: heightMm,
-    wallFillColor: fillColor,
+    wall3dColor: color3d,
   });
 
   const selectedId = selectedWallStyle.value?.id;
+  const isGroupEdit = !!selectedWallStyle.value?.isGroupEdit;
   if (selectedId) {
-    editorRef.value?.setSelectedWallStyle?.({ thicknessMm, heightMm, fillColor });
+    editorRef.value?.setSelectedWallStyle?.({ thicknessMm, heightMm, fillColor: color3d });
+    if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedWallLength?.(lengthMm);
   }
   wallStyleDraftTouched.value = false;
 }
 
 
+
+function updateSelectedWallCoords(patch) {
+  const toMm = (v) => Number(v) * 10;
+  const payload = {};
+  if (Number.isFinite(Number(patch?.axCm))) payload.axMm = toMm(patch.axCm);
+  if (Number.isFinite(Number(patch?.ayCm))) payload.ayMm = toMm(patch.ayCm);
+  if (Number.isFinite(Number(patch?.bxCm))) payload.bxMm = toMm(patch.bxCm);
+  if (Number.isFinite(Number(patch?.byCm))) payload.byMm = toMm(patch.byCm);
+  editorRef.value?.setSelectedWallCoords?.(payload);
+}
+
 function toggleQuickMenu(menuId) {
+  closeMenuPanel();
   quickMenuOpen.value = quickMenuOpen.value === menuId ? null : menuId;
 }
 
@@ -263,15 +300,22 @@ function toggleObjectAxes() {
 }
 
 function toggleSnapMaster() {
+  closeMenuPanel();
   const next = !snapOn.value;
   snapOn.value = next;
   editorRef.value?.setSnapOn?.(next);
-  if (next) {
-    applyEditorPatch({ snapOn: true });
-  }
+  snapModes.value = { corner: next, mid: next, center: next, edge: next };
+  applyEditorPatch({
+    snapOn: next,
+    snapCornerEnabled: next,
+    snapMidEnabled: next,
+    snapCenterEnabled: next,
+    snapEdgeEnabled: next,
+  });
 }
 
 function toggleSnapMode(id) {
+  closeMenuPanel();
   const next = !snapModes.value[id];
   snapModes.value = { ...snapModes.value, [id]: next };
   const patch = {};
@@ -321,21 +365,22 @@ function isEditorEmpty() {
   return !(hasWalls || hasHidden || hasDims);
 }
 
-function doNewDesign() {
+async function doNewDesign() {
   if (!editorRef.value) return;
   if (!isEditorEmpty()) {
-    const ok = window.confirm("طرح فعلی ذخیره نشده است. بدون ذخیره پاک شود؟");
+    const ok = await showConfirm("طرح فعلی ذخیره نشده است. بدون ذخیره پاک شود؟", { title: "طرح جدید" });
     if (!ok) return;
   }
   editorRef.value.clearAll?.();
   editorRef.value.goOrigin?.();
 }
 
-function doSaveProject() {
+async function doSaveProject() {
   if (!editorRef.value) return;
   const state = getEditorState();
   if (!state) return;
-  const name = (window.prompt("نام طرح را وارد کنید:", "طرح جدید") || "").trim();
+  const rawName = await showPrompt("نام طرح را وارد کنید:", "طرح جدید", { title: "ذخیره طرح" });
+  const name = (rawName || "").trim();
   if (!name) return;
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   projects.value.unshift({ id, name, ts: Date.now(), state });
@@ -352,7 +397,19 @@ function doOpenProject(p) {
   syncQuickStateFromEditor();
   openMode.value = "menu";
 }
-function doDeleteProject(p) {
+async function doRenameProject(p) {
+  const current = String(p?.name || "");
+  const raw = await showPrompt("نام جدید طرح:", current, { title: "تغییر نام طرح" });
+  if (raw == null) return;
+  const nextName = String(raw || "").trim();
+  if (!nextName || nextName === current) return;
+  projects.value = projects.value.map((x) => (x.id === p.id ? { ...x, name: nextName } : x));
+  saveProjects();
+}
+
+async function doDeleteProject(p) {
+  const ok = await showConfirm(`طرح «${p?.name || "بدون نام"}» حذف شود؟`, { title: "حذف طرح" });
+  if (!ok) return;
   projects.value = projects.value.filter((x) => x.id !== p.id);
   saveProjects();
 }
@@ -363,9 +420,9 @@ async function doExportJsonToClipboard() {
   const txt = JSON.stringify(s);
   try {
     await navigator.clipboard.writeText(txt);
-    window.alert("خروجی JSON در کلیپ‌بورد کپی شد.");
+    showAlert("خروجی JSON در کلیپ‌بورد کپی شد.", { title: "خروجی" });
   } catch (_) {
-    window.prompt("کپی نشد. متن زیر را کپی کنید:", txt);
+    await showPrompt("کپی خودکار انجام نشد. متن زیر را کپی کنید:", txt, { title: "خروجی" });
   }
 }
 
@@ -374,7 +431,7 @@ function doPrint() {
 }
 
 function doMessages() {
-  window.alert("پیام‌ها: به زودی.");
+  showAlert("پیام‌ها: به زودی.", { title: "پیام‌ها" });
 }
 
 function openMenuPanelAt(menuId, anchorEl, mode = "menu") {
@@ -398,10 +455,10 @@ function doShareFromTopbar() {
   doExportJsonToClipboard();
 }
 function doServicesFromTopbar() {
-  window.alert("سفارش خدمات برش: به زودی.");
+  showAlert("سفارش خدمات برش: به زودی.", { title: "خدمات" });
 }
 function doBuyFromTopbar() {
-  window.alert("سفارش پیش ساخته: به زودی.");
+  showAlert("سفارش پیش ساخته: به زودی.", { title: "خرید" });
 }
 
 function doZoomIn() {
@@ -457,9 +514,12 @@ function goHome() {
 }
 function goSettings() {
   closeQuickMenus();
-  openMenuPanel.value = null;
-  activeMenu.value = null;
+  closeMenuPanel();
   activeSubRail.value = null;
+  if (route.path === "/settings") {
+    router.push("/");
+    return;
+  }
   router.push("/settings");
 }
 
@@ -620,6 +680,11 @@ function scheduleShift() {
 }
 
 onMounted(() => {
+  window.__designkpDialogs = {
+    alert: (msg, opts) => showAlert(msg, opts),
+    confirm: (msg, opts) => showConfirm(msg, opts),
+    prompt: (msg, defaultValue, opts) => showPrompt(msg, defaultValue, opts),
+  };
   // Run twice to settle after first layout.
   scheduleShift();
   setTimeout(scheduleShift, 0);
@@ -770,6 +835,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (window.__designkpDialogs) delete window.__designkpDialogs;
   window.removeEventListener("resize", scheduleShift);
   window.removeEventListener("resize", scheduleSubRailPosition);
   if (_quickSyncTimer) {
@@ -941,6 +1007,9 @@ onBeforeUnmount(() => {
               <div v-for="p in projects" :key="p.id" class="menuRow">
                 <button class="menuItem menuItem--grow" type="button" @click="doOpenProject(p)">
                   {{ p.name }}
+                </button>
+                <button class="menuItem" type="button" title="تغییر نام" @click="doRenameProject(p)">
+                  نام
                 </button>
                 <button class="menuItem menuItem--danger" type="button" title="حذف" @click="doDeleteProject(p)">
                   حذف
@@ -1121,6 +1190,7 @@ onBeforeUnmount(() => {
             :wall-style-draft="wallStyleDraft"
             :selected-wall-style="selectedWallStyle"
             @update:wallStyleDraft="updateWallStyleDraft"
+            @update:selectedWallCoords="updateSelectedWallCoords"
             @model2d="onGlbModel2d"
             @mouseenter="disable2dInput"
             @mouseleave="enable2dInput"
@@ -1265,4 +1335,24 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+
+  <div v-if="dialogState.open" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="dialogState.mode === 'alert' ? closeDialog() : null"></div>
+    <div class="appDialog__card" dir="rtl">
+      <div v-if="dialogState.title" class="appDialog__title">{{ dialogState.title }}</div>
+      <div class="appDialog__msg">{{ dialogState.message }}</div>
+      <input
+        v-if="dialogState.mode === 'prompt'"
+        v-model="dialogState.inputValue"
+        class="appDialog__input"
+        type="text"
+        @keydown.enter.prevent="resolveConfirm(true)"
+      />
+      <div class="appDialog__actions">
+        <button v-if="dialogState.mode !== 'alert'" type="button" class="menuItem" @click="resolveConfirm(false)">{{ dialogState.cancelText }}</button>
+        <button type="button" class="menuItem" @click="resolveConfirm(true)">{{ dialogState.confirmText }}</button>
+      </div>
+    </div>
+  </div>
+
 </template>

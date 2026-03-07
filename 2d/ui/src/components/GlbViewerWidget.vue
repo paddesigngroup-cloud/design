@@ -24,7 +24,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft"]);
+const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords"]);
 
 const widgetEl = ref(null);
 const hostEl = ref(null);
@@ -47,6 +47,16 @@ let axesHelper = null;
 const DEFAULT_WALL_HEIGHT_M = 2.8;
 const DEFAULT_MITER_LIMIT = 10;
 
+const selectedWallCount = computed(() => {
+  const selectedIds = Array.isArray(props.walls2d?.selection?.selectedWallIds)
+    ? props.walls2d.selection.selectedWallIds.filter(Boolean)
+    : [];
+  if (selectedIds.length > 0) return selectedIds.length;
+  return props.walls2d?.selection?.selectedWallId ? 1 : 0;
+});
+const isGroupEditMode = computed(() => selectedWallCount.value > 1);
+
+
 const wallMetrics = computed(() => {
   const snapshot = props.walls2d || {};
   const nodes = Array.isArray(snapshot.nodes) ? snapshot.nodes : [];
@@ -58,8 +68,7 @@ const wallMetrics = computed(() => {
     : [];
   const selectedId = snapshot?.selection?.selectedWallId || selectedIds[0] || null;
 
-  let wall = selectedId ? walls.find((w) => w.id === selectedId) : null;
-  if (!wall && walls.length > 0) wall = walls[0];
+  const wall = selectedId ? walls.find((w) => w.id === selectedId) : null;
   if (!wall) return null;
 
   const a = byId.get(wall.a);
@@ -93,6 +102,10 @@ function patchWallStyleDraft(patch) {
     ...props.wallStyleDraft,
     ...patch,
   });
+}
+
+function patchSelectedWallCoords(patch) {
+  emit("update:selectedWallCoords", patch);
 }
 
 function v(x, z) {
@@ -294,18 +307,32 @@ function rebuildWalls3d(snapshot) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const root = new THREE.Group();
   root.name = "walls2d-extruded";
-  const wallMat = new THREE.MeshStandardMaterial({
-    color: 0xc7ccd1,
-        roughness: 0.86,
-    metalness: 0.05,
-  });
+  const fallbackHeightMm = Number(snapshot?.state?.wallHeightMm);
+  const fallbackFillColor = (typeof snapshot?.state?.wall3dColor === "string" && snapshot.state.wall3dColor)
+    ? snapshot.state.wall3dColor
+    : "#C7CCD1";
 
   const jointGammaMap = buildJointGammaMap(walls, byId);
 
   for (const w of walls) {
     const corners = computeTrimmedWallCorners(w, byId, jointGammaMap);
     if (!corners) continue;
-    const mesh = makeWallExtrudedMesh(corners, DEFAULT_WALL_HEIGHT_M, wallMat.clone());
+
+    const heightMm = Number.isFinite(Number(w?.heightMm))
+      ? Number(w.heightMm)
+      : (Number.isFinite(fallbackHeightMm) ? fallbackHeightMm : 2800);
+    const heightM = Math.max(0.1, heightMm * 0.001);
+
+    const colorHex = (typeof w?.color3d === "string" && w.color3d)
+      ? w.color3d
+      : ((typeof w?.fillColor === "string" && w.fillColor) ? w.fillColor : fallbackFillColor);
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(colorHex),
+      roughness: 0.86,
+      metalness: 0.05,
+    });
+
+    const mesh = makeWallExtrudedMesh(corners, heightM, wallMat);
     root.add(mesh);
   }
 
@@ -455,14 +482,12 @@ function goSmall() {
   viewOpen.value = false;
   isMax.value = false;
   setWidgetSizePx(baseSize.w, baseSize.h);
-  updateAttrsPosition();
 }
 
 function toggleMax() {
   if (isMax.value) {
     isMax.value = false;
     if (prevSize) setWidgetSizePx(prevSize.w, prevSize.h);
-    updateAttrsPosition();
     return;
   }
   prevSize = getWidgetSizePx();
@@ -470,7 +495,6 @@ function toggleMax() {
   viewOpen.value = false;
   const mx = getMaxSizePx();
   setWidgetSizePx(mx.w, mx.h);
-  updateAttrsPosition();
 }
 
 function setViewDir(dx, dy, dz) {
@@ -658,18 +682,14 @@ onMounted(async () => {
   resizeToHost();
   ro = new ResizeObserver(() => {
     resizeToHost();
-    updateAttrsPosition();
   });
   ro.observe(host);
 
   widgetRo = new ResizeObserver(() => {
     resizeToHost();
-    updateAttrsPosition();
   });
   widgetRo.observe(widgetEl.value);
 
-  window.addEventListener("resize", updateAttrsPosition);
-  updateAttrsPosition();
   canvas.addEventListener("dblclick", onCanvasDoubleClick);
 
   const loop = () => {
@@ -687,7 +707,6 @@ onBeforeUnmount(() => {
   ro = null;
   if (widgetRo) widgetRo.disconnect();
   widgetRo = null;
-  window.removeEventListener("resize", updateAttrsPosition);
 
   try {
     controls?.dispose?.();
@@ -750,19 +769,19 @@ onBeforeUnmount(() => {
 
   <div class="glbWallAttrs glbWallAttrs--panel" :style="attrsStyle" dir="rtl" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
     <div class="menuPanel__title glbWallAttrs__title">صفات</div>
-    <div class="glbWallAttrs__rows">
-      <template v-if="wallMetrics">
-        <div class="glbWallAttrs__row"><span>ضخامت</span><strong>{{ wallMetrics.thicknessCm }} cm</strong></div>
-        <div class="glbWallAttrs__row"><span>طول</span><strong>{{ wallMetrics.lengthCm }} cm</strong></div>
-        <div class="glbWallAttrs__row"><span>ارتفاع</span><strong>{{ wallMetrics.heightCm }} cm</strong></div>
-      </template>
-      <template v-else>
-        <div class="glbWallAttrs__row"><span>...</span></div>
-      </template>
-    </div>
-
-    <div class="menuPanel__title glbWallAttrs__title glbWallAttrs__title--secondary">تنظیمات دیوار (پیش‌فرض + انتخابی)</div>
-    <div class="glbWallAttrs__editor">
+    <div v-if="wallMetrics || isWallDrawing" class="glbWallAttrs__editor">
+      <label class="glbWallAttrs__editRow">
+        <span>طول (cm)</span>
+        <input
+          class="glbWallAttrs__input"
+          type="number"
+          min="1"
+          step="0.1"
+           :value="wallMetrics ? wallMetrics.lengthCm : (selectedWallStyle?.lengthCm || 0)"
+          :disabled="isGroupEditMode"
+          @input="patchWallStyleDraft({ lengthCm: +$event.target.value })"
+        />
+      </label>
       <label class="glbWallAttrs__editRow">
         <span>ضخامت (cm)</span>
         <input
@@ -794,18 +813,29 @@ onBeforeUnmount(() => {
           @input="patchWallStyleDraft({ color: $event.target.value })"
         />
       </label>
-      <div v-if="selectedWallStyle" class="menuPanel__hint">دیوار انتخابی: {{ selectedWallStyle.id }}</div>
+      <div v-if="selectedWallStyle" class="menuPanel__hint">
+        <template v-if="isGroupEditMode">ویرایش گروهی {{ selectedWallCount }} دیوار فعال است (طول/مختصات غیرفعال).</template>
+        <template v-else>دیوار انتخابی: {{ selectedWallStyle.name || selectedWallStyle.id }}</template>
+      </div>
     </div>
-
-    <div class="menuPanel__title glbWallAttrs__title glbWallAttrs__title--secondary">مختصات</div>
-    <div class="glbWallAttrs__rows">
-      <template v-if="wallMetrics">
-        <div class="glbWallAttrs__row"><span>A</span><strong>X: {{ wallMetrics.a.x }} / Y: {{ wallMetrics.a.y }}</strong></div>
-        <div class="glbWallAttrs__row"><span>B</span><strong>X: {{ wallMetrics.b.x }} / Y: {{ wallMetrics.b.y }}</strong></div>
-      </template>
-      <template v-else>
-        <div class="glbWallAttrs__row"><span>...</span></div>
-      </template>
-    </div>
+    <template v-if="wallMetrics && !isGroupEditMode">
+      <div class="menuPanel__title glbWallAttrs__title glbWallAttrs__title--secondary">مختصات</div>
+      <div class="glbWallAttrs__editor">
+        <div class="glbWallAttrs__editRow">
+          <span>A</span>
+          <div class="glbWallAttrs__coordGrid">
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="wallMetrics.a.x" @input="patchSelectedWallCoords({ axCm: +$event.target.value })" />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="wallMetrics.a.y" @input="patchSelectedWallCoords({ ayCm: +$event.target.value })" />
+          </div>
+        </div>
+        <div class="glbWallAttrs__editRow">
+          <span>B</span>
+          <div class="glbWallAttrs__coordGrid">
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="wallMetrics.b.x" @input="patchSelectedWallCoords({ bxCm: +$event.target.value })" />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="wallMetrics.b.y" @input="patchSelectedWallCoords({ byCm: +$event.target.value })" />
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 </template>

@@ -38,6 +38,15 @@ function wallNameFromIndex(i) {
   return `Wall ${letter}${suffix}`;
 }
 
+function wallIndexFromName(name) {
+  const m = String(name || "").trim().match(/^Wall\s+([A-Z])(?:-(\d+))?$/i);
+  if (!m) return null;
+  const letterIdx = String(m[1]).toUpperCase().charCodeAt(0) - 65;
+  if (letterIdx < 0 || letterIdx > 25) return null;
+  const cycle = Number.isFinite(Number(m[2])) ? Number(m[2]) : 0;
+  return cycle * 26 + letterIdx;
+}
+
 export class SolidWallTool {
   constructor({
     graph,
@@ -74,6 +83,7 @@ export class SolidWallTool {
       thickness: this.defaultThickness,
       heightMm: this.defaultHeightMm,
       fillColor: this.defaultColor,
+      color3d: this.defaultColor,
       error: this.error,
     };
   }
@@ -81,6 +91,16 @@ export class SolidWallTool {
   getOverlaySegments() {
     if (!this.pendingStartPos || !this.previewEndPos) return [];
     return [{ a: this.pendingStartPos, b: this.previewEndPos }];
+  }
+
+
+  syncWallIndexFromGraph() {
+    let maxIdx = -1;
+    for (const w of this.graph.walls.values()) {
+      const idx = wallIndexFromName(w?.name);
+      if (idx != null && idx > maxIdx) maxIdx = idx;
+    }
+    this.wallIndex = maxIdx + 1;
   }
 
   stopChaining() {
@@ -189,6 +209,7 @@ export class SolidWallTool {
     }
     this.error = null;
 
+    this.syncWallIndexFromGraph();
     const name = wallNameFromIndex(this.wallIndex);
     const w = this.graph.addWallByNodeIds(
       this.pendingStartNodeId,
@@ -198,7 +219,7 @@ export class SolidWallTool {
     );
     if (w) {
       w.heightMm = Math.max(1, Number(this.defaultHeightMm) || 3000);
-      w.fillColor = String(this.defaultColor || "#A6A6A6");
+      w.color3d = String(this.defaultColor || "#C7CCD1");
       // Split intersections and cleanup
       this.graph.intersectAndSplitAll(w.id, 1);
       this.graph.mergeCloseNodes(1);

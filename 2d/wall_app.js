@@ -143,6 +143,7 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   wallEdgeColor: "#000000",
   wallTextColor: "#FFFFFF",
   wallHeightColor: "#4B5563",
+  wall3dColor: "#C7CCD1",
   // Global wall thickness (world millimeters). UI shows cm.
   wallThicknessMm: 120,
   // Global wall height (world millimeters). UI shows cm.
@@ -1046,6 +1047,7 @@ function snapshotGraph(g) {
       thickness: w.thickness,
       heightMm: (typeof w.heightMm === "number" && isFinite(w.heightMm)) ? Math.max(1, w.heightMm) : null,
       fillColor: (typeof w.fillColor === "string" && w.fillColor) ? w.fillColor : null,
+      color3d: (typeof w.color3d === "string" && w.color3d) ? w.color3d : null,
       name: w.name,
       dimSide: w.dimSide ?? "auto",
       offsetSide: w.offsetSide ?? "auto",
@@ -1081,6 +1083,7 @@ function restoreGraph(g, snap) {
       thickness: w.thickness,
       heightMm: (typeof w.heightMm === "number" && isFinite(w.heightMm)) ? Math.max(1, w.heightMm) : null,
       fillColor: (typeof w.fillColor === "string" && w.fillColor) ? w.fillColor : null,
+      color3d: (typeof w.color3d === "string" && w.color3d) ? w.color3d : null,
       name: w.name,
       dimSide: w.dimSide ?? "auto",
       offsetSide: w.offsetSide ?? "auto",
@@ -3612,7 +3615,7 @@ const tool = new SolidWallTool({
   view,
   defaultThickness: state.wallThicknessMm || 120,
   defaultHeightMm: state.wallHeightMm || 3000,
-  defaultColor: state.wallFillColor || "#A6A6A6",
+  defaultColor: state.wall3dColor || "#C7CCD1",
   snapTolMm: 30,
   startIndex: 0,
 });
@@ -5160,7 +5163,10 @@ function setState(patch) {
   }
   if (typeof patch.wallFillColor === "string" && patch.wallFillColor) {
     state.wallFillColor = patch.wallFillColor;
-    tool.defaultColor = patch.wallFillColor;
+  }
+  if (typeof patch.wall3dColor === "string" && patch.wall3dColor) {
+    state.wall3dColor = patch.wall3dColor;
+    tool.defaultColor = patch.wall3dColor;
   }
 
   _ui.updateToolButtons();
@@ -5190,9 +5196,86 @@ function setSelectedWallStyle({ thicknessMm = null, heightMm = null, fillColor =
         changed = true;
       }
       if (typeof fillColor === "string" && fillColor) {
-        w.fillColor = fillColor;
+        w.color3d = fillColor;
         changed = true;
       }
+    }
+  });
+
+  if (changed) {
+    saveSettings();
+    return true;
+  }
+  return false;
+}
+
+
+
+function setSelectedWallLength(lengthMm) {
+  const w = selectedWallId ? graph.getWall(selectedWallId) : null;
+  if (!w) return false;
+  const A = graph.getNode(w.a);
+  const B = graph.getNode(w.b);
+  if (!A || !B) return false;
+
+  const targetLen = Number(lengthMm);
+  if (!Number.isFinite(targetLen) || targetLen < 1) return false;
+
+  const dx = B.x - A.x;
+  const dy = B.y - A.y;
+  const curLen = Math.hypot(dx, dy);
+  if (!Number.isFinite(curLen) || curLen < 1e-6) return false;
+
+  const ux = dx / curLen;
+  const uy = dy / curLen;
+  const nextBx = A.x + ux * targetLen;
+  const nextBy = A.y + uy * targetLen;
+
+  let changed = false;
+  undo.runAction(() => {
+    if (Math.hypot(B.x - nextBx, B.y - nextBy) > 1e-6) {
+      B.x = nextBx;
+      B.y = nextBy;
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    saveSettings();
+    return true;
+  }
+  return false;
+}
+
+function setSelectedWallCoords(coords = {}) {
+  const w = selectedWallId ? graph.getWall(selectedWallId) : null;
+  if (!w) return false;
+  const A = graph.getNode(w.a);
+  const B = graph.getNode(w.b);
+  if (!A || !B) return false;
+
+  const nextAx = Number.isFinite(Number(coords.axMm)) ? Number(coords.axMm) : A.x;
+  const nextAy = Number.isFinite(Number(coords.ayMm)) ? Number(coords.ayMm) : A.y;
+  const nextBx = Number.isFinite(Number(coords.bxMm)) ? Number(coords.bxMm) : B.x;
+  const nextBy = Number.isFinite(Number(coords.byMm)) ? Number(coords.byMm) : B.y;
+
+  if (Math.hypot(nextBx - nextAx, nextBy - nextAy) < 1) return false;
+
+  let changed = false;
+  undo.runAction(() => {
+    if (A.x !== nextAx || A.y !== nextAy) {
+      A.x = nextAx;
+      A.y = nextAy;
+      changed = true;
+    }
+    if (B.x !== nextBx || B.y !== nextBy) {
+      B.x = nextBx;
+      B.y = nextBy;
+      changed = true;
+    }
+    if (changed) {
+      graph.mergeCloseNodes(1);
+      graph.deleteTinyEdges(1);
     }
   });
 
@@ -5437,5 +5520,7 @@ return {
   getState,
   setState,
   setSelectedWallStyle,
+  setSelectedWallLength,
+  setSelectedWallCoords,
 };
 }

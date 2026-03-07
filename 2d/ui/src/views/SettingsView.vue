@@ -1,10 +1,12 @@
 <script setup>
-import { computed, reactive, watchEffect } from "vue";
+import { computed, reactive, ref, watchEffect } from "vue";
 import { useRouter } from "vue-router";
 import { editorRef } from "../editor/editor_store.js";
 
 const hasEditor = computed(() => !!editorRef.value);
 const router = useRouter();
+const baseState = ref(null);
+const isHydrating = ref(true);
 
 const model = reactive({
   unit: "cm",
@@ -49,25 +51,52 @@ const model = reactive({
 });
 
 watchEffect(() => {
-  // If editor is available, sync UI from engine state (read).
-  const s = editorRef.value?.getState?.()?.state;
-  if (!s) return;
+  // Hydrate once from editor state; do not overwrite local unsaved edits.
+  const st = editorRef.value?.getState?.()?.state;
+  if (!st) return;
+  if (!isHydrating.value) return;
+
+  const nextBase = {};
   for (const k of Object.keys(model)) {
-    if (k in s) model[k] = s[k];
+    if (k in st) model[k] = st[k];
+    nextBase[k] = (k in st) ? st[k] : model[k];
   }
+  baseState.value = nextBase;
+  isHydrating.value = false;
 });
 
 function applyPatch(patch) {
-  // Settings page does not auto-create the engine; it applies when engine exists.
-  editorRef.value?.setState?.(patch);
+  if (!patch || typeof patch !== "object") return;
+  // Local draft only; nothing is applied to engine until Save is clicked.
+  Object.assign(model, patch);
 }
 
-function saveSettingsAndBack() {
+function getDialogApi() {
+  return window.__designkpDialogs || {
+    alert: async (msg) => { window.alert(msg); return true; },
+    confirm: async (msg) => window.confirm(msg),
+  };
+}
+
+async function handleSaveSettings() {
+  const dialogs = getDialogApi();
+  const ok = await dialogs.confirm("آیا از تغییرات اطمینان دارید؟", { title: "ذخیره تنظیمات" });
+  if (!ok) return;
   if (!editorRef.value) {
-    window.alert("ابتدا وارد صفحه پلان شوید تا تنظیمات اعمال و ذخیره شوند.");
+    await dialogs.alert("ابتدا وارد صفحه پلان شوید تا موتور 2D فعال شود.", { title: "تنظیمات" });
     return;
   }
-  editorRef.value?.setState?.({ ...model });
+
+  const base = baseState.value || {};
+  const patch = {};
+  for (const k of Object.keys(model)) {
+    if (model[k] !== base[k]) patch[k] = model[k];
+  }
+
+  if (Object.keys(patch).length > 0) {
+    editorRef.value?.setState?.(patch);
+    baseState.value = { ...base, ...patch };
+  }
   router.push("/");
 }
 </script>
@@ -76,7 +105,7 @@ function saveSettingsAndBack() {
   <div style="padding: 14px;" class="settin_panel">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin: 0 0 12px;">
       <h3 style="margin: 0;">تنظیمات</h3>
-      <button class="iconbtn iconbtn--sm" type="button" title="ذخیره تنظیمات" @click="saveSettingsAndBack">
+      <button class="iconbtn iconbtn--sm" type="button" title="ذخیره تنظیمات" @click="handleSaveSettings">
         <img src="/icons/save.png" alt="" />
       </button>
     </div>
