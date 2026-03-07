@@ -1044,6 +1044,8 @@ function snapshotGraph(g) {
       a: w.a,
       b: w.b,
       thickness: w.thickness,
+      heightMm: (typeof w.heightMm === "number" && isFinite(w.heightMm)) ? Math.max(1, w.heightMm) : null,
+      fillColor: (typeof w.fillColor === "string" && w.fillColor) ? w.fillColor : null,
       name: w.name,
       dimSide: w.dimSide ?? "auto",
       offsetSide: w.offsetSide ?? "auto",
@@ -1077,6 +1079,8 @@ function restoreGraph(g, snap) {
       a: w.a,
       b: w.b,
       thickness: w.thickness,
+      heightMm: (typeof w.heightMm === "number" && isFinite(w.heightMm)) ? Math.max(1, w.heightMm) : null,
+      fillColor: (typeof w.fillColor === "string" && w.fillColor) ? w.fillColor : null,
       name: w.name,
       dimSide: w.dimSide ?? "auto",
       offsetSide: w.offsetSide ?? "auto",
@@ -3079,14 +3083,14 @@ function enforceLockedInsideLengths() {
   }
 }
 
-function drawWallBodyFromCorners(c) {
+function drawWallBodyFromCorners(c, edge) {
   const s1 = worldToScreen(c.AL.x, c.AL.y);
   const s2 = worldToScreen(c.BL.x, c.BL.y);
   const s3 = worldToScreen(c.BR.x, c.BR.y);
   const s4 = worldToScreen(c.AR.x, c.AR.y);
 
   ctx.save();
-  ctx.fillStyle = state.wallFillColor;
+  ctx.fillStyle = edge?.fillColor || state.wallFillColor;
   ctx.strokeStyle = state.wallEdgeColor;
   ctx.lineWidth = 1;
   ctx.setLineDash([]);
@@ -3155,7 +3159,7 @@ function drawToolOverlay(tool) {
     const p4 = worldToScreen(AR.x, AR.y);
 
     ctx.save();
-    ctx.fillStyle = state.wallFillColor;
+    ctx.fillStyle = st?.fillColor || state.wallFillColor;
     ctx.strokeStyle = state.wallEdgeColor;
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
@@ -3535,7 +3539,7 @@ function drawWallsNodeBased(tool) {
   }
 
   // 1) Wall bodies (geometry layer)
-  for (const it of wallDrawList) drawWallBodyFromCorners(it.corners);
+  for (const it of wallDrawList) drawWallBodyFromCorners(it.corners, it.edge);
 
   // Guides are drawn above walls, but below dimensions.
   drawGuides();
@@ -3607,6 +3611,8 @@ const tool = new SolidWallTool({
   graph,
   view,
   defaultThickness: state.wallThicknessMm || 120,
+  defaultHeightMm: state.wallHeightMm || 3000,
+  defaultColor: state.wallFillColor || "#A6A6A6",
   snapTolMm: 30,
   startIndex: 0,
 });
@@ -5141,18 +5147,60 @@ function setState(patch) {
     state[k] = patch[k];
   }
 
-  // Keep tool thickness aligned with global setting.
+  // Keep drawing defaults aligned with global settings.
   if (typeof patch.wallThicknessMm === "number" && isFinite(patch.wallThicknessMm) && patch.wallThicknessMm > 0) {
     const mm = Math.max(1, patch.wallThicknessMm);
     state.wallThicknessMm = mm;
     tool.defaultThickness = mm;
-    for (const w of graph.walls.values()) w.thickness = mm;
+  }
+  if (typeof patch.wallHeightMm === "number" && isFinite(patch.wallHeightMm) && patch.wallHeightMm > 0) {
+    const mm = Math.max(1, patch.wallHeightMm);
+    state.wallHeightMm = mm;
+    tool.defaultHeightMm = mm;
+  }
+  if (typeof patch.wallFillColor === "string" && patch.wallFillColor) {
+    state.wallFillColor = patch.wallFillColor;
+    tool.defaultColor = patch.wallFillColor;
   }
 
   _ui.updateToolButtons();
   _ui.updateSnapButton();
   updateCanvasCursor();
   saveSettings();
+}
+
+
+function setSelectedWallStyle({ thicknessMm = null, heightMm = null, fillColor = null } = {}) {
+  const ids = [];
+  if (selectedWallId) ids.push(selectedWallId);
+  for (const id of selectedWallIds) if (id && !ids.includes(id)) ids.push(id);
+  if (ids.length === 0) return false;
+
+  let changed = false;
+  undo.runAction(() => {
+    for (const id of ids) {
+      const w = graph.getWall(id);
+      if (!w) continue;
+      if (Number.isFinite(Number(thicknessMm)) && Number(thicknessMm) > 0) {
+        w.thickness = Math.max(1, Number(thicknessMm));
+        changed = true;
+      }
+      if (Number.isFinite(Number(heightMm)) && Number(heightMm) > 0) {
+        w.heightMm = Math.max(1, Number(heightMm));
+        changed = true;
+      }
+      if (typeof fillColor === "string" && fillColor) {
+        w.fillColor = fillColor;
+        changed = true;
+      }
+    }
+  });
+
+  if (changed) {
+    saveSettings();
+    return true;
+  }
+  return false;
 }
 
 function bindStandaloneUiIfPresent() {
@@ -5388,5 +5436,6 @@ return {
 
   getState,
   setState,
+  setSelectedWallStyle,
 };
 }

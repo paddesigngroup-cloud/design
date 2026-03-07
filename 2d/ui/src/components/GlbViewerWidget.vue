@@ -14,9 +14,17 @@ const props = defineProps({
     type: Object,
     default: () => ({ nodes: [], walls: [] }),
   },
+  wallStyleDraft: {
+    type: Object,
+    default: () => ({ thicknessCm: 12, heightCm: 300, color: "#A6A6A6" }),
+  },
+  selectedWallStyle: {
+    type: Object,
+    default: null,
+  },
 });
 
-const emit = defineEmits(["mouseenter", "mouseleave", "model2d"]);
+const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft"]);
 
 const widgetEl = ref(null);
 const hostEl = ref(null);
@@ -79,6 +87,14 @@ const wallMetrics = computed(() => {
     b: { x: mmToCm(b.x), y: mmToCm(b.y) },
   };
 });
+
+
+function patchWallStyleDraft(patch) {
+  emit("update:wallStyleDraft", {
+    ...props.wallStyleDraft,
+    ...patch,
+  });
+}
 
 function v(x, z) {
   return { x, z };
@@ -751,7 +767,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div class="glbWallAttrs glbWallAttrs--panel" dir="rtl" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
+  <div class="glbWallAttrs glbWallAttrs--panel" :style="attrsStyle" dir="rtl" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
     <div class="menuPanel__title glbWallAttrs__title">صفات</div>
     <div class="glbWallAttrs__rows">
       <template v-if="wallMetrics">
@@ -762,6 +778,42 @@ onBeforeUnmount(() => {
       <template v-else>
         <div class="glbWallAttrs__row"><span>...</span></div>
       </template>
+    </div>
+
+    <div class="menuPanel__title glbWallAttrs__title glbWallAttrs__title--secondary">تنظیمات دیوار (پیش‌فرض + انتخابی)</div>
+    <div class="glbWallAttrs__editor">
+      <label class="glbWallAttrs__editRow">
+        <span>ضخامت (cm)</span>
+        <input
+          class="glbWallAttrs__input"
+          type="number"
+          min="0.1"
+          step="0.5"
+          :value="wallStyleDraft.thicknessCm"
+          @input="patchWallStyleDraft({ thicknessCm: +$event.target.value })"
+        />
+      </label>
+      <label class="glbWallAttrs__editRow">
+        <span>ارتفاع (cm)</span>
+        <input
+          class="glbWallAttrs__input"
+          type="number"
+          min="1"
+          step="1"
+          :value="wallStyleDraft.heightCm"
+          @input="patchWallStyleDraft({ heightCm: +$event.target.value })"
+        />
+      </label>
+      <label class="glbWallAttrs__editRow">
+        <span>رنگ دیوار</span>
+        <input
+          class="glbWallAttrs__color"
+          type="color"
+          :value="wallStyleDraft.color"
+          @input="patchWallStyleDraft({ color: $event.target.value })"
+        />
+      </label>
+      <div v-if="selectedWallStyle" class="menuPanel__hint">دیوار انتخابی: {{ selectedWallStyle.id }}</div>
     </div>
 
     <div class="menuPanel__title glbWallAttrs__title glbWallAttrs__title--secondary">مختصات</div>

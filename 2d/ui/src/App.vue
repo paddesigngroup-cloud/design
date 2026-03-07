@@ -27,6 +27,9 @@ const activeMenu = ref(null); // menuId | null
 const openMenuPanel = ref(null); // menuId | null
 const drawUiLock = ref(false); // while drawing, keep submenus closed until Esc
 const designMenuTool = ref(null); // "wall" | "hidden" | "dimension" | "beam" | "column" | null
+const wallStyleDraft = ref({ thicknessCm: 12, heightCm: 300, color: "#A6A6A6" });
+const selectedWallStyle = ref(null);
+const wallStyleDraftTouched = ref(false);
 
 const topbarEl = ref(null);
 const mainEl = ref(null);
@@ -153,17 +156,39 @@ function syncQuickStateFromEditor() {
   showDimensions.value = s.showDimensions !== false;
   showOffsetWalls.value = !!s.offsetWallEnabled;
   showObjectAxes.value = !!s.showObjectAxes;
+  const walls = Array.isArray(full?.graphSnap?.walls) ? full.graphSnap.walls : [];
+  const selectedIds = Array.isArray(full?.selection?.selectedWallIds) ? full.selection.selectedWallIds : [];
+  const selectedId = full?.selection?.selectedWallId || selectedIds[0] || null;
+  const selectedWall = selectedId ? walls.find((w) => w.id === selectedId) : null;
+
   walls3dSnapshot.value = {
     nodes: Array.isArray(full?.graphSnap?.nodes) ? full.graphSnap.nodes : [],
-    walls: Array.isArray(full?.graphSnap?.walls) ? full.graphSnap.walls : [],
+    walls,
     selection: {
       selectedWallId: full?.selection?.selectedWallId || null,
-      selectedWallIds: Array.isArray(full?.selection?.selectedWallIds) ? full.selection.selectedWallIds : [],
+      selectedWallIds: selectedIds,
     },
     state: {
       wallHeightMm: Number.isFinite(s?.wallHeightMm) ? s.wallHeightMm : 2800,
     },
   };
+
+  if (!wallStyleDraftTouched.value) {
+    wallStyleDraft.value = {
+      thicknessCm: (Number.isFinite(Number(s?.wallThicknessMm)) ? Number(s.wallThicknessMm) : 120) / 10,
+      heightCm: (Number.isFinite(Number(s?.wallHeightMm)) ? Number(s.wallHeightMm) : 3000) / 10,
+      color: (typeof s?.wallFillColor === "string" && s.wallFillColor) ? s.wallFillColor : "#A6A6A6",
+    };
+  }
+
+  selectedWallStyle.value = selectedWall ? {
+    id: selectedWall.id,
+    thicknessCm: (Number(selectedWall.thickness) || 120) / 10,
+    heightCm: (Number(selectedWall.heightMm) || Number(s?.wallHeightMm) || 3000) / 10,
+    color: (typeof selectedWall.fillColor === "string" && selectedWall.fillColor)
+      ? selectedWall.fillColor
+      : ((typeof s?.wallFillColor === "string" && s.wallFillColor) ? s.wallFillColor : "#A6A6A6"),
+  } : null;
   stepDrawMode.value = (s.stepDrawMode === "degree") ? "degree" : "line";
   snapModes.value = {
     corner: s.snapCornerEnabled !== false,
@@ -172,6 +197,41 @@ function syncQuickStateFromEditor() {
     edge: s.snapEdgeEnabled !== false,
   };
 }
+
+function clampWallStyleDraft() {
+  const t = Math.max(0.1, Number(wallStyleDraft.value.thicknessCm) || 12);
+  const h = Math.max(1, Number(wallStyleDraft.value.heightCm) || 300);
+  const c = String(wallStyleDraft.value.color || "#A6A6A6");
+  wallStyleDraft.value = { thicknessCm: Math.round(t * 10) / 10, heightCm: Math.round(h), color: c };
+}
+
+function updateWallStyleDraft(next) {
+  wallStyleDraftTouched.value = true;
+  const draft = {
+    thicknessCm: Number(next?.thicknessCm ?? wallStyleDraft.value.thicknessCm),
+    heightCm: Number(next?.heightCm ?? wallStyleDraft.value.heightCm),
+    color: String(next?.color ?? wallStyleDraft.value.color),
+  };
+  wallStyleDraft.value = draft;
+  clampWallStyleDraft();
+
+  const thicknessMm = Math.max(1, wallStyleDraft.value.thicknessCm * 10);
+  const heightMm = Math.max(1, wallStyleDraft.value.heightCm * 10);
+  const fillColor = wallStyleDraft.value.color;
+
+  editorRef.value?.setState?.({
+    wallThicknessMm: thicknessMm,
+    wallHeightMm: heightMm,
+    wallFillColor: fillColor,
+  });
+
+  const selectedId = selectedWallStyle.value?.id;
+  if (selectedId) {
+    editorRef.value?.setSelectedWallStyle?.({ thicknessMm, heightMm, fillColor });
+  }
+  wallStyleDraftTouched.value = false;
+}
+
 
 function toggleQuickMenu(menuId) {
   quickMenuOpen.value = quickMenuOpen.value === menuId ? null : menuId;
@@ -182,18 +242,21 @@ function closeQuickMenus() {
 }
 
 function toggleDimensions() {
+  closeMenuPanel();
   const next = !showDimensions.value;
   showDimensions.value = next;
   applyEditorPatch({ showDimensions: next });
 }
 
 function toggleOffsets() {
+  closeMenuPanel();
   const next = !showOffsetWalls.value;
   showOffsetWalls.value = next;
   applyEditorPatch({ offsetWallEnabled: next });
 }
 
 function toggleObjectAxes() {
+  closeMenuPanel();
   const next = !showObjectAxes.value;
   showObjectAxes.value = next;
   applyEditorPatch({ showObjectAxes: next });
@@ -393,6 +456,10 @@ function goHome() {
   router.push("/");
 }
 function goSettings() {
+  closeQuickMenus();
+  openMenuPanel.value = null;
+  activeMenu.value = null;
+  activeSubRail.value = null;
   router.push("/settings");
 }
 
@@ -421,11 +488,6 @@ function onGlbModel2d(payload) {
   const lines = payload?.lines;
   if (!Array.isArray(lines)) return;
   editorRef.value?.setModel2dLines?.(lines, payload?.opts || null);
-}
-
-function addReadyRect90x55() {
-  editorRef.value?.addRectModel2dPreset?.({ widthMm: 900, heightMm: 550 });
-  closeMenuPanel();
 }
 
 function toggleMenu(menuId, e) {
@@ -822,7 +884,7 @@ onBeforeUnmount(() => {
     <div ref="mainEl" class="main">
       <!-- Slim left-of-submenu rail (always visible; attaches to submenu when open, else to main menu icon) -->
       <aside
-        v-if="shouldShowSubRail"
+        v-if="isHome && shouldShowSubRail"
         class="subRail"
         :class="subRailAttach === 'panel' ? 'subRail--panel' : 'subRail--main'"
         aria-label="Sub Rail"
@@ -845,7 +907,7 @@ onBeforeUnmount(() => {
       <!-- Right-side menu content opens as an overlay above the 2D stage (does not push anything). -->
       <aside
         ref="menuPanelEl"
-        v-if="openMenuPanel"
+        v-if="isHome && openMenuPanel"
         class="menuPanel"
         :class="{ 'menuPanel--auto': openMenuPanel === 'menu' && openMode === 'menu' }"
         aria-label="Menu Panel"
@@ -907,20 +969,6 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="designMenu__sep" role="separator"></div>
-
-              <button
-                type="button"
-                class="presetTile presetTile--cta"
-                title="مستطیل آماده 90×55"
-                @click="addReadyRect90x55"
-              >
-                <svg class="presetTile__svg" viewBox="0 0 44 44" aria-hidden="true">
-                  <g fill="none" stroke="rgba(52,20,31,.72)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M7 12H37V32H7Z" />
-                  </g>
-                </svg>
-                <span class="presetTile__label">مستطیل آماده 90×55</span>
-              </button>
 
               <div class="designMenu__presetsHead">مدل های آماده دیوار</div>
               <div class="designMenu__presets" aria-label="Wall Presets">
@@ -1066,15 +1114,19 @@ onBeforeUnmount(() => {
           </RouterView>
 
           <GlbViewerWidget
+            v-if="isHome"
             src="/models/1_z1.glb"
             :model2d-transform="model2dTransformRef"
             :walls2d="walls3dSnapshot"
+            :wall-style-draft="wallStyleDraft"
+            :selected-wall-style="selectedWallStyle"
+            @update:wallStyleDraft="updateWallStyleDraft"
             @model2d="onGlbModel2d"
             @mouseenter="disable2dInput"
             @mouseleave="enable2dInput"
           />
 
-          <div class="stageBottom" aria-label="Stage Bottom Bar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
+          <div v-if="isHome" class="stageBottom" aria-label="Stage Bottom Bar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
             <button class="iconbtn iconbtn--sm" title="بزرگنمایی" @click="doZoomIn">
               <img src="/icons/zoom-in.png" alt="" />
             </button>
@@ -1091,7 +1143,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <div class="toolDock" aria-label="Right Tool Dock">
+      <div v-if="isHome" class="toolDock" aria-label="Right Tool Dock">
         <nav class="toolRail" aria-label="Tools">
           <div class="toolRail__main" aria-label="Menu">
             <button

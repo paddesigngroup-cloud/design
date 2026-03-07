@@ -43,6 +43,8 @@ export class SolidWallTool {
     graph,
     view,
     defaultThickness = 120,
+    defaultHeightMm = 3000,
+    defaultColor = "#A6A6A6",
     snapTolMm = 30,
     startIndex = 0,
   }) {
@@ -50,6 +52,8 @@ export class SolidWallTool {
     this.view = view;
 
     this.defaultThickness = defaultThickness;
+    this.defaultHeightMm = defaultHeightMm;
+    this.defaultColor = defaultColor;
     this.snapTolMm = snapTolMm;
 
     this.snapEnabled = true;
@@ -68,6 +72,8 @@ export class SolidWallTool {
       snapEnabled: this.snapEnabled,
       wallName: wallNameFromIndex(this.wallIndex),
       thickness: this.defaultThickness,
+      heightMm: this.defaultHeightMm,
+      fillColor: this.defaultColor,
       error: this.error,
     };
   }
@@ -191,6 +197,8 @@ export class SolidWallTool {
       name
     );
     if (w) {
+      w.heightMm = Math.max(1, Number(this.defaultHeightMm) || 3000);
+      w.fillColor = String(this.defaultColor || "#A6A6A6");
       // Split intersections and cleanup
       this.graph.intersectAndSplitAll(w.id, 1);
       this.graph.mergeCloseNodes(1);

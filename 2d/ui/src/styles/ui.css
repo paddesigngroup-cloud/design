@@ -498,6 +498,7 @@ textarea {
   font-weight: 700;
   color: var(--text);
 }
+
 .menuList {
   display: flex;
   flex-direction: column;
@@ -814,6 +815,34 @@ textarea {
 }
 .glbWallAttrs__row strong {
   font-size: 11px;
+}
+
+.glbWallAttrs__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.glbWallAttrs__editRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+.glbWallAttrs__input {
+  width: 96px;
+  border: 1px solid rgba(11, 34, 48, 0.2);
+  border-radius: 8px;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+.glbWallAttrs__color {
+  width: 96px;
+  height: 28px;
+  border: 1px solid rgba(11, 34, 48, 0.2);
+  border-radius: 8px;
+  background: transparent;
 }
 
 .stageQuickBar {

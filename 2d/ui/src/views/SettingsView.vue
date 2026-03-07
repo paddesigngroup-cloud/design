@@ -1,8 +1,10 @@
 <script setup>
 import { computed, reactive, watchEffect } from "vue";
+import { useRouter } from "vue-router";
 import { editorRef } from "../editor/editor_store.js";
 
 const hasEditor = computed(() => !!editorRef.value);
+const router = useRouter();
 
 const model = reactive({
   unit: "cm",
@@ -59,11 +61,25 @@ function applyPatch(patch) {
   // Settings page does not auto-create the engine; it applies when engine exists.
   editorRef.value?.setState?.(patch);
 }
+
+function saveSettingsAndBack() {
+  if (!editorRef.value) {
+    window.alert("ابتدا وارد صفحه پلان شوید تا تنظیمات اعمال و ذخیره شوند.");
+    return;
+  }
+  editorRef.value?.setState?.({ ...model });
+  router.push("/");
+}
 </script>
 
 <template>
   <div style="padding: 14px;" class="settin_panel">
-    <h3 style="margin: 0 0 12px;">تنظیمات</h3>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin: 0 0 12px;">
+      <h3 style="margin: 0;">تنظیمات</h3>
+      <button class="iconbtn iconbtn--sm" type="button" title="ذخیره تنظیمات" @click="saveSettingsAndBack">
+        <img src="/icons/save.png" alt="" />
+      </button>
+    </div>
     <div v-if="!hasEditor" style="color:#6b7280; font-size:13px; line-height:1.7; margin-bottom: 12px;">
       برای اعمال تنظیمات، اول صفحه «پلان» را باز کنید تا موتور 2D فعال شود.
     </div>
