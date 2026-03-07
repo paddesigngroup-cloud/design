@@ -29,7 +29,6 @@ const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallSty
 const widgetEl = ref(null);
 const hostEl = ref(null);
 const canvasEl = ref(null);
-const attrsStyle = ref({ left: "12px", top: "210px", width: "260px" });
 
 let renderer = null;
 let scene = null;
@@ -423,24 +422,6 @@ function getWidgetSizePx() {
   if (!widgetEl.value) return { w: 260, h: 190 };
   const r = widgetEl.value.getBoundingClientRect();
   return { w: r.width, h: r.height };
-}
-
-function updateAttrsPosition() {
-  if (!widgetEl.value) return;
-  const parent = widgetEl.value.offsetParent || widgetEl.value.parentElement;
-  if (!(parent instanceof Element)) return;
-
-  const wr = widgetEl.value.getBoundingClientRect();
-  const pr = parent.getBoundingClientRect();
-
-  const left = Math.max(0, Math.round(wr.left - pr.left));
-  const top = Math.max(0, Math.round(wr.bottom - pr.top + 8));
-  const width = Math.max(180, Math.round(wr.width));
-  attrsStyle.value = {
-    left: `${left}px`,
-    top: `${top}px`,
-    width: `${width}px`,
-  };
 }
 
 function getMaxSizePx() {
