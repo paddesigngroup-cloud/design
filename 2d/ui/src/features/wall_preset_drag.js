@@ -131,6 +131,90 @@ const RAW_WALL_PRESETS = [
       ],
     },
   },
+    {
+    id: "tmp_09",
+    title: "نمونه ۹",
+    data: {
+      nodes: [
+        { id: "n1", x: -3632.9313701314463, y: -1590.7764445150397 },
+        { id: "n2", x: 508.03894086968137, y: -1590.9096894501954 },
+        { id: "n3", x: -3633, y: 3609 },
+        { id: "n4", x: 1981.7172420961265, y: -117.23138822375051 },
+        { id: "n12", x: 1965, y: 3607.9999999999995 },
+      ],
+      walls: [
+        { a: "n1", b: "n2", thickness: 200, name: "Wall A" },
+        { a: "n1", b: "n3", thickness: 200, name: "Wall B" },
+        { a: "n2", b: "n4", thickness: 200, name: "Wall C" },
+        { a: "n4", b: "n12", thickness: 200, name: "Wall D" },
+        { a: "n3", b: "n12", thickness: 200, name: "Wall E" },
+      ],
+    },
+  },
+
+        {
+    id: "tmp_10",
+    title: "نمونه ۱۰",
+    data: {
+      nodes: [
+        { id: "n1", x: 1981.6486122275728, y: -1590.7764445150397 },
+        { id: "n2", x: -2159.321698773555, y: -1590.9096894501954 },
+        { id: "n3", x: 1981.7172420961265, y: 3609 },
+        { id: "n4", x: -3633.0, y: -117.23138822375051 },
+        { id: "n12", x: -3616.2827579038735, y: 3607.9999999999995 },
+      ],
+      walls: [
+        { a: "n1", b: "n2", thickness: 200, name: "Wall A" },
+        { a: "n1", b: "n3", thickness: 200, name: "Wall B" },
+        { a: "n2", b: "n4", thickness: 200, name: "Wall C" },
+        { a: "n4", b: "n12", thickness: 200, name: "Wall D" },
+        { a: "n3", b: "n12", thickness: 200, name: "Wall E" },
+      ],
+    },
+  },
+
+  {
+    id: "tmp_11",
+    title: "نمونه ۱۱",
+    data: {
+      nodes: [
+        { id: "n1", x: -3632.931370131446, y: 3608.866755064844 },
+        { id: "n2", x: 508.038940869681, y: 3609 },
+        { id: "n3", x: -3633, y: -1590.909689450195 },
+        { id: "n4", x: 1981.717242096126, y: 2135.321698773555 },
+        { id: "n12", x: 1965, y: -1589.909689450195 },
+      ],
+      walls: [
+        { a: "n1", b: "n2", thickness: 200, name: "Wall A" },
+        { a: "n1", b: "n3", thickness: 200, name: "Wall B" },
+        { a: "n2", b: "n4", thickness: 200, name: "Wall C" },
+        { a: "n4", b: "n12", thickness: 200, name: "Wall D" },
+        { a: "n3", b: "n12", thickness: 200, name: "Wall E" },
+      ],
+    },
+  },
+
+  {
+    id: "tmp_12",
+    title: "نمونه ۱۲",
+    data: {
+      nodes: [
+        { id: "n1", x: 1981.648612227573, y: 3608.866755064844 },
+        { id: "n2", x: -2159.321698773555, y: 3609 },
+        { id: "n3", x: 1981.717242096126, y: -1590.909689450195 },
+        { id: "n4", x: -3633, y: 2135.321698773555 },
+        { id: "n12", x: -3616.282757903874, y: -1589.909689450195 },
+      ],
+      walls: [
+        { a: "n1", b: "n2", thickness: 200, name: "Wall A" },
+        { a: "n1", b: "n3", thickness: 200, name: "Wall B" },
+        { a: "n2", b: "n4", thickness: 200, name: "Wall C" },
+        { a: "n4", b: "n12", thickness: 200, name: "Wall D" },
+        { a: "n3", b: "n12", thickness: 200, name: "Wall E" },
+      ],
+    },
+  },
+
 ];
 
 function toLinesFromGraph(graph) {
@@ -190,7 +274,35 @@ const PRESET_STORE = RAW_WALL_PRESETS.map((p) => {
   return { id: p.id, title: p.title, lines };
 });
 
-export const WALL_READY_PRESETS = PRESET_STORE.map((p) => ({ id: p.id, title: p.title, kind: p.id }));
+const _wallReadyPresets = PRESET_STORE.map((p) => ({ id: p.id, title: p.title, kind: p.id }));
+
+function sampleNo(title) {
+  const m = String(title || "").match(/(\d+)/);
+  return m ? Number(m[1]) : NaN;
+}
+
+const byNo = new Map(_wallReadyPresets.map((p) => [sampleNo(p.title), p]));
+
+// Requested custom order changes:
+// pos7<-10, pos8<-7, pos10<-12, pos11<-8, pos12<-11
+const remap = new Map([
+  [7, 10],
+  [8, 7],
+  [10, 12],
+  [11, 8],
+  [12, 11],
+]);
+
+const ordered = _wallReadyPresets.slice();
+for (let i = 0; i < ordered.length; i += 1) {
+  const pos = i + 1;
+  const src = remap.get(pos);
+  if (!src) continue;
+  const cand = byNo.get(src);
+  if (cand) ordered[i] = cand;
+}
+
+export const WALL_READY_PRESETS = ordered;
 
 export function buildPresetLines(kind) {
   const p = PRESET_STORE.find((x) => x.id === kind) || PRESET_STORE[0];
