@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { editorRef, model2dTransformRef } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
@@ -47,6 +47,7 @@ const route = useRoute();
 const router = useRouter();
 const isSettings = computed(() => route.path === "/settings");
 const isHome = computed(() => route.path === "/");
+const showStageOverlays = computed(() => route.name === "floorplan");
 
 const STORAGE_PROJECTS_KEY = "designkp_projects_v1";
 const projects = ref([]); // [{id,name,ts,state}]
@@ -519,6 +520,20 @@ function goSettings() {
   router.push("/settings");
 }
 
+
+watch(
+  () => route.path,
+  (path) => {
+    if (path !== "/settings") return;
+    // Settings page keeps global menus/toolbars visible, but submenus must start closed.
+    closeQuickMenus();
+    closeMenuPanel();
+    activeSubRail.value = null;
+    drawUiLock.value = false;
+  },
+  { immediate: true }
+);
+
 function setMenu(menuId) {
   activeMenu.value = menuId;
   openMenuPanel.value = menuId;
@@ -548,7 +563,7 @@ function onGlbModel2d(payload) {
 
 function toggleMenu(menuId, e) {
   // While drawing, keep submenus closed (AutoCAD-like).
-  if (drawUiLock.value) return;
+  if (drawUiLock.value && route.path === "/") return;
   if (openMenuPanel.value === menuId) {
     openMenuPanel.value = null;
     activeMenu.value = null;
@@ -803,7 +818,7 @@ onMounted(() => {
   _drawLockRaf = requestAnimationFrame(drawLockLoop);
 
   const onStagePointerDown = (ev) => {
-    if (drawUiLock.value) return;
+    if (drawUiLock.value && route.path === "/") return;
     const el = ev.target;
     if (!(el instanceof Element)) return;
     // Only when clicking into the 2D canvas.
@@ -1071,7 +1086,7 @@ onBeforeUnmount(() => {
 
       <section ref="stageEl" class="stage">
         <div class="stage__card">
-          <div v-if="isHome || isSettings" class="stageQuickBar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
+          <div v-if="showStageOverlays" class="stageQuickBar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
             <button class="iconbtn iconbtn--sm stageQuickBar__btn" title="تنظیمات" @click="goSettings">
               <img src="/icons/setting.png" alt="" />
             </button>
@@ -1179,7 +1194,7 @@ onBeforeUnmount(() => {
           </RouterView>
 
           <GlbViewerWidget
-            v-if="isHome"
+            v-if="showStageOverlays"
             src="/models/1_z1.glb"
             :model2d-transform="model2dTransformRef"
             :walls2d="walls3dSnapshot"
@@ -1192,7 +1207,7 @@ onBeforeUnmount(() => {
             @mouseleave="enable2dInput"
           />
 
-          <div v-if="isHome" class="stageBottom" aria-label="Stage Bottom Bar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
+          <div v-if="showStageOverlays" class="stageBottom" aria-label="Stage Bottom Bar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
             <button class="iconbtn iconbtn--sm" title="بزرگنمایی" @click="doZoomIn">
               <img src="/icons/zoom-in.png" alt="" />
             </button>
