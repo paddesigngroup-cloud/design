@@ -516,10 +516,6 @@ function goSettings() {
   closeQuickMenus();
   closeMenuPanel();
   activeSubRail.value = null;
-  if (route.path === "/settings") {
-    router.push("/");
-    return;
-  }
   router.push("/settings");
 }
 

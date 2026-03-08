@@ -142,6 +142,27 @@ function patchSelectedWallCoords(patch) {
   emit("update:selectedWallCoords", patch);
 }
 
+
+function patchCenterCoord(axis, value) {
+  if (!wallMetrics.value) return;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return;
+
+  const curCenter = wallCoordPoints.value?.center;
+  if (!curCenter) return;
+
+  const dx = (axis === "x") ? (num - curCenter.x) : 0;
+  const dy = (axis === "y") ? (num - curCenter.y) : 0;
+  if (dx === 0 && dy === 0) return;
+
+  patchSelectedWallCoords({
+    axCm: wallMetrics.value.a.x + dx,
+    ayCm: wallMetrics.value.a.y + dy,
+    bxCm: wallMetrics.value.b.x + dx,
+    byCm: wallMetrics.value.b.y + dy,
+  });
+}
+
 function v(x, z) {
   return { x, z };
 }
@@ -875,8 +896,8 @@ onBeforeUnmount(() => {
         <div class="glbWallAttrs__pointTitle">نقطه مرکز</div>
         <div class="glbWallAttrs__editRow">
           <div class="glbWallAttrs__coordGrid">
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.x" disabled />
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.y" disabled />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.x" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchCenterCoord('x', +$event.target.value)" />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchCenterCoord('y', +$event.target.value)" />
           </div>
         </div>
       </div>
