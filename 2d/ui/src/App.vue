@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { editorRef, model2dTransformRef } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
 import { useDialogService } from "./dialog_service.js";
+import { WALL_READY_PRESETS, buildPresetLines, getPresetIconWalls } from "./features/wall_preset_drag.js";
 
 const activeTool = ref("select");
 const snapOn = ref(true);
@@ -129,20 +130,8 @@ const designMenuTools = [
   { id: "column", icon: "/icons/column.png", title: "ستون", mapsToTool: null },
 ];
 
-const wallPresets = [
-  { id: "rect", title: "مستطیل", kind: "rect" },
-  { id: "l1", title: "L", kind: "l1" },
-  { id: "l2", title: "L2", kind: "l2" },
-  { id: "u1", title: "U", kind: "u1" },
-  { id: "u2", title: "U2", kind: "u2" },
-  { id: "c1", title: "C", kind: "c1" },
-  { id: "c2", title: "C2", kind: "c2" },
-  { id: "diag1", title: "مورب", kind: "diag1" },
-  { id: "diag2", title: "مورب2", kind: "diag2" },
-  { id: "oct1", title: "۸ضلعی", kind: "oct1" },
-  { id: "oct2", title: "۸ضلعی2", kind: "oct2" },
-  { id: "mix1", title: "ترکیبی", kind: "mix1" },
-];
+const wallPresets = WALL_READY_PRESETS;
+const presetDrag = ref({ active: false, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false });
 const snapMenuItems = [
   { id: "corner", title: "گوشه ها", icon: "/icons/corner_point.png" },
   { id: "mid", title: "وسط ضلع", icon: "/icons/midpoint.png" },
@@ -283,6 +272,29 @@ function updateSelectedWallCoords(patch) {
   if (Number.isFinite(Number(patch?.bxCm))) payload.bxMm = toMm(patch.bxCm);
   if (Number.isFinite(Number(patch?.byCm))) payload.byMm = toMm(patch.byCm);
   editorRef.value?.setSelectedWallCoords?.(payload);
+}
+
+
+async function doCopyWallsJson() {
+  const full = editorRef.value?.getState?.();
+  const nodes = Array.isArray(full?.graphSnap?.nodes) ? full.graphSnap.nodes : [];
+  const walls = Array.isArray(full?.graphSnap?.walls) ? full.graphSnap.walls : [];
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    unit: "mm",
+    wallsCount: walls.length,
+    nodesCount: nodes.length,
+    nodes,
+    walls,
+  };
+  const text = JSON.stringify(payload, null, 2);
+
+  try {
+    await navigator.clipboard.writeText(text);
+    showAlert("JSON دیوارها کپی شد. لطفا برای من ارسال کنید.", { title: "کپی موفق" });
+  } catch (_) {
+    await showPrompt("کپی خودکار ممکن نبود. متن زیر را دستی کپی کنید:", text, { title: "کپی JSON دیوارها" });
+  }
 }
 
 function toggleQuickMenu(menuId) {
@@ -587,6 +599,53 @@ function onGlbModel2d(payload) {
   editorRef.value?.setModel2dLines?.(lines, payload?.opts || null);
 }
 
+function startWallPresetDrag(ev, preset) {
+  if (!preset || !ev?.isPrimary) return;
+  presetDrag.value = {
+    active: true,
+    preset,
+    clientX: ev.clientX,
+    clientY: ev.clientY,
+    startX: ev.clientX,
+    startY: ev.clientY,
+    enteredStage: false,
+  };
+  disable2dInput();
+  window.addEventListener("pointermove", onPresetPointerMove);
+  window.addEventListener("pointerup", onPresetPointerUp, { once: true });
+}
+
+function onPresetPointerMove(ev) {
+  if (!presetDrag.value.active) return;
+  const stageRect = stageEl.value?.getBoundingClientRect();
+  const inStage = !!stageRect
+    && ev.clientX >= stageRect.left && ev.clientX <= stageRect.right
+    && ev.clientY >= stageRect.top && ev.clientY <= stageRect.bottom;
+  presetDrag.value = {
+    ...presetDrag.value,
+    clientX: ev.clientX,
+    clientY: ev.clientY,
+    enteredStage: presetDrag.value.enteredStage || inStage,
+  };
+}
+
+function onPresetPointerUp(ev) {
+  const stageRect = stageEl.value?.getBoundingClientRect();
+  const inStage = !!stageRect && ev.clientX >= stageRect.left && ev.clientX <= stageRect.right
+    && ev.clientY >= stageRect.top && ev.clientY <= stageRect.bottom;
+  const dragDx = ev.clientX - (presetDrag.value.startX || ev.clientX);
+  const dragDy = ev.clientY - (presetDrag.value.startY || ev.clientY);
+  const movedEnough = Math.hypot(dragDx, dragDy) >= 12;
+
+  if (inStage && movedEnough && presetDrag.value.enteredStage && presetDrag.value.preset) {
+    const lines = buildPresetLines(presetDrag.value.preset.kind);
+    editorRef.value?.placeWallPresetAtClient?.(lines, ev.clientX, ev.clientY);
+  }
+  presetDrag.value = { active: false, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false };
+  window.removeEventListener("pointermove", onPresetPointerMove);
+  enable2dInput();
+}
+
 function toggleMenu(menuId, e) {
   // While drawing, keep submenus closed (AutoCAD-like).
   if (drawUiLock.value && route.path === "/") return;
@@ -872,6 +931,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener("pointermove", onPresetPointerMove);
   if (window.__designkpDialogs) delete window.__designkpDialogs;
   window.removeEventListener("resize", scheduleShift);
   window.removeEventListener("resize", scheduleSubRailPosition);
@@ -1084,21 +1144,30 @@ onBeforeUnmount(() => {
                   type="button"
                   class="presetTile"
                   :title="p.title"
+                  @pointerdown.prevent="startWallPresetDrag($event, p)"
                 >
                   <svg class="presetTile__svg" viewBox="0 0 44 44" aria-hidden="true">
-                    <g fill="none" stroke="rgba(52,20,31,.72)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                      <path v-if="p.kind==='rect'" d="M10 10H34V34H10Z" />
-                      <path v-else-if="p.kind==='l1'" d="M12 10V34H34" />
-                      <path v-else-if="p.kind==='l2'" d="M10 12H28V34" />
-                      <path v-else-if="p.kind==='u1'" d="M12 10V34H34V10" />
-                      <path v-else-if="p.kind==='u2'" d="M10 14V34H34V14" />
-                      <path v-else-if="p.kind==='c1'" d="M34 12H16V32H34" />
-                      <path v-else-if="p.kind==='c2'" d="M30 10H14V34H30" />
-                      <path v-else-if="p.kind==='diag1'" d="M10 30L30 10H34V34H10Z" />
-                      <path v-else-if="p.kind==='diag2'" d="M10 10H34V28L28 34H10Z" />
-                      <path v-else-if="p.kind==='oct1'" d="M16 10H28L34 16V28L28 34H16L10 28V16Z" />
-                      <path v-else-if="p.kind==='oct2'" d="M18 10H26L34 18V26L26 34H18L10 26V18Z" />
-                      <path v-else d="M10 12H30V22H22V34H10Z" />
+                    <g fill="none" stroke="#111827" stroke-linecap="square" stroke-linejoin="miter">
+                      <line
+                        v-for="(w,idx) in getPresetIconWalls(p.kind)"
+                        :key="`edge-${p.id}-${idx}`"
+                        :x1="w.x1"
+                        :y1="w.y1"
+                        :x2="w.x2"
+                        :y2="w.y2"
+                        :stroke-width="w.sw + 1.5"
+                      />
+                    </g>
+                    <g fill="none" stroke="#A6A6A6" stroke-linecap="square" stroke-linejoin="miter">
+                      <line
+                        v-for="(w,idx) in getPresetIconWalls(p.kind)"
+                        :key="`fill-${p.id}-${idx}`"
+                        :x1="w.x1"
+                        :y1="w.y1"
+                        :x2="w.x2"
+                        :y2="w.y2"
+                        :stroke-width="w.sw"
+                      />
                     </g>
                   </svg>
                 </button>
@@ -1138,6 +1207,14 @@ onBeforeUnmount(() => {
               @click="toggleObjectAxes"
             >
               <img src="/icons/ax_point.png" alt="" />
+            </button>
+
+            <button
+              class="iconbtn iconbtn--sm stageQuickBar__btn"
+              title="کپی JSON دیوارها (تستی)"
+              @click="doCopyWallsJson"
+            >
+              <img src="/icons/copy.png" alt="" />
             </button>
 
             <div class="stageQuickBar__ddWrap">
@@ -1232,6 +1309,38 @@ onBeforeUnmount(() => {
               <component :is="Component" />
             </KeepAlive>
           </RouterView>
+
+          <div
+            v-if="presetDrag.active"
+            class="presetDragGhost"
+            :style="{ left: `${presetDrag.clientX}px`, top: `${presetDrag.clientY}px` }"
+            aria-hidden="true"
+          >
+            <svg class="presetDragGhost__svg" viewBox="0 0 44 44">
+              <g fill="none" stroke="#111827" stroke-linecap="square" stroke-linejoin="miter">
+                <line
+                  v-for="(w,idx) in getPresetIconWalls(presetDrag.preset?.kind)"
+                  :key="`ghost-edge-${idx}`"
+                  :x1="w.x1"
+                  :y1="w.y1"
+                  :x2="w.x2"
+                  :y2="w.y2"
+                  :stroke-width="w.sw + 1.5"
+                />
+              </g>
+              <g fill="none" stroke="#A6A6A6" stroke-linecap="square" stroke-linejoin="miter">
+                <line
+                  v-for="(w,idx) in getPresetIconWalls(presetDrag.preset?.kind)"
+                  :key="`ghost-fill-${idx}`"
+                  :x1="w.x1"
+                  :y1="w.y1"
+                  :x2="w.x2"
+                  :y2="w.y2"
+                  :stroke-width="w.sw"
+                />
+              </g>
+            </svg>
+          </div>
 
           <GlbViewerWidget
             v-if="showStageOverlays"

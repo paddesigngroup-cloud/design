@@ -1599,6 +1599,128 @@ function clearModel2dLines(recordUndo = true) {
   });
 }
 
+function placeWallPresetAtClient(lines, clientX, clientY, recordUndo = true) {
+  if (!Array.isArray(lines) || lines.length === 0 || !isFinite(clientX) || !isFinite(clientY)) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const sx = clientX - rect.left;
+  const sy = clientY - rect.top;
+  const centerWorld = screenToWorld(sx, sy);
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const l of lines) {
+    const vals = [l?.ax, l?.bx];
+    const yvals = [l?.ay, l?.by];
+    for (const v of vals) {
+      const n = Number(v);
+      if (!isFinite(n)) continue;
+      if (n < minX) minX = n;
+      if (n > maxX) maxX = n;
+    }
+    for (const v of yvals) {
+      const n = Number(v);
+      if (!isFinite(n)) continue;
+      if (n < minY) minY = n;
+      if (n > maxY) maxY = n;
+    }
+  }
+  if (!isFinite(minX) || !isFinite(maxX) || !isFinite(minY) || !isFinite(maxY)) return;
+
+  const cx = (minX + maxX) * 0.5;
+  const cy = (minY + maxY) * 0.5;
+
+  const apply = () => {
+    let firstWallId = null;
+    for (const l of lines) {
+      const ax = Number(l?.ax) - cx + centerWorld.x;
+      const ay = Number(l?.ay) - cy + centerWorld.y;
+      const bx = Number(l?.bx) - cx + centerWorld.x;
+      const by = Number(l?.by) - cy + centerWorld.y;
+      if (!isFinite(ax) || !isFinite(ay) || !isFinite(bx) || !isFinite(by)) continue;
+      const thickness = (typeof l?.thickness === "number" && isFinite(l.thickness) && l.thickness > 0)
+        ? l.thickness
+        : Math.max(1, state.wallThicknessMm || 120);
+      const wallName = (typeof l?.name === "string" && l.name) ? l.name : "";
+      const w = graph.addWallByPoints(ax, ay, bx, by, thickness, wallName, 1);
+      if (w) {
+        w.heightMm = Math.max(1, Number(state.wallHeightMm) || 3000);
+        w.color3d = (typeof state.wall3dColor === "string" && state.wall3dColor)
+          ? state.wall3dColor
+          : "#C7CCD1";
+      }
+      if (w && !firstWallId) firstWallId = w.id;
+    }
+
+    graph.mergeCloseNodes(1);
+    clearGroupSelection();
+    selectedWallId = firstWallId;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    selectedModelOutline = false;
+    hoverModelOutline = false;
+  };
+
+  if (!recordUndo) {
+    apply();
+    return;
+  }
+  undo.runAction(() => {
+    apply();
+  });
+}
+
+function placeModel2dPresetAtClient(lines, clientX, clientY, recordUndo = true) {
+  if (!Array.isArray(lines) || lines.length === 0 || !isFinite(clientX) || !isFinite(clientY)) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const sx = clientX - rect.left;
+  const sy = clientY - rect.top;
+  const centerWorld = screenToWorld(sx, sy);
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const l of lines) {
+    const vals = [l?.ax, l?.bx];
+    const yvals = [l?.ay, l?.by];
+    for (const v of vals) {
+      const n = Number(v);
+      if (!isFinite(n)) continue;
+      if (n < minX) minX = n;
+      if (n > maxX) maxX = n;
+    }
+    for (const v of yvals) {
+      const n = Number(v);
+      if (!isFinite(n)) continue;
+      if (n < minY) minY = n;
+      if (n > maxY) maxY = n;
+    }
+  }
+  if (!isFinite(minX) || !isFinite(maxX) || !isFinite(minY) || !isFinite(maxY)) return;
+
+  const cx = (minX + maxX) * 0.5;
+  const cy = (minY + maxY) * 0.5;
+  const shifted = lines.map((l) => ({
+    ax: Number(l.ax) - cx + centerWorld.x,
+    ay: Number(l.ay) - cy + centerWorld.y,
+    bx: Number(l.bx) - cx + centerWorld.x,
+    by: Number(l.by) - cy + centerWorld.y,
+  }));
+
+  setModel2dLines(shifted, null, recordUndo);
+  clearGroupSelection();
+  selectedWallId = null;
+  selectedHiddenId = null;
+  selectedDimId = null;
+  selectedModelOutline = true;
+  hoverModelOutline = true;
+  state.showObjectAxes = true;
+}
+
 function addRectModel2dPreset({ widthMm = 900, heightMm = 550, center = null } = {}, recordUndo = true) {
   const w = Math.max(10, Number(widthMm) || 900);
   const h = Math.max(10, Number(heightMm) || 550);
@@ -5518,6 +5640,8 @@ return {
   setModel2dLines,
   clearModel2dLines,
   addRectModel2dPreset,
+  placeModel2dPresetAtClient,
+  placeWallPresetAtClient,
   setUiCursorMode,
 
   undo: () => { if (dimEditor.active) closeDimEditor(true); undo.undo(); },
