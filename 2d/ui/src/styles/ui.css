@@ -981,6 +981,10 @@ textarea {
   background: #fff;
   box-shadow: 0 1px 3px rgba(11, 34, 48, 0.25);
 }
+.snapToggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .stageQuickDrop--steps {
   min-width: 190px;
 }

@@ -1151,7 +1151,7 @@ onBeforeUnmount(() => {
               </button>
               <div v-if="quickMenuOpen === 'snaps'" class="stageQuickDrop">
                 <div class="stageQuickDrop__head">
-                  <span>Snap</span>
+                  <span>اسنپ</span>
                   <button type="button" class="stageQuickDrop__headBtn" @click="toggleSnapMaster">
                     {{ snapOn ? "خاموش" : "روشن" }}
                   </button>
@@ -1193,26 +1193,36 @@ onBeforeUnmount(() => {
                     {{ stepDrawEnabled ? "خاموش" : "روشن" }}
                   </button>
                 </div>
-                <button
-                  type="button"
-                  class="stepModeBtn"
-                  :class="{ 'is-active': stepDrawEnabled && stepDrawMode === 'line' }"
-                  :disabled="!stepDrawEnabled"
-                  @click="setStepMode('line')"
-                >
-                  <img src="/icons/step_line.png" alt="" />
-                  <span>رسم خط</span>
-                </button>
-                <button
-                  type="button"
-                  class="stepModeBtn"
-                  :class="{ 'is-active': stepDrawEnabled && stepDrawMode === 'degree' }"
-                  :disabled="!stepDrawEnabled"
-                  @click="setStepMode('degree')"
-                >
-                  <img src="/icons/step_degree.png" alt="" />
-                  <span>رسم زاویه ای</span>
-                </button>
+                <div class="stageQuickDrop__row">
+                  <div class="stageQuickDrop__label">
+                    <img src="/icons/step_line.png" alt="" />
+                    <span>رسم خط</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="snapToggle"
+                    :class="{ 'is-on': stepDrawEnabled && stepDrawMode === 'line' }"
+                    :disabled="!stepDrawEnabled"
+                    @click="setStepMode('line')"
+                  >
+                    <span class="snapToggle__knob"></span>
+                  </button>
+                </div>
+                <div class="stageQuickDrop__row">
+                  <div class="stageQuickDrop__label">
+                    <img src="/icons/step_degree.png" alt="" />
+                    <span>رسم زاویه ای</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="snapToggle"
+                    :class="{ 'is-on': stepDrawEnabled && stepDrawMode === 'degree' }"
+                    :disabled="!stepDrawEnabled"
+                    @click="setStepMode('degree')"
+                  >
+                    <span class="snapToggle__knob"></span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

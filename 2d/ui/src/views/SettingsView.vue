@@ -216,7 +216,7 @@ async function handleSaveSettings() {
     </div>
 
     <div class="panel">
-      <div class="panel__title">نمایش و Snap</div>
+      <div class="panel__title">نمایش و اسنپ</div>
       <div class="row">
         <label class="label">نمایش دایمنشن ها</label>
         <label style="display:flex; gap:10px; align-items:center;">
@@ -240,7 +240,7 @@ async function handleSaveSettings() {
         </label>
       </div>
       <div class="row">
-        <label class="label">Snap</label>
+        <label class="label">اسنپ</label>
         <label style="display:flex; gap:10px; align-items:center;">
           <input
             type="checkbox"
@@ -251,7 +251,7 @@ async function handleSaveSettings() {
         </label>
       </div>
       <div class="row">
-        <label class="label">Snap گوشه</label>
+        <label class="label">اسنپ گوشه</label>
         <label style="display:flex; gap:10px; align-items:center;">
           <input
             type="checkbox"
@@ -262,7 +262,7 @@ async function handleSaveSettings() {
         </label>
       </div>
       <div class="row">
-        <label class="label">Snap وسط ضلع</label>
+        <label class="label">اسنپ وسط ضلع</label>
         <label style="display:flex; gap:10px; align-items:center;">
           <input
             type="checkbox"
@@ -273,7 +273,7 @@ async function handleSaveSettings() {
         </label>
       </div>
       <div class="row">
-        <label class="label">Snap آکس وسط</label>
+        <label class="label">اسنپ آکس وسط</label>
         <label style="display:flex; gap:10px; align-items:center;">
           <input
             type="checkbox"
@@ -284,7 +284,7 @@ async function handleSaveSettings() {
         </label>
       </div>
       <div class="row">
-        <label class="label">Snap لبه</label>
+        <label class="label">اسنپ لبه</label>
         <label style="display:flex; gap:10px; align-items:center;">
           <input
             type="checkbox"
@@ -295,7 +295,7 @@ async function handleSaveSettings() {
         </label>
       </div>
       <div class="row">
-        <label class="label">Snap مغناطیسی دیوار</label>
+        <label class="label">اسنپ مغناطیسی دیوار</label>
         <label style="display:flex; gap:10px; align-items:center;">
           <input
             type="checkbox"
