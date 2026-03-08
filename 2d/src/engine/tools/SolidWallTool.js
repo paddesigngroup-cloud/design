@@ -104,6 +104,15 @@ export class SolidWallTool {
   }
 
   stopChaining() {
+    const pendingNodeId = this.pendingStartNodeId;
+    if (pendingNodeId) {
+      const linkedWalls = this.graph.nodeToWalls.get(pendingNodeId);
+      if (linkedWalls && linkedWalls.size === 0) {
+        this.graph.nodeToWalls.delete(pendingNodeId);
+        this.graph.nodes.delete(pendingNodeId);
+      }
+    }
+
     this.pendingStartNodeId = null;
     this.pendingStartPos = null;
     this.previewEndPos = null;
