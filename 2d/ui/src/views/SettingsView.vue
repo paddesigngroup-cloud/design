@@ -26,10 +26,12 @@ const model = reactive({
 
   snapOn: true,
   showDimensions: true,
+  stepDrawEnabled: true,
   snapCornerEnabled: true,
   snapMidEnabled: true,
   snapCenterEnabled: true,
   snapEdgeEnabled: true,
+  wallMagnetEnabled: true,
 
   // Colors
   bgColor: "#FFFFFF",
@@ -227,6 +229,17 @@ async function handleSaveSettings() {
         </label>
       </div>
       <div class="row">
+        <label class="label">رسم گام به گام</label>
+        <label style="display:flex; gap:10px; align-items:center;">
+          <input
+            type="checkbox"
+            :checked="!!model.stepDrawEnabled"
+            @change="applyPatch({ stepDrawEnabled: !!$event.target.checked })"
+          />
+          <span style="font-size:13px; color:#111827;">فعال</span>
+        </label>
+      </div>
+      <div class="row">
         <label class="label">Snap</label>
         <label style="display:flex; gap:10px; align-items:center;">
           <input
@@ -277,6 +290,17 @@ async function handleSaveSettings() {
             type="checkbox"
             :checked="!!model.snapEdgeEnabled"
             @change="applyPatch({ snapEdgeEnabled: !!$event.target.checked })"
+          />
+          <span style="font-size:13px; color:#111827;">فعال</span>
+        </label>
+      </div>
+      <div class="row">
+        <label class="label">Snap مغناطیسی دیوار</label>
+        <label style="display:flex; gap:10px; align-items:center;">
+          <input
+            type="checkbox"
+            :checked="!!model.wallMagnetEnabled"
+            @change="applyPatch({ wallMagnetEnabled: !!$event.target.checked })"
           />
           <span style="font-size:13px; color:#111827;">فعال</span>
         </label>

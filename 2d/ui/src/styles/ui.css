@@ -1008,6 +1008,11 @@ textarea {
   border-color: rgba(118, 45, 71, 0.28);
 }
 
+.stepModeBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .stageBottom {
   position: absolute;
   left: 50%;

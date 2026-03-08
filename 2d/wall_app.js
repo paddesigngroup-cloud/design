@@ -127,8 +127,10 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   snapMidEnabled: true,
   snapCenterEnabled: true,
   snapEdgeEnabled: true,
+  wallMagnetEnabled: true,
   // Placeholder for staged drawing mode (UI state).
   stepDrawMode: "line",
+  stepDrawEnabled: true,
 
   meterDivisions: 10,
   majorEvery: 10,
@@ -3619,6 +3621,7 @@ const tool = new SolidWallTool({
   snapTolMm: 30,
   startIndex: 0,
 });
+tool.snapEnabled = state.wallMagnetEnabled !== false;
 
 const hiddenTool = new HiddenWallTool({
   graph: hiddenGraph,
@@ -4898,7 +4901,10 @@ function onWindowKeyDown(e) {
 
   if (state.activeTool === "dim") dimTool.onKeyDown(e);
   else if (state.activeTool === "hidden") hiddenTool.onKeyDown(e);
-  else tool.onKeyDown(e);
+  else {
+    tool.onKeyDown(e);
+    state.wallMagnetEnabled = !!tool.snapEnabled;
+  }
 
   if (key === "Escape") {
     if (boxSelect.active) {
@@ -5065,6 +5071,7 @@ function setActiveTool(name) {
   dimTool.cancel();
 
   state.activeTool = next;
+  if (next === "wall") tool.snapEnabled = state.wallMagnetEnabled !== false;
   _ui.updateToolButtons();
   updateCanvasCursor();
   saveSettings();
@@ -5167,6 +5174,10 @@ function setState(patch) {
   if (typeof patch.wall3dColor === "string" && patch.wall3dColor) {
     state.wall3dColor = patch.wall3dColor;
     tool.defaultColor = patch.wall3dColor;
+  }
+  if (typeof patch.wallMagnetEnabled === "boolean") {
+    state.wallMagnetEnabled = patch.wallMagnetEnabled;
+    tool.snapEnabled = patch.wallMagnetEnabled;
   }
 
   _ui.updateToolButtons();

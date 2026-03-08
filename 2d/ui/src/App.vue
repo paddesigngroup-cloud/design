@@ -17,11 +17,13 @@ const walls3dSnapshot = ref({
   state: { wallHeightMm: 2800 },
 });
 const stepDrawMode = ref("line"); // "line" | "degree"
+const stepDrawEnabled = ref(true);
 const snapModes = ref({
   corner: true,
   mid: true,
   center: true,
   edge: true,
+  wallMagnet: true,
 });
 const quickMenuOpen = ref(null); // "snaps" | "steps" | null
 const { dialogState, alert: showAlert, confirm: showConfirm, prompt: showPrompt, resolveConfirm, close: closeDialog } = useDialogService();
@@ -146,6 +148,7 @@ const snapMenuItems = [
   { id: "mid", title: "وسط ضلع", icon: "/icons/midpoint.png" },
   { id: "center", title: "آکس وسط", icon: "/icons/ax_point.png" },
   { id: "edge", title: "لبه", icon: "/icons/edge_snap.png" },
+  { id: "wallMagnet", title: "مغناطیسی دیوار", icon: "/icons/clicker.png" },
 ];
 
 function applyEditorPatch(patch) {
@@ -183,11 +186,21 @@ function syncQuickStateFromEditor() {
   };
 
   if (!wallStyleDraftTouched.value) {
-    wallStyleDraft.value = {
-      thicknessCm: (Number.isFinite(Number(s?.wallThicknessMm)) ? Number(s.wallThicknessMm) : 120) / 10,
-      heightCm: (Number.isFinite(Number(s?.wallHeightMm)) ? Number(s.wallHeightMm) : 3000) / 10,
-      color: (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1",
-    };
+    const defaultThicknessCm = (Number.isFinite(Number(s?.wallThicknessMm)) ? Number(s.wallThicknessMm) : 120) / 10;
+    const defaultHeightCm = (Number.isFinite(Number(s?.wallHeightMm)) ? Number(s.wallHeightMm) : 3000) / 10;
+    const defaultColor = (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1";
+
+    wallStyleDraft.value = selectedWall
+      ? {
+          thicknessCm: (Number(selectedWall.thickness) || 120) / 10,
+          heightCm: (Number(selectedWall.heightMm) || Number(s?.wallHeightMm) || 3000) / 10,
+          color: (typeof selectedWall.color3d === "string" && selectedWall.color3d) ? selectedWall.color3d : defaultColor,
+        }
+      : {
+          thicknessCm: defaultThicknessCm,
+          heightCm: defaultHeightCm,
+          color: defaultColor,
+        };
   }
 
   if (selectedWall) {
@@ -213,11 +226,13 @@ function syncQuickStateFromEditor() {
     selectedWallStyle.value = null;
   }
   stepDrawMode.value = (s.stepDrawMode === "degree") ? "degree" : "line";
+  stepDrawEnabled.value = s.stepDrawEnabled !== false;
   snapModes.value = {
     corner: s.snapCornerEnabled !== false,
     mid: s.snapMidEnabled !== false,
     center: s.snapCenterEnabled !== false,
     edge: s.snapEdgeEnabled !== false,
+    wallMagnet: s.wallMagnetEnabled !== false,
   };
 }
 
@@ -305,13 +320,14 @@ function toggleSnapMaster() {
   const next = !snapOn.value;
   snapOn.value = next;
   editorRef.value?.setSnapOn?.(next);
-  snapModes.value = { corner: next, mid: next, center: next, edge: next };
+  snapModes.value = { corner: next, mid: next, center: next, edge: next, wallMagnet: next };
   applyEditorPatch({
     snapOn: next,
     snapCornerEnabled: next,
     snapMidEnabled: next,
     snapCenterEnabled: next,
     snapEdgeEnabled: next,
+    wallMagnetEnabled: next,
   });
 }
 
@@ -324,13 +340,23 @@ function toggleSnapMode(id) {
   else if (id === "mid") patch.snapMidEnabled = next;
   else if (id === "center") patch.snapCenterEnabled = next;
   else if (id === "edge") patch.snapEdgeEnabled = next;
+  else if (id === "wallMagnet") patch.wallMagnetEnabled = next;
   applyEditorPatch(patch);
 }
 
+function toggleStepMaster() {
+  closeMenuPanel();
+  const next = !stepDrawEnabled.value;
+  stepDrawEnabled.value = next;
+  if (!next) stepDrawMode.value = "line";
+  applyEditorPatch({ stepDrawEnabled: next, stepDrawMode: stepDrawMode.value });
+}
+
 function setStepMode(mode) {
+  if (!stepDrawEnabled.value) return;
   const m = mode === "degree" ? "degree" : "line";
   stepDrawMode.value = m;
-  applyEditorPatch({ stepDrawMode: m });
+  applyEditorPatch({ stepDrawMode: m, stepDrawEnabled: true });
   closeQuickMenus();
 }
 
@@ -961,7 +987,7 @@ onBeforeUnmount(() => {
     <div ref="mainEl" class="main">
       <!-- Slim left-of-submenu rail (always visible; attaches to submenu when open, else to main menu icon) -->
       <aside
-        v-if="isHome && shouldShowSubRail"
+        v-if="shouldShowSubRail"
         class="subRail"
         :class="subRailAttach === 'panel' ? 'subRail--panel' : 'subRail--main'"
         aria-label="Sub Rail"
@@ -984,7 +1010,7 @@ onBeforeUnmount(() => {
       <!-- Right-side menu content opens as an overlay above the 2D stage (does not push anything). -->
       <aside
         ref="menuPanelEl"
-        v-if="isHome && openMenuPanel"
+        v-if="openMenuPanel"
         class="menuPanel"
         :class="{ 'menuPanel--auto': openMenuPanel === 'menu' && openMode === 'menu' }"
         aria-label="Menu Panel"
@@ -1087,14 +1113,10 @@ onBeforeUnmount(() => {
       <section ref="stageEl" class="stage">
         <div class="stage__card">
           <div v-if="showStageOverlays" class="stageQuickBar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
-            <button class="iconbtn iconbtn--sm stageQuickBar__btn" title="تنظیمات" @click="goSettings">
-              <img src="/icons/setting.png" alt="" />
-            </button>
-
             <button
               class="iconbtn iconbtn--sm stageQuickBar__btn"
               :class="{ 'is-active': showDimensions }"
-              title="نمایش دایمنشن"
+              title="نمایش اندازه گذاری"
               @click="toggleDimensions"
             >
               <img src="/icons/turn_dim.png" alt="" />
@@ -1103,7 +1125,7 @@ onBeforeUnmount(() => {
             <button
               class="iconbtn iconbtn--sm stageQuickBar__btn"
               :class="{ 'is-active': showOffsetWalls }"
-              title="نمایش آفست دیوار"
+              title="نمایش خط مخفی"
               @click="toggleOffsets"
             >
               <img src="/icons/turn_offset.png" alt="" />
@@ -1112,7 +1134,7 @@ onBeforeUnmount(() => {
             <button
               class="iconbtn iconbtn--sm stageQuickBar__btn"
               :class="{ 'is-active': showObjectAxes }"
-              title="محورها"
+              title="نمایش محور"
               @click="toggleObjectAxes"
             >
               <img src="/icons/ax_point.png" alt="" />
@@ -1121,8 +1143,8 @@ onBeforeUnmount(() => {
             <div class="stageQuickBar__ddWrap">
               <button
                 class="iconbtn iconbtn--sm stageQuickBar__btn"
-                :class="{ 'is-active': quickMenuOpen === 'snaps' }"
-                title="اسنپ ها"
+                :class="{ 'is-active': snapOn }"
+                title="نمایش اسنپ"
                 @click="toggleQuickMenu('snaps')"
               >
                 <img src="/icons/turn_snaps.png" alt="" />
@@ -1158,17 +1180,24 @@ onBeforeUnmount(() => {
             <div class="stageQuickBar__ddWrap">
               <button
                 class="iconbtn iconbtn--sm stageQuickBar__btn"
-                :class="{ 'is-active': quickMenuOpen === 'steps' }"
-                title="رسم مرحله ای"
+                :class="{ 'is-active': stepDrawEnabled }"
+                title="رسم گام یه گام"
                 @click="toggleQuickMenu('steps')"
               >
                 <img src="/icons/turn_steps.png" alt="" />
               </button>
               <div v-if="quickMenuOpen === 'steps'" class="stageQuickDrop stageQuickDrop--steps">
+                <div class="stageQuickDrop__head">
+                  <span>رسم گام به گام</span>
+                  <button type="button" class="stageQuickDrop__headBtn" @click="toggleStepMaster">
+                    {{ stepDrawEnabled ? "خاموش" : "روشن" }}
+                  </button>
+                </div>
                 <button
                   type="button"
                   class="stepModeBtn"
-                  :class="{ 'is-active': stepDrawMode === 'line' }"
+                  :class="{ 'is-active': stepDrawEnabled && stepDrawMode === 'line' }"
+                  :disabled="!stepDrawEnabled"
                   @click="setStepMode('line')"
                 >
                   <img src="/icons/step_line.png" alt="" />
@@ -1177,7 +1206,8 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="stepModeBtn"
-                  :class="{ 'is-active': stepDrawMode === 'degree' }"
+                  :class="{ 'is-active': stepDrawEnabled && stepDrawMode === 'degree' }"
+                  :disabled="!stepDrawEnabled"
                   @click="setStepMode('degree')"
                 >
                   <img src="/icons/step_degree.png" alt="" />
@@ -1224,7 +1254,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <div v-if="isHome" class="toolDock" aria-label="Right Tool Dock">
+      <div class="toolDock" aria-label="Right Tool Dock">
         <nav class="toolRail" aria-label="Tools">
           <div class="toolRail__main" aria-label="Menu">
             <button
