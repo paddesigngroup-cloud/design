@@ -1075,7 +1075,7 @@ onBeforeUnmount(() => {
 
       <section ref="stageEl" class="stage">
         <div class="stage__card">
-          <div v-if="isHome" class="stageQuickBar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
+          <div v-if="isHome || isSettings" class="stageQuickBar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
             <button class="iconbtn iconbtn--sm stageQuickBar__btn" title="تنظیمات" @click="goSettings">
               <img src="/icons/setting.png" alt="" />
             </button>

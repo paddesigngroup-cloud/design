@@ -79,10 +79,9 @@ const wallMetrics = computed(() => {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const lengthMm = Math.hypot(dx, dy);
-  const fallbackHeight = Number(snapshot?.state?.wallHeightMm);
   const heightMm = Number.isFinite(Number(wall.heightMm))
     ? Number(wall.heightMm)
-    : (Number.isFinite(fallbackHeight) ? fallbackHeight : 2800);
+    : 2800;
 
   const mmToCm = (v) => (Math.round((v * 0.1) * 10) / 10);
 
@@ -95,6 +94,41 @@ const wallMetrics = computed(() => {
     b: { x: mmToCm(b.x), y: mmToCm(b.y) },
   };
 });
+
+const wallCoordPoints = computed(() => {
+  if (!wallMetrics.value) return null;
+  const a = wallMetrics.value.a;
+  const b = wallMetrics.value.b;
+
+  const aIsLeft =
+    (a.x < b.x) ||
+    (a.x === b.x && a.y <= b.y);
+
+  const leftKey = aIsLeft ? "a" : "b";
+  const rightKey = aIsLeft ? "b" : "a";
+  const left = aIsLeft ? a : b;
+  const right = aIsLeft ? b : a;
+
+  return {
+    leftKey,
+    rightKey,
+    left,
+    right,
+    center: {
+      x: Math.round(((a.x + b.x) * 0.5) * 10) / 10,
+      y: Math.round(((a.y + b.y) * 0.5) * 10) / 10,
+    },
+  };
+});
+
+function patchByPointKey(pointKey, axis, value) {
+  if (!Number.isFinite(value)) return;
+  if (pointKey === "a") {
+    patchSelectedWallCoords(axis === "x" ? { axCm: value } : { ayCm: value });
+  } else {
+    patchSelectedWallCoords(axis === "x" ? { bxCm: value } : { byCm: value });
+  }
+}
 
 
 function patchWallStyleDraft(patch) {
@@ -307,10 +341,7 @@ function rebuildWalls3d(snapshot) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const root = new THREE.Group();
   root.name = "walls2d-extruded";
-  const fallbackHeightMm = Number(snapshot?.state?.wallHeightMm);
-  const fallbackFillColor = (typeof snapshot?.state?.wall3dColor === "string" && snapshot.state.wall3dColor)
-    ? snapshot.state.wall3dColor
-    : "#C7CCD1";
+  const fallbackFillColor = "#C7CCD1";
 
   const jointGammaMap = buildJointGammaMap(walls, byId);
 
@@ -320,7 +351,7 @@ function rebuildWalls3d(snapshot) {
 
     const heightMm = Number.isFinite(Number(w?.heightMm))
       ? Number(w.heightMm)
-      : (Number.isFinite(fallbackHeightMm) ? fallbackHeightMm : 2800);
+      : 2800;
     const heightM = Math.max(0.1, heightMm * 0.001);
 
     const colorHex = (typeof w?.color3d === "string" && w.color3d)
@@ -767,75 +798,90 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div class="glbWallAttrs glbWallAttrs--panel" :style="attrsStyle" dir="rtl" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
-    <div class="menuPanel__title glbWallAttrs__title">صفات</div>
-    <div v-if="wallMetrics || isWallDrawing" class="glbWallAttrs__editor">
-      <label class="glbWallAttrs__editRow">
-        <span>طول (cm)</span>
-        <input
-          class="glbWallAttrs__input"
-          type="number"
-          min="1"
-          step="0.1"
-           :value="wallMetrics ? wallMetrics.lengthCm : (selectedWallStyle?.lengthCm || 0)"
-          :disabled="isGroupEditMode"
-          @input="patchWallStyleDraft({ lengthCm: +$event.target.value })"
-        />
-      </label>
-      <label class="glbWallAttrs__editRow">
-        <span>ضخامت (cm)</span>
-        <input
-          class="glbWallAttrs__input"
-          type="number"
-          min="0.1"
-          step="0.5"
-          :value="wallStyleDraft.thicknessCm"
-          @input="patchWallStyleDraft({ thicknessCm: +$event.target.value })"
-        />
-      </label>
-      <label class="glbWallAttrs__editRow">
-        <span>ارتفاع (cm)</span>
-        <input
-          class="glbWallAttrs__input"
-          type="number"
-          min="1"
-          step="1"
-          :value="wallStyleDraft.heightCm"
-          @input="patchWallStyleDraft({ heightCm: +$event.target.value })"
-        />
-      </label>
-      <label class="glbWallAttrs__editRow">
-        <span>رنگ دیوار</span>
-        <input
-          class="glbWallAttrs__color"
-          type="color"
-          :value="wallStyleDraft.color"
-          @input="patchWallStyleDraft({ color: $event.target.value })"
-        />
-      </label>
-      <div v-if="selectedWallStyle" class="menuPanel__hint">
-        <template v-if="isGroupEditMode">ویرایش گروهی {{ selectedWallCount }} دیوار فعال است (طول/مختصات غیرفعال).</template>
-        <template v-else>دیوار انتخابی: {{ selectedWallStyle.name || selectedWallStyle.id }}</template>
-      </div>
+  <div class="glbWallAttrs glbWallAttrs--panel" dir="rtl" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
+    <div class="glbWallAttrs__head">
+      <div class="menuPanel__title glbWallAttrs__title">صفات</div>
+      <div v-if="isGroupEditMode" class="glbWallAttrs__groupLabel">ویرایش گروهی</div>
     </div>
-    <template v-if="wallMetrics && !isGroupEditMode">
+    <div class="glbWallAttrs__sep"></div>
+
+    <template v-if="wallMetrics">
+      <div class="glbWallAttrs__editor">
+        <label class="glbWallAttrs__editRow">
+          <span>طول (cm)</span>
+          <input
+            class="glbWallAttrs__input"
+            type="number"
+            min="1"
+            step="0.1"
+            :value="isGroupEditMode ? '' : wallMetrics.lengthCm"
+            :disabled="isGroupEditMode"
+            @input="patchWallStyleDraft({ lengthCm: +$event.target.value })"
+          />
+        </label>
+        <label class="glbWallAttrs__editRow">
+          <span>ضخامت (cm)</span>
+          <input
+            class="glbWallAttrs__input"
+            type="number"
+            min="0.1"
+            step="0.5"
+            :value="wallStyleDraft.thicknessCm"
+            @input="patchWallStyleDraft({ thicknessCm: +$event.target.value })"
+          />
+        </label>
+        <label class="glbWallAttrs__editRow">
+          <span>ارتفاع (cm)</span>
+          <input
+            class="glbWallAttrs__input"
+            type="number"
+            min="1"
+            step="1"
+            :value="wallStyleDraft.heightCm"
+            @input="patchWallStyleDraft({ heightCm: +$event.target.value })"
+          />
+        </label>
+        <label class="glbWallAttrs__editRow">
+          <span>رنگ دیوار</span>
+          <input
+            class="glbWallAttrs__color"
+            type="color"
+            :value="wallStyleDraft.color"
+            @input="patchWallStyleDraft({ color: $event.target.value })"
+          />
+        </label>
+      </div>
+
+      <div class="glbWallAttrs__sep"></div>
+
       <div class="menuPanel__title glbWallAttrs__title glbWallAttrs__title--secondary">مختصات</div>
       <div class="glbWallAttrs__editor">
+        <div class="glbWallAttrs__pointTitle">نقطه پایین چپ</div>
         <div class="glbWallAttrs__editRow">
-          <span>A</span>
           <div class="glbWallAttrs__coordGrid">
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="wallMetrics.a.x" @input="patchSelectedWallCoords({ axCm: +$event.target.value })" />
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="wallMetrics.a.y" @input="patchSelectedWallCoords({ ayCm: +$event.target.value })" />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.left?.x" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.leftKey, 'x', +$event.target.value)" />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.left?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.leftKey, 'y', +$event.target.value)" />
           </div>
         </div>
+
+        <div class="glbWallAttrs__pointTitle">نقطه پایین راست</div>
         <div class="glbWallAttrs__editRow">
-          <span>B</span>
           <div class="glbWallAttrs__coordGrid">
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="wallMetrics.b.x" @input="patchSelectedWallCoords({ bxCm: +$event.target.value })" />
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="wallMetrics.b.y" @input="patchSelectedWallCoords({ byCm: +$event.target.value })" />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.right?.x" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.rightKey, 'x', +$event.target.value)" />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.right?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.rightKey, 'y', +$event.target.value)" />
+          </div>
+        </div>
+
+        <div class="glbWallAttrs__pointTitle">نقطه مرکز</div>
+        <div class="glbWallAttrs__editRow">
+          <div class="glbWallAttrs__coordGrid">
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.x" disabled />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.y" disabled />
           </div>
         </div>
       </div>
     </template>
+
+    <div v-else class="menuPanel__hint glbWallAttrs__hint--soft">ترسیم خود را انتخاب نمایید</div>
   </div>
 </template>

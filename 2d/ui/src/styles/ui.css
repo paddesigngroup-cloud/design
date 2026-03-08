@@ -790,11 +790,41 @@ textarea {
   color: var(--text);
   font-family: Vazirmatn, sans-serif;
 }
+.glbWallAttrs__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .glbWallAttrs__title {
-  margin-bottom: 8px;
+  margin-bottom: 0;
+  font-weight: 800;
+}
+.glbWallAttrs__groupLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(118, 45, 71, 0.82);
+  background: rgba(118, 45, 71, 0.12);
+  border: 1px solid rgba(118, 45, 71, 0.2);
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
 }
 .glbWallAttrs__title--secondary {
   margin-top: 2px;
+}
+.glbWallAttrs__sep {
+  height: 1px;
+  margin: 8px 8px 10px;
+  background: rgba(120, 130, 148, 0.35);
+}
+.glbWallAttrs__pointTitle {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
+.glbWallAttrs__hint--soft {
+  color: #94a3b8;
 }
 .glbWallAttrs__rows {
   display: flex;
