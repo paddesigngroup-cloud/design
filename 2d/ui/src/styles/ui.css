@@ -455,6 +455,7 @@ textarea {
   font-size: 12px;
   color: var(--text);
   opacity: 0.9;
+  text-align: center;
 }
 .designMenu__presets {
   display: grid;
@@ -800,7 +801,7 @@ textarea {
   position: absolute;
   top: 210px;
   left: 12px;
-  width: 260px;
+  width: 196px;
   z-index: 7;
   max-width: calc(100% - 24px);
 }
@@ -814,18 +815,20 @@ textarea {
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 12px 24px rgba(11, 34, 48, 0.1);
   backdrop-filter: blur(8px);
-  padding: 10px;
+  padding: 10px 6px;
   color: var(--text);
   font-family: Vazirmatn, sans-serif;
 }
 .glbWallAttrs__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 8px;
+  text-align: center;
 }
 .glbWallAttrs__title {
   margin-bottom: 0;
+  text-align: center;
 }
 .glbWallAttrs__groupLabel {
   font-size: 11px;
@@ -849,9 +852,11 @@ textarea {
   font-size: 11px;
   color: #64748b;
   margin-top: 2px;
+  text-align: center;
 }
 .glbWallAttrs__hint--soft {
   color: #94a3b8;
+  text-align: center;
 }
 .glbWallAttrs__rows {
   display: flex;
@@ -877,35 +882,50 @@ textarea {
 .glbWallAttrs__editor {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 6px;
   margin-bottom: 8px;
 }
 .glbWallAttrs__editRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 8px;
+  width: 100%;
   font-size: 11px;
 }
+.glbWallAttrs__editor--attrs .glbWallAttrs__editRow {
+  flex-direction: column;
+  gap: 4px;
+}
+.glbWallAttrs__editor--attrs .glbWallAttrs__editRow > span {
+  text-align: center;
+}
+.glbWallAttrs__editor--attrs .glbWallAttrs__input,
+.glbWallAttrs__editor--attrs .glbWallAttrs__color {
+  width: min(120px, 100%);
+}
 .glbWallAttrs__input {
-  width: 96px;
+  width: 76px;
   border: 1px solid rgba(11, 34, 48, 0.2);
   border-radius: 8px;
   padding: 4px 6px;
   font-size: 11px;
+  text-align: center;
 }
 .glbWallAttrs__color {
-  width: 96px;
+  width: 76px;
   height: 28px;
   border: 1px solid rgba(11, 34, 48, 0.2);
   border-radius: 8px;
   background: transparent;
+  margin-inline: auto;
 }
 .glbWallAttrs__coordGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
-  width: 196px;
+  width: 158px;
 }
 
 .stageQuickBar {

@@ -128,6 +128,7 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   snapCenterEnabled: true,
   snapEdgeEnabled: true,
   wallMagnetEnabled: true,
+  orthoEnabled: true,
   // Placeholder for staged drawing mode (UI state).
   stepDrawMode: "line",
   stepDrawEnabled: true,
@@ -757,7 +758,7 @@ function applyModelDrag(targetWorld) {
 
   let snapTx = 0;
   let snapTy = 0;
-  if (state.snapOn && (modelDrag.startOutline || []).length >= 2 && graph.walls.size > 0) {
+  if (state.snapOn && state.wallMagnetEnabled !== false && (modelDrag.startOutline || []).length >= 2 && graph.walls.size > 0) {
     const movedOutline = (modelDrag.startOutline || []).map((p) => ({ x: p.x + dx, y: p.y + dy }));
     const nearest = nearestWallToPoints(movedOutline);
     if (nearest && nearest.dist <= MODEL_WALL_SNAP_DIST_MM) {
@@ -3743,7 +3744,7 @@ const tool = new SolidWallTool({
   snapTolMm: 30,
   startIndex: 0,
 });
-tool.snapEnabled = state.wallMagnetEnabled !== false;
+tool.snapEnabled = state.orthoEnabled !== false;
 
 const hiddenTool = new HiddenWallTool({
   graph: hiddenGraph,
@@ -4320,7 +4321,13 @@ function onMouseDown(e) {
     };
     if (state.activeTool === "dim") dimTool.onPointerDown(ev, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld });
     else if (state.activeTool === "hidden") hiddenTool.onPointerDown(ev, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld });
-    else if (state.activeTool === "wall") tool.onPointerDown(ev);
+    else if (state.activeTool === "wall") {
+      tool.onPointerDown(ev, {
+        snapOn: state.snapOn,
+        wallMagnetEnabled: state.wallMagnetEnabled,
+      });
+      state.orthoEnabled = !!tool.snapEnabled;
+    }
     return;
   }
 
@@ -4469,7 +4476,13 @@ function onMouseDown(e) {
   if (state.activeTool === "wall" && tool.getStatus()?.isDrawing) {
     undo.runAction(() => {
       const beforeWalls = graph.walls.size;
-      tool.onPointerDown({ button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey });
+      tool.onPointerDown(
+        { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
+        {
+          snapOn: state.snapOn,
+          wallMagnetEnabled: state.wallMagnetEnabled,
+        }
+      );
       if (graph.walls.size !== beforeWalls) enforceLockedInsideLengths();
     });
     return;
@@ -4543,7 +4556,13 @@ function onMouseDown(e) {
   } else if (state.activeTool === "wall") {
     undo.runAction(() => {
       const beforeWalls = graph.walls.size;
-      tool.onPointerDown({ button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey });
+      tool.onPointerDown(
+        { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
+        {
+          snapOn: state.snapOn,
+          wallMagnetEnabled: state.wallMagnetEnabled,
+        }
+      );
       if (graph.walls.size !== beforeWalls) enforceLockedInsideLengths();
     });
   }
@@ -4829,7 +4848,13 @@ function onWindowMouseMove(e) {
 
   if (state.activeTool === "dim") dimTool.onPointerMove({ offsetX: ox, offsetY: oy, shiftKey: e.shiftKey }, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld });
   else if (state.activeTool === "hidden") hiddenTool.onPointerMove({ offsetX: ox, offsetY: oy, shiftKey: e.shiftKey }, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld });
-  else tool.onPointerMove({ offsetX: ox, offsetY: oy, shiftKey: e.shiftKey });
+  else tool.onPointerMove(
+    { offsetX: ox, offsetY: oy, shiftKey: e.shiftKey },
+    {
+      snapOn: state.snapOn,
+      wallMagnetEnabled: state.wallMagnetEnabled,
+    }
+  );
 
   const axisHoverHit = inside ? hitTestObjectAxesScreen(ox, oy) : null;
   hoverObjectAxis = axisHoverHit ? axisHoverHit.axis : null;
@@ -5025,7 +5050,7 @@ function onWindowKeyDown(e) {
   else if (state.activeTool === "hidden") hiddenTool.onKeyDown(e);
   else {
     tool.onKeyDown(e);
-    state.wallMagnetEnabled = !!tool.snapEnabled;
+    state.orthoEnabled = !!tool.snapEnabled;
   }
 
   if (key === "Escape") {
@@ -5193,7 +5218,7 @@ function setActiveTool(name) {
   dimTool.cancel();
 
   state.activeTool = next;
-  if (next === "wall") tool.snapEnabled = state.wallMagnetEnabled !== false;
+  if (next === "wall") tool.snapEnabled = state.orthoEnabled !== false;
   _ui.updateToolButtons();
   updateCanvasCursor();
   saveSettings();
@@ -5299,7 +5324,10 @@ function setState(patch) {
   }
   if (typeof patch.wallMagnetEnabled === "boolean") {
     state.wallMagnetEnabled = patch.wallMagnetEnabled;
-    tool.snapEnabled = patch.wallMagnetEnabled;
+  }
+  if (typeof patch.orthoEnabled === "boolean") {
+    state.orthoEnabled = patch.orthoEnabled;
+    tool.snapEnabled = patch.orthoEnabled;
   }
 
   _ui.updateToolButtons();

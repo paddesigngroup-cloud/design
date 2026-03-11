@@ -25,6 +25,7 @@ const snapModes = ref({
   center: true,
   edge: true,
   wallMagnet: true,
+  ortho: true,
 });
 const quickMenuOpen = ref(null); // "snaps" | "steps" | null
 const { dialogState, alert: showAlert, confirm: showConfirm, prompt: showPrompt, resolveConfirm, close: closeDialog } = useDialogService();
@@ -138,6 +139,7 @@ const snapMenuItems = [
   { id: "center", title: "آکس وسط", icon: "/icons/ax_point.png" },
   { id: "edge", title: "لبه", icon: "/icons/edge_snap.png" },
   { id: "wallMagnet", title: "مغناطیسی دیوار", icon: "/icons/clicker.png" },
+  { id: "ortho", title: "راستا (راست کلیک)", icon: "/icons/step_degree.png" },
 ];
 
 function applyEditorPatch(patch) {
@@ -222,6 +224,7 @@ function syncQuickStateFromEditor() {
     center: s.snapCenterEnabled !== false,
     edge: s.snapEdgeEnabled !== false,
     wallMagnet: s.wallMagnetEnabled !== false,
+    ortho: s.orthoEnabled !== false,
   };
 }
 
@@ -332,7 +335,7 @@ function toggleSnapMaster() {
   const next = !snapOn.value;
   snapOn.value = next;
   editorRef.value?.setSnapOn?.(next);
-  snapModes.value = { corner: next, mid: next, center: next, edge: next, wallMagnet: next };
+  snapModes.value = { corner: next, mid: next, center: next, edge: next, wallMagnet: next, ortho: next };
   applyEditorPatch({
     snapOn: next,
     snapCornerEnabled: next,
@@ -340,6 +343,7 @@ function toggleSnapMaster() {
     snapCenterEnabled: next,
     snapEdgeEnabled: next,
     wallMagnetEnabled: next,
+    orthoEnabled: next,
   });
 }
 
@@ -353,6 +357,7 @@ function toggleSnapMode(id) {
   else if (id === "center") patch.snapCenterEnabled = next;
   else if (id === "edge") patch.snapEdgeEnabled = next;
   else if (id === "wallMagnet") patch.wallMagnetEnabled = next;
+  else if (id === "ortho") patch.orthoEnabled = next;
   applyEditorPatch(patch);
 }
 
@@ -1136,7 +1141,7 @@ onBeforeUnmount(() => {
 
               <div class="designMenu__sep" role="separator"></div>
 
-              <div class="designMenu__presetsHead">مدل های آماده دیوار</div>
+              <div class="designMenu__presetsHead">مدل های دیوار</div>
               <div class="designMenu__presets" aria-label="Wall Presets">
                 <button
                   v-for="p in wallPresets"
@@ -1209,6 +1214,7 @@ onBeforeUnmount(() => {
               <img src="/icons/ax_point.png" alt="" />
             </button>
 
+            <!--
             <button
               class="iconbtn iconbtn--sm stageQuickBar__btn"
               title="کپی JSON دیوارها (تستی)"
@@ -1216,6 +1222,7 @@ onBeforeUnmount(() => {
             >
               <img src="/icons/copy.png" alt="" />
             </button>
+            -->
 
             <div class="stageQuickBar__ddWrap">
               <button
@@ -1230,7 +1237,7 @@ onBeforeUnmount(() => {
                 <div class="stageQuickDrop__head">
                   <span>اسنپ</span>
                   <button type="button" class="stageQuickDrop__headBtn" @click="toggleSnapMaster">
-                    {{ snapOn ? "خاموش" : "روشن" }}
+                    {{ snapOn ? "خاموش کن" : "روشن کن" }}
                   </button>
                 </div>
                 <div
@@ -1267,7 +1274,7 @@ onBeforeUnmount(() => {
                 <div class="stageQuickDrop__head">
                   <span>رسم گام به گام</span>
                   <button type="button" class="stageQuickDrop__headBtn" @click="toggleStepMaster">
-                    {{ stepDrawEnabled ? "خاموش" : "روشن" }}
+                    {{ stepDrawEnabled ? "خاموش کن" : "روشن کن" }}
                   </button>
                 </div>
                 <div class="stageQuickDrop__row">

@@ -283,26 +283,13 @@ function sampleNo(title) {
 
 const byNo = new Map(_wallReadyPresets.map((p) => [sampleNo(p.title), p]));
 
-// Requested custom order changes:
-// pos7<-10, pos8<-7, pos10<-12, pos11<-8, pos12<-11
-const remap = new Map([
-  [7, 10],
-  [8, 7],
-  [10, 12],
-  [11, 8],
-  [12, 11],
-]);
+// Requested grid order from design review (left->right, top->bottom):
+// 1,7,6 / 3,5,4 / 9,2,10 / 11,8,12
+const orderNo = [1, 7, 6, 3, 5, 4, 9, 2, 10, 11, 8, 12];
+const ordered = orderNo.map((n) => byNo.get(n)).filter(Boolean);
 
-const ordered = _wallReadyPresets.slice();
-for (let i = 0; i < ordered.length; i += 1) {
-  const pos = i + 1;
-  const src = remap.get(pos);
-  if (!src) continue;
-  const cand = byNo.get(src);
-  if (cand) ordered[i] = cand;
-}
-
-export const WALL_READY_PRESETS = ordered;
+export const WALL_READY_PRESETS =
+  ordered.length === _wallReadyPresets.length ? ordered : _wallReadyPresets;
 
 export function buildPresetLines(kind) {
   const p = PRESET_STORE.find((x) => x.id === kind) || PRESET_STORE[0];

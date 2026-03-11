@@ -67,6 +67,7 @@ export class SolidWallTool {
 
     this.snapEnabled = true;
     this.lastDir = null;
+    this.shiftLockDir = null;
     this.error = null; // { type:"overlap" } | null
 
     this.wallIndex = startIndex;
@@ -117,6 +118,7 @@ export class SolidWallTool {
     this.pendingStartPos = null;
     this.previewEndPos = null;
     this.lastDir = null;
+    this.shiftLockDir = null;
     this.snapEnabled = true;
     this.error = null;
   }
@@ -170,23 +172,45 @@ export class SolidWallTool {
   }
 
   _applyAngle(startPos, endPos, shiftKey) {
-    if (this.snapEnabled) return snap45(startPos, endPos);
-    if (shiftKey && this.lastDir) {
-      const u = normalize(this.lastDir.x, this.lastDir.y);
-      const vx = endPos.x - startPos.x;
-      const vy = endPos.y - startPos.y;
-      const t = vx * u.x + vy * u.y;
-      return { x: startPos.x + u.x * t, y: startPos.y + u.y * t };
+    if (this.snapEnabled) {
+      this.shiftLockDir = null;
+      return snap45(startPos, endPos);
     }
-    return endPos;
+
+    const vx = endPos.x - startPos.x;
+    const vy = endPos.y - startPos.y;
+
+    if (!shiftKey) {
+      this.shiftLockDir = null;
+      return endPos;
+    }
+
+    if (!this.shiftLockDir) {
+      const L0 = Math.hypot(vx, vy);
+      if (L0 >= 1e-9) this.shiftLockDir = normalize(vx, vy);
+      else if (this.lastDir) this.shiftLockDir = normalize(this.lastDir.x, this.lastDir.y);
+    }
+
+    const u = this.shiftLockDir || this.lastDir;
+    if (!u) return endPos;
+
+    const L = Math.hypot(vx, vy);
+    if (L < 1e-9) return { x: startPos.x, y: startPos.y };
+
+    const dot = vx * u.x + vy * u.y;
+    const signedLen = dot < 0 ? -L : L;
+    return { x: startPos.x + u.x * signedLen, y: startPos.y + u.y * signedLen };
   }
 
-  onPointerDown(e) {
+  onPointerDown(e, opts = {}) {
     // right click: toggle snap
     if (e.button === 2) {
       e.preventDefault?.();
       // Only toggle snap while actively drawing; otherwise right-click does nothing.
-      if (this.pendingStartNodeId) this.snapEnabled = !this.snapEnabled;
+      if (this.pendingStartNodeId) {
+        this.snapEnabled = !this.snapEnabled;
+        this.shiftLockDir = null;
+      }
       return;
     }
     if (e.button !== 0) return;
@@ -195,7 +219,8 @@ export class SolidWallTool {
 
     // click1: set start
     if (!this.pendingStartNodeId) {
-      const n0 = this._resolveSnapNode(p.x, p.y);
+      const useWallMagnet = opts?.snapOn !== false && opts?.wallMagnetEnabled !== false;
+      const n0 = this._resolveSnapNode(p.x, p.y, useWallMagnet);
       this.pendingStartNodeId = n0.id;
       this.pendingStartPos = { x: n0.x, y: n0.y };
       this.previewEndPos = { x: n0.x, y: n0.y };
@@ -206,9 +231,11 @@ export class SolidWallTool {
     // click2+: set end and create wall
     const startPos = this.pendingStartPos;
 
-    let endPos = this._applyAngle(startPos, { x: p.x, y: p.y }, !!e.shiftKey);
+    const orthoByShiftEnabled = opts?.orthoByShiftEnabled !== false;
+    let endPos = this._applyAngle(startPos, { x: p.x, y: p.y }, !!e.shiftKey, orthoByShiftEnabled);
 
-    const n1 = this._resolveSnapNode(endPos.x, endPos.y);
+    const useWallMagnet = opts?.snapOn !== false && opts?.wallMagnetEnabled !== false;
+    const n1 = this._resolveSnapNode(endPos.x, endPos.y, useWallMagnet);
     if (n1.id === this.pendingStartNodeId) return;
 
     // Overlap check (collinear overlap with existing walls)
@@ -244,13 +271,14 @@ export class SolidWallTool {
     this.previewEndPos = { x: n1.x, y: n1.y };
   }
 
-  onPointerMove(e) {
+  onPointerMove(e, opts = {}) {
     if (!this.pendingStartPos) return;
 
     const p = this.view.screenToWorld(e.offsetX, e.offsetY);
     const startPos = this.pendingStartPos;
 
-    const endPos = this._applyAngle(startPos, { x: p.x, y: p.y }, !!e.shiftKey);
+    const orthoByShiftEnabled = opts?.orthoByShiftEnabled !== false;
+    const endPos = this._applyAngle(startPos, { x: p.x, y: p.y }, !!e.shiftKey, orthoByShiftEnabled);
 
     this.previewEndPos = endPos;
 
@@ -268,7 +296,9 @@ export class SolidWallTool {
     }
   }
 
-  _resolveSnapNode(x, y) {
+  _resolveSnapNode(x, y, useWallMagnet = true) {
+    if (!useWallMagnet) return this.graph.addNode(x, y);
+
     // 1) snap to existing nodes
     const n = this.graph.findNearestNode(x, y, this.snapTolMm);
     if (n) return n;

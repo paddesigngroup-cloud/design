@@ -100,20 +100,20 @@ const wallCoordPoints = computed(() => {
   const a = wallMetrics.value.a;
   const b = wallMetrics.value.b;
 
-  const aIsLeft =
-    (a.x < b.x) ||
-    (a.x === b.x && a.y <= b.y);
+  const aIsBottomLeft =
+    (a.y < b.y) ||
+    (a.y === b.y && a.x <= b.x);
 
-  const leftKey = aIsLeft ? "a" : "b";
-  const rightKey = aIsLeft ? "b" : "a";
-  const left = aIsLeft ? a : b;
-  const right = aIsLeft ? b : a;
+  const bottomLeftKey = aIsBottomLeft ? "a" : "b";
+  const topRightKey = aIsBottomLeft ? "b" : "a";
+  const bottomLeft = aIsBottomLeft ? a : b;
+  const topRight = aIsBottomLeft ? b : a;
 
   return {
-    leftKey,
-    rightKey,
-    left,
-    right,
+    bottomLeftKey,
+    topRightKey,
+    bottomLeft,
+    topRight,
     center: {
       x: Math.round(((a.x + b.x) * 0.5) * 10) / 10,
       y: Math.round(((a.y + b.y) * 0.5) * 10) / 10,
@@ -142,7 +142,6 @@ function patchSelectedWallCoords(patch) {
   emit("update:selectedWallCoords", patch);
 }
 
-
 function patchCenterCoord(axis, value) {
   if (!wallMetrics.value) return;
   const num = Number(value);
@@ -162,6 +161,7 @@ function patchCenterCoord(axis, value) {
     byCm: wallMetrics.value.b.y + dy,
   });
 }
+
 
 function v(x, z) {
   return { x, z };
@@ -827,7 +827,7 @@ onBeforeUnmount(() => {
     <div class="glbWallAttrs__sep"></div>
 
     <template v-if="wallMetrics">
-      <div class="glbWallAttrs__editor">
+      <div class="glbWallAttrs__editor glbWallAttrs__editor--attrs">
         <label class="glbWallAttrs__editRow">
           <span>طول (cm)</span>
           <input
@@ -880,16 +880,16 @@ onBeforeUnmount(() => {
         <div class="glbWallAttrs__pointTitle">نقطه پایین چپ</div>
         <div class="glbWallAttrs__editRow">
           <div class="glbWallAttrs__coordGrid">
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.left?.x" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.leftKey, 'x', +$event.target.value)" />
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.left?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.leftKey, 'y', +$event.target.value)" />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.bottomLeft?.x" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.bottomLeftKey, 'x', +$event.target.value)" />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.bottomLeft?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.bottomLeftKey, 'y', +$event.target.value)" />
           </div>
         </div>
 
-        <div class="glbWallAttrs__pointTitle">نقطه پایین راست</div>
+        <div class="glbWallAttrs__pointTitle">نقطه بالا راست</div>
         <div class="glbWallAttrs__editRow">
           <div class="glbWallAttrs__coordGrid">
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.right?.x" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.rightKey, 'x', +$event.target.value)" />
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.right?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.rightKey, 'y', +$event.target.value)" />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.topRight?.x" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.topRightKey, 'x', +$event.target.value)" />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.topRight?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.topRightKey, 'y', +$event.target.value)" />
           </div>
         </div>
 
@@ -900,6 +900,7 @@ onBeforeUnmount(() => {
             <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchCenterCoord('y', +$event.target.value)" />
           </div>
         </div>
+
       </div>
     </template>
 
