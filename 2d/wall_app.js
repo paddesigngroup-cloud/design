@@ -136,6 +136,9 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   stepDegreeEnabled: false,
   stepLineCm: 5,
   stepAngleDeg: 10,
+  dimSnapProfileEnabled: false,
+  dimSnapLineProfile: { origin: true, corner: true, mid: true, center: true, edge: true },
+  dimSnapOffsetProfile: { origin: true, corner: true, mid: true, center: true, edge: true },
 
   meterDivisions: 10,
   majorEvery: 10,
@@ -740,6 +743,15 @@ const wallHandleDrag = {
   lenHandleProjStartMm: null,
   moved: false,
 };
+const freeDimDrag = {
+  active: false,
+  dimId: null,
+  startOffsetMm: 0,
+  startSideSign: 1,
+  startX: 0,
+  startY: 0,
+  moved: false,
+};
 const boxSelect = {
   active: false,
   startX: 0,
@@ -995,7 +1007,7 @@ const dimensions = [];
 ============================= */
 const dimEditor = {
   active: false,
-  graphType: "wall", // "wall" | "hidden"
+  graphType: "wall", // "wall" | "hidden" | "free"
   wallId: null,
   input: null,
 };
@@ -1047,6 +1059,22 @@ function _dimGraphByType(graphType) {
 }
 
 function openDimEditor(wallId, graphType = "wall") {
+  if (graphType === "free") {
+    const d = dimensions.find((x) => x && x.id === wallId);
+    if (!d || !d.a || !d.b) return;
+    ensureDimEditorInput();
+    dimEditor.active = true;
+    dimEditor.graphType = "free";
+    dimEditor.wallId = wallId;
+    const curLen = Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y);
+    dimEditor.input.value = formatLengthMm(curLen);
+    dimEditor.input.style.display = "block";
+    positionDimEditor();
+    dimEditor.input.focus({ preventScroll: true });
+    dimEditor.input.select();
+    return;
+  }
+
   const g = _dimGraphByType(graphType);
   const w = g.getWall(wallId);
   if (!w) return;
@@ -1098,7 +1126,21 @@ function commitDimEditor() {
   if (targetMm) {
     const graphType = dimEditor.graphType || "wall";
     const wallId = dimEditor.wallId;
-    if (graphType === "hidden") {
+    if (graphType === "free") {
+      undo.runAction(() => {
+        const d = dimensions.find((x) => x && x.id === wallId);
+        if (!d || !d.a || !d.b) return;
+        const dx = d.b.x - d.a.x;
+        const dy = d.b.y - d.a.y;
+        const L = Math.hypot(dx, dy);
+        const ux = (L >= 1e-9) ? (dx / L) : 1;
+        const uy = (L >= 1e-9) ? (dy / L) : 0;
+        d.b = { x: d.a.x + ux * targetMm, y: d.a.y + uy * targetMm };
+      });
+      selectedDimId = wallId;
+      selectedWallId = null;
+      selectedHiddenId = null;
+    } else if (graphType === "hidden") {
       undo.runAction(() => {
         hiddenGraph.setWallLengthMm(wallId, Math.max(1, targetMm));
         hiddenGraph.mergeCloseNodes(1);
@@ -1161,6 +1203,26 @@ function commitDimEditor() {
 function positionDimEditor(jointGammaMap = null) {
   if (!dimEditor.active || !dimEditor.wallId || !dimEditor.input) return;
   const graphType = dimEditor.graphType || "wall";
+  if (graphType === "free") {
+    const d = dimensions.find((x) => x && x.id === dimEditor.wallId);
+    if (!d || !d.a || !d.b) { closeDimEditor(false); return; }
+    const lay = computeDimensionLayout(
+      d.a.x, d.a.y, d.b.x, d.b.y,
+      "auto",
+      null,
+      { offsetMm: d.offsetMm ?? state.dimOffsetMm, fixedSideSign: d.sideSign ?? 1 }
+    );
+    if (!lay) { closeDimEditor(false); return; }
+    const r = lay.textRect;
+    dimEditor.input.style.left = `${Math.round(r.x)}px`;
+    dimEditor.input.style.top = `${Math.round(r.y)}px`;
+    dimEditor.input.style.width = `${Math.round(Math.max(70, r.w))}px`;
+    dimEditor.input.style.height = `${Math.round(r.h)}px`;
+    dimEditor.input.style.lineHeight = `${Math.round(r.h)}px`;
+    dimEditor.input.style.font = `${state.dimFontPx}px ${state.fontFamily}`;
+    return;
+  }
+
   const g = _dimGraphByType(graphType);
   const w = g.getWall(dimEditor.wallId);
   if (!w) { closeDimEditor(false); return; }
@@ -1345,6 +1407,8 @@ function snapshotDimTool(t) {
     a: t?.a ? { x: t.a.x, y: t.a.y } : null,
     b: t?.b ? { x: t.b.x, y: t.b.y } : null,
     cursor: t?.cursor ? { x: t.cursor.x, y: t.cursor.y } : null,
+    orthoLocked: (typeof t?.orthoLocked === "boolean") ? t.orthoLocked : true,
+    lastDir: t?.lastDir ? { x: t.lastDir.x, y: t.lastDir.y } : null,
     _did: t?._did ?? 1,
   };
 }
@@ -1356,6 +1420,8 @@ function restoreDimTool(t, snap) {
   t.a = snap?.a ? { x: snap.a.x, y: snap.a.y } : null;
   t.b = snap?.b ? { x: snap.b.x, y: snap.b.y } : null;
   t.cursor = snap?.cursor ? { x: snap.cursor.x, y: snap.cursor.y } : null;
+  if (typeof snap?.orthoLocked === "boolean") t.orthoLocked = snap.orthoLocked;
+  t.lastDir = snap?.lastDir ? { x: snap.lastDir.x, y: snap.lastDir.y } : null;
   if (typeof snap?._did === "number") t._did = snap._did;
 }
 
@@ -3779,7 +3845,11 @@ function drawStandaloneDimensions() {
       null,
       { offsetMm: d.offsetMm ?? state.dimOffsetMm, fixedSideSign: d.sideSign ?? 1 }
     );
-    if (lay) drawDimensionFromLayout(lay);
+    if (lay) {
+      lay.hideText = !!(dimEditor.active && dimEditor.graphType === "free" && dimEditor.wallId === d.id);
+      drawDimensionFromLayout(lay);
+      addRectTarget("free_dim_text", d.id, lay.textRect);
+    }
 
     state.dimLineWidthPx = was;
   }
@@ -3802,10 +3872,11 @@ function drawDimToolOverlay() {
 
   if (prev.stage === 1) {
     const pS = worldToScreen(P.x, P.y);
+    const guideStyle = getGuidePreviewStyle();
     ctx.save();
-    ctx.setLineDash([6, 8]);
-    ctx.lineWidth = state.dimLineWidthPx;
-    ctx.strokeStyle = state.dimColor;
+    ctx.setLineDash(guideStyle.dash);
+    ctx.lineWidth = guideStyle.lineWidthPx;
+    ctx.strokeStyle = guideStyle.color;
     ctx.beginPath();
     ctx.moveTo(aS.x, aS.y);
     ctx.lineTo(pS.x, pS.y);
@@ -4455,6 +4526,43 @@ function resolveSnapPointWorld(x, y) {
   return { x: best.x, y: best.y, type: best.type };
 }
 
+function resolveSnapPointWorldByTypes(x, y, allowedTypes = null) {
+  if (!state.snapOn) return null;
+  const tolSnapMm = Math.max(4, SNAP_TOL_PX / Math.max(state.zoom, 1e-6));
+  const candidates = collectSnapCandidatesWorld(x, y, tolSnapMm);
+  if (!candidates.length) return null;
+  const best = (allowedTypes && allowedTypes.size > 0)
+    ? (candidates.find((c) => allowedTypes.has(c.type)) || null)
+    : candidates[0];
+  if (!best) return null;
+  return { x: best.x, y: best.y, type: best.type };
+}
+
+function _normalizeSnapProfile(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const keys = ["origin", "corner", "mid", "center", "edge"];
+  const out = {};
+  let hasAny = false;
+  for (const k of keys) {
+    const v = !!raw[k];
+    out[k] = v;
+    if (v) hasAny = true;
+  }
+  return hasAny ? out : null;
+}
+
+function resolveDimSnapPointWorld(x, y, ctx = null) {
+  if (!state.snapOn) return null;
+  if (!state.dimSnapProfileEnabled) return resolveSnapPointWorldByTypes(x, y, null);
+  const phase = String(ctx?.phase || "line");
+  const profileRaw = (phase === "offset") ? state.dimSnapOffsetProfile : state.dimSnapLineProfile;
+  const profile = _normalizeSnapProfile(profileRaw);
+  if (!profile) return null;
+  const allowed = new Set(Object.keys(profile).filter((k) => profile[k]));
+  if (!allowed.size) return null;
+  return resolveSnapPointWorldByTypes(x, y, allowed);
+}
+
 function isSceneEmpty() {
   const hasModel2d = !!(
     (model2d.lines && model2d.lines.length > 0) ||
@@ -4660,7 +4768,17 @@ function onMouseDown(e) {
       offsetY: e.offsetY,
       preventDefault: () => e.preventDefault(),
     };
-    if (state.activeTool === "dim") dimTool.onPointerDown(ev, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld });
+    if (state.activeTool === "dim") dimTool.onPointerDown(ev, {
+      snapOn: state.snapOn,
+      resolveSnapPoint: resolveDimSnapPointWorld,
+      orthoEnabled: state.orthoEnabled !== false,
+      stepDrawEnabled: state.stepDrawEnabled,
+      stepDrawMode: state.stepDrawMode,
+      stepLineEnabled: state.stepLineEnabled,
+      stepDegreeEnabled: state.stepDegreeEnabled,
+      stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+      stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+    });
     else if (state.activeTool === "hidden") hiddenTool.onPointerDown(ev, {
       snapOn: state.snapOn,
       resolveSnapPoint: resolveSnapPointWorld,
@@ -4713,6 +4831,23 @@ function onMouseDown(e) {
   // 1) UI hit => handle and STOP (does not start drawing)
   const t = hitTest(e.offsetX, e.offsetY) || hitTestSelectedWallUiFallback(e.offsetX, e.offsetY);
   if (t) {
+    if (t.type === "free_dim_text") {
+      const d = dimensions.find((x) => x && x.id === t.wallId);
+      if (!d) return;
+      clearGroupSelection();
+      selectedWallId = null;
+      selectedHiddenId = null;
+      selectedDimId = d.id;
+      freeDimDrag.active = true;
+      freeDimDrag.dimId = d.id;
+      freeDimDrag.startOffsetMm = (typeof d.offsetMm === "number" && isFinite(d.offsetMm)) ? Math.max(0, d.offsetMm) : state.dimOffsetMm;
+      freeDimDrag.startSideSign = (d.sideSign === -1) ? -1 : 1;
+      freeDimDrag.startX = e.offsetX;
+      freeDimDrag.startY = e.offsetY;
+      freeDimDrag.moved = false;
+      return;
+    }
+
     const isHiddenTarget = String(t.type || "").startsWith("hidden_");
     const g = isHiddenTarget ? hiddenGraph : graph;
     const w = g.getWall(t.wallId);
@@ -4892,14 +5027,29 @@ function onMouseDown(e) {
     return;
   }
 
-  // Dimension tool is modal: clicks place/commit dimensions (no selection here).
+  // Dimension tool is modal: clicks place/commit dimensions (no wall/hidden selection here).
   if (state.activeTool === "dim") {
     undo.runAction(() => dimTool.onPointerDown(
       { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
       {
         snapOn: state.snapOn,
-        resolveSnapPoint: resolveSnapPointWorld,
-        onCommit: (d) => dimensions.push(d),
+        resolveSnapPoint: resolveDimSnapPointWorld,
+        orthoEnabled: state.orthoEnabled !== false,
+        stepDrawEnabled: state.stepDrawEnabled,
+        stepDrawMode: state.stepDrawMode,
+        stepLineEnabled: state.stepLineEnabled,
+        stepDegreeEnabled: state.stepDegreeEnabled,
+        stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+        stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+        onCommit: (d) => {
+          dimensions.push(d);
+          clearGroupSelection();
+          selectedWallId = null;
+          selectedHiddenId = null;
+          selectedModelOutline = false;
+          hoverModelOutline = false;
+          selectedDimId = d.id;
+        },
       }
     ));
     return;
@@ -5059,6 +5209,14 @@ function onMouseDown(e) {
   }
 }
 
+function getGuidePreviewStyle() {
+  return {
+    dash: Array.isArray(state.hiddenWallDash) ? state.hiddenWallDash : [10, 8],
+    lineWidthPx: Math.max(1, Number(state.hiddenWallLineWidthPx) || 2),
+    color: state.hiddenWallColor || state.dimColor,
+  };
+}
+
 function onWindowMouseUp() {
   if (boxSelect.active) {
     const x1 = boxSelect.startX;
@@ -5125,6 +5283,38 @@ function onWindowMouseUp() {
         w.dimOffsetMm = startOffsetMm;
         w.dimSide = startDimSide;
         openDimEditor(w.id, graphType);
+      }
+    }
+  }
+  if (freeDimDrag.active) {
+    const dimId = freeDimDrag.dimId;
+    const startOffsetMm = freeDimDrag.startOffsetMm;
+    const startSideSign = freeDimDrag.startSideSign;
+    const moved = !!freeDimDrag.moved;
+    freeDimDrag.active = false;
+    freeDimDrag.dimId = null;
+    freeDimDrag.startOffsetMm = 0;
+    freeDimDrag.startSideSign = 1;
+    freeDimDrag.startX = 0;
+    freeDimDrag.startY = 0;
+    freeDimDrag.moved = false;
+
+    const d = dimId ? dimensions.find((x) => x && x.id === dimId) : null;
+    if (d) {
+      const finalOffsetMm = (typeof d.offsetMm === "number" && isFinite(d.offsetMm)) ? Math.max(0, d.offsetMm) : state.dimOffsetMm;
+      const finalSideSign = (d.sideSign === -1) ? -1 : 1;
+      const sideChanged = finalSideSign !== startSideSign;
+      if (moved && (Math.abs(finalOffsetMm - startOffsetMm) > 0.1 || sideChanged)) {
+        d.offsetMm = startOffsetMm;
+        d.sideSign = startSideSign;
+        undo.runAction(() => {
+          d.offsetMm = finalOffsetMm;
+          d.sideSign = finalSideSign;
+        });
+      } else {
+        d.offsetMm = startOffsetMm;
+        d.sideSign = startSideSign;
+        openDimEditor(d.id, "free");
       }
     }
   }
@@ -5196,7 +5386,7 @@ function onWindowMouseMove(e) {
 
   // When integrated in Vue layout, ignore hover/move when pointer is outside the canvas,
   // except while panning or while an active draw command is in progress.
-  if (!inside && !isPanning && !isDrawing && !modelDrag.active && !wallDimDrag.active && !wallHandleDrag.active && !boxSelect.active) {
+  if (!inside && !isPanning && !isDrawing && !modelDrag.active && !wallDimDrag.active && !freeDimDrag.active && !wallHandleDrag.active && !boxSelect.active) {
     updateSnapPreview(NaN, NaN);
     hoverUi = null;
     hoverWallHandle = null;
@@ -5363,8 +5553,55 @@ function onWindowMouseMove(e) {
       return;
     }
   }
+  if (freeDimDrag.active) {
+    const d = freeDimDrag.dimId ? dimensions.find((x) => x && x.id === freeDimDrag.dimId) : null;
+    if (!d || !d.a || !d.b) {
+      freeDimDrag.active = false;
+      freeDimDrag.dimId = null;
+    } else {
+      const A = d.a;
+      const B = d.b;
+      const dx = B.x - A.x;
+      const dy = B.y - A.y;
+      const L = Math.hypot(dx, dy);
+      if (L >= 1e-6) {
+        const ux = dx / L;
+        const uy = dy / L;
+        const nL = { x: -uy, y: ux };
+        const sideSign = (freeDimDrag.startSideSign === -1) ? -1 : 1;
+        const normal = { x: nL.x * sideSign, y: nL.y * sideSign };
+        const startW = screenToWorld(freeDimDrag.startX, freeDimDrag.startY);
+        const curW = screenToWorld(ox, oy);
+        const deltaMm = dot(curW.x - startW.x, curW.y - startW.y, normal.x, normal.y);
+        const signedOffset = freeDimDrag.startOffsetMm + deltaMm;
+        if (signedOffset >= 0) {
+          d.sideSign = sideSign;
+          d.offsetMm = signedOffset;
+        } else {
+          d.sideSign = -sideSign;
+          d.offsetMm = -signedOffset;
+        }
+        const movedPx = Math.hypot(ox - freeDimDrag.startX, oy - freeDimDrag.startY);
+        if (movedPx >= 3) freeDimDrag.moved = true;
+      }
+      return;
+    }
+  }
 
-  if (state.activeTool === "dim") dimTool.onPointerMove({ offsetX: ox, offsetY: oy, shiftKey: e.shiftKey }, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld });
+  if (state.activeTool === "dim") dimTool.onPointerMove(
+    { offsetX: ox, offsetY: oy, shiftKey: e.shiftKey },
+    {
+      snapOn: state.snapOn,
+      resolveSnapPoint: resolveDimSnapPointWorld,
+      orthoEnabled: state.orthoEnabled !== false,
+      stepDrawEnabled: state.stepDrawEnabled,
+      stepDrawMode: state.stepDrawMode,
+      stepLineEnabled: state.stepLineEnabled,
+      stepDegreeEnabled: state.stepDegreeEnabled,
+      stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+      stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+    }
+  );
   else if (state.activeTool === "hidden") hiddenTool.onPointerMove(
     { offsetX: ox, offsetY: oy, shiftKey: e.shiftKey },
     {
@@ -5623,6 +5860,16 @@ function onWindowKeyDown(e) {
       wallHandleDrag.lenHandleProjStartMm = null;
       wallHandleDrag.moved = false;
     }
+    if (freeDimDrag.active) {
+      const d = freeDimDrag.dimId ? dimensions.find((x) => x && x.id === freeDimDrag.dimId) : null;
+      if (d) {
+        d.offsetMm = freeDimDrag.startOffsetMm;
+        d.sideSign = (freeDimDrag.startSideSign === -1) ? -1 : 1;
+      }
+      freeDimDrag.active = false;
+      freeDimDrag.dimId = null;
+      freeDimDrag.moved = false;
+    }
     if (dimEditor.active) closeDimEditor(false);
     else {
       hoverWallId = null; selectedWallId = null;
@@ -5767,6 +6014,7 @@ function setActiveTool(name) {
 
   state.activeTool = next;
   if (next === "wall") tool.snapEnabled = state.orthoEnabled !== false;
+  if (next === "dim") dimTool.orthoLocked = state.orthoEnabled !== false;
   _ui.updateToolButtons();
   updateCanvasCursor();
   saveSettings();
@@ -5885,6 +6133,7 @@ function setState(patch) {
     state.orthoEnabled = patch.orthoEnabled;
     // Keep wall tool lock-step state synced with the public ortho flag.
     tool.snapEnabled = state.orthoEnabled;
+    if (!dimTool.getStatus?.()?.isDrawing) dimTool.orthoLocked = state.orthoEnabled;
   }
   if (Number.isFinite(Number(patch.stepLineCm))) {
     state.stepLineCm = Math.max(0.1, Number(patch.stepLineCm));
