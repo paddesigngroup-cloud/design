@@ -55,6 +55,10 @@ const selectedWallCount = computed(() => {
   return props.walls2d?.selection?.selectedWallId ? 1 : 0;
 });
 const isGroupEditMode = computed(() => selectedWallCount.value > 1);
+const selectedObjectTitle = computed(() => {
+  const raw = props.selectedWallStyle?.name || props.selectedWallStyle?.id || wallMetrics.value?.id || "";
+  return String(raw).trim();
+});
 
 
 const wallMetrics = computed(() => {
@@ -536,12 +540,8 @@ function goSmall() {
   setWidgetSizePx(baseSize.w, baseSize.h);
 }
 
-function toggleMax() {
-  if (isMax.value) {
-    isMax.value = false;
-    if (prevSize) setWidgetSizePx(prevSize.w, prevSize.h);
-    return;
-  }
+function goMax() {
+  if (isMax.value) return;
   prevSize = getWidgetSizePx();
   isMax.value = true;
   viewOpen.value = false;
@@ -792,7 +792,7 @@ onBeforeUnmount(() => {
     <div class="glbWidget__head" dir="rtl">
       <div class="glbWidget__headBtns">
         <button type="button" class="glbWidget__btn" title="کوچک" @click="goSmall">–</button>
-        <button type="button" class="glbWidget__btn" title="بزرگ" @click="toggleMax">□</button>
+        <button type="button" class="glbWidget__btn" title="بزرگ" @click="goMax">□</button>
       </div>
       <div ref="hostEl" class="glbWidget__host">
         <canvas ref="canvasEl" class="glbWidget__canvas"></canvas>
@@ -827,6 +827,7 @@ onBeforeUnmount(() => {
     <div class="glbWallAttrs__sep"></div>
 
     <template v-if="wallMetrics">
+      <div v-if="selectedObjectTitle" class="glbWallAttrs__objectTitle">{{ selectedObjectTitle }}</div>
       <div class="glbWallAttrs__editor glbWallAttrs__editor--attrs">
         <label class="glbWallAttrs__editRow">
           <span>طول (cm)</span>
