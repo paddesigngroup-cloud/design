@@ -46,13 +46,20 @@ let axesHelper = null;
 
 const DEFAULT_WALL_HEIGHT_M = 2.8;
 const DEFAULT_MITER_LIMIT = 10;
+const attrsSnapshot = computed(() => props.walls2d?.metrics || props.walls2d || {});
+const selectedEntityType = computed(
+  () => attrsSnapshot.value?.entityType || props.selectedWallStyle?.entityType || "wall"
+);
+const showThicknessField = computed(() => selectedEntityType.value === "wall");
+const showHeightField = computed(() => selectedEntityType.value === "wall");
+const showColorField = computed(() => selectedEntityType.value === "wall");
 
 const selectedWallCount = computed(() => {
-  const selectedIds = Array.isArray(props.walls2d?.selection?.selectedWallIds)
-    ? props.walls2d.selection.selectedWallIds.filter(Boolean)
+  const selectedIds = Array.isArray(attrsSnapshot.value?.selection?.selectedWallIds)
+    ? attrsSnapshot.value.selection.selectedWallIds.filter(Boolean)
     : [];
   if (selectedIds.length > 0) return selectedIds.length;
-  return props.walls2d?.selection?.selectedWallId ? 1 : 0;
+  return attrsSnapshot.value?.selection?.selectedWallId ? 1 : 0;
 });
 const isGroupEditMode = computed(() => selectedWallCount.value > 1);
 const selectedObjectTitle = computed(() => {
@@ -63,7 +70,7 @@ const wallMoveDeltaCm = ref({ x: 0, y: 0 });
 
 
 const wallMetrics = computed(() => {
-  const snapshot = props.walls2d || {};
+  const snapshot = attrsSnapshot.value || {};
   const nodes = Array.isArray(snapshot.nodes) ? snapshot.nodes : [];
   const walls = Array.isArray(snapshot.walls) ? snapshot.walls : [];
   const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -894,7 +901,7 @@ onBeforeUnmount(() => {
             @input="patchWallStyleDraft({ lengthCm: +$event.target.value })"
           />
         </label>
-        <label class="glbWallAttrs__editRow">
+        <label v-if="showThicknessField" class="glbWallAttrs__editRow">
           <span>ضخامت (cm)</span>
           <input
             class="glbWallAttrs__input"
@@ -905,7 +912,7 @@ onBeforeUnmount(() => {
             @input="patchWallStyleDraft({ thicknessCm: +$event.target.value })"
           />
         </label>
-        <label class="glbWallAttrs__editRow">
+        <label v-if="showHeightField" class="glbWallAttrs__editRow">
           <span>ارتفاع (cm)</span>
           <input
             class="glbWallAttrs__input"
@@ -916,7 +923,7 @@ onBeforeUnmount(() => {
             @input="patchWallStyleDraft({ heightCm: +$event.target.value })"
           />
         </label>
-        <label class="glbWallAttrs__editRow">
+        <label v-if="showColorField" class="glbWallAttrs__editRow">
           <span>رنگ دیوار</span>
           <input
             class="glbWallAttrs__color"

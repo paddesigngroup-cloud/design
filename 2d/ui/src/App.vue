@@ -14,7 +14,13 @@ const showObjectAxes = ref(false);
 const walls3dSnapshot = ref({
   nodes: [],
   walls: [],
-  selection: { selectedWallId: null },
+  selection: { selectedWallId: null, selectedWallIds: [], selectedHiddenId: null, selectedHiddenIds: [] },
+  metrics: {
+    nodes: [],
+    walls: [],
+    selection: { selectedWallId: null, selectedWallIds: [] },
+    entityType: "wall",
+  },
   state: { wallHeightMm: 2800, axisXColor: "#9CC9B4", axisYColor: "#BCC8EB" },
 });
 const stepModes = ref({
@@ -130,7 +136,7 @@ const activeSubRailTitle = computed(() => {
 
 const designMenuTools = [
   { id: "wall", icon: "/icons/drawing_wall.png", title: "دیوار", mapsToTool: "wall" },
-  { id: "hidden", icon: "/icons/drawing_hidden_wall.png", title: "هیدن وال", mapsToTool: "hidden" },
+  { id: "hidden", icon: "/icons/drawing_hidden_wall.png", title: "خط راهنما", mapsToTool: "hidden" },
   { id: "dimension", icon: "/icons/drawing_dimension.png", title: "دایمنشن", mapsToTool: "dimension" },
   { id: "beam", icon: "/icons/beam.png", title: "تیر", mapsToTool: null },
   { id: "column", icon: "/icons/column.png", title: "ستون", mapsToTool: null },
@@ -188,18 +194,40 @@ function syncQuickStateFromEditor() {
   showDimensions.value = s.showDimensions !== false;
   showOffsetWalls.value = !!s.offsetWallEnabled;
   showObjectAxes.value = !!s.showObjectAxes;
+  const wallNodes = Array.isArray(full?.graphSnap?.nodes) ? full.graphSnap.nodes : [];
+  const hiddenNodes = Array.isArray(full?.hiddenGraphSnap?.nodes) ? full.hiddenGraphSnap.nodes : [];
   const walls = Array.isArray(full?.graphSnap?.walls) ? full.graphSnap.walls : [];
-  const selectedIds = Array.isArray(full?.selection?.selectedWallIds) ? full.selection.selectedWallIds : [];
-  const selectedCount = selectedIds.length;
-  const selectedId = full?.selection?.selectedWallId || selectedIds[0] || null;
-  const selectedWall = selectedId ? walls.find((w) => w.id === selectedId) : null;
+  const hiddenWalls = Array.isArray(full?.hiddenGraphSnap?.walls) ? full.hiddenGraphSnap.walls : [];
+  const selectedWallIds = Array.isArray(full?.selection?.selectedWallIds) ? full.selection.selectedWallIds : [];
+  const selectedHiddenIds = Array.isArray(full?.selection?.selectedHiddenIds) ? full.selection.selectedHiddenIds : [];
+  const selectedWallId = full?.selection?.selectedWallId || selectedWallIds[0] || null;
+  const selectedHiddenId = full?.selection?.selectedHiddenId || selectedHiddenIds[0] || null;
+  const selectedWall = selectedWallId ? walls.find((w) => w.id === selectedWallId) : null;
+  const selectedHidden = selectedHiddenId ? hiddenWalls.find((w) => w.id === selectedHiddenId) : null;
+  const selectedWallCount = selectedWallIds.length > 0 ? selectedWallIds.length : (selectedWallId ? 1 : 0);
+  const selectedHiddenCount = selectedHiddenIds.length > 0 ? selectedHiddenIds.length : (selectedHiddenId ? 1 : 0);
+  const hasWallSelection = !!(selectedWall || selectedWallIds.length > 0);
+  const hasHiddenSelection = !!(selectedHidden || selectedHiddenIds.length > 0);
+  const metricsEntityType = hasWallSelection ? "wall" : hasHiddenSelection ? "hidden" : "wall";
+  const selectedCount = (metricsEntityType === "hidden") ? selectedHiddenCount : selectedWallCount;
 
   walls3dSnapshot.value = {
-    nodes: Array.isArray(full?.graphSnap?.nodes) ? full.graphSnap.nodes : [],
+    nodes: wallNodes,
     walls,
     selection: {
       selectedWallId: full?.selection?.selectedWallId || null,
-      selectedWallIds: selectedIds,
+      selectedWallIds,
+      selectedHiddenId: full?.selection?.selectedHiddenId || null,
+      selectedHiddenIds,
+    },
+    metrics: {
+      nodes: metricsEntityType === "hidden" ? hiddenNodes : wallNodes,
+      walls: metricsEntityType === "hidden" ? hiddenWalls : walls,
+      selection: {
+        selectedWallId: metricsEntityType === "hidden" ? selectedHiddenId : selectedWallId,
+        selectedWallIds: metricsEntityType === "hidden" ? selectedHiddenIds : selectedWallIds,
+      },
+      entityType: metricsEntityType,
     },
     state: {
       wallHeightMm: Number.isFinite(s?.wallHeightMm) ? s.wallHeightMm : 2800,
@@ -217,11 +245,12 @@ function syncQuickStateFromEditor() {
     const defaultHeightCm = (Number.isFinite(Number(s?.wallHeightMm)) ? Number(s.wallHeightMm) : 3000) / 10;
     const defaultColor = (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1";
 
-    wallStyleDraft.value = selectedWall
+    const selectedObj = (metricsEntityType === "hidden") ? selectedHidden : selectedWall;
+    wallStyleDraft.value = selectedObj
       ? {
-          thicknessCm: (Number(selectedWall.thickness) || 120) / 10,
-          heightCm: (Number(selectedWall.heightMm) || Number(s?.wallHeightMm) || 3000) / 10,
-          color: (typeof selectedWall.color3d === "string" && selectedWall.color3d) ? selectedWall.color3d : defaultColor,
+          thicknessCm: (Number(selectedObj.thickness) || 120) / 10,
+          heightCm: (Number(selectedObj.heightMm) || Number(s?.wallHeightMm) || 3000) / 10,
+          color: (typeof selectedObj.color3d === "string" && selectedObj.color3d) ? selectedObj.color3d : defaultColor,
         }
       : {
           thicknessCm: defaultThicknessCm,
@@ -230,22 +259,25 @@ function syncQuickStateFromEditor() {
         };
   }
 
-  if (selectedWall) {
-    const byId = new Map((Array.isArray(full?.graphSnap?.nodes) ? full.graphSnap.nodes : []).map((n) => [n.id, n]));
-    const na = byId.get(selectedWall.a);
-    const nb = byId.get(selectedWall.b);
+  const selectedEntity = (metricsEntityType === "hidden") ? selectedHidden : selectedWall;
+  if (selectedEntity) {
+    const srcNodes = (metricsEntityType === "hidden") ? hiddenNodes : wallNodes;
+    const byId = new Map(srcNodes.map((n) => [n.id, n]));
+    const na = byId.get(selectedEntity.a);
+    const nb = byId.get(selectedEntity.b);
     const lenMm = (na && nb) ? Math.hypot(nb.x - na.x, nb.y - na.y) : 0;
     selectedWallStyle.value = {
-      id: selectedWall.id,
-      name: selectedWall.name || selectedWall.id,
-      thicknessCm: (Number(selectedWall.thickness) || 120) / 10,
-      heightCm: (Number(selectedWall.heightMm) || Number(s?.wallHeightMm) || 3000) / 10,
+      id: selectedEntity.id,
+      name: selectedEntity.name || selectedEntity.id,
+      entityType: metricsEntityType,
+      thicknessCm: (Number(selectedEntity.thickness) || 120) / 10,
+      heightCm: (Number(selectedEntity.heightMm) || Number(s?.wallHeightMm) || 3000) / 10,
       lengthCm: lenMm / 10,
-      color: (typeof selectedWall.color3d === "string" && selectedWall.color3d)
-        ? selectedWall.color3d
+      color: (typeof selectedEntity.color3d === "string" && selectedEntity.color3d)
+        ? selectedEntity.color3d
         : ((typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1"),
-      a: selectedWall.a,
-      b: selectedWall.b,
+      a: selectedEntity.a,
+      b: selectedEntity.b,
       selectedCount,
       isGroupEdit: selectedCount > 1,
     };
@@ -287,18 +319,25 @@ function updateWallStyleDraft(next) {
   const heightMm = Math.max(1, wallStyleDraft.value.heightCm * 10);
   const color3d = wallStyleDraft.value.color;
   const lengthMm = Number.isFinite(Number(next?.lengthCm)) ? Math.max(10, Number(next.lengthCm) * 10) : null;
+  const entityType = selectedWallStyle.value?.entityType || "wall";
 
-  editorRef.value?.setState?.({
-    wallThicknessMm: thicknessMm,
-    wallHeightMm: heightMm,
-    wall3dColor: color3d,
-  });
+  if (entityType !== "hidden") {
+    editorRef.value?.setState?.({
+      wallThicknessMm: thicknessMm,
+      wallHeightMm: heightMm,
+      wall3dColor: color3d,
+    });
+  }
 
   const selectedId = selectedWallStyle.value?.id;
   const isGroupEdit = !!selectedWallStyle.value?.isGroupEdit;
   if (selectedId) {
-    editorRef.value?.setSelectedWallStyle?.({ thicknessMm, heightMm, fillColor: color3d });
-    if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedWallLength?.(lengthMm);
+    if (entityType === "hidden") {
+      if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedHiddenLength?.(lengthMm);
+    } else {
+      editorRef.value?.setSelectedWallStyle?.({ thicknessMm, heightMm, fillColor: color3d });
+      if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedWallLength?.(lengthMm);
+    }
   }
   wallStyleDraftTouched.value = false;
 }
@@ -307,13 +346,21 @@ function updateWallStyleDraft(next) {
 
 function updateSelectedWallCoords(patch) {
   const toMm = (v) => Number(v) * 10;
+  const entityType = selectedWallStyle.value?.entityType || "wall";
   const dxMm = Number.isFinite(Number(patch?.dxCm)) ? toMm(patch.dxCm) : null;
   const dyMm = Number.isFinite(Number(patch?.dyCm)) ? toMm(patch.dyCm) : null;
   if (dxMm !== null || dyMm !== null) {
-    editorRef.value?.moveSelectedWallsBy?.({
-      dxMm: dxMm ?? 0,
-      dyMm: dyMm ?? 0,
-    });
+    if (entityType === "hidden") {
+      editorRef.value?.moveSelectedHiddenWallsBy?.({
+        dxMm: dxMm ?? 0,
+        dyMm: dyMm ?? 0,
+      });
+    } else {
+      editorRef.value?.moveSelectedWallsBy?.({
+        dxMm: dxMm ?? 0,
+        dyMm: dyMm ?? 0,
+      });
+    }
     return;
   }
 
@@ -322,7 +369,8 @@ function updateSelectedWallCoords(patch) {
   if (Number.isFinite(Number(patch?.ayCm))) payload.ayMm = toMm(patch.ayCm);
   if (Number.isFinite(Number(patch?.bxCm))) payload.bxMm = toMm(patch.bxCm);
   if (Number.isFinite(Number(patch?.byCm))) payload.byMm = toMm(patch.byCm);
-  editorRef.value?.setSelectedWallCoords?.(payload);
+  if (entityType === "hidden") editorRef.value?.setSelectedHiddenCoords?.(payload);
+  else editorRef.value?.setSelectedWallCoords?.(payload);
 }
 
 

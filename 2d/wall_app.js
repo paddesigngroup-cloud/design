@@ -157,6 +157,7 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   wallHeightMm: 3000,
 
   // Hidden walls (dashed guide-like lines)
+  hiddenWallThicknessMm: 1,
   hiddenWallColor: "#D8D4D4",
   hiddenWallLineWidthPx: 2,
   hiddenWallDash: [10, 8],
@@ -712,9 +713,11 @@ let selectedWallIds = [];
 let selectedHiddenIds = [];
 let selectedDimIds = [];
 let hoverDimTextWallId = null;
+let hoverDimTextHiddenId = null;
 let hoverWallHandle = null; // { type, wallId }
 const wallDimDrag = {
   active: false,
+  graphType: "wall", // "wall" | "hidden"
   wallId: null,
   startDimSide: "auto",
   startSide: "left",
@@ -726,11 +729,14 @@ const wallDimDrag = {
 const wallHandleDrag = {
   active: false,
   kind: null, // len_a|len_b|free_a|free_b|mid_move
+  graphType: "wall", // "wall" | "hidden"
   wallId: null,
   graphStartSnap: null,
   startMouse: null, // world
   startA: null,
   startB: null,
+  lenBaseMm: null,
+  lenHandleProjStartMm: null,
   moved: false,
 };
 const boxSelect = {
@@ -794,6 +800,33 @@ function toggleWallSelectionByModifier(wallId) {
   }
 
   selectedHiddenId = null;
+  selectedDimId = null;
+  selectedModelOutline = false;
+}
+
+function toggleHiddenSelectionByModifier(wallId) {
+  if (!wallId) return;
+  const ids = [];
+  if (selectedHiddenId) ids.push(selectedHiddenId);
+  for (const id of selectedHiddenIds) {
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  const idx = ids.indexOf(wallId);
+  if (idx >= 0) ids.splice(idx, 1);
+  else ids.push(wallId);
+
+  if (ids.length === 1) {
+    selectedHiddenId = ids[0];
+    selectedHiddenIds = [];
+  } else if (ids.length > 1) {
+    selectedHiddenId = null;
+    selectedHiddenIds = ids;
+  } else {
+    selectedHiddenId = null;
+    selectedHiddenIds = [];
+  }
+
+  selectedWallId = null;
   selectedDimId = null;
   selectedModelOutline = false;
 }
@@ -927,6 +960,7 @@ const dimensions = [];
 ============================= */
 const dimEditor = {
   active: false,
+  graphType: "wall", // "wall" | "hidden"
   wallId: null,
   input: null,
 };
@@ -973,33 +1007,43 @@ function ensureDimEditorInput() {
   return el;
 }
 
-function openDimEditor(wallId) {
-  const w = graph.getWall(wallId);
+function _dimGraphByType(graphType) {
+  return graphType === "hidden" ? hiddenGraph : graph;
+}
+
+function openDimEditor(wallId, graphType = "wall") {
+  const g = _dimGraphByType(graphType);
+  const w = g.getWall(wallId);
   if (!w) return;
-  const A = graph.getNode(w.a);
-  const B = graph.getNode(w.b);
+  const A = g.getNode(w.a);
+  const B = g.getNode(w.b);
   if (!A || !B) return;
 
   ensureDimEditorInput();
 
   dimEditor.active = true;
+  dimEditor.graphType = graphType;
   dimEditor.wallId = wallId;
 
   // Match the drawn dimension value for the current dimension side.
-  const nodeMap = buildNodeEndpointMap(graph);
-  const jointGammaMap = buildJointGammaMap(nodeMap);
-  const c = computeTrimmedWallCorners(w, jointGammaMap);
-  const sideSign = chooseSideSignWithPref(A.x, A.y, B.x, B.y, w.dimSide || "auto", w);
-  const curLen = c ? ((sideSign === 1) ? c.leftLen : c.rightLen) : Math.hypot(B.x - A.x, B.y - A.y);
+  let curLen = Math.hypot(B.x - A.x, B.y - A.y);
+  if (graphType === "wall") {
+    const nodeMap = buildNodeEndpointMap(graph);
+    const jointGammaMap = buildJointGammaMap(nodeMap);
+    const c = computeTrimmedWallCorners(w, jointGammaMap);
+    const sideSign = chooseSideSignWithPref(A.x, A.y, B.x, B.y, w.dimSide || "auto", w);
+    curLen = c ? ((sideSign === 1) ? c.leftLen : c.rightLen) : curLen;
+  }
   dimEditor.input.value = formatLengthMm(curLen);
   dimEditor.input.style.display = "block";
-  positionDimEditor(jointGammaMap);
+  positionDimEditor();
   dimEditor.input.focus({ preventScroll: true });
   dimEditor.input.select();
 }
 
 function closeDimEditor(keepSelection = true) {
   dimEditor.active = false;
+  dimEditor.graphType = "wall";
   dimEditor.wallId = null;
   if (dimEditor.input) dimEditor.input.style.display = "none";
   if (!keepSelection) {
@@ -1017,79 +1061,105 @@ function commitDimEditor() {
   if (!dimEditor.active || !dimEditor.wallId || !dimEditor.input) return;
   const targetMm = parseUserLengthToMm(dimEditor.input.value ?? "");
   if (targetMm) {
+    const graphType = dimEditor.graphType || "wall";
     const wallId = dimEditor.wallId;
-    // Adjust centerline length so the rendered useful dimension matches the requested value.
-    undo.runAction(() => {
-      let guess = Math.max(1, targetMm);
+    if (graphType === "hidden") {
+      undo.runAction(() => {
+        hiddenGraph.setWallLengthMm(wallId, Math.max(1, targetMm));
+        hiddenGraph.mergeCloseNodes(1);
+        hiddenGraph.deleteTinyEdges(1);
+      });
+      selectedHiddenId = wallId;
+      selectedWallId = null;
+    } else {
+      // Adjust centerline length so the rendered useful dimension matches the requested value.
+      undo.runAction(() => {
+        let guess = Math.max(1, targetMm);
 
-      const w = graph.getWall(wallId);
-      if (!w) return;
-      const A0 = graph.getNode(w.a);
-      const B0 = graph.getNode(w.b);
-      const sideSign = (A0 && B0) ? chooseSideSignWithPref(A0.x, A0.y, B0.x, B0.y, w.dimSide || "auto", w) : 1;
+        const w = graph.getWall(wallId);
+        if (!w) return;
+        const A0 = graph.getNode(w.a);
+        const B0 = graph.getNode(w.b);
+        const sideSign = (A0 && B0) ? chooseSideSignWithPref(A0.x, A0.y, B0.x, B0.y, w.dimSide || "auto", w) : 1;
 
-      // Seed guess using current error (derivative ~ 1).
-      {
-        const nodeMap0 = buildNodeEndpointMap(graph);
-        const jointGammaMap0 = buildJointGammaMap(nodeMap0);
-        const c0 = computeTrimmedWallCorners(w, jointGammaMap0);
-        if (A0 && B0) {
-          const curCenter = Math.hypot(B0.x - A0.x, B0.y - A0.y);
-          const curFace = c0 ? ((sideSign === 1) ? c0.leftLen : c0.rightLen) : curCenter;
-          guess = Math.max(1, curCenter + (targetMm - curFace));
+        // Seed guess using current error (derivative ~ 1).
+        {
+          const nodeMap0 = buildNodeEndpointMap(graph);
+          const jointGammaMap0 = buildJointGammaMap(nodeMap0);
+          const c0 = computeTrimmedWallCorners(w, jointGammaMap0);
+          if (A0 && B0) {
+            const curCenter = Math.hypot(B0.x - A0.x, B0.y - A0.y);
+            const curFace = c0 ? ((sideSign === 1) ? c0.leftLen : c0.rightLen) : curCenter;
+            guess = Math.max(1, curCenter + (targetMm - curFace));
+          }
         }
-      }
 
-      for (let i = 0; i < 6; i++) {
-        graph.setWallLengthMm(wallId, guess);
+        for (let i = 0; i < 6; i++) {
+          graph.setWallLengthMm(wallId, guess);
 
-        const nodeMap = buildNodeEndpointMap(graph);
-        const jointGammaMap = buildJointGammaMap(nodeMap);
-        const c = computeTrimmedWallCorners(w, jointGammaMap);
+          const nodeMap = buildNodeEndpointMap(graph);
+          const jointGammaMap = buildJointGammaMap(nodeMap);
+          const c = computeTrimmedWallCorners(w, jointGammaMap);
 
-        const A = graph.getNode(w.a);
-        const B = graph.getNode(w.b);
-        const curFace = (c && isFinite(c.leftLen) && isFinite(c.rightLen))
-          ? ((sideSign === 1) ? c.leftLen : c.rightLen)
-          : (A && B ? Math.hypot(B.x - A.x, B.y - A.y) : guess);
+          const A = graph.getNode(w.a);
+          const B = graph.getNode(w.b);
+          const curFace = (c && isFinite(c.leftLen) && isFinite(c.rightLen))
+            ? ((sideSign === 1) ? c.leftLen : c.rightLen)
+            : (A && B ? Math.hypot(B.x - A.x, B.y - A.y) : guess);
 
-        const err = targetMm - curFace;
-        if (!isFinite(err) || Math.abs(err) < 0.1) break;
+          const err = targetMm - curFace;
+          if (!isFinite(err) || Math.abs(err) < 0.1) break;
 
-        guess = Math.max(1, guess + err);
-      }
+          guess = Math.max(1, guess + err);
+        }
 
-      // Driving dimension: keep the last "useful" length stable across topology changes (best-effort).
-      w.lockedInsideLenMm = targetMm;
-    });
-    selectedWallId = wallId;
+        // Driving dimension: keep the last "useful" length stable across topology changes (best-effort).
+        w.lockedInsideLenMm = targetMm;
+      });
+      selectedWallId = wallId;
+      selectedHiddenId = null;
+    }
   }
   closeDimEditor(true);
 }
 
 function positionDimEditor(jointGammaMap = null) {
   if (!dimEditor.active || !dimEditor.wallId || !dimEditor.input) return;
-  const w = graph.getWall(dimEditor.wallId);
+  const graphType = dimEditor.graphType || "wall";
+  const g = _dimGraphByType(graphType);
+  const w = g.getWall(dimEditor.wallId);
   if (!w) { closeDimEditor(false); return; }
-  const A = graph.getNode(w.a);
-  const B = graph.getNode(w.b);
+  const A = g.getNode(w.a);
+  const B = g.getNode(w.b);
   if (!A || !B) { closeDimEditor(false); return; }
 
-  let jgm = jointGammaMap;
-  if (!jgm) {
-    const nodeMap = buildNodeEndpointMap(graph);
-    jgm = buildJointGammaMap(nodeMap);
-  }
-  const c = computeTrimmedWallCorners(w, jgm);
   const wallDimOffset =
     (typeof w.dimOffsetMm === "number" && isFinite(w.dimOffsetMm))
       ? Math.max(0, w.dimOffsetMm)
       : state.dimOffsetMm;
-  const opts = c
-    ? { anchorsBySide: c.anchorsBySide, offsetMm: wallDimOffset, wallEdge: w }
-    : { offsetMm: wallDimOffset, wallEdge: w };
-
-  const lay = computeDimensionLayout(A.x, A.y, B.x, B.y, w.dimSide || "auto", c ? { left: c.leftLen, right: c.rightLen } : null, opts);
+  let lay = null;
+  if (graphType === "hidden") {
+    lay = computeDimensionLayout(
+      A.x,
+      A.y,
+      B.x,
+      B.y,
+      w.dimSide || "auto",
+      null,
+      { offsetMm: wallDimOffset, fixedSideSign: (w.dimSide === "right") ? -1 : 1 }
+    );
+  } else {
+    let jgm = jointGammaMap;
+    if (!jgm) {
+      const nodeMap = buildNodeEndpointMap(graph);
+      jgm = buildJointGammaMap(nodeMap);
+    }
+    const c = computeTrimmedWallCorners(w, jgm);
+    const opts = c
+      ? { anchorsBySide: c.anchorsBySide, offsetMm: wallDimOffset, wallEdge: w }
+      : { offsetMm: wallDimOffset, wallEdge: w };
+    lay = computeDimensionLayout(A.x, A.y, B.x, B.y, w.dimSide || "auto", c ? { left: c.leftLen, right: c.rightLen } : null, opts);
+  }
   if (!lay) { closeDimEditor(false); return; }
 
   const r = lay.textRect;
@@ -2322,7 +2392,7 @@ function hitTest(x, y) {
       if (!firstOffSideHit) firstOffSideHit = t;
       continue;
     }
-    if (t.type === "dim_side") {
+    if (t.type === "dim_side" || t.type === "hidden_dim_side") {
       if (!firstDimSideHit) firstDimSideHit = t;
       continue;
     }
@@ -2330,7 +2400,11 @@ function hitTest(x, y) {
       t.type === "wall_len_a" || t.type === "wall_len_b" ||
       t.type === "wall_free_a" || t.type === "wall_free_b" ||
       t.type === "wall_mid_move" ||
-      t.type === "wall_chain_a" || t.type === "wall_chain_b"
+      t.type === "wall_chain_a" || t.type === "wall_chain_b" ||
+      t.type === "hidden_len_a" || t.type === "hidden_len_b" ||
+      t.type === "hidden_free_a" || t.type === "hidden_free_b" ||
+      t.type === "hidden_mid_move" ||
+      t.type === "hidden_chain_a" || t.type === "hidden_chain_b"
     ) {
       if (!firstWallHandleHit) firstWallHandleHit = t;
       continue;
@@ -3074,11 +3148,11 @@ function drawWallEditHandles() {
   function drawHandleIcon(rect, iconKey, rotRad, fallbackFill, fallbackStroke) {
     const isHover = !!(hoverWallHandle && hoverWallHandle.wallId === w.id && hoverWallHandle.type === iconKey);
     const activeByKind =
-      (iconKey === "len_a" && wallHandleDrag.active && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "len_a") ||
-      (iconKey === "len_b" && wallHandleDrag.active && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "len_b") ||
-      (iconKey === "free_a" && wallHandleDrag.active && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "free_a") ||
-      (iconKey === "free_b" && wallHandleDrag.active && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "free_b") ||
-      (iconKey === "mid" && wallHandleDrag.active && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "mid_move");
+      (iconKey === "len_a" && wallHandleDrag.active && wallHandleDrag.graphType !== "hidden" && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "len_a") ||
+      (iconKey === "len_b" && wallHandleDrag.active && wallHandleDrag.graphType !== "hidden" && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "len_b") ||
+      (iconKey === "free_a" && wallHandleDrag.active && wallHandleDrag.graphType !== "hidden" && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "free_a") ||
+      (iconKey === "free_b" && wallHandleDrag.active && wallHandleDrag.graphType !== "hidden" && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "free_b") ||
+      (iconKey === "mid" && wallHandleDrag.active && wallHandleDrag.graphType !== "hidden" && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "mid_move");
     const alpha = activeByKind ? 1 : isHover ? 0.88 : 0.7;
 
     const baseKey =
@@ -3454,6 +3528,10 @@ function drawHiddenToolOverlay(tool) {
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
+
+    // Live dimension while drawing guide line (same behavior as wall preview).
+    const lay = computeDimensionLayout(s.a.x, s.a.y, s.b.x, s.b.y, "auto");
+    if (lay) drawDimensionFromLayout(lay);
   }
   ctx.restore();
 
@@ -3776,6 +3854,38 @@ function drawWallsNodeBased(tool) {
         wallUiIcons.push({ type: "dim_side", wallId: edge.id, rect: dimLayout.arrowRect, rot: dimLayout.arrowRot });
       }
     }
+
+    // Hidden wall dimensions
+    for (const edge of hiddenGraph.walls.values()) {
+      const A = hiddenGraph.getNode(edge.a);
+      const B = hiddenGraph.getNode(edge.b);
+      if (!A || !B) continue;
+      const sideSign = (edge.dimSide === "right") ? -1 : 1;
+      const dimLayout = computeDimensionLayout(
+        A.x,
+        A.y,
+        B.x,
+        B.y,
+        edge.dimSide || "auto",
+        null,
+        {
+          offsetMm: (typeof edge.dimOffsetMm === "number" && isFinite(edge.dimOffsetMm))
+            ? Math.max(0, edge.dimOffsetMm)
+            : state.dimOffsetMm,
+          fixedSideSign: sideSign,
+        }
+      );
+      if (!dimLayout) continue;
+
+      dimLayout.hideText = !!(dimEditor.active && dimEditor.graphType === "hidden" && dimEditor.wallId === edge.id);
+      drawDimensionFromLayout(dimLayout);
+
+      addRectTarget("hidden_dim_text", edge.id, dimLayout.textRect);
+      if (selectedHiddenId === edge.id || hoverDimTextHiddenId === edge.id) {
+        addRectTarget("hidden_dim_side", edge.id, dimLayout.arrowRect);
+        wallUiIcons.push({ type: "hidden_dim_side", wallId: edge.id, rect: dimLayout.arrowRect, rot: dimLayout.arrowRot });
+      }
+    }
   }
 
   // 3) Wall names (always on top of dimensions)
@@ -3788,6 +3898,7 @@ function drawWallsNodeBased(tool) {
   drawAngles(nodeMap);
   drawSelectionAndHover();
   drawWallEditHandles();
+  drawHiddenEditHandles();
   drawToolOverlay(tool);
   drawWallUiIconsTopLayer();
 
@@ -3798,7 +3909,7 @@ function drawWallsNodeBased(tool) {
 function drawWallUiIconsTopLayer() {
   const now = performance.now();
   for (const icon of wallUiIcons) {
-    if (icon.type === "dim_side" || icon.type === "off_side") {
+    if (icon.type === "dim_side" || icon.type === "off_side" || icon.type === "hidden_dim_side") {
       const hovered = !!(hoverUi && hoverUi.type === icon.type && hoverUi.wallId === icon.wallId);
       const active = !!(iconPulse && iconPulse.type === icon.type && iconPulse.wallId === icon.wallId && now < iconPulse.untilMs);
       drawArrowButton(icon.rect, icon.rot, false, { hovered, active, accentColor: state.dimColor });
@@ -3826,6 +3937,7 @@ const hiddenTool = new HiddenWallTool({
   graph: hiddenGraph,
   view,
   snapTolMm: 30,
+  defaultThickness: state.hiddenWallThicknessMm || 1,
 });
 
 const dimTool = new DimensionTool({
@@ -4325,12 +4437,115 @@ function isSceneEmpty() {
 function oppositeExplicitSide(side) {
   return side === "left" ? "right" : "left";
 }
-function resolveRenderedDimSide(edge) {
-  const A = graph.getNode(edge.a);
-  const B = graph.getNode(edge.b);
+
+function drawHiddenEditHandles() {
+  if (!selectedHiddenId) return;
+  initCursorImagesOnce();
+  const w = hiddenGraph.getWall(selectedHiddenId);
+  if (!w) return;
+  const A = hiddenGraph.getNode(w.a);
+  const B = hiddenGraph.getNode(w.b);
+  if (!A || !B) return;
+
+  const aS = worldToScreen(A.x, A.y);
+  const bS = worldToScreen(B.x, B.y);
+  const midS = { x: (aS.x + bS.x) / 2, y: (aS.y + bS.y) / 2 };
+  const dx = bS.x - aS.x;
+  const dy = bS.y - aS.y;
+  const L = Math.hypot(dx, dy) || 1;
+  const tx = dx / L;
+  const ty = dy / L;
+
+  const LEN_SZ = 48;
+  const FREE_SZ = 44;
+  const MID_W = 48;
+  const MID_H = 48;
+  const CHAIN_SZ = 18;
+  const CHAIN_PUSH = 0;
+  const LEN_PUSH = (CHAIN_SZ / 2) + (LEN_SZ / 2) + 8;
+  const FREE_PUSH = LEN_PUSH + (LEN_SZ / 2) + (FREE_SZ / 2) + 8;
+
+  function rectCenter(cx, cy, w0, h0) {
+    return { x: cx - w0 / 2, y: cy - h0 / 2, w: w0, h: h0 };
+  }
+  function drawRect(rect, fill, stroke, lw = 2) {
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = lw;
+    ctx.beginPath();
+    ctx.rect(rect.x, rect.y, rect.w, rect.h);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+  function drawHandleIcon(rect, iconKey, rotRad, fallbackFill, fallbackStroke) {
+    const isHover = !!(hoverWallHandle && hoverWallHandle.wallId === w.id && hoverWallHandle.type === iconKey);
+    const activeByKind =
+      (iconKey === "len_a" && wallHandleDrag.active && wallHandleDrag.graphType === "hidden" && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "len_a") ||
+      (iconKey === "len_b" && wallHandleDrag.active && wallHandleDrag.graphType === "hidden" && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "len_b") ||
+      (iconKey === "free_a" && wallHandleDrag.active && wallHandleDrag.graphType === "hidden" && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "free_a") ||
+      (iconKey === "free_b" && wallHandleDrag.active && wallHandleDrag.graphType === "hidden" && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "free_b") ||
+      (iconKey === "mid" && wallHandleDrag.active && wallHandleDrag.graphType === "hidden" && wallHandleDrag.wallId === w.id && wallHandleDrag.kind === "mid_move");
+    const alpha = activeByKind ? 1 : isHover ? 0.88 : 0.7;
+
+    const baseKey =
+      (iconKey === "len_a" || iconKey === "len_b") ? "len" :
+      (iconKey === "free_a" || iconKey === "free_b") ? "free" :
+      iconKey;
+    const img = wallHandleImgs.get(baseKey);
+    if (img && img.complete && img.naturalWidth > 0) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+      if (rotRad) ctx.rotate(rotRad);
+      ctx.drawImage(img, -rect.w / 2, -rect.h / 2, rect.w, rect.h);
+      ctx.restore();
+      return;
+    }
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    drawRect(rect, fallbackFill, fallbackStroke);
+    ctx.restore();
+  }
+
+  const lenA = rectCenter(aS.x - tx * LEN_PUSH, aS.y - ty * LEN_PUSH, LEN_SZ, LEN_SZ);
+  const lenB = rectCenter(bS.x + tx * LEN_PUSH, bS.y + ty * LEN_PUSH, LEN_SZ, LEN_SZ);
+  const freeA = rectCenter(aS.x - tx * FREE_PUSH, aS.y - ty * FREE_PUSH, FREE_SZ, FREE_SZ);
+  const freeB = rectCenter(bS.x + tx * FREE_PUSH, bS.y + ty * FREE_PUSH, FREE_SZ, FREE_SZ);
+  const mid = rectCenter(midS.x, midS.y, MID_W, MID_H);
+  const chainA = rectCenter(aS.x - tx * CHAIN_PUSH, aS.y - ty * CHAIN_PUSH, CHAIN_SZ, CHAIN_SZ);
+  const chainB = rectCenter(bS.x + tx * CHAIN_PUSH, bS.y + ty * CHAIN_PUSH, CHAIN_SZ, CHAIN_SZ);
+
+  addRectTarget("hidden_len_a", w.id, lenA);
+  addRectTarget("hidden_len_b", w.id, lenB);
+  addRectTarget("hidden_free_a", w.id, freeA);
+  addRectTarget("hidden_free_b", w.id, freeB);
+  addRectTarget("hidden_mid_move", w.id, mid);
+  addRectTarget("hidden_chain_a", w.id, chainA);
+  addRectTarget("hidden_chain_b", w.id, chainB);
+
+  const wallAng = Math.atan2(ty, tx);
+  drawHandleIcon(lenA, "len_a", wallAng, "#ffd18a", "#d97706");
+  drawHandleIcon(lenB, "len_b", wallAng, "#ffd18a", "#d97706");
+  drawHandleIcon(freeA, "free_a", wallAng + Math.PI, "#ddf9d3", "#16a34a");
+  drawHandleIcon(freeB, "free_b", wallAng, "#ddf9d3", "#16a34a");
+  drawHandleIcon(mid, "mid", wallAng, "#ffd18a", "#d97706");
+  drawHandleIcon(chainA, "joint", wallAng + Math.PI / 2, "#cfe3ff", "#2563eb");
+  drawHandleIcon(chainB, "joint", wallAng + Math.PI / 2, "#cfe3ff", "#2563eb");
+}
+function resolveRenderedDimSideForGraph(edge, g, graphType = "wall") {
+  const A = g.getNode(edge.a);
+  const B = g.getNode(edge.b);
   if (!A || !B) return "left";
-  const sign = chooseSideSignWithPref(A.x, A.y, B.x, B.y, edge.dimSide || "auto", edge);
+  const sign = (graphType === "hidden")
+    ? ((edge.dimSide === "right") ? -1 : 1)
+    : chooseSideSignWithPref(A.x, A.y, B.x, B.y, edge.dimSide || "auto", edge);
   return sign === 1 ? "left" : "right";
+}
+function resolveRenderedDimSide(edge) {
+  return resolveRenderedDimSideForGraph(edge, graph, "wall");
 }
 function resolveRenderedOffsetSide(edge) {
   const A = graph.getNode(edge.a);
@@ -4352,19 +4567,33 @@ function changeWallLengthByStep(wallId, deltaMm) {
   graph.setWallLengthMm(wallId, next);
 }
 
-function beginWallHandleDrag(kind, wallId, offsetX, offsetY) {
-  const w = graph.getWall(wallId);
+function beginWallHandleDrag(kind, wallId, offsetX, offsetY, graphType = "wall") {
+  const g = graphType === "hidden" ? hiddenGraph : graph;
+  const w = g.getWall(wallId);
   if (!w) return false;
-  const A = graph.getNode(w.a);
-  const B = graph.getNode(w.b);
+  const A = g.getNode(w.a);
+  const B = g.getNode(w.b);
   if (!A || !B) return false;
   wallHandleDrag.active = true;
   wallHandleDrag.kind = kind;
+  wallHandleDrag.graphType = graphType;
   wallHandleDrag.wallId = wallId;
-  wallHandleDrag.graphStartSnap = snapshotGraph(graph);
+  wallHandleDrag.graphStartSnap = snapshotGraph(g);
   wallHandleDrag.startMouse = screenToWorld(offsetX, offsetY);
   wallHandleDrag.startA = { x: A.x, y: A.y };
   wallHandleDrag.startB = { x: B.x, y: B.y };
+  wallHandleDrag.lenBaseMm = null;
+  wallHandleDrag.lenHandleProjStartMm = null;
+  if (kind === "len_a" || kind === "len_b") {
+    const d0 = normalize(B.x - A.x, B.y - A.y);
+    const ux = (kind === "len_a") ? -d0.x : d0.x;
+    const uy = (kind === "len_a") ? -d0.y : d0.y;
+    const anchor = (kind === "len_a") ? B : A;
+    const moving = (kind === "len_a") ? A : B;
+    const startMouse = wallHandleDrag.startMouse;
+    wallHandleDrag.lenBaseMm = Math.max(1, dot(moving.x - anchor.x, moving.y - anchor.y, ux, uy));
+    wallHandleDrag.lenHandleProjStartMm = dot(startMouse.x - anchor.x, startMouse.y - anchor.y, ux, uy);
+  }
   wallHandleDrag.moved = false;
   return true;
 }
@@ -4397,7 +4626,17 @@ function onMouseDown(e) {
       preventDefault: () => e.preventDefault(),
     };
     if (state.activeTool === "dim") dimTool.onPointerDown(ev, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld });
-    else if (state.activeTool === "hidden") hiddenTool.onPointerDown(ev, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld });
+    else if (state.activeTool === "hidden") hiddenTool.onPointerDown(ev, {
+      snapOn: state.snapOn,
+      resolveSnapPoint: resolveSnapPointWorld,
+      defaultThicknessMm: state.hiddenWallThicknessMm,
+      stepDrawEnabled: state.stepDrawEnabled,
+      stepDrawMode: state.stepDrawMode,
+      stepLineEnabled: state.stepLineEnabled,
+      stepDegreeEnabled: state.stepDegreeEnabled,
+      stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+      stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+    });
     else if (state.activeTool === "wall") {
       tool.onPointerDown(ev, {
         snapOn: state.snapOn,
@@ -4439,7 +4678,9 @@ function onMouseDown(e) {
   // 1) UI hit => handle and STOP (does not start drawing)
   const t = hitTest(e.offsetX, e.offsetY) || hitTestSelectedWallUiFallback(e.offsetX, e.offsetY);
   if (t) {
-    const w = graph.getWall(t.wallId);
+    const isHiddenTarget = String(t.type || "").startsWith("hidden_");
+    const g = isHiddenTarget ? hiddenGraph : graph;
+    const w = g.getWall(t.wallId);
     if (!w) return;
     clearGroupSelection();
 
@@ -4454,6 +4695,19 @@ function onMouseDown(e) {
       tool.pendingStartNodeId = nodeId;
       tool.pendingStartPos = { x: n.x, y: n.y };
       tool.previewEndPos = { x: n.x, y: n.y };
+      return;
+    }
+    if (t.type === "hidden_chain_a" || t.type === "hidden_chain_b") {
+      const nodeId = (t.type === "hidden_chain_a") ? w.a : w.b;
+      const n = hiddenGraph.getNode(nodeId);
+      if (!n) return;
+      selectedWallId = null;
+      selectedDimId = null;
+      selectedHiddenId = w.id;
+      setActiveTool("hidden");
+      hiddenTool.pendingStartNodeId = nodeId;
+      hiddenTool.pendingStartPos = { x: n.x, y: n.y };
+      hiddenTool.previewEndPos = { x: n.x, y: n.y };
       return;
     }
     if (t.type === "wall_len_a") {
@@ -4491,15 +4745,69 @@ function onMouseDown(e) {
       beginWallHandleDrag("mid_move", w.id, e.offsetX, e.offsetY);
       return;
     }
+    if (t.type === "hidden_len_a") {
+      selectedWallId = null;
+      selectedDimId = null;
+      selectedHiddenId = w.id;
+      beginWallHandleDrag("len_a", w.id, e.offsetX, e.offsetY, "hidden");
+      return;
+    }
+    if (t.type === "hidden_len_b") {
+      selectedWallId = null;
+      selectedDimId = null;
+      selectedHiddenId = w.id;
+      beginWallHandleDrag("len_b", w.id, e.offsetX, e.offsetY, "hidden");
+      return;
+    }
+    if (t.type === "hidden_free_a") {
+      selectedWallId = null;
+      selectedDimId = null;
+      selectedHiddenId = w.id;
+      beginWallHandleDrag("free_a", w.id, e.offsetX, e.offsetY, "hidden");
+      return;
+    }
+    if (t.type === "hidden_free_b") {
+      selectedWallId = null;
+      selectedDimId = null;
+      selectedHiddenId = w.id;
+      beginWallHandleDrag("free_b", w.id, e.offsetX, e.offsetY, "hidden");
+      return;
+    }
+    if (t.type === "hidden_mid_move") {
+      selectedWallId = null;
+      selectedDimId = null;
+      selectedHiddenId = w.id;
+      beginWallHandleDrag("mid_move", w.id, e.offsetX, e.offsetY, "hidden");
+      return;
+    }
 
     if (t.type === "dim_text") {
       selectedHiddenId = null;
       selectedWallId = w.id;
       selectedDimId = null;
       wallDimDrag.active = true;
+      wallDimDrag.graphType = "wall";
       wallDimDrag.wallId = w.id;
       wallDimDrag.startDimSide = w.dimSide || "auto";
       wallDimDrag.startSide = resolveRenderedDimSide(w);
+      wallDimDrag.startX = e.offsetX;
+      wallDimDrag.startY = e.offsetY;
+      wallDimDrag.startOffsetMm =
+        (typeof w.dimOffsetMm === "number" && isFinite(w.dimOffsetMm))
+          ? Math.max(0, w.dimOffsetMm)
+          : state.dimOffsetMm;
+      wallDimDrag.moved = false;
+      return;
+    }
+    if (t.type === "hidden_dim_text") {
+      selectedWallId = null;
+      selectedHiddenId = w.id;
+      selectedDimId = null;
+      wallDimDrag.active = true;
+      wallDimDrag.graphType = "hidden";
+      wallDimDrag.wallId = w.id;
+      wallDimDrag.startDimSide = w.dimSide || "auto";
+      wallDimDrag.startSide = resolveRenderedDimSideForGraph(w, hiddenGraph, "hidden");
       wallDimDrag.startX = e.offsetX;
       wallDimDrag.startY = e.offsetY;
       wallDimDrag.startOffsetMm =
@@ -4519,6 +4827,17 @@ function onMouseDown(e) {
         w.dimSide = oppositeExplicitSide(current);
       });
       iconPulse = { type: "dim_side", wallId: w.id, untilMs: performance.now() + 260 };
+      return;
+    }
+    if (t.type === "hidden_dim_side") {
+      selectedWallId = null;
+      selectedHiddenId = w.id;
+      selectedDimId = null;
+      undo.runAction(() => {
+        const current = resolveRenderedDimSideForGraph(w, hiddenGraph, "hidden");
+        w.dimSide = oppositeExplicitSide(current);
+      });
+      iconPulse = { type: "hidden_dim_side", wallId: w.id, untilMs: performance.now() + 260 };
       return;
     }
 
@@ -4553,7 +4872,20 @@ function onMouseDown(e) {
 
   // 2) If active tool is drawing, next click continues that chain.
   if (state.activeTool === "hidden" && hiddenTool.getStatus()?.isDrawing) {
-    undo.runAction(() => hiddenTool.onPointerDown({ button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey }, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld }));
+    undo.runAction(() => hiddenTool.onPointerDown(
+      { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
+      {
+        snapOn: state.snapOn,
+        resolveSnapPoint: resolveSnapPointWorld,
+        defaultThicknessMm: state.hiddenWallThicknessMm,
+        stepDrawEnabled: state.stepDrawEnabled,
+        stepDrawMode: state.stepDrawMode,
+        stepLineEnabled: state.stepLineEnabled,
+        stepDegreeEnabled: state.stepDegreeEnabled,
+        stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+        stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+      }
+    ));
     return;
   }
   if (state.activeTool === "wall" && tool.getStatus()?.isDrawing) {
@@ -4600,6 +4932,10 @@ function onMouseDown(e) {
     return;
   }
   if (hoverHiddenId) {
+    if (isMultiSelectModifier) {
+      toggleHiddenSelectionByModifier(hoverHiddenId);
+      return;
+    }
     clearGroupSelection();
     selectedWallId = null;
     selectedHiddenId = hoverHiddenId;
@@ -4645,7 +4981,20 @@ function onMouseDown(e) {
   }
 
   if (state.activeTool === "hidden") {
-    undo.runAction(() => hiddenTool.onPointerDown({ button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey }, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld }));
+    undo.runAction(() => hiddenTool.onPointerDown(
+      { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
+      {
+        snapOn: state.snapOn,
+        resolveSnapPoint: resolveSnapPointWorld,
+        defaultThicknessMm: state.hiddenWallThicknessMm,
+        stepDrawEnabled: state.stepDrawEnabled,
+        stepDrawMode: state.stepDrawMode,
+        stepLineEnabled: state.stepLineEnabled,
+        stepDegreeEnabled: state.stepDegreeEnabled,
+        stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+        stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+      }
+    ));
   } else if (state.activeTool === "wall") {
     undo.runAction(() => {
       const beforeWalls = graph.walls.size;
@@ -4678,37 +5027,45 @@ function onWindowMouseUp() {
   }
   if (wallHandleDrag.active) {
     const startSnap = wallHandleDrag.graphStartSnap;
+    const graphType = wallHandleDrag.graphType || "wall";
+    const dragGraph = graphType === "hidden" ? hiddenGraph : graph;
     const moved = !!wallHandleDrag.moved;
-    const endSnap = snapshotGraph(graph);
+    const endSnap = snapshotGraph(dragGraph);
     wallHandleDrag.active = false;
     wallHandleDrag.kind = null;
+    wallHandleDrag.graphType = "wall";
     wallHandleDrag.wallId = null;
     wallHandleDrag.graphStartSnap = null;
     wallHandleDrag.startMouse = null;
     wallHandleDrag.startA = null;
     wallHandleDrag.startB = null;
+    wallHandleDrag.lenBaseMm = null;
+    wallHandleDrag.lenHandleProjStartMm = null;
     wallHandleDrag.moved = false;
     if (moved && startSnap) {
-      restoreGraph(graph, startSnap);
+      restoreGraph(dragGraph, startSnap);
       undo.runAction(() => {
-        restoreGraph(graph, endSnap);
+        restoreGraph(dragGraph, endSnap);
       });
     }
   }
   if (wallDimDrag.active) {
+    const graphType = wallDimDrag.graphType || "wall";
+    const dimGraph = graphType === "hidden" ? hiddenGraph : graph;
     const wallId = wallDimDrag.wallId;
     const startDimSide = wallDimDrag.startDimSide || "auto";
     const startSide = wallDimDrag.startSide || "left";
     const startOffsetMm = wallDimDrag.startOffsetMm;
     const moved = !!wallDimDrag.moved;
     wallDimDrag.active = false;
+    wallDimDrag.graphType = "wall";
     wallDimDrag.wallId = null;
 
-    const w = wallId ? graph.getWall(wallId) : null;
+    const w = wallId ? dimGraph.getWall(wallId) : null;
     if (w) {
       const finalDimSide = (w.dimSide === "left" || w.dimSide === "right")
         ? w.dimSide
-        : resolveRenderedDimSide(w);
+        : resolveRenderedDimSideForGraph(w, dimGraph, graphType);
       const finalOffsetMm =
         (typeof w.dimOffsetMm === "number" && isFinite(w.dimOffsetMm))
           ? Math.max(0, w.dimOffsetMm)
@@ -4724,7 +5081,7 @@ function onWindowMouseUp() {
       } else {
         w.dimOffsetMm = startOffsetMm;
         w.dimSide = startDimSide;
-        openDimEditor(w.id);
+        openDimEditor(w.id, graphType);
       }
     }
   }
@@ -4848,13 +5205,14 @@ function onWindowMouseMove(e) {
 
   if (wallHandleDrag.active) {
     const startSnap = wallHandleDrag.graphStartSnap;
+    const dragGraph = wallHandleDrag.graphType === "hidden" ? hiddenGraph : graph;
     if (!startSnap) {
       wallHandleDrag.active = false;
     } else {
-      restoreGraph(graph, startSnap);
-      const w = wallHandleDrag.wallId ? graph.getWall(wallHandleDrag.wallId) : null;
-      const A = w ? graph.getNode(w.a) : null;
-      const B = w ? graph.getNode(w.b) : null;
+      restoreGraph(dragGraph, startSnap);
+      const w = wallHandleDrag.wallId ? dragGraph.getWall(wallHandleDrag.wallId) : null;
+      const A = w ? dragGraph.getNode(w.a) : null;
+      const B = w ? dragGraph.getNode(w.b) : null;
       const p0 = wallHandleDrag.startMouse;
       const a0 = wallHandleDrag.startA;
       const b0 = wallHandleDrag.startB;
@@ -4895,24 +5253,34 @@ function onWindowMouseMove(e) {
         } else if (wallHandleDrag.kind === "len_a") {
           const ux = -d0.x;
           const uy = -d0.y;
-          const vx = snapW.x - b0.x;
-          const vy = snapW.y - b0.y;
-          let lenNew = Math.max(1, vx * ux + vy * uy);
+          const startProj = Number.isFinite(Number(wallHandleDrag.lenHandleProjStartMm))
+            ? Number(wallHandleDrag.lenHandleProjStartMm)
+            : dot(p0.x - b0.x, p0.y - b0.y, ux, uy);
+          const baseLen = Number.isFinite(Number(wallHandleDrag.lenBaseMm))
+            ? Number(wallHandleDrag.lenBaseMm)
+            : Math.max(1, dot(a0.x - b0.x, a0.y - b0.y, ux, uy));
+          const curProj = dot(snapW.x - b0.x, snapW.y - b0.y, ux, uy);
+          let lenNew = Math.max(1, baseLen + (curProj - startProj));
           if (stepOpts.useLineStep) lenNew = Math.max(1, Math.round(lenNew / stepOpts.stepLineMm) * stepOpts.stepLineMm);
           A.x = b0.x + ux * lenNew;
           A.y = b0.y + uy * lenNew;
         } else if (wallHandleDrag.kind === "len_b") {
           const ux = d0.x;
           const uy = d0.y;
-          const vx = snapW.x - a0.x;
-          const vy = snapW.y - a0.y;
-          let lenNew = Math.max(1, vx * ux + vy * uy);
+          const startProj = Number.isFinite(Number(wallHandleDrag.lenHandleProjStartMm))
+            ? Number(wallHandleDrag.lenHandleProjStartMm)
+            : dot(p0.x - a0.x, p0.y - a0.y, ux, uy);
+          const baseLen = Number.isFinite(Number(wallHandleDrag.lenBaseMm))
+            ? Number(wallHandleDrag.lenBaseMm)
+            : Math.max(1, dot(b0.x - a0.x, b0.y - a0.y, ux, uy));
+          const curProj = dot(snapW.x - a0.x, snapW.y - a0.y, ux, uy);
+          let lenNew = Math.max(1, baseLen + (curProj - startProj));
           if (stepOpts.useLineStep) lenNew = Math.max(1, Math.round(lenNew / stepOpts.stepLineMm) * stepOpts.stepLineMm);
           B.x = a0.x + ux * lenNew;
           B.y = a0.y + uy * lenNew;
         }
-        graph.mergeCloseNodes(1);
-        graph.deleteTinyEdges(1);
+        dragGraph.mergeCloseNodes(1);
+        dragGraph.deleteTinyEdges(1);
         const movedMm = Math.hypot(snapW.x - p0.x, snapW.y - p0.y);
         if (movedMm > 0.5) wallHandleDrag.moved = true;
         return;
@@ -4921,11 +5289,13 @@ function onWindowMouseMove(e) {
   }
 
   if (wallDimDrag.active) {
-    const w = wallDimDrag.wallId ? graph.getWall(wallDimDrag.wallId) : null;
-    const A = w ? graph.getNode(w.a) : null;
-    const B = w ? graph.getNode(w.b) : null;
+    const dimGraph = wallDimDrag.graphType === "hidden" ? hiddenGraph : graph;
+    const w = wallDimDrag.wallId ? dimGraph.getWall(wallDimDrag.wallId) : null;
+    const A = w ? dimGraph.getNode(w.a) : null;
+    const B = w ? dimGraph.getNode(w.b) : null;
     if (!w || !A || !B) {
       wallDimDrag.active = false;
+      wallDimDrag.graphType = "wall";
       wallDimDrag.wallId = null;
     } else {
       const sideSign = (wallDimDrag.startSide === "left") ? 1 : -1;
@@ -4952,7 +5322,19 @@ function onWindowMouseMove(e) {
   }
 
   if (state.activeTool === "dim") dimTool.onPointerMove({ offsetX: ox, offsetY: oy, shiftKey: e.shiftKey }, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld });
-  else if (state.activeTool === "hidden") hiddenTool.onPointerMove({ offsetX: ox, offsetY: oy, shiftKey: e.shiftKey }, { snapOn: state.snapOn, resolveSnapPoint: resolveSnapPointWorld });
+  else if (state.activeTool === "hidden") hiddenTool.onPointerMove(
+    { offsetX: ox, offsetY: oy, shiftKey: e.shiftKey },
+    {
+      snapOn: state.snapOn,
+      resolveSnapPoint: resolveSnapPointWorld,
+      stepDrawEnabled: state.stepDrawEnabled,
+      stepDrawMode: state.stepDrawMode,
+      stepLineEnabled: state.stepLineEnabled,
+      stepDegreeEnabled: state.stepDegreeEnabled,
+      stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+      stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+    }
+  );
   else tool.onPointerMove(
     { offsetX: ox, offsetY: oy, shiftKey: e.shiftKey },
     {
@@ -4976,15 +5358,23 @@ function onWindowMouseMove(e) {
       ht.type === "wall_len_a" || ht.type === "wall_len_b" ||
       ht.type === "wall_free_a" || ht.type === "wall_free_b" ||
       ht.type === "wall_mid_move" ||
-      ht.type === "wall_chain_a" || ht.type === "wall_chain_b"
+      ht.type === "wall_chain_a" || ht.type === "wall_chain_b" ||
+      ht.type === "hidden_len_a" || ht.type === "hidden_len_b" ||
+      ht.type === "hidden_free_a" || ht.type === "hidden_free_b" ||
+      ht.type === "hidden_mid_move" ||
+      ht.type === "hidden_chain_a" || ht.type === "hidden_chain_b"
     )
   ) {
-    hoverWallHandle = { type: ht.type, wallId: ht.wallId };
+    const handleType = String(ht.type || "")
+      .replace(/^wall_/, "")
+      .replace(/^hidden_/, "");
+    hoverWallHandle = { type: handleType, wallId: ht.wallId };
   } else {
     hoverWallHandle = null;
   }
   hoverDimTextWallId = (ht && ht.type === "dim_text") ? ht.wallId : null;
-  if (ht && (ht.type === "dim_side" || ht.type === "off_side")) {
+  hoverDimTextHiddenId = (ht && ht.type === "hidden_dim_text") ? ht.wallId : null;
+  if (ht && (ht.type === "dim_side" || ht.type === "off_side" || ht.type === "hidden_dim_side")) {
     hoverUi = { type: ht.type, wallId: ht.wallId };
   } else {
     hoverUi = null;
@@ -5176,14 +5566,18 @@ function onWindowKeyDown(e) {
       return;
     }
     if (wallHandleDrag.active && wallHandleDrag.graphStartSnap) {
-      restoreGraph(graph, wallHandleDrag.graphStartSnap);
+      const dragGraph = (wallHandleDrag.graphType === "hidden") ? hiddenGraph : graph;
+      restoreGraph(dragGraph, wallHandleDrag.graphStartSnap);
       wallHandleDrag.active = false;
       wallHandleDrag.kind = null;
+      wallHandleDrag.graphType = "wall";
       wallHandleDrag.wallId = null;
       wallHandleDrag.graphStartSnap = null;
       wallHandleDrag.startMouse = null;
       wallHandleDrag.startA = null;
       wallHandleDrag.startB = null;
+      wallHandleDrag.lenBaseMm = null;
+      wallHandleDrag.lenHandleProjStartMm = null;
       wallHandleDrag.moved = false;
     }
     if (dimEditor.active) closeDimEditor(false);
@@ -5436,6 +5830,14 @@ function setState(patch) {
   if (typeof patch.wallMagnetEnabled === "boolean") {
     state.wallMagnetEnabled = patch.wallMagnetEnabled;
   }
+  if (Number.isFinite(Number(patch.hiddenWallThicknessMm)) && Number(patch.hiddenWallThicknessMm) > 0) {
+    const mm = Math.max(1, Number(patch.hiddenWallThicknessMm));
+    state.hiddenWallThicknessMm = mm;
+    hiddenTool.defaultThickness = mm;
+    for (const w of hiddenGraph.walls.values()) {
+      w.thickness = mm;
+    }
+  }
   if (typeof patch.orthoEnabled === "boolean") {
     state.orthoEnabled = patch.orthoEnabled;
     // Keep wall tool lock-step state synced with the public ortho flag.
@@ -5586,6 +5988,31 @@ function setSelectedWallCoords(coords = {}) {
   return false;
 }
 
+function setSelectedHiddenStyle({ thicknessMm = null } = {}) {
+  const ids = [];
+  if (selectedHiddenId) ids.push(selectedHiddenId);
+  for (const id of selectedHiddenIds) if (id && !ids.includes(id)) ids.push(id);
+  if (ids.length === 0) return false;
+
+  let changed = false;
+  undo.runAction(() => {
+    for (const id of ids) {
+      const w = hiddenGraph.getWall(id);
+      if (!w) continue;
+      if (Number.isFinite(Number(thicknessMm)) && Number(thicknessMm) > 0) {
+        w.thickness = Math.max(1, Number(thicknessMm));
+        changed = true;
+      }
+    }
+  });
+
+  if (changed) {
+    saveSettings();
+    return true;
+  }
+  return false;
+}
+
 function moveSelectedWallsBy(delta = {}) {
   const dx = Number.isFinite(Number(delta.dxMm)) ? Number(delta.dxMm) : 0;
   const dy = Number.isFinite(Number(delta.dyMm)) ? Number(delta.dyMm) : 0;
@@ -5617,6 +6044,127 @@ function moveSelectedWallsBy(delta = {}) {
         node.y = nextY;
         changed = true;
       }
+    }
+  });
+
+  if (changed) {
+    saveSettings();
+    return true;
+  }
+  return false;
+}
+
+function setSelectedHiddenLength(lengthMm) {
+  const w = selectedHiddenId ? hiddenGraph.getWall(selectedHiddenId) : null;
+  if (!w) return false;
+  const A = hiddenGraph.getNode(w.a);
+  const B = hiddenGraph.getNode(w.b);
+  if (!A || !B) return false;
+
+  const targetLen = Number(lengthMm);
+  if (!Number.isFinite(targetLen) || targetLen < 1) return false;
+
+  const dx = B.x - A.x;
+  const dy = B.y - A.y;
+  const curLen = Math.hypot(dx, dy);
+  if (!Number.isFinite(curLen) || curLen < 1e-6) return false;
+
+  const ux = dx / curLen;
+  const uy = dy / curLen;
+  const nextBx = A.x + ux * targetLen;
+  const nextBy = A.y + uy * targetLen;
+
+  let changed = false;
+  undo.runAction(() => {
+    if (Math.hypot(B.x - nextBx, B.y - nextBy) > 1e-6) {
+      B.x = nextBx;
+      B.y = nextBy;
+      hiddenGraph.mergeCloseNodes(1);
+      hiddenGraph.deleteTinyEdges(1);
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    saveSettings();
+    return true;
+  }
+  return false;
+}
+
+function setSelectedHiddenCoords(coords = {}) {
+  const w = selectedHiddenId ? hiddenGraph.getWall(selectedHiddenId) : null;
+  if (!w) return false;
+  const A = hiddenGraph.getNode(w.a);
+  const B = hiddenGraph.getNode(w.b);
+  if (!A || !B) return false;
+
+  const nextAx = Number.isFinite(Number(coords.axMm)) ? Number(coords.axMm) : A.x;
+  const nextAy = Number.isFinite(Number(coords.ayMm)) ? Number(coords.ayMm) : A.y;
+  const nextBx = Number.isFinite(Number(coords.bxMm)) ? Number(coords.bxMm) : B.x;
+  const nextBy = Number.isFinite(Number(coords.byMm)) ? Number(coords.byMm) : B.y;
+  if (Math.hypot(nextBx - nextAx, nextBy - nextAy) < 1) return false;
+
+  let changed = false;
+  undo.runAction(() => {
+    if (A.x !== nextAx || A.y !== nextAy) {
+      A.x = nextAx;
+      A.y = nextAy;
+      changed = true;
+    }
+    if (B.x !== nextBx || B.y !== nextBy) {
+      B.x = nextBx;
+      B.y = nextBy;
+      changed = true;
+    }
+    if (changed) {
+      hiddenGraph.mergeCloseNodes(1);
+      hiddenGraph.deleteTinyEdges(1);
+    }
+  });
+
+  if (changed) {
+    saveSettings();
+    return true;
+  }
+  return false;
+}
+
+function moveSelectedHiddenWallsBy(delta = {}) {
+  const dx = Number.isFinite(Number(delta.dxMm)) ? Number(delta.dxMm) : 0;
+  const dy = Number.isFinite(Number(delta.dyMm)) ? Number(delta.dyMm) : 0;
+  if (dx === 0 && dy === 0) return false;
+
+  const ids = [];
+  if (selectedHiddenId) ids.push(selectedHiddenId);
+  for (const id of selectedHiddenIds) if (id && !ids.includes(id)) ids.push(id);
+  if (ids.length === 0) return false;
+
+  const nodeIds = new Set();
+  for (const id of ids) {
+    const w = hiddenGraph.getWall(id);
+    if (!w) continue;
+    nodeIds.add(w.a);
+    nodeIds.add(w.b);
+  }
+  if (nodeIds.size === 0) return false;
+
+  let changed = false;
+  undo.runAction(() => {
+    for (const nodeId of nodeIds) {
+      const node = hiddenGraph.getNode(nodeId);
+      if (!node) continue;
+      const nextX = node.x + dx;
+      const nextY = node.y + dy;
+      if (node.x !== nextX || node.y !== nextY) {
+        node.x = nextX;
+        node.y = nextY;
+        changed = true;
+      }
+    }
+    if (changed) {
+      hiddenGraph.mergeCloseNodes(1);
+      hiddenGraph.deleteTinyEdges(1);
     }
   });
 
@@ -5863,8 +6411,12 @@ return {
   getState,
   setState,
   setSelectedWallStyle,
+  setSelectedHiddenStyle,
   setSelectedWallLength,
   setSelectedWallCoords,
   moveSelectedWallsBy,
+  setSelectedHiddenLength,
+  setSelectedHiddenCoords,
+  moveSelectedHiddenWallsBy,
 };
 }

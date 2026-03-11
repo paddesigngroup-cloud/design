@@ -28,11 +28,40 @@ function constrainAlongDir(from, to, dir) {
   return { x: from.x + u.x * t, y: from.y + u.y * t };
 }
 
+function quantizeLength(from, to, stepMm) {
+  const step = Number(stepMm);
+  if (!Number.isFinite(step) || step <= 0) return to;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return { x: from.x, y: from.y };
+  const snappedLen = Math.round(len / step) * step;
+  const scale = snappedLen / len;
+  return { x: from.x + dx * scale, y: from.y + dy * scale };
+}
+
+function quantizeAngle(from, to, stepDeg) {
+  const step = Number(stepDeg);
+  if (!Number.isFinite(step) || step <= 0) return to;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return { x: from.x, y: from.y };
+  const stepRad = (step * Math.PI) / 180;
+  const angle = Math.atan2(dy, dx);
+  const snapped = Math.round(angle / stepRad) * stepRad;
+  return {
+    x: from.x + Math.cos(snapped) * len,
+    y: from.y + Math.sin(snapped) * len,
+  };
+}
+
 export class HiddenWallTool {
-  constructor({ graph, view, snapTolMm = 30 }) {
+  constructor({ graph, view, snapTolMm = 30, defaultThickness = 1 }) {
     this.graph = graph;
     this.view = view;
     this.snapTolMm = snapTolMm;
+    this.defaultThickness = Math.max(1, Number(defaultThickness) || 1);
 
     this.angleLocked = true; // 45deg
     this.lastDir = null;
@@ -62,10 +91,28 @@ export class HiddenWallTool {
     this.angleLocked = true;
   }
 
-  _applyAngle(startPos, endPos, shiftKey) {
-    if (this.angleLocked) return snap45(startPos, endPos);
-    if (shiftKey && this.lastDir) return constrainAlongDir(startPos, endPos, this.lastDir);
-    return endPos;
+  _applyAngle(startPos, endPos, shiftKey, opts = {}) {
+    let nextPos = endPos;
+    if (this.angleLocked) nextPos = snap45(startPos, nextPos);
+    else if (shiftKey && this.lastDir) nextPos = constrainAlongDir(startPos, nextPos, this.lastDir);
+
+    const hasLineToggle = typeof opts?.stepLineEnabled === "boolean";
+    const hasDegreeToggle = typeof opts?.stepDegreeEnabled === "boolean";
+    const legacyStepsEnabled = opts?.stepDrawEnabled !== false;
+    const legacyMode = opts?.stepDrawMode === "degree" ? "degree" : "line";
+    let useLineStep = false;
+    let useDegreeStep = false;
+    if (hasLineToggle || hasDegreeToggle) {
+      useLineStep = hasLineToggle ? !!opts.stepLineEnabled : false;
+      useDegreeStep = hasDegreeToggle ? !!opts.stepDegreeEnabled : false;
+    } else if (legacyStepsEnabled) {
+      useLineStep = legacyMode !== "degree";
+      useDegreeStep = legacyMode === "degree";
+    }
+
+    if (useDegreeStep) nextPos = quantizeAngle(startPos, nextPos, opts?.stepAngleDeg);
+    if (useLineStep) nextPos = quantizeLength(startPos, nextPos, opts?.stepLineMm);
+    return nextPos;
   }
 
   onPointerDown(e, opts = null) {
@@ -94,13 +141,14 @@ export class HiddenWallTool {
 
     // click2+: create segment
     const startPos = this.pendingStartPos;
-    let endPos = this._applyAngle(startPos, p, !!e.shiftKey);
+    let endPos = this._applyAngle(startPos, p, !!e.shiftKey, opts);
     if (snapOn && typeof resolveSnapPoint === "function") endPos = resolveSnapPoint(endPos.x, endPos.y) || endPos;
 
     const n1 = this.graph.getOrCreateNode(endPos.x, endPos.y, snapOn ? this.snapTolMm : 1);
     if (n1.id === this.pendingStartNodeId) return;
 
-    const w = this.graph.addWallByNodeIds(this.pendingStartNodeId, n1.id, 1, "");
+    const thicknessMm = Math.max(1, Number(opts?.defaultThicknessMm ?? this.defaultThickness) || 1);
+    const w = this.graph.addWallByNodeIds(this.pendingStartNodeId, n1.id, thicknessMm, "");
     if (!w) return;
 
     this.lastDir = normalize(n1.x - startPos.x, n1.y - startPos.y);
@@ -116,7 +164,7 @@ export class HiddenWallTool {
 
     let p = this.view.screenToWorld(e.offsetX, e.offsetY);
     const startPos = this.pendingStartPos;
-    let endPos = this._applyAngle(startPos, p, !!e.shiftKey);
+    let endPos = this._applyAngle(startPos, p, !!e.shiftKey, opts);
     if (snapOn && typeof resolveSnapPoint === "function") endPos = resolveSnapPoint(endPos.x, endPos.y) || endPos;
     this.previewEndPos = endPos;
   }
@@ -138,9 +186,13 @@ export function drawHiddenWalls({
   selectedIds = null,
   hoverId = null,
 }) {
+  const zoom = Math.max(0.001, Number(state?.zoom) || 1);
+  const basePx = Math.max(1, Number(state?.hiddenWallLineWidthPx) || 2);
+  const defaultThicknessMm = Math.max(1, Number(state?.hiddenWallThicknessMm) || 1);
+  const lineWidthFromMm = (mm) => Math.max(basePx, Number(mm) * zoom);
+
   ctx.save();
   ctx.setLineDash(state.hiddenWallDash || [10, 8]);
-  ctx.lineWidth = state.hiddenWallLineWidthPx || 2;
   ctx.strokeStyle = state.hiddenWallColor || "#D8D4D4";
   ctx.lineCap = "round";
 
@@ -154,6 +206,7 @@ export function drawHiddenWalls({
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
+    ctx.lineWidth = lineWidthFromMm(e?.thickness || defaultThicknessMm);
     ctx.stroke();
   }
 
@@ -173,7 +226,8 @@ export function drawHiddenWalls({
     const isSelected = selectedSet.has(hlId);
     ctx.save();
     ctx.setLineDash(state.hiddenWallDash || [10, 8]);
-    ctx.lineWidth = isSelected ? 4 : 3;
+    const base = lineWidthFromMm(e?.thickness || defaultThicknessMm);
+    ctx.lineWidth = isSelected ? (base + 2) : (base + 1);
     ctx.globalAlpha = isSelected ? 1 : 0.8;
     ctx.strokeStyle = state.hiddenWallColor || "#D8D4D4";
     ctx.beginPath();

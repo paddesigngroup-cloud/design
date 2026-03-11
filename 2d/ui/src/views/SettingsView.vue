@@ -12,6 +12,7 @@ const model = reactive({
   unit: "cm",
   wallThicknessMm: 120,
   wallHeightMm: 3000,
+  hiddenWallThicknessMm: 1,
 
   dimOffsetMm: 150,
   dimFontPx: 15,
@@ -110,6 +111,10 @@ async function handleSaveSettings() {
     patch.stepAngleDeg = positiveOrFallback(patch.stepAngleDeg, base.stepAngleDeg ?? 10);
     model.stepAngleDeg = patch.stepAngleDeg;
   }
+  if ("hiddenWallThicknessMm" in patch) {
+    patch.hiddenWallThicknessMm = positiveOrFallback(patch.hiddenWallThicknessMm, base.hiddenWallThicknessMm ?? 1, 0);
+    model.hiddenWallThicknessMm = patch.hiddenWallThicknessMm;
+  }
 
   if (Object.keys(patch).length > 0) {
     editorRef.value?.setState?.(patch);
@@ -164,6 +169,17 @@ async function handleSaveSettings() {
           step="1"
           :value="(model.wallHeightMm || 3000) / 10"
           @change="applyPatch({ wallHeightMm: Math.max(1, (+$event.target.value || 300) * 10) })"
+        />
+      </div>
+      <div class="row">
+        <label class="label">ضخامت پیش‌فرض خط راهنما (سانتی‌متر)</label>
+        <input
+          class="input ltr"
+          type="number"
+          min="0.1"
+          step="0.1"
+          :value="(model.hiddenWallThicknessMm || 1) / 10"
+          @change="applyPatch({ hiddenWallThicknessMm: Math.max(0.1, (+$event.target.value || 0.1) * 10) })"
         />
       </div>
     </div>
@@ -440,7 +456,7 @@ async function handleSaveSettings() {
         </div>
       </div>
       <div class="row">
-        <label class="label">Dimension / HiddenWall</label>
+        <label class="label">Dimension / خط راهنما</label>
         <div style="display:flex; gap:10px; align-items:center;">
           <input type="color" :value="model.dimColor" @input="applyPatch({ dimColor: $event.target.value })" />
           <input type="color" :value="model.hiddenWallColor" @input="applyPatch({ hiddenWallColor: $event.target.value })" />
