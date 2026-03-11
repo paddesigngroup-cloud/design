@@ -143,6 +143,67 @@ const axisTagStyles = computed(() => {
   };
 });
 
+function getAxisColorsFromState() {
+  const st = props.walls2d?.state || {};
+  return {
+    x: (typeof st.axisXColor === "string" && st.axisXColor) ? st.axisXColor : "#9CC9B4",
+    y: (typeof st.axisYColor === "string" && st.axisYColor) ? st.axisYColor : "#BCC8EB",
+    z: (typeof st.axisZColor === "string" && st.axisZColor) ? st.axisZColor : "#0000FF",
+  };
+}
+
+function applyAxesHelperColors() {
+  if (!axesHelper?.geometry) return;
+  const colorsAttr = axesHelper.geometry.getAttribute("color");
+  if (!colorsAttr || colorsAttr.itemSize !== 3 || colorsAttr.count < 6) return;
+
+  const { x, y, z } = getAxisColorsFromState();
+  const xColor = new THREE.Color(x);
+  const yColor = new THREE.Color(y);
+  const zColor = new THREE.Color(z);
+
+  // AxesHelper vertex order: [X0, X1, Y0, Y1, Z0, Z1]
+  colorsAttr.setXYZ(0, xColor.r, xColor.g, xColor.b);
+  colorsAttr.setXYZ(1, xColor.r, xColor.g, xColor.b);
+  colorsAttr.setXYZ(2, yColor.r, yColor.g, yColor.b);
+  colorsAttr.setXYZ(3, yColor.r, yColor.g, yColor.b);
+  colorsAttr.setXYZ(4, zColor.r, zColor.g, zColor.b);
+  colorsAttr.setXYZ(5, zColor.r, zColor.g, zColor.b);
+  colorsAttr.needsUpdate = true;
+}
+
+function createPlanAlignedAxesHelper(length = 1) {
+  const l = Math.max(0.01, Number(length) || 1);
+
+  // Project axis mapping:
+  // X -> +X (plan horizontal)
+  // Y -> -Z (plan vertical in 2D space)
+  // Z -> +Y (height/up)
+  const positions = new Float32Array([
+    0, 0, 0,  l, 0, 0,   // X
+    0, 0, 0,  0, 0, -l,  // Y
+    0, 0, 0,  0, l, 0,   // Z
+  ]);
+  const colors = new Float32Array(18);
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+  const mat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    toneMapped: false,
+    transparent: true,
+    opacity: 0.9,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  const helper = new THREE.LineSegments(geom, mat);
+  helper.renderOrder = 999;
+  return helper;
+}
+
 function patchByPointKey(pointKey, axis, value) {
   if (!Number.isFinite(value)) return;
   if (pointKey === "a") {
@@ -661,6 +722,14 @@ watch(
   { immediate: true, deep: true }
 );
 
+watch(
+  () => [props.walls2d?.state?.axisXColor, props.walls2d?.state?.axisYColor, props.walls2d?.state?.axisZColor],
+  () => {
+    applyAxesHelperColors();
+  },
+  { immediate: true }
+);
+
 function projectModelTo2DLines(root) {
   if (!root) return [];
   root.updateMatrixWorld(true);
@@ -735,15 +804,8 @@ onMounted(async () => {
   scene.background = null;
 
   // ✅ محورهای X/Y/Z
-  axesHelper = new THREE.AxesHelper(1);
-  axesHelper.renderOrder = 999;
-  axesHelper.traverse((o) => {
-    if (!o.material) return;
-    o.material.depthTest = false;
-    o.material.depthWrite = false;
-    o.material.transparent = true;
-    o.material.opacity = 0.9;
-  });
+  axesHelper = createPlanAlignedAxesHelper(1);
+  applyAxesHelperColors();
   scene.add(axesHelper);
 
   camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);

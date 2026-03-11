@@ -21,7 +21,7 @@ const walls3dSnapshot = ref({
     selection: { selectedWallId: null, selectedWallIds: [] },
     entityType: "wall",
   },
-  state: { wallHeightMm: 2800, axisXColor: "#9CC9B4", axisYColor: "#BCC8EB" },
+  state: { wallHeightMm: 2800, axisXColor: "#9CC9B4", axisYColor: "#BCC8EB", axisZColor: "#0000FF" },
 });
 const stepModes = ref({
   line: true,
@@ -235,6 +235,7 @@ function syncQuickStateFromEditor() {
       wall3dColor: (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1",
       axisXColor: (typeof s?.axisXColor === "string" && s.axisXColor) ? s.axisXColor : "#9CC9B4",
       axisYColor: (typeof s?.axisYColor === "string" && s.axisYColor) ? s.axisYColor : "#BCC8EB",
+      axisZColor: (typeof s?.axisZColor === "string" && s.axisZColor) ? s.axisZColor : "#0000FF",
       activeTool: s?.activeTool || "select",
       isWallDrawing: !!full?.tools?.wall?.isDrawing,
     },

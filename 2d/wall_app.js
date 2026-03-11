@@ -144,6 +144,7 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   majorColor: "#A3A3A3",
   axisXColor: "#9CC9B4",
   axisYColor: "#BCC8EB",
+  axisZColor: "#0000FF",
   showObjectAxes: false,
 
   wallFillColor: "#A6A6A6",

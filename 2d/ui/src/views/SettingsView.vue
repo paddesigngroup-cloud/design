@@ -42,6 +42,7 @@ const model = reactive({
   majorColor: "#A3A3A3",
   axisXColor: "#9CC9B4",
   axisYColor: "#BCC8EB",
+  axisZColor: "#0000FF",
 
   wallFillColor: "#A6A6A6",
   wallEdgeColor: "#000000",
@@ -435,10 +436,11 @@ async function handleSaveSettings() {
         </div>
       </div>
       <div class="row">
-        <label class="label">Axis X / Y</label>
+        <label class="label">Axis X / Y / Z</label>
         <div style="display:flex; gap:10px; align-items:center;">
           <input type="color" :value="model.axisXColor" @input="applyPatch({ axisXColor: $event.target.value })" />
           <input type="color" :value="model.axisYColor" @input="applyPatch({ axisYColor: $event.target.value })" />
+          <input type="color" :value="model.axisZColor" @input="applyPatch({ axisZColor: $event.target.value })" />
         </div>
       </div>
       <div class="row">
