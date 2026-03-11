@@ -27,6 +27,8 @@ const model = reactive({
   snapOn: true,
   showDimensions: true,
   stepDrawEnabled: true,
+  stepLineCm: 5,
+  stepAngleDeg: 10,
   snapCornerEnabled: true,
   snapMidEnabled: true,
   snapCenterEnabled: true,
@@ -51,6 +53,11 @@ const model = reactive({
   offsetWallEnabled: true,
   offsetWallDistanceMm: 600,
 });
+
+function positiveOrFallback(value, fallback, min = 0.0001) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > min ? parsed : fallback;
+}
 
 watchEffect(() => {
   // Hydrate once from editor state; do not overwrite local unsaved edits.
@@ -93,6 +100,15 @@ async function handleSaveSettings() {
   const patch = {};
   for (const k of Object.keys(model)) {
     if (model[k] !== base[k]) patch[k] = model[k];
+  }
+
+  if ("stepLineCm" in patch) {
+    patch.stepLineCm = positiveOrFallback(patch.stepLineCm, base.stepLineCm ?? 5);
+    model.stepLineCm = patch.stepLineCm;
+  }
+  if ("stepAngleDeg" in patch) {
+    patch.stepAngleDeg = positiveOrFallback(patch.stepAngleDeg, base.stepAngleDeg ?? 10);
+    model.stepAngleDeg = patch.stepAngleDeg;
   }
 
   if (Object.keys(patch).length > 0) {
@@ -238,6 +254,31 @@ async function handleSaveSettings() {
           />
           <span style="font-size:13px; color:#111827;">فعال</span>
         </label>
+      </div>
+      <div style="margin: 4px 0 10px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <div style="font-size: 12px; color: #374151; margin-bottom: 8px;">رسم گام به گام</div>
+        <div class="row" style="margin-bottom: 8px;">
+          <label class="label">گام خط (سانتی‌متر)</label>
+          <input
+            class="input ltr"
+            type="number"
+            min="0.1"
+            step="0.5"
+            :value="model.stepLineCm"
+            @change="applyPatch({ stepLineCm: positiveOrFallback($event.target.value, model.stepLineCm) })"
+          />
+        </div>
+        <div class="row" style="margin-bottom: 0;">
+          <label class="label">گام زاویه (درجه)</label>
+          <input
+            class="input ltr"
+            type="number"
+            min="0.1"
+            step="1"
+            :value="model.stepAngleDeg"
+            @change="applyPatch({ stepAngleDeg: positiveOrFallback($event.target.value, model.stepAngleDeg) })"
+          />
+        </div>
       </div>
       <div class="row">
         <label class="label">اسنپ</label>
@@ -408,4 +449,3 @@ async function handleSaveSettings() {
     </div>
   </div>
 </template>
-

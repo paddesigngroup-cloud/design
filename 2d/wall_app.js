@@ -132,6 +132,8 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   // Placeholder for staged drawing mode (UI state).
   stepDrawMode: "line",
   stepDrawEnabled: true,
+  stepLineCm: 5,
+  stepAngleDeg: 10,
 
   meterDivisions: 10,
   majorEvery: 10,
@@ -4325,6 +4327,12 @@ function onMouseDown(e) {
       tool.onPointerDown(ev, {
         snapOn: state.snapOn,
         wallMagnetEnabled: state.wallMagnetEnabled,
+        stepDrawEnabled: state.stepDrawEnabled,
+        stepDrawMode: state.stepDrawMode,
+        stepLineEnabled: state.stepLineEnabled,
+        stepDegreeEnabled: state.stepDegreeEnabled,
+        stepLineMm: state.stepLineMm,
+        stepAngleDeg: state.stepAngleDeg,
       });
       state.orthoEnabled = !!tool.snapEnabled;
     }
@@ -4481,6 +4489,10 @@ function onMouseDown(e) {
         {
           snapOn: state.snapOn,
           wallMagnetEnabled: state.wallMagnetEnabled,
+          stepDrawEnabled: state.stepDrawEnabled,
+          stepDrawMode: state.stepDrawMode,
+          stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+          stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
         }
       );
       if (graph.walls.size !== beforeWalls) enforceLockedInsideLengths();
@@ -4561,6 +4573,10 @@ function onMouseDown(e) {
         {
           snapOn: state.snapOn,
           wallMagnetEnabled: state.wallMagnetEnabled,
+          stepDrawEnabled: state.stepDrawEnabled,
+          stepDrawMode: state.stepDrawMode,
+          stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+          stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
         }
       );
       if (graph.walls.size !== beforeWalls) enforceLockedInsideLengths();
@@ -4853,6 +4869,10 @@ function onWindowMouseMove(e) {
     {
       snapOn: state.snapOn,
       wallMagnetEnabled: state.wallMagnetEnabled,
+      stepDrawEnabled: state.stepDrawEnabled,
+      stepDrawMode: state.stepDrawMode,
+      stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+      stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
     }
   );
 
@@ -5325,9 +5345,11 @@ function setState(patch) {
   if (typeof patch.wallMagnetEnabled === "boolean") {
     state.wallMagnetEnabled = patch.wallMagnetEnabled;
   }
-  if (typeof patch.orthoEnabled === "boolean") {
-    state.orthoEnabled = patch.orthoEnabled;
-    tool.snapEnabled = patch.orthoEnabled;
+  if (Number.isFinite(Number(patch.stepLineCm))) {
+    state.stepLineCm = Math.max(0.1, Number(patch.stepLineCm));
+  }
+  if (Number.isFinite(Number(patch.stepAngleDeg))) {
+    state.stepAngleDeg = Math.max(0.1, Number(patch.stepAngleDeg));
   }
 
   _ui.updateToolButtons();

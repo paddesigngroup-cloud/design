@@ -32,6 +32,36 @@ function snap45(from, to) {
   };
 }
 
+
+
+function quantizeLength(from, to, stepMm) {
+  const step = Number(stepMm);
+  if (!Number.isFinite(step) || step <= 0) return to;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return { x: from.x, y: from.y };
+  const snappedLen = Math.round(len / step) * step;
+  const scale = snappedLen / len;
+  return { x: from.x + dx * scale, y: from.y + dy * scale };
+}
+
+function quantizeAngle(from, to, stepDeg) {
+  const step = Number(stepDeg);
+  if (!Number.isFinite(step) || step <= 0) return to;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return { x: from.x, y: from.y };
+  const stepRad = (step * Math.PI) / 180;
+  const angle = Math.atan2(dy, dx);
+  const snapped = Math.round(angle / stepRad) * stepRad;
+  return {
+    x: from.x + Math.cos(snapped) * len,
+    y: from.y + Math.sin(snapped) * len,
+  };
+}
+
 function wallNameFromIndex(i) {
   const letter = String.fromCharCode(65 + (i % 26));
   const suffix = i >= 26 ? `-${Math.floor(i / 26)}` : "";
@@ -171,35 +201,43 @@ export class SolidWallTool {
     return false;
   }
 
-  _applyAngle(startPos, endPos, shiftKey) {
+  _applyAngle(startPos, endPos, shiftKey, opts = {}) {
+    const useSteps = opts?.stepDrawEnabled !== false;
+    const stepMode = opts?.stepDrawMode === "degree" ? "degree" : "line";
+
+    let nextPos = endPos;
     if (this.snapEnabled) {
       this.shiftLockDir = null;
-      return snap45(startPos, endPos);
+      nextPos = snap45(startPos, nextPos);
+    } else {
+      const vx = nextPos.x - startPos.x;
+      const vy = nextPos.y - startPos.y;
+
+      if (!shiftKey) {
+        this.shiftLockDir = null;
+      } else {
+        if (!this.shiftLockDir) {
+          const L0 = Math.hypot(vx, vy);
+          if (L0 >= 1e-9) this.shiftLockDir = normalize(vx, vy);
+          else if (this.lastDir) this.shiftLockDir = normalize(this.lastDir.x, this.lastDir.y);
+        }
+
+        const u = this.shiftLockDir || this.lastDir;
+        if (u) {
+          const L = Math.hypot(vx, vy);
+          if (L < 1e-9) nextPos = { x: startPos.x, y: startPos.y };
+          else {
+            const dot = vx * u.x + vy * u.y;
+            const signedLen = dot < 0 ? -L : L;
+            nextPos = { x: startPos.x + u.x * signedLen, y: startPos.y + u.y * signedLen };
+          }
+        }
+      }
     }
 
-    const vx = endPos.x - startPos.x;
-    const vy = endPos.y - startPos.y;
-
-    if (!shiftKey) {
-      this.shiftLockDir = null;
-      return endPos;
-    }
-
-    if (!this.shiftLockDir) {
-      const L0 = Math.hypot(vx, vy);
-      if (L0 >= 1e-9) this.shiftLockDir = normalize(vx, vy);
-      else if (this.lastDir) this.shiftLockDir = normalize(this.lastDir.x, this.lastDir.y);
-    }
-
-    const u = this.shiftLockDir || this.lastDir;
-    if (!u) return endPos;
-
-    const L = Math.hypot(vx, vy);
-    if (L < 1e-9) return { x: startPos.x, y: startPos.y };
-
-    const dot = vx * u.x + vy * u.y;
-    const signedLen = dot < 0 ? -L : L;
-    return { x: startPos.x + u.x * signedLen, y: startPos.y + u.y * signedLen };
+    if (!useSteps) return nextPos;
+    if (stepMode === "degree") return quantizeAngle(startPos, nextPos, opts?.stepAngleDeg);
+    return quantizeLength(startPos, nextPos, opts?.stepLineMm);
   }
 
   onPointerDown(e, opts = {}) {
@@ -220,7 +258,7 @@ export class SolidWallTool {
     // click1: set start
     if (!this.pendingStartNodeId) {
       const useWallMagnet = opts?.snapOn !== false && opts?.wallMagnetEnabled !== false;
-      const n0 = this._resolveSnapNode(p.x, p.y, useWallMagnet);
+      const n0 = this._findSnapTargetPoint(p.x, p.y, useWallMagnet);
       this.pendingStartNodeId = n0.id;
       this.pendingStartPos = { x: n0.x, y: n0.y };
       this.previewEndPos = { x: n0.x, y: n0.y };
@@ -231,11 +269,10 @@ export class SolidWallTool {
     // click2+: set end and create wall
     const startPos = this.pendingStartPos;
 
-    const orthoByShiftEnabled = opts?.orthoByShiftEnabled !== false;
-    let endPos = this._applyAngle(startPos, { x: p.x, y: p.y }, !!e.shiftKey, orthoByShiftEnabled);
+    let endPos = this._applyAngle(startPos, { x: p.x, y: p.y }, !!e.shiftKey, opts);
 
     const useWallMagnet = opts?.snapOn !== false && opts?.wallMagnetEnabled !== false;
-    const n1 = this._resolveSnapNode(endPos.x, endPos.y, useWallMagnet);
+    const n1 = this._findSnapTargetPoint(endPos.x, endPos.y, useWallMagnet);
     if (n1.id === this.pendingStartNodeId) return;
 
     // Overlap check (collinear overlap with existing walls)
@@ -277,8 +314,7 @@ export class SolidWallTool {
     const p = this.view.screenToWorld(e.offsetX, e.offsetY);
     const startPos = this.pendingStartPos;
 
-    const orthoByShiftEnabled = opts?.orthoByShiftEnabled !== false;
-    const endPos = this._applyAngle(startPos, { x: p.x, y: p.y }, !!e.shiftKey, orthoByShiftEnabled);
+    const endPos = this._applyAngle(startPos, { x: p.x, y: p.y }, !!e.shiftKey, opts);
 
     this.previewEndPos = endPos;
 
@@ -294,6 +330,11 @@ export class SolidWallTool {
     if (e.key === "s" || e.key === "S") {
       this.snapEnabled = !this.snapEnabled;
     }
+  }
+
+
+  _findSnapTargetPoint(x, y, useWallMagnet = true) {
+    return this._resolveSnapNode(x, y, useWallMagnet);
   }
 
   _resolveSnapNode(x, y, useWallMagnet = true) {
