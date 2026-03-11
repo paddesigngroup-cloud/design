@@ -322,7 +322,8 @@ function updateWallStyleDraft(next) {
   const lengthMm = Number.isFinite(Number(next?.lengthCm)) ? Math.max(10, Number(next.lengthCm) * 10) : null;
   const entityType = selectedWallStyle.value?.entityType || "wall";
 
-  if (entityType !== "hidden") {
+  // Only update global wall defaults when no wall is selected.
+  if (entityType !== "hidden" && !selectedWallStyle.value?.id) {
     editorRef.value?.setState?.({
       wallThicknessMm: thicknessMm,
       wallHeightMm: heightMm,

@@ -5142,6 +5142,19 @@ function onMouseDown(e) {
   }
 
   // 4) Empty space => start drawing with active tool (unless we're in select mode)
+  // If a standalone dimension is currently selected, first click on empty space
+  // should not immediately start wall/hidden drawing.
+  const hadDimSelection = !!selectedDimId || (Array.isArray(selectedDimIds) && selectedDimIds.length > 0);
+  if (
+    hadDimSelection &&
+    (state.activeTool === "wall" || state.activeTool === "hidden")
+  ) {
+    selectedDimId = null;
+    hoverDimId = null;
+    clearGroupSelection();
+    return;
+  }
+
   selectedWallId = null;
   hoverWallId = null;
   selectedHiddenId = null;
