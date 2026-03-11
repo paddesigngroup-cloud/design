@@ -67,6 +67,7 @@ const selectedObjectTitle = computed(() => {
   return String(raw).trim();
 });
 const wallMoveDeltaCm = ref({ x: 0, y: 0 });
+const coordInputDrafts = ref({});
 
 
 const wallMetrics = computed(() => {
@@ -247,7 +248,7 @@ function patchCenterCoord(axis, value) {
 
 function patchWallMoveDelta(axis, value) {
   if (axis !== "x" && axis !== "y") return;
-  const num = Number(value);
+  const num = parseNumericInput(value);
   wallMoveDeltaCm.value = {
     ...wallMoveDeltaCm.value,
     [axis]: Number.isFinite(num) ? (Math.round(num * 10) / 10) : 0,
@@ -286,6 +287,70 @@ function moveWallByAxis(axis) {
     [axis]: 0,
   };
 }
+
+function normalizeNumericText(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  return raw
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .replace(/[−﹣－]/g, "-")
+    .replace(/[٫،]/g, ".");
+}
+
+function parseNumericInput(value) {
+  const normalized = normalizeNumericText(value);
+  if (!normalized) return NaN;
+  return Number(normalized);
+}
+
+function getCoordFieldValue(key, fallback) {
+  if (Object.prototype.hasOwnProperty.call(coordInputDrafts.value, key)) {
+    return coordInputDrafts.value[key];
+  }
+  return (fallback ?? "");
+}
+
+function setCoordFieldDraft(key, value) {
+  coordInputDrafts.value = { ...coordInputDrafts.value, [key]: String(value ?? "") };
+}
+
+function clearCoordFieldDraft(key) {
+  if (!Object.prototype.hasOwnProperty.call(coordInputDrafts.value, key)) return;
+  const next = { ...coordInputDrafts.value };
+  delete next[key];
+  coordInputDrafts.value = next;
+}
+
+function commitMoveDeltaInput(axis, key) {
+  const text = coordInputDrafts.value[key];
+  if (typeof text === "undefined") return;
+  patchWallMoveDelta(axis, text);
+  clearCoordFieldDraft(key);
+}
+
+function commitCenterCoordInput(axis, key) {
+  const text = coordInputDrafts.value[key];
+  const num = parseNumericInput(text);
+  clearCoordFieldDraft(key);
+  if (!Number.isFinite(num)) return;
+  patchCenterCoord(axis, num);
+}
+
+function commitPointCoordInput(pointKey, axis, key) {
+  const text = coordInputDrafts.value[key];
+  const num = parseNumericInput(text);
+  clearCoordFieldDraft(key);
+  if (!Number.isFinite(num)) return;
+  patchByPointKey(pointKey, axis, num);
+}
+
+watch(
+  [() => wallMetrics.value?.id, () => selectedWallCount.value, () => isGroupEditMode.value],
+  () => {
+    coordInputDrafts.value = {};
+  }
+);
 
 
 function v(x, z) {
@@ -1005,24 +1070,26 @@ onBeforeUnmount(() => {
           <div class="glbWallAttrs__axisInputWrap">
             <input
               class="glbWallAttrs__input glbWallAttrs__moveInput glbWallAttrs__moveInput--axis"
-              type="number"
-              step="0.1"
+              type="text"
+              inputmode="decimal"
               :disabled="selectedWallCount === 0"
-              :value="wallMoveDeltaCm.y"
-              @input="patchWallMoveDelta('y', $event.target.value)"
-              @keydown.enter.prevent="moveWallByAxis('y')"
+              :value="getCoordFieldValue('moveY', wallMoveDeltaCm.y)"
+              @input="setCoordFieldDraft('moveY', $event.target.value)"
+              @blur="commitMoveDeltaInput('y', 'moveY')"
+              @keydown.enter.prevent="commitMoveDeltaInput('y', 'moveY'); moveWallByAxis('y')"
             />
             <span class="glbWallAttrs__axisTag" :style="axisTagStyles.y">Y</span>
           </div>
           <div class="glbWallAttrs__axisInputWrap">
             <input
               class="glbWallAttrs__input glbWallAttrs__moveInput glbWallAttrs__moveInput--axis"
-              type="number"
-              step="0.1"
+              type="text"
+              inputmode="decimal"
               :disabled="selectedWallCount === 0"
-              :value="wallMoveDeltaCm.x"
-              @input="patchWallMoveDelta('x', $event.target.value)"
-              @keydown.enter.prevent="moveWallByAxis('x')"
+              :value="getCoordFieldValue('moveX', wallMoveDeltaCm.x)"
+              @input="setCoordFieldDraft('moveX', $event.target.value)"
+              @blur="commitMoveDeltaInput('x', 'moveX')"
+              @keydown.enter.prevent="commitMoveDeltaInput('x', 'moveX'); moveWallByAxis('x')"
             />
             <span class="glbWallAttrs__axisTag" :style="axisTagStyles.x">X</span>
           </div>
@@ -1031,24 +1098,78 @@ onBeforeUnmount(() => {
         <div class="glbWallAttrs__pointTitle">نقطه مرکز</div>
         <div class="glbWallAttrs__editRow">
           <div class="glbWallAttrs__coordGrid">
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.x" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchCenterCoord('x', +$event.target.value)" />
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchCenterCoord('y', +$event.target.value)" />
+            <input
+              class="glbWallAttrs__input"
+              type="text"
+              inputmode="decimal"
+              :value="getCoordFieldValue('centerX', isGroupEditMode ? '' : wallCoordPoints?.center?.x)"
+              :disabled="isGroupEditMode || !wallCoordPoints"
+              @input="setCoordFieldDraft('centerX', $event.target.value)"
+              @blur="commitCenterCoordInput('x', 'centerX')"
+              @keydown.enter.prevent="commitCenterCoordInput('x', 'centerX')"
+            />
+            <input
+              class="glbWallAttrs__input"
+              type="text"
+              inputmode="decimal"
+              :value="getCoordFieldValue('centerY', isGroupEditMode ? '' : wallCoordPoints?.center?.y)"
+              :disabled="isGroupEditMode || !wallCoordPoints"
+              @input="setCoordFieldDraft('centerY', $event.target.value)"
+              @blur="commitCenterCoordInput('y', 'centerY')"
+              @keydown.enter.prevent="commitCenterCoordInput('y', 'centerY')"
+            />
           </div>
         </div>
 
         <div class="glbWallAttrs__pointTitle">نقطه پایین چپ</div>
         <div class="glbWallAttrs__editRow">
           <div class="glbWallAttrs__coordGrid">
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.bottomLeft?.x" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.bottomLeftKey, 'x', +$event.target.value)" />
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.bottomLeft?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.bottomLeftKey, 'y', +$event.target.value)" />
+            <input
+              class="glbWallAttrs__input"
+              type="text"
+              inputmode="decimal"
+              :value="getCoordFieldValue('blX', isGroupEditMode ? '' : wallCoordPoints?.bottomLeft?.x)"
+              :disabled="isGroupEditMode || !wallCoordPoints"
+              @input="setCoordFieldDraft('blX', $event.target.value)"
+              @blur="commitPointCoordInput(wallCoordPoints.bottomLeftKey, 'x', 'blX')"
+              @keydown.enter.prevent="commitPointCoordInput(wallCoordPoints.bottomLeftKey, 'x', 'blX')"
+            />
+            <input
+              class="glbWallAttrs__input"
+              type="text"
+              inputmode="decimal"
+              :value="getCoordFieldValue('blY', isGroupEditMode ? '' : wallCoordPoints?.bottomLeft?.y)"
+              :disabled="isGroupEditMode || !wallCoordPoints"
+              @input="setCoordFieldDraft('blY', $event.target.value)"
+              @blur="commitPointCoordInput(wallCoordPoints.bottomLeftKey, 'y', 'blY')"
+              @keydown.enter.prevent="commitPointCoordInput(wallCoordPoints.bottomLeftKey, 'y', 'blY')"
+            />
           </div>
         </div>
 
         <div class="glbWallAttrs__pointTitle">نقطه بالا راست</div>
         <div class="glbWallAttrs__editRow">
           <div class="glbWallAttrs__coordGrid">
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.topRight?.x" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.topRightKey, 'x', +$event.target.value)" />
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.topRight?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.topRightKey, 'y', +$event.target.value)" />
+            <input
+              class="glbWallAttrs__input"
+              type="text"
+              inputmode="decimal"
+              :value="getCoordFieldValue('trX', isGroupEditMode ? '' : wallCoordPoints?.topRight?.x)"
+              :disabled="isGroupEditMode || !wallCoordPoints"
+              @input="setCoordFieldDraft('trX', $event.target.value)"
+              @blur="commitPointCoordInput(wallCoordPoints.topRightKey, 'x', 'trX')"
+              @keydown.enter.prevent="commitPointCoordInput(wallCoordPoints.topRightKey, 'x', 'trX')"
+            />
+            <input
+              class="glbWallAttrs__input"
+              type="text"
+              inputmode="decimal"
+              :value="getCoordFieldValue('trY', isGroupEditMode ? '' : wallCoordPoints?.topRight?.y)"
+              :disabled="isGroupEditMode || !wallCoordPoints"
+              @input="setCoordFieldDraft('trY', $event.target.value)"
+              @blur="commitPointCoordInput(wallCoordPoints.topRightKey, 'y', 'trY')"
+              @keydown.enter.prevent="commitPointCoordInput(wallCoordPoints.topRightKey, 'y', 'trY')"
+            />
           </div>
         </div>
       </div>

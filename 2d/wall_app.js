@@ -832,6 +832,40 @@ function toggleHiddenSelectionByModifier(wallId) {
   selectedModelOutline = false;
 }
 
+function findNewestCreatedWallId(targetGraph, beforeIds = null) {
+  if (!targetGraph?.walls) return null;
+  let newestId = null;
+  let newestNum = -1;
+  for (const id of targetGraph.walls.keys()) {
+    if (beforeIds?.has?.(id)) continue;
+    const n = Number.isFinite(_idNum(id)) ? _idNum(id) : -1;
+    if (n >= newestNum) {
+      newestNum = n;
+      newestId = id;
+    }
+  }
+  return newestId;
+}
+
+function selectLatestDrawnWall({ graphType, beforeIds = null }) {
+  const targetGraph = graphType === "hidden" ? hiddenGraph : graph;
+  const newestId = findNewestCreatedWallId(targetGraph, beforeIds);
+  if (!newestId) return false;
+
+  clearGroupSelection();
+  selectedDimId = null;
+  selectedModelOutline = false;
+  hoverModelOutline = false;
+  if (graphType === "hidden") {
+    selectedWallId = null;
+    selectedHiddenId = newestId;
+  } else {
+    selectedHiddenId = null;
+    selectedWallId = newestId;
+  }
+  return true;
+}
+
 function _cloneModel2dLines(lines) {
   return (lines || []).map((l) => ({ ax: l.ax, ay: l.ay, bx: l.bx, by: l.by }));
 }
@@ -4873,6 +4907,7 @@ function onMouseDown(e) {
 
   // 2) If active tool is drawing, next click continues that chain.
   if (state.activeTool === "hidden" && hiddenTool.getStatus()?.isDrawing) {
+    const beforeHiddenIds = new Set(hiddenGraph.walls.keys());
     undo.runAction(() => hiddenTool.onPointerDown(
       { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
       {
@@ -4887,9 +4922,11 @@ function onMouseDown(e) {
         stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
       }
     ));
+    selectLatestDrawnWall({ graphType: "hidden", beforeIds: beforeHiddenIds });
     return;
   }
   if (state.activeTool === "wall" && tool.getStatus()?.isDrawing) {
+    const beforeWallIds = new Set(graph.walls.keys());
     undo.runAction(() => {
       const beforeWalls = graph.walls.size;
       tool.onPointerDown(
@@ -4907,6 +4944,7 @@ function onMouseDown(e) {
       );
       if (graph.walls.size !== beforeWalls) enforceLockedInsideLengths();
     });
+    selectLatestDrawnWall({ graphType: "wall", beforeIds: beforeWallIds });
     return;
   }
 
@@ -4982,6 +5020,7 @@ function onMouseDown(e) {
   }
 
   if (state.activeTool === "hidden") {
+    const beforeHiddenIds = new Set(hiddenGraph.walls.keys());
     undo.runAction(() => hiddenTool.onPointerDown(
       { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
       {
@@ -4996,7 +5035,9 @@ function onMouseDown(e) {
         stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
       }
     ));
+    selectLatestDrawnWall({ graphType: "hidden", beforeIds: beforeHiddenIds });
   } else if (state.activeTool === "wall") {
+    const beforeWallIds = new Set(graph.walls.keys());
     undo.runAction(() => {
       const beforeWalls = graph.walls.size;
       tool.onPointerDown(
@@ -5014,6 +5055,7 @@ function onMouseDown(e) {
       );
       if (graph.walls.size !== beforeWalls) enforceLockedInsideLengths();
     });
+    selectLatestDrawnWall({ graphType: "wall", beforeIds: beforeWallIds });
   }
 }
 
