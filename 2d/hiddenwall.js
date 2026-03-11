@@ -65,6 +65,7 @@ export class HiddenWallTool {
 
     this.angleLocked = true; // 45deg
     this.lastDir = null;
+    this.shiftLockDir = null;
 
     this.pendingStartNodeId = null;
     this.pendingStartPos = null;
@@ -88,13 +89,40 @@ export class HiddenWallTool {
     this.pendingStartPos = null;
     this.previewEndPos = null;
     this.lastDir = null;
+    this.shiftLockDir = null;
     this.angleLocked = true;
   }
 
   _applyAngle(startPos, endPos, shiftKey, opts = {}) {
     let nextPos = endPos;
-    if (this.angleLocked) nextPos = snap45(startPos, nextPos);
-    else if (shiftKey && this.lastDir) nextPos = constrainAlongDir(startPos, nextPos, this.lastDir);
+    if (this.angleLocked) {
+      this.shiftLockDir = null;
+      nextPos = snap45(startPos, nextPos);
+    } else {
+      const vx = nextPos.x - startPos.x;
+      const vy = nextPos.y - startPos.y;
+
+      if (!shiftKey) {
+        this.shiftLockDir = null;
+      } else {
+        if (!this.shiftLockDir) {
+          const L0 = Math.hypot(vx, vy);
+          if (L0 >= 1e-9) this.shiftLockDir = normalize(vx, vy);
+          else if (this.lastDir) this.shiftLockDir = normalize(this.lastDir.x, this.lastDir.y);
+        }
+
+        const u = this.shiftLockDir || this.lastDir;
+        if (u) {
+          const L = Math.hypot(vx, vy);
+          if (L < 1e-9) nextPos = { x: startPos.x, y: startPos.y };
+          else {
+            const dot = vx * u.x + vy * u.y;
+            const signedLen = dot < 0 ? -L : L;
+            nextPos = { x: startPos.x + u.x * signedLen, y: startPos.y + u.y * signedLen };
+          }
+        }
+      }
+    }
 
     const hasLineToggle = typeof opts?.stepLineEnabled === "boolean";
     const hasDegreeToggle = typeof opts?.stepDegreeEnabled === "boolean";
@@ -122,7 +150,10 @@ export class HiddenWallTool {
     // right click: toggle angle lock (only while drawing)
     if (e.button === 2) {
       e.preventDefault?.();
-      if (this.pendingStartNodeId) this.angleLocked = !this.angleLocked;
+      if (this.pendingStartNodeId) {
+        this.angleLocked = !this.angleLocked;
+        this.shiftLockDir = null;
+      }
       return;
     }
     if (e.button !== 0) return;
