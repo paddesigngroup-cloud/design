@@ -15,7 +15,7 @@ const walls3dSnapshot = ref({
   nodes: [],
   walls: [],
   selection: { selectedWallId: null },
-  state: { wallHeightMm: 2800 },
+  state: { wallHeightMm: 2800, axisXColor: "#9CC9B4", axisYColor: "#BCC8EB" },
 });
 const stepModes = ref({
   line: true,
@@ -205,6 +205,8 @@ function syncQuickStateFromEditor() {
       wallHeightMm: Number.isFinite(s?.wallHeightMm) ? s.wallHeightMm : 2800,
       wallFillColor: (typeof s?.wallFillColor === "string" && s.wallFillColor) ? s.wallFillColor : "#A6A6A6",
       wall3dColor: (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1",
+      axisXColor: (typeof s?.axisXColor === "string" && s.axisXColor) ? s.axisXColor : "#9CC9B4",
+      axisYColor: (typeof s?.axisYColor === "string" && s.axisYColor) ? s.axisYColor : "#BCC8EB",
       activeTool: s?.activeTool || "select",
       isWallDrawing: !!full?.tools?.wall?.isDrawing,
     },
@@ -305,6 +307,16 @@ function updateWallStyleDraft(next) {
 
 function updateSelectedWallCoords(patch) {
   const toMm = (v) => Number(v) * 10;
+  const dxMm = Number.isFinite(Number(patch?.dxCm)) ? toMm(patch.dxCm) : null;
+  const dyMm = Number.isFinite(Number(patch?.dyCm)) ? toMm(patch.dyCm) : null;
+  if (dxMm !== null || dyMm !== null) {
+    editorRef.value?.moveSelectedWallsBy?.({
+      dxMm: dxMm ?? 0,
+      dyMm: dyMm ?? 0,
+    });
+    return;
+  }
+
   const payload = {};
   if (Number.isFinite(Number(patch?.axCm))) payload.axMm = toMm(patch.axCm);
   if (Number.isFinite(Number(patch?.ayCm))) payload.ayMm = toMm(patch.ayCm);

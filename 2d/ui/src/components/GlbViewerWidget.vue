@@ -59,6 +59,7 @@ const selectedObjectTitle = computed(() => {
   const raw = props.selectedWallStyle?.name || props.selectedWallStyle?.id || wallMetrics.value?.id || "";
   return String(raw).trim();
 });
+const wallMoveDeltaCm = ref({ x: 0, y: 0 });
 
 
 const wallMetrics = computed(() => {
@@ -125,6 +126,16 @@ const wallCoordPoints = computed(() => {
   };
 });
 
+const axisTagStyles = computed(() => {
+  const st = props.walls2d?.state || {};
+  const xColor = (typeof st.axisXColor === "string" && st.axisXColor) ? st.axisXColor : "#9CC9B4";
+  const yColor = (typeof st.axisYColor === "string" && st.axisYColor) ? st.axisYColor : "#BCC8EB";
+  return {
+    x: { color: xColor },
+    y: { color: yColor },
+  };
+});
+
 function patchByPointKey(pointKey, axis, value) {
   if (!Number.isFinite(value)) return;
   if (pointKey === "a") {
@@ -164,6 +175,48 @@ function patchCenterCoord(axis, value) {
     bxCm: wallMetrics.value.b.x + dx,
     byCm: wallMetrics.value.b.y + dy,
   });
+}
+
+function patchWallMoveDelta(axis, value) {
+  if (axis !== "x" && axis !== "y") return;
+  const num = Number(value);
+  wallMoveDeltaCm.value = {
+    ...wallMoveDeltaCm.value,
+    [axis]: Number.isFinite(num) ? (Math.round(num * 10) / 10) : 0,
+  };
+}
+
+function moveWallByAxis(axis) {
+  if (axis !== "x" && axis !== "y") return;
+  const delta = Number(wallMoveDeltaCm.value?.[axis]);
+  if (!Number.isFinite(delta) || delta === 0) return;
+
+  if (isGroupEditMode.value) {
+    patchSelectedWallCoords(axis === "x" ? { dxCm: delta } : { dyCm: delta });
+    wallMoveDeltaCm.value = {
+      ...wallMoveDeltaCm.value,
+      [axis]: 0,
+    };
+    return;
+  }
+  if (!wallMetrics.value) return;
+
+  if (axis === "x") {
+    patchSelectedWallCoords({
+      axCm: wallMetrics.value.a.x + delta,
+      bxCm: wallMetrics.value.b.x + delta,
+    });
+  } else {
+    patchSelectedWallCoords({
+      ayCm: wallMetrics.value.a.y + delta,
+      byCm: wallMetrics.value.b.y + delta,
+    });
+  }
+
+  wallMoveDeltaCm.value = {
+    ...wallMoveDeltaCm.value,
+    [axis]: 0,
+  };
 }
 
 
@@ -878,6 +931,42 @@ onBeforeUnmount(() => {
 
       <div class="menuPanel__title glbWallAttrs__title glbWallAttrs__title--secondary">مختصات</div>
       <div class="glbWallAttrs__editor">
+        <div class="glbWallAttrs__pointTitle">جابجایی محوری</div>
+        <div class="glbWallAttrs__editRow glbWallAttrs__axisSingleRow">
+          <div class="glbWallAttrs__axisInputWrap">
+            <input
+              class="glbWallAttrs__input glbWallAttrs__moveInput glbWallAttrs__moveInput--axis"
+              type="number"
+              step="0.1"
+              :disabled="selectedWallCount === 0"
+              :value="wallMoveDeltaCm.y"
+              @input="patchWallMoveDelta('y', $event.target.value)"
+              @keydown.enter.prevent="moveWallByAxis('y')"
+            />
+            <span class="glbWallAttrs__axisTag" :style="axisTagStyles.y">Y</span>
+          </div>
+          <div class="glbWallAttrs__axisInputWrap">
+            <input
+              class="glbWallAttrs__input glbWallAttrs__moveInput glbWallAttrs__moveInput--axis"
+              type="number"
+              step="0.1"
+              :disabled="selectedWallCount === 0"
+              :value="wallMoveDeltaCm.x"
+              @input="patchWallMoveDelta('x', $event.target.value)"
+              @keydown.enter.prevent="moveWallByAxis('x')"
+            />
+            <span class="glbWallAttrs__axisTag" :style="axisTagStyles.x">X</span>
+          </div>
+        </div>
+
+        <div class="glbWallAttrs__pointTitle">نقطه مرکز</div>
+        <div class="glbWallAttrs__editRow">
+          <div class="glbWallAttrs__coordGrid">
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.x" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchCenterCoord('x', +$event.target.value)" />
+            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchCenterCoord('y', +$event.target.value)" />
+          </div>
+        </div>
+
         <div class="glbWallAttrs__pointTitle">نقطه پایین چپ</div>
         <div class="glbWallAttrs__editRow">
           <div class="glbWallAttrs__coordGrid">
@@ -893,15 +982,6 @@ onBeforeUnmount(() => {
             <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.topRight?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchByPointKey(wallCoordPoints.topRightKey, 'y', +$event.target.value)" />
           </div>
         </div>
-
-        <div class="glbWallAttrs__pointTitle">نقطه مرکز</div>
-        <div class="glbWallAttrs__editRow">
-          <div class="glbWallAttrs__coordGrid">
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.x" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchCenterCoord('x', +$event.target.value)" />
-            <input class="glbWallAttrs__input" type="number" step="0.1" :value="isGroupEditMode ? '' : wallCoordPoints?.center?.y" :disabled="isGroupEditMode || !wallCoordPoints" @input="patchCenterCoord('y', +$event.target.value)" />
-          </div>
-        </div>
-
       </div>
     </template>
 

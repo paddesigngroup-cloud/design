@@ -804,6 +804,9 @@ textarea {
   width: 196px;
   z-index: 7;
   max-width: calc(100% - 24px);
+  max-height: calc(100% - 222px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .glbWidget.is-max {
@@ -937,6 +940,43 @@ textarea {
   grid-template-columns: 1fr 1fr;
   gap: 6px;
   width: 158px;
+}
+.glbWallAttrs__moveRow {
+  gap: 6px;
+}
+.glbWallAttrs__axisRow {
+  gap: 10px;
+}
+.glbWallAttrs__axisPairRow {
+  gap: 8px;
+}
+.glbWallAttrs__axisSingleRow {
+  width: 158px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.glbWallAttrs__moveInput {
+  width: 70px;
+}
+.glbWallAttrs__moveInput--axis {
+  width: 100%;
+  padding-right: 24px;
+}
+.glbWallAttrs__axisInputWrap {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.glbWallAttrs__axisTag {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  font-size: 14px;
+  font-weight: 700;
+  color: #334155;
+  pointer-events: none;
 }
 
 .stageQuickBar {

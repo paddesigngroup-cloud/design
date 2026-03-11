@@ -249,6 +249,51 @@ function len(ax, ay, bx, by) { return Math.hypot(bx-ax, by-ay); }
 function normalize(x, y) { const l = Math.hypot(x, y) || 1; return { x:x/l, y:y/l }; }
 function dot(ax, ay, bx, by) { return ax*bx + ay*by; }
 function radToDeg(r) { return r * 180 / Math.PI; }
+function quantizeLengthFromAnchor(anchor, target, stepMm) {
+  const step = Number(stepMm);
+  if (!Number.isFinite(step) || step <= 0) return target;
+  const dx = target.x - anchor.x;
+  const dy = target.y - anchor.y;
+  const curLen = Math.hypot(dx, dy);
+  if (curLen < 1e-9) return { x: anchor.x, y: anchor.y };
+  const nextLen = Math.round(curLen / step) * step;
+  const scale = nextLen / curLen;
+  return {
+    x: anchor.x + dx * scale,
+    y: anchor.y + dy * scale,
+  };
+}
+function quantizeAngleFromAnchor(anchor, target, stepDeg) {
+  const step = Number(stepDeg);
+  if (!Number.isFinite(step) || step <= 0) return target;
+  const dx = target.x - anchor.x;
+  const dy = target.y - anchor.y;
+  const curLen = Math.hypot(dx, dy);
+  if (curLen < 1e-9) return { x: anchor.x, y: anchor.y };
+  const stepRad = (step * Math.PI) / 180;
+  const ang = Math.atan2(dy, dx);
+  const snapped = Math.round(ang / stepRad) * stepRad;
+  return {
+    x: anchor.x + Math.cos(snapped) * curLen,
+    y: anchor.y + Math.sin(snapped) * curLen,
+  };
+}
+function getHandleStepOptions() {
+  const useLineStep = !!state.stepLineEnabled;
+  const useDegreeStep = !!state.stepDegreeEnabled;
+  return {
+    useLineStep,
+    useDegreeStep,
+    stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+    stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+  };
+}
+function applyHandleStepFromAnchor(anchor, target, opts) {
+  let next = target;
+  if (opts?.useDegreeStep) next = quantizeAngleFromAnchor(anchor, next, opts.stepAngleDeg);
+  if (opts?.useLineStep) next = quantizeLengthFromAnchor(anchor, next, opts.stepLineMm);
+  return next;
+}
 
 const MODEL_WALL_SNAP_DIST_MM = 140;
 const MODEL_AXIS_SNAP_PULL_MM = 28;
@@ -724,6 +769,33 @@ function clearGroupSelection() {
   selectedWallIds = [];
   selectedHiddenIds = [];
   selectedDimIds = [];
+}
+
+function toggleWallSelectionByModifier(wallId) {
+  if (!wallId) return;
+  const ids = [];
+  if (selectedWallId) ids.push(selectedWallId);
+  for (const id of selectedWallIds) {
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  const idx = ids.indexOf(wallId);
+  if (idx >= 0) ids.splice(idx, 1);
+  else ids.push(wallId);
+
+  if (ids.length === 1) {
+    selectedWallId = ids[0];
+    selectedWallIds = [];
+  } else if (ids.length > 1) {
+    selectedWallId = null;
+    selectedWallIds = ids;
+  } else {
+    selectedWallId = null;
+    selectedWallIds = [];
+  }
+
+  selectedHiddenId = null;
+  selectedDimId = null;
+  selectedModelOutline = false;
 }
 
 function _cloneModel2dLines(lines) {
@@ -4312,6 +4384,7 @@ function deleteOrphanNodes(g, keepNodeIds = null) {
 
 function onMouseDown(e) {
   if (!inputEnabled) return;
+  const isMultiSelectModifier = !!(e.ctrlKey || e.metaKey);
   // If an inline editor is open and user clicks outside it, cancel editing.
   if (dimEditor.active && dimEditor.input && e.target !== dimEditor.input) closeDimEditor(true);
 
@@ -4515,6 +4588,10 @@ function onMouseDown(e) {
     return;
   }
   if (hoverWallId) {
+    if (isMultiSelectModifier) {
+      toggleWallSelectionByModifier(hoverWallId);
+      return;
+    }
     clearGroupSelection();
     selectedHiddenId = null;
     selectedWallId = hoverWallId;
@@ -4786,13 +4863,15 @@ function onWindowMouseMove(e) {
       } else {
         const rawW = screenToWorld(ox, oy);
         const snapW = rawW;
+        const stepOpts = getHandleStepOptions();
 
         const d0 = normalize(b0.x - a0.x, b0.y - a0.y);
         const n0 = { x: -d0.y, y: d0.x };
         if (wallHandleDrag.kind === "mid_move") {
           const dx = snapW.x - p0.x;
           const dy = snapW.y - p0.y;
-          const t = dot(dx, dy, n0.x, n0.y);
+          let t = dot(dx, dy, n0.x, n0.y);
+          if (stepOpts.useLineStep) t = Math.round(t / stepOpts.stepLineMm) * stepOpts.stepLineMm;
           A.x = a0.x + n0.x * t;
           A.y = a0.y + n0.y * t;
           B.x = b0.x + n0.x * t;
@@ -4802,6 +4881,7 @@ function onWindowMouseMove(e) {
           const dyMove = rawW.y - p0.y;
           let target = { x: a0.x + dxMove, y: a0.y + dyMove };
           if (state.snapOn) target = resolveSnapPointWorld(target.x, target.y) || target;
+          target = applyHandleStepFromAnchor(b0, target, stepOpts);
           A.x = target.x;
           A.y = target.y;
         } else if (wallHandleDrag.kind === "free_b") {
@@ -4809,6 +4889,7 @@ function onWindowMouseMove(e) {
           const dyMove = rawW.y - p0.y;
           let target = { x: b0.x + dxMove, y: b0.y + dyMove };
           if (state.snapOn) target = resolveSnapPointWorld(target.x, target.y) || target;
+          target = applyHandleStepFromAnchor(a0, target, stepOpts);
           B.x = target.x;
           B.y = target.y;
         } else if (wallHandleDrag.kind === "len_a") {
@@ -4816,7 +4897,8 @@ function onWindowMouseMove(e) {
           const uy = -d0.y;
           const vx = snapW.x - b0.x;
           const vy = snapW.y - b0.y;
-          const lenNew = Math.max(1, vx * ux + vy * uy);
+          let lenNew = Math.max(1, vx * ux + vy * uy);
+          if (stepOpts.useLineStep) lenNew = Math.max(1, Math.round(lenNew / stepOpts.stepLineMm) * stepOpts.stepLineMm);
           A.x = b0.x + ux * lenNew;
           A.y = b0.y + uy * lenNew;
         } else if (wallHandleDrag.kind === "len_b") {
@@ -4824,7 +4906,8 @@ function onWindowMouseMove(e) {
           const uy = d0.y;
           const vx = snapW.x - a0.x;
           const vy = snapW.y - a0.y;
-          const lenNew = Math.max(1, vx * ux + vy * uy);
+          let lenNew = Math.max(1, vx * ux + vy * uy);
+          if (stepOpts.useLineStep) lenNew = Math.max(1, Math.round(lenNew / stepOpts.stepLineMm) * stepOpts.stepLineMm);
           B.x = a0.x + ux * lenNew;
           B.y = a0.y + uy * lenNew;
         }
@@ -5503,6 +5586,47 @@ function setSelectedWallCoords(coords = {}) {
   return false;
 }
 
+function moveSelectedWallsBy(delta = {}) {
+  const dx = Number.isFinite(Number(delta.dxMm)) ? Number(delta.dxMm) : 0;
+  const dy = Number.isFinite(Number(delta.dyMm)) ? Number(delta.dyMm) : 0;
+  if (dx === 0 && dy === 0) return false;
+
+  const ids = [];
+  if (selectedWallId) ids.push(selectedWallId);
+  for (const id of selectedWallIds) if (id && !ids.includes(id)) ids.push(id);
+  if (ids.length === 0) return false;
+
+  const nodeIds = new Set();
+  for (const id of ids) {
+    const w = graph.getWall(id);
+    if (!w) continue;
+    nodeIds.add(w.a);
+    nodeIds.add(w.b);
+  }
+  if (nodeIds.size === 0) return false;
+
+  let changed = false;
+  undo.runAction(() => {
+    for (const nodeId of nodeIds) {
+      const node = graph.getNode(nodeId);
+      if (!node) continue;
+      const nextX = node.x + dx;
+      const nextY = node.y + dy;
+      if (node.x !== nextX || node.y !== nextY) {
+        node.x = nextX;
+        node.y = nextY;
+        changed = true;
+      }
+    }
+  });
+
+  if (changed) {
+    saveSettings();
+    return true;
+  }
+  return false;
+}
+
 function bindStandaloneUiIfPresent() {
   if (_standaloneUiBound) return;
 
@@ -5741,5 +5865,6 @@ return {
   setSelectedWallStyle,
   setSelectedWallLength,
   setSelectedWallCoords,
+  moveSelectedWallsBy,
 };
 }
