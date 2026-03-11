@@ -5353,6 +5353,11 @@ function setState(patch) {
   if (typeof patch.wallMagnetEnabled === "boolean") {
     state.wallMagnetEnabled = patch.wallMagnetEnabled;
   }
+  if (typeof patch.orthoEnabled === "boolean") {
+    state.orthoEnabled = patch.orthoEnabled;
+    // Keep wall tool lock-step state synced with the public ortho flag.
+    tool.snapEnabled = state.orthoEnabled;
+  }
   if (Number.isFinite(Number(patch.stepLineCm))) {
     state.stepLineCm = Math.max(0.1, Number(patch.stepLineCm));
   }

@@ -45,6 +45,7 @@ const wallStyleDraftTouched = ref(false);
 const topbarEl = ref(null);
 const mainEl = ref(null);
 const stageEl = ref(null);
+const stageCardEl = ref(null);
 const homeBtnEl = ref(null);
 const menuPanelEl = ref(null);
 const mainMenuBtnEl = ref(null);
@@ -142,8 +143,8 @@ const snapMenuItems = [
   { id: "mid", title: "وسط ضلع", icon: "/icons/midpoint.png" },
   { id: "center", title: "آکس وسط", icon: "/icons/ax_point.png" },
   { id: "edge", title: "لبه", icon: "/icons/edge_snap.png" },
-  { id: "wallMagnet", title: "مغناطیسی دیوار", icon: "/icons/clicker.png" },
-  { id: "ortho", title: "راستا (راست کلیک)", icon: "/icons/step_degree.png" },
+  { id: "wallMagnet", title: "مغناطیسی دیوار", icon: "/icons/magnet.png" },
+  { id: "ortho", title: "راستا (راست کلیک)", icon: "/icons/ortho_line.png" },
 ];
 
 function applyEditorPatch(patch) {
@@ -797,8 +798,10 @@ let _shiftPx = 0;
 let _quickSyncTimer = 0;
 let _quickOutsidePointerDown = null;
 function updateTopbarShift() {
-  if (!topbarEl.value || !stageEl.value || !homeBtnEl.value) return;
-  const stageRect = stageEl.value.getBoundingClientRect();
+  if (!topbarEl.value || !homeBtnEl.value) return;
+  const stageHost = stageCardEl.value || stageEl.value;
+  if (!stageHost) return;
+  const stageRect = stageHost.getBoundingClientRect();
   const homeRect = homeBtnEl.value.getBoundingClientRect();
   const stageCenterX = stageRect.left + stageRect.width / 2;
   const homeCenterX = homeRect.left + homeRect.width / 2;
@@ -1224,7 +1227,7 @@ onBeforeUnmount(() => {
       </aside>
 
       <section ref="stageEl" class="stage">
-        <div class="stage__card">
+        <div ref="stageCardEl" class="stage__card">
           <div v-if="showStageOverlays" class="stageQuickBar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
             <button
               class="iconbtn iconbtn--sm stageQuickBar__btn"
@@ -1307,7 +1310,7 @@ onBeforeUnmount(() => {
                 title="رسم گام یه گام"
                 @click="toggleQuickMenu('steps')"
               >
-                <img src="/icons/turn_steps.png" alt="" />
+                <img src="/icons/step_by_step.png" alt="" />
               </button>
               <div v-if="quickMenuOpen === 'steps'" class="stageQuickDrop stageQuickDrop--steps" @click.stop>
                 <div class="stageQuickDrop__head">
