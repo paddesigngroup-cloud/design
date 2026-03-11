@@ -132,6 +132,8 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   // Placeholder for staged drawing mode (UI state).
   stepDrawMode: "line",
   stepDrawEnabled: true,
+  stepLineEnabled: true,
+  stepDegreeEnabled: false,
   stepLineCm: 5,
   stepAngleDeg: 10,
 
@@ -4491,6 +4493,8 @@ function onMouseDown(e) {
           wallMagnetEnabled: state.wallMagnetEnabled,
           stepDrawEnabled: state.stepDrawEnabled,
           stepDrawMode: state.stepDrawMode,
+          stepLineEnabled: state.stepLineEnabled,
+          stepDegreeEnabled: state.stepDegreeEnabled,
           stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
           stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
         }
@@ -4575,6 +4579,8 @@ function onMouseDown(e) {
           wallMagnetEnabled: state.wallMagnetEnabled,
           stepDrawEnabled: state.stepDrawEnabled,
           stepDrawMode: state.stepDrawMode,
+          stepLineEnabled: state.stepLineEnabled,
+          stepDegreeEnabled: state.stepDegreeEnabled,
           stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
           stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
         }
@@ -4871,6 +4877,8 @@ function onWindowMouseMove(e) {
       wallMagnetEnabled: state.wallMagnetEnabled,
       stepDrawEnabled: state.stepDrawEnabled,
       stepDrawMode: state.stepDrawMode,
+      stepLineEnabled: state.stepLineEnabled,
+      stepDegreeEnabled: state.stepDegreeEnabled,
       stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
       stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
     }
@@ -5351,6 +5359,27 @@ function setState(patch) {
   if (Number.isFinite(Number(patch.stepAngleDeg))) {
     state.stepAngleDeg = Math.max(0.1, Number(patch.stepAngleDeg));
   }
+
+  const hasStepLineToggle = typeof patch.stepLineEnabled === "boolean";
+  const hasStepDegreeToggle = typeof patch.stepDegreeEnabled === "boolean";
+  const hasLegacyStepEnabled = typeof patch.stepDrawEnabled === "boolean";
+  const hasLegacyStepMode = typeof patch.stepDrawMode === "string";
+
+  // Backward compatibility: old UI only sends stepDrawEnabled/stepDrawMode.
+  if (!hasStepLineToggle && !hasStepDegreeToggle && (hasLegacyStepEnabled || hasLegacyStepMode)) {
+    if (patch.stepDrawEnabled === false) {
+      state.stepLineEnabled = false;
+      state.stepDegreeEnabled = false;
+    } else {
+      const mode = patch.stepDrawMode === "degree" ? "degree" : "line";
+      state.stepLineEnabled = mode === "line";
+      state.stepDegreeEnabled = mode === "degree";
+    }
+  }
+
+  // Keep legacy fields synced from the new independent toggles.
+  state.stepDrawEnabled = !!(state.stepLineEnabled || state.stepDegreeEnabled);
+  state.stepDrawMode = state.stepDegreeEnabled ? "degree" : "line";
 
   _ui.updateToolButtons();
   _ui.updateSnapButton();

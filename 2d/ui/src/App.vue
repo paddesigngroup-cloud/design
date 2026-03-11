@@ -17,7 +17,6 @@ const walls3dSnapshot = ref({
   selection: { selectedWallId: null },
   state: { wallHeightMm: 2800 },
 });
-const stepDrawEnabled = ref(true);
 const stepModes = ref({
   line: true,
   degree: false,
@@ -151,25 +150,34 @@ function applyEditorPatch(patch) {
   editorRef.value?.setState?.(patch);
 }
 
-function normalizeStepMode(mode) {
-  return mode === "degree" ? "degree" : "line";
+function normalizeStepModes(statePatch = {}) {
+  const hasLine = typeof statePatch.stepLineEnabled === "boolean";
+  const hasDegree = typeof statePatch.stepDegreeEnabled === "boolean";
+  if (hasLine || hasDegree) {
+    return {
+      line: hasLine ? !!statePatch.stepLineEnabled : false,
+      degree: hasDegree ? !!statePatch.stepDegreeEnabled : false,
+    };
+  }
+  const enabled = statePatch.stepDrawEnabled !== false;
+  if (!enabled) return { line: false, degree: false };
+  const mode = statePatch.stepDrawMode === "degree" ? "degree" : "line";
+  return { line: mode === "line", degree: mode === "degree" };
 }
 
-function getStepEnabledValue() {
-  return (typeof stepDrawEnabled !== "undefined" && stepDrawEnabled) ? stepDrawEnabled.value !== false : true;
-}
-
-function setStepEnabledValue(next) {
-  if (typeof stepDrawEnabled !== "undefined" && stepDrawEnabled) stepDrawEnabled.value = !!next;
-}
-
-function getCurrentStepMode() {
-  if (typeof stepDrawMode === "undefined" || !stepDrawMode) return "line";
-  return normalizeStepMode(stepDrawMode.value);
-}
-
-function setCurrentStepMode(mode) {
-  if (typeof stepDrawMode !== "undefined" && stepDrawMode) stepDrawMode.value = normalizeStepMode(mode);
+function getStepPatch(nextModes) {
+  const modes = {
+    line: !!nextModes?.line,
+    degree: !!nextModes?.degree,
+  };
+  const anyOn = modes.line || modes.degree;
+  const mode = modes.degree ? "degree" : "line";
+  return {
+    stepLineEnabled: modes.line,
+    stepDegreeEnabled: modes.degree,
+    stepDrawEnabled: anyOn,
+    stepDrawMode: mode,
+  };
 }
 
 function syncQuickStateFromEditor() {
@@ -242,8 +250,7 @@ function syncQuickStateFromEditor() {
     selectedWallStyle.value = null;
   }
   if (quickMenuOpen.value !== "steps") {
-    setCurrentStepMode(s.stepDrawMode);
-    setStepEnabledValue(s.stepDrawEnabled !== false);
+    stepModes.value = normalizeStepModes(s);
   }
   snapModes.value = {
     corner: s.snapCornerEnabled !== false,
@@ -395,28 +402,18 @@ function toggleSnapMode(id) {
 
 function toggleStepMaster() {
   closeMenuPanel();
-  const next = !getStepEnabledValue();
-  const mode = getCurrentStepMode();
-  setStepEnabledValue(next);
-  setCurrentStepMode(mode);
-  applyEditorPatch({ stepDrawEnabled: next, stepDrawMode: mode });
+  const next = !isAnyStepModeOn.value;
+  const modes = { line: next, degree: next };
+  stepModes.value = modes;
+  applyEditorPatch(getStepPatch(modes));
 }
 
-function setStepMode(mode) {
-  const m = normalizeStepMode(mode);
-  const enabled = getStepEnabledValue();
-  const current = getCurrentStepMode();
-
-  if (enabled && current === m) {
-    // Toggle off when clicking the currently active mode switch.
-    setStepEnabledValue(false);
-    applyEditorPatch({ stepDrawEnabled: false, stepDrawMode: m });
-    return;
-  }
-
-  setCurrentStepMode(m);
-  setStepEnabledValue(true);
-  applyEditorPatch({ stepDrawMode: m, stepDrawEnabled: true });
+function toggleStepMode(id) {
+  closeMenuPanel();
+  const next = !stepModes.value[id];
+  const modes = { ...stepModes.value, [id]: next };
+  stepModes.value = modes;
+  applyEditorPatch(getStepPatch(modes));
 }
 
 function loadProjects() {
@@ -1306,7 +1303,7 @@ onBeforeUnmount(() => {
             <div class="stageQuickBar__ddWrap">
               <button
                 class="iconbtn iconbtn--sm stageQuickBar__btn"
-                :class="{ 'is-active': getStepEnabledValue() }"
+                :class="{ 'is-active': isAnyStepModeOn }"
                 title="رسم گام یه گام"
                 @click="toggleQuickMenu('steps')"
               >
@@ -1316,19 +1313,19 @@ onBeforeUnmount(() => {
                 <div class="stageQuickDrop__head">
                   <span>رسم گام به گام</span>
                   <button type="button" class="stageQuickDrop__headBtn" @click.stop="toggleStepMaster">
-                    {{ getStepEnabledValue() ? "خاموش کن" : "روشن کن" }}
+                    {{ isAnyStepModeOn ? "خاموش کن" : "روشن کن" }}
                   </button>
                 </div>
                 <div class="stageQuickDrop__row">
                   <div class="stageQuickDrop__label">
                     <img src="/icons/step_line.png" alt="" />
-                    <span>رسم خط</span>
+                    <span>خط</span>
                   </div>
                   <button
                     type="button"
                     class="snapToggle"
-                    :class="{ 'is-on': getStepEnabledValue() && getCurrentStepMode() === 'line' }"
-                    @click.stop="setStepMode('line')"
+                    :class="{ 'is-on': stepModes.line }"
+                    @click.stop="toggleStepMode('line')"
                   >
                     <span class="snapToggle__knob"></span>
                   </button>
@@ -1336,13 +1333,13 @@ onBeforeUnmount(() => {
                 <div class="stageQuickDrop__row">
                   <div class="stageQuickDrop__label">
                     <img src="/icons/step_degree.png" alt="" />
-                    <span>رسم زاویه ای</span>
+                    <span>زاویه</span>
                   </div>
                   <button
                     type="button"
                     class="snapToggle"
-                    :class="{ 'is-on': getStepEnabledValue() && getCurrentStepMode() === 'degree' }"
-                    @click.stop="setStepMode('degree')"
+                    :class="{ 'is-on': stepModes.degree }"
+                    @click.stop="toggleStepMode('degree')"
                   >
                     <span class="snapToggle__knob"></span>
                   </button>

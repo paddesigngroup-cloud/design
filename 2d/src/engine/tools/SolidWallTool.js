@@ -202,8 +202,10 @@ export class SolidWallTool {
   }
 
   _applyAngle(startPos, endPos, shiftKey, opts = {}) {
-    const useSteps = opts?.stepDrawEnabled !== false;
-    const stepMode = opts?.stepDrawMode === "degree" ? "degree" : "line";
+    const hasLineToggle = typeof opts?.stepLineEnabled === "boolean";
+    const hasDegreeToggle = typeof opts?.stepDegreeEnabled === "boolean";
+    const legacyStepsEnabled = opts?.stepDrawEnabled !== false;
+    const legacyMode = opts?.stepDrawMode === "degree" ? "degree" : "line";
 
     let nextPos = endPos;
     if (this.snapEnabled) {
@@ -235,9 +237,19 @@ export class SolidWallTool {
       }
     }
 
-    if (!useSteps) return nextPos;
-    if (stepMode === "degree") return quantizeAngle(startPos, nextPos, opts?.stepAngleDeg);
-    return quantizeLength(startPos, nextPos, opts?.stepLineMm);
+    let useLineStep = false;
+    let useDegreeStep = false;
+    if (hasLineToggle || hasDegreeToggle) {
+      useLineStep = hasLineToggle ? !!opts.stepLineEnabled : false;
+      useDegreeStep = hasDegreeToggle ? !!opts.stepDegreeEnabled : false;
+    } else if (legacyStepsEnabled) {
+      useLineStep = legacyMode !== "degree";
+      useDegreeStep = legacyMode === "degree";
+    }
+
+    if (useDegreeStep) nextPos = quantizeAngle(startPos, nextPos, opts?.stepAngleDeg);
+    if (useLineStep) nextPos = quantizeLength(startPos, nextPos, opts?.stepLineMm);
+    return nextPos;
   }
 
   onPointerDown(e, opts = {}) {
