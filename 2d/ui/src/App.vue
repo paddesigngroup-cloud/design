@@ -137,7 +137,7 @@ const activeSubRailTitle = computed(() => {
 const designMenuTools = [
   { id: "wall", icon: "/icons/drawing_wall.png", title: "دیوار", mapsToTool: "wall" },
   { id: "hidden", icon: "/icons/drawing_hidden_wall.png", title: "خط راهنما", mapsToTool: "hidden" },
-  { id: "dimension", icon: "/icons/drawing_dimension.png", title: "دایمنشن", mapsToTool: "dimension" },
+  { id: "dimension", icon: "/icons/drawing_dimension.png", title: "اندازه گذاری", mapsToTool: "dimension" },
   { id: "beam", icon: "/icons/beam.png", title: "تیر", mapsToTool: null },
   { id: "column", icon: "/icons/column.png", title: "ستون", mapsToTool: null },
 ];
@@ -145,11 +145,11 @@ const designMenuTools = [
 const wallPresets = WALL_READY_PRESETS;
 const presetDrag = ref({ active: false, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false });
 const snapMenuItems = [
-  { id: "corner", title: "گوشه ها", icon: "/icons/corner_point.png" },
+  { id: "corner", title: "گوشه", icon: "/icons/corner_point.png" },
   { id: "mid", title: "وسط ضلع", icon: "/icons/midpoint.png" },
-  { id: "center", title: "آکس وسط", icon: "/icons/ax_point.png" },
+  { id: "center", title: "نقطه وسط", icon: "/icons/ax_point.png" },
   { id: "edge", title: "لبه", icon: "/icons/edge_snap.png" },
-  { id: "wallMagnet", title: "مغناطیسی دیوار", icon: "/icons/magnet.png" },
+  { id: "wallMagnet", title: "جذب دیوار", icon: "/icons/magnet.png" },
   { id: "ortho", title: "راستا (راست کلیک)", icon: "/icons/ortho_line.png" },
 ];
 
@@ -1303,7 +1303,7 @@ onBeforeUnmount(() => {
             <button
               class="iconbtn iconbtn--sm stageQuickBar__btn"
               :class="{ 'is-active': showOffsetWalls }"
-              title="نمایش خط مخفی"
+              title="نمایش خط راهنما"
               @click="toggleOffsets"
             >
               <img src="/icons/turn_offset.png" alt="" />
@@ -1332,14 +1332,14 @@ onBeforeUnmount(() => {
               <button
                 class="iconbtn iconbtn--sm stageQuickBar__btn"
                 :class="{ 'is-active': isAnySnapModeOn }"
-                title="نمایش اسنپ"
+                title="نمایش نقاط جذب"
                 @click="toggleQuickMenu('snaps')"
               >
                 <img src="/icons/turn_snaps.png" alt="" />
               </button>
               <div v-if="quickMenuOpen === 'snaps'" class="stageQuickDrop">
                 <div class="stageQuickDrop__head">
-                  <span>اسنپ</span>
+                  <span>نقاط جذب</span>
                   <button type="button" class="stageQuickDrop__headBtn" @click="toggleSnapMaster">
                     {{ isAnySnapModeOn ? "خاموش کن" : "روشن کن" }}
                   </button>

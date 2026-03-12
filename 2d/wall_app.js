@@ -299,6 +299,25 @@ function applyHandleStepFromAnchor(anchor, target, opts) {
   if (opts?.useLineStep) next = quantizeLengthFromAnchor(anchor, next, opts.stepLineMm);
   return next;
 }
+function applyShiftLockFromAnchor(anchor, target, shiftKey, lockDir = null) {
+  if (!shiftKey) return { target, dir: null };
+  const vx = target.x - anchor.x;
+  const vy = target.y - anchor.y;
+  let dir = lockDir;
+  if (!dir) {
+    const L0 = Math.hypot(vx, vy);
+    if (L0 >= 1e-9) dir = normalize(vx, vy);
+  }
+  if (!dir) return { target, dir: null };
+  const L = Math.hypot(vx, vy);
+  if (L < 1e-9) return { target: { x: anchor.x, y: anchor.y }, dir };
+  const proj = vx * dir.x + vy * dir.y;
+  const signedLen = proj < 0 ? -L : L;
+  return {
+    target: { x: anchor.x + dir.x * signedLen, y: anchor.y + dir.y * signedLen },
+    dir,
+  };
+}
 
 const MODEL_WALL_SNAP_DIST_MM = 140;
 const MODEL_AXIS_SNAP_PULL_MM = 28;
@@ -741,6 +760,7 @@ const wallHandleDrag = {
   startB: null,
   lenBaseMm: null,
   lenHandleProjStartMm: null,
+  shiftLockDir: null, // world unit vector for Shift lock in free handle drag
   moved: false,
 };
 const freeDimDrag = {
@@ -3871,18 +3891,9 @@ function drawDimToolOverlay() {
   if (!state.snapOn) drawHourglassMarkerScreen(aS.x, aS.y, state.dimColor, 5);
 
   if (prev.stage === 1) {
+    const lay = computeDimensionLayout(A.x, A.y, P.x, P.y, "auto");
+    if (lay) drawDimensionFromLayout(lay);
     const pS = worldToScreen(P.x, P.y);
-    const guideStyle = getGuidePreviewStyle();
-    ctx.save();
-    ctx.setLineDash(guideStyle.dash);
-    ctx.lineWidth = guideStyle.lineWidthPx;
-    ctx.strokeStyle = guideStyle.color;
-    ctx.beginPath();
-    ctx.moveTo(aS.x, aS.y);
-    ctx.lineTo(pS.x, pS.y);
-    ctx.stroke();
-    ctx.restore();
-
     if (!state.snapOn) drawHourglassMarkerScreen(pS.x, pS.y, state.dimColor, 5);
     return;
   }
@@ -4553,8 +4564,14 @@ function _normalizeSnapProfile(raw) {
 
 function resolveDimSnapPointWorld(x, y, ctx = null) {
   if (!state.snapOn) return null;
-  if (!state.dimSnapProfileEnabled) return resolveSnapPointWorldByTypes(x, y, null);
   const phase = String(ctx?.phase || "line");
+  // Offset placement (3rd click) must stay free from magnetic snapping.
+  // This avoids sticking to wall edges while positioning the dimension line.
+  if (phase === "offset") return null;
+
+  if (!state.dimSnapProfileEnabled) {
+    return resolveSnapPointWorldByTypes(x, y, null);
+  }
   const profileRaw = (phase === "offset") ? state.dimSnapOffsetProfile : state.dimSnapLineProfile;
   const profile = _normalizeSnapProfile(profileRaw);
   if (!profile) return null;
@@ -4727,6 +4744,7 @@ function beginWallHandleDrag(kind, wallId, offsetX, offsetY, graphType = "wall")
   wallHandleDrag.startB = { x: B.x, y: B.y };
   wallHandleDrag.lenBaseMm = null;
   wallHandleDrag.lenHandleProjStartMm = null;
+  wallHandleDrag.shiftLockDir = null;
   if (kind === "len_a" || kind === "len_b") {
     const d0 = normalize(B.x - A.x, B.y - A.y);
     const ux = (kind === "len_a") ? -d0.x : d0.x;
@@ -4793,6 +4811,7 @@ function onMouseDown(e) {
     else if (state.activeTool === "wall") {
       tool.onPointerDown(ev, {
         snapOn: state.snapOn,
+        resolveSnapPoint: resolveSnapPointWorld,
         wallMagnetEnabled: state.wallMagnetEnabled,
         stepDrawEnabled: state.stepDrawEnabled,
         stepDrawMode: state.stepDrawMode,
@@ -4821,11 +4840,89 @@ function onMouseDown(e) {
   }
   if (e.button !== 0) return;
 
+  // Dimension tool is modal: left clicks should only place/commit dimensions.
+  // Handle it early so wall/hidden hit targets cannot switch the active tool.
+  if (state.activeTool === "dim") {
+    undo.runAction(() => dimTool.onPointerDown(
+      { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
+      {
+        snapOn: state.snapOn,
+        resolveSnapPoint: resolveDimSnapPointWorld,
+        orthoEnabled: state.orthoEnabled !== false,
+        stepDrawEnabled: state.stepDrawEnabled,
+        stepDrawMode: state.stepDrawMode,
+        stepLineEnabled: state.stepLineEnabled,
+        stepDegreeEnabled: state.stepDegreeEnabled,
+        stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+        stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+        onCommit: (d) => {
+          dimensions.push(d);
+          clearGroupSelection();
+          selectedWallId = null;
+          selectedHiddenId = null;
+          selectedModelOutline = false;
+          hoverModelOutline = false;
+          selectedDimId = d.id;
+        },
+      }
+    ));
+    return;
+  }
+
   // 0) Axis hit => drag selected object on chosen axis.
   const axisHit = hitTestObjectAxesScreen(e.offsetX, e.offsetY);
   if (axisHit) {
     const started = beginAxisDrag(axisHit.axis, e.offsetX, e.offsetY, axisHit.geometry?.target || null);
     if (started) return;
+  }
+
+  // In drawing tools, clicking an active snap point should draw from/to that point,
+  // even if the cursor is over selectable geometry.
+  if (state.snapOn && (state.activeTool === "wall" || state.activeTool === "hidden")) {
+    const clickW = screenToWorld(e.offsetX, e.offsetY);
+    const snapAtClick = resolveSnapPointWorld(clickW.x, clickW.y);
+    if (snapAtClick) {
+      if (state.activeTool === "hidden") {
+        const beforeHiddenIds = new Set(hiddenGraph.walls.keys());
+        undo.runAction(() => hiddenTool.onPointerDown(
+          { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
+          {
+            snapOn: state.snapOn,
+            resolveSnapPoint: resolveSnapPointWorld,
+            defaultThicknessMm: state.hiddenWallThicknessMm,
+            stepDrawEnabled: state.stepDrawEnabled,
+            stepDrawMode: state.stepDrawMode,
+            stepLineEnabled: state.stepLineEnabled,
+            stepDegreeEnabled: state.stepDegreeEnabled,
+            stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+            stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+          }
+        ));
+        selectLatestDrawnWall({ graphType: "hidden", beforeIds: beforeHiddenIds });
+        return;
+      }
+      const beforeWallIds = new Set(graph.walls.keys());
+      undo.runAction(() => {
+        const beforeWalls = graph.walls.size;
+        tool.onPointerDown(
+          { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
+          {
+            snapOn: state.snapOn,
+            resolveSnapPoint: resolveSnapPointWorld,
+            wallMagnetEnabled: state.wallMagnetEnabled,
+            stepDrawEnabled: state.stepDrawEnabled,
+            stepDrawMode: state.stepDrawMode,
+            stepLineEnabled: state.stepLineEnabled,
+            stepDegreeEnabled: state.stepDegreeEnabled,
+            stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+            stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+          }
+        );
+        if (graph.walls.size !== beforeWalls) enforceLockedInsideLengths();
+      });
+      selectLatestDrawnWall({ graphType: "wall", beforeIds: beforeWallIds });
+      return;
+    }
   }
 
   // 1) UI hit => handle and STOP (does not start drawing)
@@ -5027,34 +5124,6 @@ function onMouseDown(e) {
     return;
   }
 
-  // Dimension tool is modal: clicks place/commit dimensions (no wall/hidden selection here).
-  if (state.activeTool === "dim") {
-    undo.runAction(() => dimTool.onPointerDown(
-      { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
-      {
-        snapOn: state.snapOn,
-        resolveSnapPoint: resolveDimSnapPointWorld,
-        orthoEnabled: state.orthoEnabled !== false,
-        stepDrawEnabled: state.stepDrawEnabled,
-        stepDrawMode: state.stepDrawMode,
-        stepLineEnabled: state.stepLineEnabled,
-        stepDegreeEnabled: state.stepDegreeEnabled,
-        stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
-        stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
-        onCommit: (d) => {
-          dimensions.push(d);
-          clearGroupSelection();
-          selectedWallId = null;
-          selectedHiddenId = null;
-          selectedModelOutline = false;
-          hoverModelOutline = false;
-          selectedDimId = d.id;
-        },
-      }
-    ));
-    return;
-  }
-
   // 2) If active tool is drawing, next click continues that chain.
   if (state.activeTool === "hidden" && hiddenTool.getStatus()?.isDrawing) {
     const beforeHiddenIds = new Set(hiddenGraph.walls.keys());
@@ -5083,6 +5152,7 @@ function onMouseDown(e) {
         { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
         {
           snapOn: state.snapOn,
+          resolveSnapPoint: resolveSnapPointWorld,
           wallMagnetEnabled: state.wallMagnetEnabled,
           stepDrawEnabled: state.stepDrawEnabled,
           stepDrawMode: state.stepDrawMode,
@@ -5207,6 +5277,7 @@ function onMouseDown(e) {
         { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
         {
           snapOn: state.snapOn,
+          resolveSnapPoint: resolveSnapPointWorld,
           wallMagnetEnabled: state.wallMagnetEnabled,
           stepDrawEnabled: state.stepDrawEnabled,
           stepDrawMode: state.stepDrawMode,
@@ -5220,14 +5291,6 @@ function onMouseDown(e) {
     });
     selectLatestDrawnWall({ graphType: "wall", beforeIds: beforeWallIds });
   }
-}
-
-function getGuidePreviewStyle() {
-  return {
-    dash: Array.isArray(state.hiddenWallDash) ? state.hiddenWallDash : [10, 8],
-    lineWidthPx: Math.max(1, Number(state.hiddenWallLineWidthPx) || 2),
-    color: state.hiddenWallColor || state.dimColor,
-  };
 }
 
 function onWindowMouseUp() {
@@ -5255,6 +5318,7 @@ function onWindowMouseUp() {
     wallHandleDrag.startB = null;
     wallHandleDrag.lenBaseMm = null;
     wallHandleDrag.lenHandleProjStartMm = null;
+    wallHandleDrag.shiftLockDir = null;
     wallHandleDrag.moved = false;
     if (moved && startSnap) {
       restoreGraph(dragGraph, startSnap);
@@ -5471,6 +5535,9 @@ function onWindowMouseMove(e) {
 
         const d0 = normalize(b0.x - a0.x, b0.y - a0.y);
         const n0 = { x: -d0.y, y: d0.x };
+        if (wallHandleDrag.kind !== "free_a" && wallHandleDrag.kind !== "free_b") {
+          wallHandleDrag.shiftLockDir = null;
+        }
         if (wallHandleDrag.kind === "mid_move") {
           const dx = snapW.x - p0.x;
           const dy = snapW.y - p0.y;
@@ -5484,6 +5551,9 @@ function onWindowMouseMove(e) {
           const dxMove = rawW.x - p0.x;
           const dyMove = rawW.y - p0.y;
           let target = { x: a0.x + dxMove, y: a0.y + dyMove };
+          const lock = applyShiftLockFromAnchor(b0, target, !!e.shiftKey, wallHandleDrag.shiftLockDir);
+          target = lock.target;
+          wallHandleDrag.shiftLockDir = lock.dir;
           if (state.snapOn) target = resolveSnapPointWorld(target.x, target.y) || target;
           target = applyHandleStepFromAnchor(b0, target, stepOpts);
           A.x = target.x;
@@ -5492,6 +5562,9 @@ function onWindowMouseMove(e) {
           const dxMove = rawW.x - p0.x;
           const dyMove = rawW.y - p0.y;
           let target = { x: b0.x + dxMove, y: b0.y + dyMove };
+          const lock = applyShiftLockFromAnchor(a0, target, !!e.shiftKey, wallHandleDrag.shiftLockDir);
+          target = lock.target;
+          wallHandleDrag.shiftLockDir = lock.dir;
           if (state.snapOn) target = resolveSnapPointWorld(target.x, target.y) || target;
           target = applyHandleStepFromAnchor(a0, target, stepOpts);
           B.x = target.x;
@@ -5632,6 +5705,7 @@ function onWindowMouseMove(e) {
     { offsetX: ox, offsetY: oy, shiftKey: e.shiftKey },
     {
       snapOn: state.snapOn,
+      resolveSnapPoint: resolveSnapPointWorld,
       wallMagnetEnabled: state.wallMagnetEnabled,
       stepDrawEnabled: state.stepDrawEnabled,
       stepDrawMode: state.stepDrawMode,
@@ -5871,6 +5945,7 @@ function onWindowKeyDown(e) {
       wallHandleDrag.startB = null;
       wallHandleDrag.lenBaseMm = null;
       wallHandleDrag.lenHandleProjStartMm = null;
+      wallHandleDrag.shiftLockDir = null;
       wallHandleDrag.moved = false;
     }
     if (freeDimDrag.active) {
@@ -5891,8 +5966,8 @@ function onWindowKeyDown(e) {
       clearGroupSelection();
       hoverModelOutline = false; selectedModelOutline = false;
     }
-    // Escape exits Dimension command back to Wall tool (AutoCAD-like).
-    if (state.activeTool === "dim") setActiveTool("wall");
+    // Keep active tool on dimension after canceling with Escape.
+    // This prevents unintended wall drawing on the next click.
   }
 }
 

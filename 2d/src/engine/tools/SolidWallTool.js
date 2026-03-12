@@ -265,11 +265,14 @@ export class SolidWallTool {
     }
     if (e.button !== 0) return;
 
-    const p = this.view.screenToWorld(e.offsetX, e.offsetY);
+    const snapOn = !!opts?.snapOn;
+    const resolveSnapPoint = opts?.resolveSnapPoint;
+    let p = this.view.screenToWorld(e.offsetX, e.offsetY);
+    if (snapOn && typeof resolveSnapPoint === "function") p = resolveSnapPoint(p.x, p.y) || p;
 
     // click1: set start
     if (!this.pendingStartNodeId) {
-      const useWallMagnet = opts?.snapOn !== false && opts?.wallMagnetEnabled !== false;
+      const useWallMagnet = snapOn && opts?.wallMagnetEnabled !== false;
       const n0 = this._findSnapTargetPoint(p.x, p.y, useWallMagnet);
       this.pendingStartNodeId = n0.id;
       this.pendingStartPos = { x: n0.x, y: n0.y };
@@ -282,10 +285,16 @@ export class SolidWallTool {
     const startPos = this.pendingStartPos;
 
     let endPos = this._applyAngle(startPos, { x: p.x, y: p.y }, !!e.shiftKey, opts);
+    if (snapOn && typeof resolveSnapPoint === "function") endPos = resolveSnapPoint(endPos.x, endPos.y) || endPos;
 
-    const useWallMagnet = opts?.snapOn !== false && opts?.wallMagnetEnabled !== false;
+    const useWallMagnet = snapOn && opts?.wallMagnetEnabled !== false;
     const n1 = this._findSnapTargetPoint(endPos.x, endPos.y, useWallMagnet);
-    if (n1.id === this.pendingStartNodeId) return;
+    if (n1.id === this.pendingStartNodeId) {
+      // Clicking the same snap point should end current chain,
+      // not restart drawing from the same location.
+      this.stopChaining();
+      return;
+    }
 
     // Overlap check (collinear overlap with existing walls)
     if (this._checkOverlap(startPos, { x: n1.x, y: n1.y })) {
@@ -323,10 +332,13 @@ export class SolidWallTool {
   onPointerMove(e, opts = {}) {
     if (!this.pendingStartPos) return;
 
+    const snapOn = !!opts?.snapOn;
+    const resolveSnapPoint = opts?.resolveSnapPoint;
     const p = this.view.screenToWorld(e.offsetX, e.offsetY);
     const startPos = this.pendingStartPos;
 
-    const endPos = this._applyAngle(startPos, { x: p.x, y: p.y }, !!e.shiftKey, opts);
+    let endPos = this._applyAngle(startPos, { x: p.x, y: p.y }, !!e.shiftKey, opts);
+    if (snapOn && typeof resolveSnapPoint === "function") endPos = resolveSnapPoint(endPos.x, endPos.y) || endPos;
 
     this.previewEndPos = endPos;
 

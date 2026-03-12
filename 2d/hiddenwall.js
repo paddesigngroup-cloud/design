@@ -176,7 +176,12 @@ export class HiddenWallTool {
     if (snapOn && typeof resolveSnapPoint === "function") endPos = resolveSnapPoint(endPos.x, endPos.y) || endPos;
 
     const n1 = this.graph.getOrCreateNode(endPos.x, endPos.y, snapOn ? this.snapTolMm : 1);
-    if (n1.id === this.pendingStartNodeId) return;
+    if (n1.id === this.pendingStartNodeId) {
+      // Clicking the same snap point should end current chain,
+      // not restart drawing from the same location.
+      this.stopChaining();
+      return;
+    }
 
     const thicknessMm = Math.max(1, Number(opts?.defaultThicknessMm ?? this.defaultThickness) || 1);
     const w = this.graph.addWallByNodeIds(this.pendingStartNodeId, n1.id, thicknessMm, "");

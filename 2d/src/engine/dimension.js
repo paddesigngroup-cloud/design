@@ -199,7 +199,8 @@ export class DimensionTool {
     }
 
     if (this.stage === 2) {
-      p = this._applyAngleAndStep(this.b || this.a, raw, !!e.shiftKey, opts);
+      // Offset placement (3rd click) should remain free from ortho/step constraints.
+      p = raw;
       p = this._applySnap(p, opts, { phase: "offset", stage: this.stage, anchorA: this.a, anchorB: this.b });
       const A = this.a;
       const B = this.b;
@@ -228,7 +229,8 @@ export class DimensionTool {
       return;
     }
     if (this.stage === 2) {
-      let p = this._applyAngleAndStep(this.b || this.a, raw, !!e.shiftKey, opts);
+      // Offset preview (stage 2) should follow cursor freely.
+      let p = raw;
       p = this._applySnap(p, opts, { phase: "offset", stage: this.stage, anchorA: this.a, anchorB: this.b });
       this.cursor = p;
       return;
