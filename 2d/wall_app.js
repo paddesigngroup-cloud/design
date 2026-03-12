@@ -815,6 +815,21 @@ const moveCommand = {
   startModelSnap: null,
   moved: false,
 };
+const rotateCommand = {
+  mode: "idle", // idle | await_confirm_selection | await_base_point | await_mode_or_drag | await_reference_point | await_target_point | await_typed_angle | preview_rotate
+  inputMode: "drag", // drag | 3point | typed
+  selectionSnapshot: null,
+  pivot: null,
+  cursorPoint: null,
+  referencePoint: null,
+  previewAngleRad: 0,
+  typedValue: "",
+  startGraphSnap: null,
+  startHiddenGraphSnap: null,
+  startDimensionsSnap: null,
+  startModelSnap: null,
+  moved: false,
+};
 const contextMenuState = {
   visible: false,
   clientX: 0,
@@ -2427,6 +2442,117 @@ function applyMoveConstraintsFromBase(base, target, shiftKey, lockDir = null) {
   return { target: next, dir: lockDir };
 }
 
+function rotatePointAroundPivot(point, pivot, angleRad) {
+  const px = point.x - pivot.x;
+  const py = point.y - pivot.y;
+  const c = Math.cos(angleRad);
+  const s = Math.sin(angleRad);
+  return {
+    x: pivot.x + px * c - py * s,
+    y: pivot.y + px * s + py * c,
+  };
+}
+
+function quantizeAngleRad(angleRad, stepDeg) {
+  const step = Number(stepDeg);
+  if (!Number.isFinite(step) || step <= 0) return wrapAnglePi(angleRad);
+  const stepRad = (step * Math.PI) / 180;
+  return wrapAnglePi(Math.round(angleRad / stepRad) * stepRad);
+}
+
+function constrainRotateAngle(angleRad) {
+  let next = wrapAnglePi(angleRad);
+  if (state.orthoEnabled !== false) {
+    next = quantizeAngleRad(next, 45);
+  } else if (state.stepDegreeEnabled) {
+    next = quantizeAngleRad(next, Math.max(0.1, Number(state.stepAngleDeg || 10)));
+  }
+  return wrapAnglePi(next);
+}
+
+function applySelectionRotation(snapshot, pivot, angleRad) {
+  if (!selectionSnapshotHasAny(snapshot) || !pivot || !Number.isFinite(angleRad)) return false;
+  if (Math.abs(angleRad) < 1e-9) return false;
+
+  const normalizeIds = (ids) => Array.isArray(ids) ? ids : [];
+  const collectNodes = (wallIds, getWall, getNode) => {
+    const nodeIds = new Set();
+    for (const id of normalizeIds(wallIds)) {
+      const w = getWall(id);
+      if (!w) continue;
+      nodeIds.add(w.a);
+      nodeIds.add(w.b);
+    }
+    const out = [];
+    for (const nodeId of nodeIds) {
+      const node = getNode(nodeId);
+      if (node) out.push(node);
+    }
+    return out;
+  };
+
+  for (const node of collectNodes(snapshot.wallIds, (id) => graph.getWall(id), (id) => graph.getNode(id))) {
+    const rotated = rotatePointAroundPivot(node, pivot, angleRad);
+    node.x = rotated.x;
+    node.y = rotated.y;
+  }
+  for (const node of collectNodes(snapshot.hiddenIds, (id) => hiddenGraph.getWall(id), (id) => hiddenGraph.getNode(id))) {
+    const rotated = rotatePointAroundPivot(node, pivot, angleRad);
+    node.x = rotated.x;
+    node.y = rotated.y;
+  }
+
+  const dimIdSet = new Set(normalizeIds(snapshot.dimIds));
+  for (const dim of dimensions) {
+    if (!dim || !dimIdSet.has(dim.id)) continue;
+    if (dim.a) {
+      const rotated = rotatePointAroundPivot(dim.a, pivot, angleRad);
+      dim.a.x = rotated.x;
+      dim.a.y = rotated.y;
+    }
+    if (dim.b) {
+      const rotated = rotatePointAroundPivot(dim.b, pivot, angleRad);
+      dim.b.x = rotated.x;
+      dim.b.y = rotated.y;
+    }
+  }
+
+  if (snapshot.hasModel) {
+    model2d.lines = (model2d.lines || []).map((line) => {
+      const a = rotatePointAroundPivot({ x: line.ax, y: line.ay }, pivot, angleRad);
+      const b = rotatePointAroundPivot({ x: line.bx, y: line.by }, pivot, angleRad);
+      return { ax: a.x, ay: a.y, bx: b.x, by: b.y };
+    });
+    model2d.outline = (model2d.outline || []).map((pt) => rotatePointAroundPivot(pt, pivot, angleRad));
+    const rotatedOffset = rotatePointAroundPivot({
+      x: model2d.offsetXmm || 0,
+      y: model2d.offsetYmm || 0,
+    }, pivot, angleRad);
+    model2d.offsetXmm = rotatedOffset.x;
+    model2d.offsetYmm = rotatedOffset.y;
+    model2d.rotationRad = wrapAnglePi((model2d.rotationRad || 0) + angleRad);
+    emitModel2dTransform();
+  }
+  return true;
+}
+
+function normalizeTypedNumberText(text) {
+  if (typeof text !== "string") return "";
+  return text
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .replace(/,/g, ".")
+    .trim();
+}
+
+function parseRotateAngleValue(text) {
+  const normalized = normalizeTypedNumberText(text);
+  if (!normalized) return NaN;
+  const num = Number(normalized);
+  if (!Number.isFinite(num)) return NaN;
+  return (num * Math.PI) / 180;
+}
+
 function beginAxisDrag(axis, offsetX, offsetY) {
   const target = getSelectedObjectTargetInfo();
   if (!target) return false;
@@ -2492,7 +2618,7 @@ function stopMoveCommandRuntime() {
 }
 
 function beginMoveCommand() {
-  if (moveCommand.mode !== "idle") return false;
+  if (moveCommand.mode !== "idle" || rotateCommand.mode !== "idle") return false;
   if (dimEditor.active) closeDimEditor(true);
   moveCommand.mode = "await_confirm_selection";
   moveCommand.selectionSnapshot = buildSelectionSnapshotFromCurrentSelection();
@@ -2623,6 +2749,235 @@ function updateMoveCommandCursor(worldPoint, shiftKey = false) {
     }, { merge: false });
     moveCommand.moved = Math.hypot(lock.target.x - moveCommand.basePoint.x, lock.target.y - moveCommand.basePoint.y) > 0.5;
   }
+  return true;
+}
+
+function stopRotateCommandRuntime() {
+  rotateCommand.selectionSnapshot = null;
+  rotateCommand.pivot = null;
+  rotateCommand.cursorPoint = null;
+  rotateCommand.referencePoint = null;
+  rotateCommand.previewAngleRad = 0;
+  rotateCommand.typedValue = "";
+  rotateCommand.startGraphSnap = null;
+  rotateCommand.startHiddenGraphSnap = null;
+  rotateCommand.startDimensionsSnap = null;
+  rotateCommand.startModelSnap = null;
+  rotateCommand.moved = false;
+}
+
+function beginRotateCommand() {
+  if (rotateCommand.mode !== "idle" || moveCommand.mode !== "idle") return false;
+  if (dimEditor.active) closeDimEditor(true);
+  rotateCommand.mode = "await_confirm_selection";
+  rotateCommand.inputMode = "drag";
+  rotateCommand.selectionSnapshot = buildSelectionSnapshotFromCurrentSelection();
+  rotateCommand.cursorPoint = null;
+  rotateCommand.referencePoint = null;
+  rotateCommand.previewAngleRad = 0;
+  rotateCommand.typedValue = "";
+  rotateCommand.moved = false;
+  return true;
+}
+
+function _startRotatePreview(pivot, mode = null) {
+  rotateCommand.pivot = { x: pivot.x, y: pivot.y };
+  rotateCommand.cursorPoint = { x: pivot.x, y: pivot.y };
+  rotateCommand.referencePoint = null;
+  rotateCommand.previewAngleRad = 0;
+  rotateCommand.typedValue = "";
+  rotateCommand.startGraphSnap = snapshotGraph(graph);
+  rotateCommand.startHiddenGraphSnap = snapshotGraph(hiddenGraph);
+  rotateCommand.startDimensionsSnap = snapshotDimensions(dimensions);
+  rotateCommand.startModelSnap = snapshotModel2d(model2d);
+  rotateCommand.moved = false;
+  if (mode === "3point") {
+    rotateCommand.inputMode = "3point";
+    rotateCommand.mode = "await_reference_point";
+  } else if (mode === "typed") {
+    rotateCommand.inputMode = "typed";
+    rotateCommand.mode = "await_typed_angle";
+  } else {
+    rotateCommand.inputMode = "drag";
+    rotateCommand.mode = "preview_rotate";
+  }
+}
+
+function setRotateMode(mode) {
+  const next =
+    mode === "3point" ? "3point" :
+    mode === "typed" ? "typed" :
+    "drag";
+  rotateCommand.inputMode = next;
+  if (!rotateCommand.pivot) return true;
+  if (
+    !rotateCommand.startGraphSnap ||
+    !rotateCommand.startHiddenGraphSnap ||
+    !rotateCommand.startDimensionsSnap ||
+    !rotateCommand.startModelSnap
+  ) {
+    _startRotatePreview(rotateCommand.pivot, next);
+    return true;
+  }
+  restoreGraph(graph, rotateCommand.startGraphSnap);
+  restoreGraph(hiddenGraph, rotateCommand.startHiddenGraphSnap);
+  restoreDimensions(dimensions, rotateCommand.startDimensionsSnap);
+  restoreModel2d(model2d, rotateCommand.startModelSnap);
+  emitModel2dTransform();
+  rotateCommand.referencePoint = null;
+  rotateCommand.cursorPoint = { x: rotateCommand.pivot.x, y: rotateCommand.pivot.y };
+  rotateCommand.previewAngleRad = 0;
+  rotateCommand.moved = false;
+  rotateCommand.mode =
+    next === "3point" ? "await_reference_point" :
+    next === "typed" ? "await_typed_angle" :
+    "preview_rotate";
+  return true;
+}
+
+function setRotateInputValue(value) {
+  rotateCommand.typedValue = String(value ?? "");
+  if (rotateCommand.inputMode !== "typed" || !rotateCommand.pivot) return true;
+  const angleRad = constrainRotateAngle(parseRotateAngleValue(rotateCommand.typedValue));
+  restoreGraph(graph, rotateCommand.startGraphSnap);
+  restoreGraph(hiddenGraph, rotateCommand.startHiddenGraphSnap);
+  restoreDimensions(dimensions, rotateCommand.startDimensionsSnap);
+  restoreModel2d(model2d, rotateCommand.startModelSnap);
+  if (Number.isFinite(angleRad)) {
+    applySelectionRotation(rotateCommand.selectionSnapshot, rotateCommand.pivot, angleRad);
+    rotateCommand.previewAngleRad = angleRad;
+    rotateCommand.moved = Math.abs(angleRad) > 1e-6;
+  } else {
+    rotateCommand.previewAngleRad = 0;
+    rotateCommand.moved = false;
+  }
+  return true;
+}
+
+function cancelRotateCommand(restoreGeometry = true) {
+  const hasPreview =
+    rotateCommand.startGraphSnap &&
+    rotateCommand.startHiddenGraphSnap &&
+    rotateCommand.startDimensionsSnap &&
+    rotateCommand.startModelSnap;
+  if (restoreGeometry && hasPreview) {
+    restoreGraph(graph, rotateCommand.startGraphSnap);
+    restoreGraph(hiddenGraph, rotateCommand.startHiddenGraphSnap);
+    restoreDimensions(dimensions, rotateCommand.startDimensionsSnap);
+    restoreModel2d(model2d, rotateCommand.startModelSnap);
+    emitModel2dTransform();
+  }
+  rotateCommand.mode = "idle";
+  rotateCommand.inputMode = "drag";
+  stopRotateCommandRuntime();
+}
+
+function _commitRotatePreview() {
+  const endGraphSnap = snapshotGraph(graph);
+  const endHiddenGraphSnap = snapshotGraph(hiddenGraph);
+  const endDimensionsSnap = snapshotDimensions(dimensions);
+  const endModelSnap = snapshotModel2d(model2d);
+  const moved = !!rotateCommand.moved;
+  const startGraphSnap = rotateCommand.startGraphSnap;
+  const startHiddenGraphSnap = rotateCommand.startHiddenGraphSnap;
+  const startDimensionsSnap = rotateCommand.startDimensionsSnap;
+  const startModelSnap = rotateCommand.startModelSnap;
+  cancelRotateCommand(false);
+  if (!moved || !startGraphSnap || !startHiddenGraphSnap || !startDimensionsSnap || !startModelSnap) return true;
+  restoreGraph(graph, startGraphSnap);
+  restoreGraph(hiddenGraph, startHiddenGraphSnap);
+  restoreDimensions(dimensions, startDimensionsSnap);
+  restoreModel2d(model2d, startModelSnap);
+  emitModel2dTransform();
+  undo.runAction(() => {
+    restoreGraph(graph, endGraphSnap);
+    restoreGraph(hiddenGraph, endHiddenGraphSnap);
+    restoreDimensions(dimensions, endDimensionsSnap);
+    restoreModel2d(model2d, endModelSnap);
+    emitModel2dTransform();
+  });
+  return true;
+}
+
+function confirmRotateStep() {
+  if (rotateCommand.mode === "idle") return false;
+
+  if (rotateCommand.mode === "await_confirm_selection") {
+    const snap = buildSelectionSnapshotFromCurrentSelection();
+    if (!selectionSnapshotHasAny(snap)) return false;
+    rotateCommand.selectionSnapshot = snap;
+    rotateCommand.mode = "await_base_point";
+    rotateCommand.cursorPoint = null;
+    return true;
+  }
+
+  if (rotateCommand.mode === "await_base_point") {
+    if (!rotateCommand.cursorPoint) return false;
+    _startRotatePreview(rotateCommand.cursorPoint, "drag");
+    return true;
+  }
+
+  if (rotateCommand.mode === "await_reference_point") {
+    if (!rotateCommand.cursorPoint || !rotateCommand.pivot) return false;
+    rotateCommand.referencePoint = { x: rotateCommand.cursorPoint.x, y: rotateCommand.cursorPoint.y };
+    rotateCommand.mode = "await_target_point";
+    return true;
+  }
+
+  if (rotateCommand.mode === "await_typed_angle") {
+    const angleRad = constrainRotateAngle(parseRotateAngleValue(rotateCommand.typedValue));
+    if (!Number.isFinite(angleRad)) return false;
+    setRotateInputValue(rotateCommand.typedValue);
+    return _commitRotatePreview();
+  }
+
+  if (rotateCommand.mode === "await_target_point" || rotateCommand.mode === "preview_rotate") {
+    return _commitRotatePreview();
+  }
+
+  return false;
+}
+
+function updateRotateCommandCursor(worldPoint) {
+  if (rotateCommand.mode === "idle") return false;
+  rotateCommand.cursorPoint = { x: worldPoint.x, y: worldPoint.y };
+
+  if (rotateCommand.mode === "await_reference_point" || rotateCommand.mode === "await_base_point") {
+    return true;
+  }
+  if (
+    rotateCommand.mode !== "preview_rotate" &&
+    rotateCommand.mode !== "await_target_point"
+  ) {
+    return true;
+  }
+  if (
+    !rotateCommand.pivot ||
+    !rotateCommand.startGraphSnap ||
+    !rotateCommand.startHiddenGraphSnap ||
+    !rotateCommand.startDimensionsSnap ||
+    !rotateCommand.startModelSnap
+  ) {
+    return false;
+  }
+
+  let angleRad = 0;
+  if (rotateCommand.inputMode === "3point") {
+    if (!rotateCommand.referencePoint) return true;
+    const refAngle = Math.atan2(rotateCommand.referencePoint.y - rotateCommand.pivot.y, rotateCommand.referencePoint.x - rotateCommand.pivot.x);
+    const targetAngle = Math.atan2(worldPoint.y - rotateCommand.pivot.y, worldPoint.x - rotateCommand.pivot.x);
+    angleRad = constrainRotateAngle(wrapAnglePi(targetAngle - refAngle));
+  } else {
+    angleRad = constrainRotateAngle(Math.atan2(worldPoint.y - rotateCommand.pivot.y, worldPoint.x - rotateCommand.pivot.x));
+  }
+
+  restoreGraph(graph, rotateCommand.startGraphSnap);
+  restoreGraph(hiddenGraph, rotateCommand.startHiddenGraphSnap);
+  restoreDimensions(dimensions, rotateCommand.startDimensionsSnap);
+  restoreModel2d(model2d, rotateCommand.startModelSnap);
+  applySelectionRotation(rotateCommand.selectionSnapshot, rotateCommand.pivot, angleRad);
+  rotateCommand.previewAngleRad = angleRad;
+  rotateCommand.moved = Math.abs(angleRad) > 1e-6;
   return true;
 }
 function drawSelectedObjectAxes() {
@@ -3976,6 +4331,50 @@ function drawMoveOverlay() {
   ctx.restore();
 }
 
+function drawRotateOverlay() {
+  if (rotateCommand.mode === "idle" || !rotateCommand.pivot) return;
+  const pivot = worldToScreen(rotateCommand.pivot.x, rotateCommand.pivot.y);
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.strokeStyle = "#7c3aed";
+  ctx.fillStyle = "#ffffff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(pivot.x, pivot.y, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  const drawRay = (point, color) => {
+    if (!point) return;
+    const p = worldToScreen(point.x, point.y);
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(pivot.x, pivot.y);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  if (rotateCommand.referencePoint) drawRay(rotateCommand.referencePoint, "#0891b2");
+  if (rotateCommand.cursorPoint && rotateCommand.mode !== "await_base_point" && rotateCommand.mode !== "await_typed_angle") {
+    drawRay(rotateCommand.cursorPoint, "#7c3aed");
+  }
+
+  const label =
+    rotateCommand.mode === "await_reference_point" ? "3P-REF" :
+    rotateCommand.mode === "await_target_point" ? "3P-TGT" :
+    rotateCommand.mode === "await_typed_angle" ? `ROT ${rotateCommand.typedValue || ""}` :
+    `ROT ${radToDeg(rotateCommand.previewAngleRad || 0).toFixed(1)}°`;
+  ctx.fillStyle = "#111827";
+  ctx.font = `12px ${state.fontFamily || "Tahoma"}`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "bottom";
+  ctx.fillText(label, pivot.x + 10, pivot.y - 10);
+  ctx.restore();
+}
+
 function updateCanvasCursor() {
   // We draw our own cursor inside the canvas. When input is disabled (menus),
   // let the browser show the native cursor.
@@ -4356,6 +4755,7 @@ function loop() {
     drawStandaloneDimensions();
     drawSnapOverlay();
     drawMoveOverlay();
+    drawRotateOverlay();
     if (state.activeTool === "hidden") drawHiddenToolOverlay(hiddenTool);
     if (state.activeTool === "dim") drawDimToolOverlay();
     drawToolCursor();
@@ -4411,6 +4811,7 @@ function detach() {
 
   if (dimEditor.active) closeDimEditor(true);
   hideContextMenu();
+  if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
   isPanning = false;
 
   if (_rafId != null) cancelAnimationFrame(_rafId);
@@ -4528,7 +4929,7 @@ function renderContextMenuItems() {
   const items = [
     { id: "move", label: "انتقال", disabled: !hasAnySelection() },
     { id: "copy", label: "کپی", disabled: true },
-    { id: "rotate", label: "چرخش", disabled: true },
+    { id: "rotate", label: "چرخش", disabled: !hasAnySelection() },
     { id: "delete", label: "حذف", disabled: true },
   ];
   menu.innerHTML = "";
@@ -4557,6 +4958,10 @@ function renderContextMenuItems() {
           if (moveCommand.mode !== "idle") cancelMoveCommand(true);
           beginMoveCommand();
           confirmMoveStep();
+        } else if (item.id === "rotate") {
+          if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
+          beginRotateCommand();
+          confirmRotateStep();
         }
       };
     }
@@ -4597,7 +5002,8 @@ function onContextMenu(e) {
     wallDimDrag.active ||
     freeDimDrag.active ||
     modelDrag.active ||
-    moveCommand.mode !== "idle"
+    moveCommand.mode !== "idle" ||
+    rotateCommand.mode !== "idle"
   ) {
     return;
   }
@@ -5236,6 +5642,27 @@ function onMouseDown(e) {
     return;
   }
   if (moveCommand.mode === "drag_direct") return;
+  if (rotateCommand.mode === "await_base_point") {
+    const raw = screenToWorld(e.offsetX, e.offsetY);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    _startRotatePreview(p, "drag");
+    return;
+  }
+  if (rotateCommand.mode === "await_reference_point") {
+    const raw = screenToWorld(e.offsetX, e.offsetY);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    rotateCommand.cursorPoint = { x: p.x, y: p.y };
+    confirmRotateStep();
+    return;
+  }
+  if (rotateCommand.mode === "preview_rotate" || rotateCommand.mode === "await_target_point") {
+    const raw = screenToWorld(e.offsetX, e.offsetY);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    updateRotateCommandCursor(p);
+    confirmRotateStep();
+    return;
+  }
+  if (rotateCommand.mode === "await_typed_angle") return;
 
   // Dimension tool is modal: left clicks should only place/commit dimensions.
   // Handle it early so wall/hidden hit targets cannot switch the active tool.
@@ -5886,7 +6313,7 @@ function onWindowMouseMove(e) {
 
   // When integrated in Vue layout, ignore hover/move when pointer is outside the canvas,
   // except while panning or while an active draw command is in progress.
-  if (!inside && !isPanning && !isDrawing && !modelDrag.active && !wallDimDrag.active && !freeDimDrag.active && !wallHandleDrag.active && !boxSelect.active && moveCommand.mode === "idle") {
+  if (!inside && !isPanning && !isDrawing && !modelDrag.active && !wallDimDrag.active && !freeDimDrag.active && !wallHandleDrag.active && !boxSelect.active && moveCommand.mode === "idle" && rotateCommand.mode === "idle") {
     updateSnapPreview(NaN, NaN);
     hoverUi = null;
     hoverWallHandle = null;
@@ -5925,6 +6352,20 @@ function onWindowMouseMove(e) {
     const raw = screenToWorld(ox, oy);
     const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
     updateMoveCommandCursor(p, !!e.shiftKey);
+    hoverObjectAxis = null;
+    return;
+  }
+  if (rotateCommand.mode === "await_base_point" || rotateCommand.mode === "await_reference_point") {
+    const raw = screenToWorld(ox, oy);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    rotateCommand.cursorPoint = { x: p.x, y: p.y };
+    hoverObjectAxis = null;
+    return;
+  }
+  if (rotateCommand.mode === "preview_rotate" || rotateCommand.mode === "await_target_point") {
+    const raw = screenToWorld(ox, oy);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    updateRotateCommandCursor(p);
     hoverObjectAxis = null;
     return;
   }
@@ -6247,10 +6688,28 @@ function onWindowKeyDown(e) {
   }
 
   // MOVE command: M then Enter (AutoCAD-like flow)
+  if (!ctrl && (code === "KeyR" || key.toLowerCase() === "r")) {
+    if (isEditableTarget(e.target)) return;
+    e.preventDefault();
+    beginRotateCommand();
+    return;
+  }
   if (!ctrl && (code === "KeyM" || key.toLowerCase() === "m")) {
     if (isEditableTarget(e.target)) return;
     e.preventDefault();
     beginMoveCommand();
+    return;
+  }
+  if ((key === "Enter" || key === " ") && rotateCommand.mode !== "idle") {
+    if (isEditableTarget(e.target)) return;
+    e.preventDefault();
+    confirmRotateStep();
+    return;
+  }
+  if (key === "Escape" && rotateCommand.mode !== "idle") {
+    if (isEditableTarget(e.target)) return;
+    e.preventDefault();
+    cancelRotateCommand(true);
     return;
   }
   if ((key === "Enter" || key === " ") && moveCommand.mode !== "idle") {
@@ -6264,6 +6723,35 @@ function onWindowKeyDown(e) {
     e.preventDefault();
     cancelMoveCommand(true);
     return;
+  }
+  if (!ctrl && rotateCommand.mode !== "idle") {
+    const canChooseMode =
+      rotateCommand.mode === "preview_rotate" ||
+      rotateCommand.mode === "await_reference_point" ||
+      rotateCommand.mode === "await_target_point" ||
+      rotateCommand.mode === "await_typed_angle";
+    if (canChooseMode && (code === "KeyP" || key.toLowerCase() === "p")) {
+      e.preventDefault();
+      setRotateMode("3point");
+      return;
+    }
+    const canTypeAngle =
+      rotateCommand.pivot &&
+      (rotateCommand.mode === "preview_rotate" || rotateCommand.mode === "await_typed_angle");
+    if (canTypeAngle && key === "Backspace") {
+      e.preventDefault();
+      setRotateMode("typed");
+      setRotateInputValue(rotateCommand.typedValue.slice(0, -1));
+      return;
+    }
+    if (canTypeAngle && key.length === 1 && /[0-9.,\-]/.test(key)) {
+      e.preventDefault();
+      setRotateMode("typed");
+      const nextValue =
+        (rotateCommand.mode === "await_typed_angle" ? rotateCommand.typedValue : "") + key;
+      setRotateInputValue(nextValue);
+      return;
+    }
   }
 
   // Delete selected wall/object(s)
@@ -6566,6 +7054,7 @@ function setActiveTool(name) {
   if (dimEditor.active) closeDimEditor(true);
   hideContextMenu();
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);
+  if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
   tool.stopChaining();
   hiddenTool.stopChaining();
   dimTool.cancel();
@@ -6589,6 +7078,7 @@ function clearAll() {
   if (dimEditor.active) closeDimEditor(true);
   hideContextMenu();
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);
+  if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
   undo.runAction(() => {
     graph.clear();
     hiddenGraph.clear();
@@ -6636,6 +7126,12 @@ function getState() {
     move: {
       mode: moveCommand.mode,
       active: moveCommand.mode !== "idle",
+    },
+    rotate: {
+      mode: rotateCommand.mode,
+      active: rotateCommand.mode !== "idle",
+      inputMode: rotateCommand.inputMode,
+      pivot: rotateCommand.pivot ? { x: rotateCommand.pivot.x, y: rotateCommand.pivot.y } : null,
     },
     selection: {
       selectedWallId,
@@ -7204,6 +7700,11 @@ return {
   beginMoveCommand,
   confirmMoveStep,
   cancelMoveCommand,
+  beginRotateCommand,
+  confirmRotateStep,
+  cancelRotateCommand,
+  setRotateInputValue,
+  setRotateMode,
   setSnapOn,
   setInputEnabled,
   setModel2dLines,
