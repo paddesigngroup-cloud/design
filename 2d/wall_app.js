@@ -822,6 +822,7 @@ const rotateCommand = {
   pivot: null,
   cursorPoint: null,
   referencePoint: null,
+  referenceAngleRad: 0,
   previewAngleRad: 0,
   typedValue: "",
   startGraphSnap: null,
@@ -2460,7 +2461,7 @@ function quantizeAngleRad(angleRad, stepDeg) {
   return wrapAnglePi(Math.round(angleRad / stepRad) * stepRad);
 }
 
-function constrainRotateAngle(angleRad) {
+function constrainRotateDelta(angleRad) {
   let next = wrapAnglePi(angleRad);
   if (state.orthoEnabled !== false) {
     next = quantizeAngleRad(next, 45);
@@ -2468,6 +2469,40 @@ function constrainRotateAngle(angleRad) {
     next = quantizeAngleRad(next, Math.max(0.1, Number(state.stepAngleDeg || 10)));
   }
   return wrapAnglePi(next);
+}
+
+function getSelectionReferenceAngle(snapshot) {
+  if (!snapshot) return 0;
+  const firstWallId = Array.isArray(snapshot.wallIds) ? snapshot.wallIds[0] : null;
+  if (firstWallId) {
+    const wall = graph.getWall(firstWallId);
+    const a = wall ? graph.getNode(wall.a) : null;
+    const b = wall ? graph.getNode(wall.b) : null;
+    if (a && b) return Math.atan2(b.y - a.y, b.x - a.x);
+  }
+  const firstHiddenId = Array.isArray(snapshot.hiddenIds) ? snapshot.hiddenIds[0] : null;
+  if (firstHiddenId) {
+    const wall = hiddenGraph.getWall(firstHiddenId);
+    const a = wall ? hiddenGraph.getNode(wall.a) : null;
+    const b = wall ? hiddenGraph.getNode(wall.b) : null;
+    if (a && b) return Math.atan2(b.y - a.y, b.x - a.x);
+  }
+  const firstDimId = Array.isArray(snapshot.dimIds) ? snapshot.dimIds[0] : null;
+  if (firstDimId) {
+    const dim = dimensions.find((d) => d && d.id === firstDimId);
+    if (dim?.a && dim?.b) return Math.atan2(dim.b.y - dim.a.y, dim.b.x - dim.a.x);
+  }
+  if (snapshot.hasModel) {
+    const modelAngle = dominantModelAngle(model2d.lines || []);
+    if (Number.isFinite(modelAngle)) return modelAngle;
+    const outline = Array.isArray(model2d.outline) ? model2d.outline : [];
+    if (outline.length >= 2) {
+      const a = outline[0];
+      const b = outline[1];
+      return Math.atan2(b.y - a.y, b.x - a.x);
+    }
+  }
+  return 0;
 }
 
 function applySelectionRotation(snapshot, pivot, angleRad) {
@@ -2757,6 +2792,7 @@ function stopRotateCommandRuntime() {
   rotateCommand.pivot = null;
   rotateCommand.cursorPoint = null;
   rotateCommand.referencePoint = null;
+  rotateCommand.referenceAngleRad = 0;
   rotateCommand.previewAngleRad = 0;
   rotateCommand.typedValue = "";
   rotateCommand.startGraphSnap = null;
@@ -2774,6 +2810,7 @@ function beginRotateCommand() {
   rotateCommand.selectionSnapshot = buildSelectionSnapshotFromCurrentSelection();
   rotateCommand.cursorPoint = null;
   rotateCommand.referencePoint = null;
+  rotateCommand.referenceAngleRad = 0;
   rotateCommand.previewAngleRad = 0;
   rotateCommand.typedValue = "";
   rotateCommand.moved = false;
@@ -2784,6 +2821,7 @@ function _startRotatePreview(pivot, mode = null) {
   rotateCommand.pivot = { x: pivot.x, y: pivot.y };
   rotateCommand.cursorPoint = { x: pivot.x, y: pivot.y };
   rotateCommand.referencePoint = null;
+  rotateCommand.referenceAngleRad = getSelectionReferenceAngle(rotateCommand.selectionSnapshot);
   rotateCommand.previewAngleRad = 0;
   rotateCommand.typedValue = "";
   rotateCommand.startGraphSnap = snapshotGraph(graph);
@@ -2826,6 +2864,7 @@ function setRotateMode(mode) {
   emitModel2dTransform();
   rotateCommand.referencePoint = null;
   rotateCommand.cursorPoint = { x: rotateCommand.pivot.x, y: rotateCommand.pivot.y };
+  rotateCommand.referenceAngleRad = getSelectionReferenceAngle(rotateCommand.selectionSnapshot);
   rotateCommand.previewAngleRad = 0;
   rotateCommand.moved = false;
   rotateCommand.mode =
@@ -2838,7 +2877,7 @@ function setRotateMode(mode) {
 function setRotateInputValue(value) {
   rotateCommand.typedValue = String(value ?? "");
   if (rotateCommand.inputMode !== "typed" || !rotateCommand.pivot) return true;
-  const angleRad = constrainRotateAngle(parseRotateAngleValue(rotateCommand.typedValue));
+  const angleRad = constrainRotateDelta(parseRotateAngleValue(rotateCommand.typedValue));
   restoreGraph(graph, rotateCommand.startGraphSnap);
   restoreGraph(hiddenGraph, rotateCommand.startHiddenGraphSnap);
   restoreDimensions(dimensions, rotateCommand.startDimensionsSnap);
@@ -2925,7 +2964,7 @@ function confirmRotateStep() {
   }
 
   if (rotateCommand.mode === "await_typed_angle") {
-    const angleRad = constrainRotateAngle(parseRotateAngleValue(rotateCommand.typedValue));
+    const angleRad = constrainRotateDelta(parseRotateAngleValue(rotateCommand.typedValue));
     if (!Number.isFinite(angleRad)) return false;
     setRotateInputValue(rotateCommand.typedValue);
     return _commitRotatePreview();
@@ -2966,9 +3005,22 @@ function updateRotateCommandCursor(worldPoint) {
     if (!rotateCommand.referencePoint) return true;
     const refAngle = Math.atan2(rotateCommand.referencePoint.y - rotateCommand.pivot.y, rotateCommand.referencePoint.x - rotateCommand.pivot.x);
     const targetAngle = Math.atan2(worldPoint.y - rotateCommand.pivot.y, worldPoint.x - rotateCommand.pivot.x);
-    angleRad = constrainRotateAngle(wrapAnglePi(targetAngle - refAngle));
+    angleRad = constrainRotateDelta(wrapAnglePi(targetAngle - refAngle));
+    const guideAngle = wrapAnglePi(refAngle + angleRad);
+    const radius = Math.hypot(worldPoint.x - rotateCommand.pivot.x, worldPoint.y - rotateCommand.pivot.y);
+    rotateCommand.cursorPoint = {
+      x: rotateCommand.pivot.x + Math.cos(guideAngle) * radius,
+      y: rotateCommand.pivot.y + Math.sin(guideAngle) * radius,
+    };
   } else {
-    angleRad = constrainRotateAngle(Math.atan2(worldPoint.y - rotateCommand.pivot.y, worldPoint.x - rotateCommand.pivot.x));
+    const targetAngle = Math.atan2(worldPoint.y - rotateCommand.pivot.y, worldPoint.x - rotateCommand.pivot.x);
+    angleRad = constrainRotateDelta(wrapAnglePi(targetAngle - rotateCommand.referenceAngleRad));
+    const guideAngle = wrapAnglePi(rotateCommand.referenceAngleRad + angleRad);
+    const radius = Math.hypot(worldPoint.x - rotateCommand.pivot.x, worldPoint.y - rotateCommand.pivot.y);
+    rotateCommand.cursorPoint = {
+      x: rotateCommand.pivot.x + Math.cos(guideAngle) * radius,
+      y: rotateCommand.pivot.y + Math.sin(guideAngle) * radius,
+    };
   }
 
   restoreGraph(graph, rotateCommand.startGraphSnap);
@@ -4357,9 +4409,38 @@ function drawRotateOverlay() {
     ctx.restore();
   };
 
+  const getPreviewRayPoint = () => {
+    if (!rotateCommand.pivot) return null;
+    if (
+      rotateCommand.mode === "preview_rotate" ||
+      rotateCommand.mode === "await_target_point" ||
+      rotateCommand.mode === "await_typed_angle"
+    ) {
+      const radiusBase =
+        (rotateCommand.cursorPoint && Math.hypot(
+          rotateCommand.cursorPoint.x - rotateCommand.pivot.x,
+          rotateCommand.cursorPoint.y - rotateCommand.pivot.y
+        )) || 1200;
+      const baseAngle =
+        rotateCommand.inputMode === "3point" && rotateCommand.referencePoint
+          ? Math.atan2(
+              rotateCommand.referencePoint.y - rotateCommand.pivot.y,
+              rotateCommand.referencePoint.x - rotateCommand.pivot.x
+            )
+          : rotateCommand.referenceAngleRad;
+      const guideAngle = wrapAnglePi(baseAngle + (rotateCommand.previewAngleRad || 0));
+      return {
+        x: rotateCommand.pivot.x + Math.cos(guideAngle) * radiusBase,
+        y: rotateCommand.pivot.y + Math.sin(guideAngle) * radiusBase,
+      };
+    }
+    return rotateCommand.cursorPoint;
+  };
+
   if (rotateCommand.referencePoint) drawRay(rotateCommand.referencePoint, "#0891b2");
-  if (rotateCommand.cursorPoint && rotateCommand.mode !== "await_base_point" && rotateCommand.mode !== "await_typed_angle") {
-    drawRay(rotateCommand.cursorPoint, "#7c3aed");
+  const previewRayPoint = getPreviewRayPoint();
+  if (previewRayPoint && rotateCommand.mode !== "await_base_point") {
+    drawRay(previewRayPoint, "#7c3aed");
   }
 
   const label =
