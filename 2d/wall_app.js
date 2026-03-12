@@ -803,11 +803,41 @@ const axisDrag = {
   moved: false,
 };
 let hoverObjectAxis = null; // "x" | "y" | null
+const moveCommand = {
+  mode: "idle", // idle | await_confirm_selection | await_base_point | await_target_point | drag_direct
+  selectionSnapshot: null,
+  basePoint: null,
+  cursorPoint: null,
+  shiftLockDir: null,
+  startGraphSnap: null,
+  startHiddenGraphSnap: null,
+  startDimensionsSnap: null,
+  startModelSnap: null,
+  moved: false,
+};
+const contextMenuState = {
+  visible: false,
+  clientX: 0,
+  clientY: 0,
+  el: null,
+};
 
 function clearGroupSelection() {
   selectedWallIds = [];
   selectedHiddenIds = [];
   selectedDimIds = [];
+}
+
+function hasAnySelection() {
+  return !!(
+    selectedWallId ||
+    selectedHiddenId ||
+    selectedDimId ||
+    selectedModelOutline ||
+    selectedWallIds.length ||
+    selectedHiddenIds.length ||
+    selectedDimIds.length
+  );
 }
 
 function toggleWallSelectionByModifier(wallId) {
@@ -2278,7 +2308,7 @@ function hitTestObjectAxesScreen(x, y) {
   return null;
 }
 
-function buildAxisDragSelectionSnapshot() {
+function buildSelectionSnapshotFromCurrentSelection() {
   const collectIds = (singleId, multiIds) => {
     const out = [];
     if (singleId !== null && singleId !== undefined) out.push(singleId);
@@ -2303,11 +2333,106 @@ function buildAxisDragSelectionSnapshot() {
   };
 }
 
+function selectionSnapshotHasAny(snapshot) {
+  if (!snapshot) return false;
+  return (
+    (Array.isArray(snapshot.wallIds) && snapshot.wallIds.length > 0) ||
+    (Array.isArray(snapshot.hiddenIds) && snapshot.hiddenIds.length > 0) ||
+    (Array.isArray(snapshot.dimIds) && snapshot.dimIds.length > 0) ||
+    !!snapshot.hasModel
+  );
+}
+
+function applySelectionDelta(snapshot, delta, opts = null) {
+  if (!selectionSnapshotHasAny(snapshot)) return false;
+  const dx = Number(delta?.x) || 0;
+  const dy = Number(delta?.y) || 0;
+  if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return false;
+
+  const merge = !!opts?.merge;
+  const normalizeIds = (ids) => Array.isArray(ids) ? ids : [];
+  const collectNodeIdsFromWalls = (wallIds, getWall, getNode) => {
+    const nodeIds = new Set();
+    for (const id of normalizeIds(wallIds)) {
+      const w = getWall(id);
+      if (!w) continue;
+      nodeIds.add(w.a);
+      nodeIds.add(w.b);
+    }
+    const out = [];
+    for (const nodeId of nodeIds) {
+      const n = getNode(nodeId);
+      if (!n) continue;
+      out.push(n);
+    }
+    return out;
+  };
+  const translateNodes = (nodes) => {
+    for (const n of nodes) {
+      n.x += dx;
+      n.y += dy;
+    }
+  };
+
+  const wallNodes = collectNodeIdsFromWalls(snapshot.wallIds, (id) => graph.getWall(id), (id) => graph.getNode(id));
+  const hiddenNodes = collectNodeIdsFromWalls(snapshot.hiddenIds, (id) => hiddenGraph.getWall(id), (id) => hiddenGraph.getNode(id));
+  translateNodes(wallNodes);
+  translateNodes(hiddenNodes);
+
+  const dimIdSet = new Set(normalizeIds(snapshot.dimIds));
+  for (const d of dimensions) {
+    if (!d || !dimIdSet.has(d.id)) continue;
+    if (d.a) { d.a.x += dx; d.a.y += dy; }
+    if (d.b) { d.b.x += dx; d.b.y += dy; }
+  }
+
+  if (snapshot.hasModel) {
+    const lines = Array.isArray(model2d.lines) ? model2d.lines : [];
+    const outline = Array.isArray(model2d.outline) ? model2d.outline : [];
+    model2d.lines = lines.map((l) => ({
+      ax: l.ax + dx, ay: l.ay + dy, bx: l.bx + dx, by: l.by + dy,
+    }));
+    model2d.outline = outline.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));
+    model2d.offsetXmm = (model2d.offsetXmm || 0) + dx;
+    model2d.offsetYmm = (model2d.offsetYmm || 0) + dy;
+    emitModel2dTransform();
+  }
+
+  if (merge) {
+    graph.mergeCloseNodes(1);
+    graph.deleteTinyEdges(1);
+    hiddenGraph.mergeCloseNodes(1);
+    hiddenGraph.deleteTinyEdges(1);
+  }
+  return true;
+}
+
+function applyMoveConstraintsFromBase(base, target, shiftKey, lockDir = null) {
+  let next = { x: target.x, y: target.y };
+  const orthoOn = state.orthoEnabled !== false;
+  if (orthoOn) {
+    next = quantizeAngleFromAnchor(base, next, 45);
+  } else {
+    const lock = applyShiftLockFromAnchor(base, next, !!shiftKey, lockDir);
+    next = lock.target;
+    lockDir = lock.dir;
+  }
+  const stepOpts = getHandleStepOptions();
+  if (!orthoOn && stepOpts.useDegreeStep) {
+    next = quantizeAngleFromAnchor(base, next, stepOpts.stepAngleDeg);
+  }
+  if (stepOpts.useLineStep) {
+    next = quantizeLengthFromAnchor(base, next, stepOpts.stepLineMm);
+  }
+  return { target: next, dir: lockDir };
+}
+
 function beginAxisDrag(axis, offsetX, offsetY) {
   const target = getSelectedObjectTargetInfo();
   if (!target) return false;
 
-  const selectionSnapshot = buildAxisDragSelectionSnapshot();
+  const selectionSnapshot = buildSelectionSnapshotFromCurrentSelection();
+  if (!selectionSnapshotHasAny(selectionSnapshot)) return false;
 
   axisDrag.active = true;
   axisDrag.axis = (axis === "y") ? "y" : "x";
@@ -2348,87 +2473,157 @@ function applyAxisDrag(targetWorld) {
   restoreGraph(hiddenGraph, axisDrag.startHiddenGraphSnap);
   restoreDimensions(dimensions, axisDrag.startDimensionsSnap);
   restoreModel2d(model2d, axisDrag.startModelSnap);
-
-  const normalizeIds = (ids) => Array.isArray(ids) ? ids : [];
-
-  const collectNodeIdsFromWalls = (wallIds, getWall, getNode) => {
-    const nodeIds = new Set();
-    for (const id of normalizeIds(wallIds)) {
-      const w = getWall(id);
-      if (!w) continue;
-      nodeIds.add(w.a);
-      nodeIds.add(w.b);
-    }
-    const out = [];
-    for (const nodeId of nodeIds) {
-      const n = getNode(nodeId);
-      if (!n) continue;
-      out.push(n);
-    }
-    return out;
-  };
-
-  const translateNodes = (nodes) => {
-    for (const n of nodes) {
-      n.x += delta.x;
-      n.y += delta.y;
-    }
-  };
-
-  const moveWallsByIds = (wallIds) => {
-    const nodes = collectNodeIdsFromWalls(wallIds, (id) => graph.getWall(id), (id) => graph.getNode(id));
-    translateNodes(nodes);
-    graph.mergeCloseNodes(1);
-    graph.deleteTinyEdges(1);
-  };
-
-  const moveHiddenByIds = (wallIds) => {
-    const nodes = collectNodeIdsFromWalls(wallIds, (id) => hiddenGraph.getWall(id), (id) => hiddenGraph.getNode(id));
-    translateNodes(nodes);
-    hiddenGraph.mergeCloseNodes(1);
-    hiddenGraph.deleteTinyEdges(1);
-  };
-
-  const moveDimsByIds = (dimIds) => {
-    const dimIdSet = new Set(normalizeIds(dimIds));
-    for (const d of dimensions) {
-      if (!d || !dimIdSet.has(d.id)) continue;
-      if (d.a) { d.a.x += delta.x; d.a.y += delta.y; }
-      if (d.b) { d.b.x += delta.x; d.b.y += delta.y; }
-    }
-  };
-
-  const moveModelSelection = () => {
-    const lines = Array.isArray(model2d.lines) ? model2d.lines : [];
-    const outline = Array.isArray(model2d.outline) ? model2d.outline : [];
-
-    model2d.lines = lines.map((l) => ({
-      ax: l.ax + delta.x, ay: l.ay + delta.y, bx: l.bx + delta.x, by: l.by + delta.y,
-    }));
-    model2d.outline = outline.map((pt) => ({ x: pt.x + delta.x, y: pt.y + delta.y }));
-    model2d.offsetXmm = (model2d.offsetXmm || 0) + delta.x;
-    model2d.offsetYmm = (model2d.offsetYmm || 0) + delta.y;
-    emitModel2dTransform();
-  };
-
-  const snap = axisDrag.selectionSnapshot || buildAxisDragSelectionSnapshot();
-  const movers = {
-    wall: () => moveWallsByIds(snap.wallIds),
-    hidden: () => moveHiddenByIds(snap.hiddenIds),
-    dim: () => moveDimsByIds(snap.dimIds),
-    model: () => { if (snap.hasModel) moveModelSelection(); },
-  };
-
-  if (axisDrag.targetType === "mixed") {
-    movers.wall();
-    movers.hidden();
-    movers.dim();
-    movers.model();
-  } else if (movers[axisDrag.targetType]) {
-    movers[axisDrag.targetType]();
-  }
+  const snap = axisDrag.selectionSnapshot || buildSelectionSnapshotFromCurrentSelection();
+  applySelectionDelta(snap, delta, { merge: false });
 
   if (Math.hypot(delta.x, delta.y) > 0.5) axisDrag.moved = true;
+}
+
+function stopMoveCommandRuntime() {
+  moveCommand.selectionSnapshot = null;
+  moveCommand.basePoint = null;
+  moveCommand.cursorPoint = null;
+  moveCommand.shiftLockDir = null;
+  moveCommand.startGraphSnap = null;
+  moveCommand.startHiddenGraphSnap = null;
+  moveCommand.startDimensionsSnap = null;
+  moveCommand.startModelSnap = null;
+  moveCommand.moved = false;
+}
+
+function beginMoveCommand() {
+  if (moveCommand.mode !== "idle") return false;
+  if (dimEditor.active) closeDimEditor(true);
+  moveCommand.mode = "await_confirm_selection";
+  moveCommand.selectionSnapshot = buildSelectionSnapshotFromCurrentSelection();
+  moveCommand.cursorPoint = null;
+  moveCommand.basePoint = null;
+  moveCommand.shiftLockDir = null;
+  moveCommand.moved = false;
+  return true;
+}
+
+function _startMoveTargetPhase(basePoint) {
+  moveCommand.basePoint = { x: basePoint.x, y: basePoint.y };
+  moveCommand.mode = "await_target_point";
+  moveCommand.shiftLockDir = null;
+  moveCommand.startGraphSnap = snapshotGraph(graph);
+  moveCommand.startHiddenGraphSnap = snapshotGraph(hiddenGraph);
+  moveCommand.startDimensionsSnap = snapshotDimensions(dimensions);
+  moveCommand.startModelSnap = snapshotModel2d(model2d);
+  moveCommand.moved = false;
+}
+
+function beginMoveDirectDrag(offsetX, offsetY) {
+  const selectionSnapshot = buildSelectionSnapshotFromCurrentSelection();
+  if (!selectionSnapshotHasAny(selectionSnapshot)) return false;
+  const mouseWorld = screenToWorld(offsetX, offsetY);
+  const snap = state.snapOn ? (resolveSnapPointWorld(mouseWorld.x, mouseWorld.y) || mouseWorld) : mouseWorld;
+  stopMoveCommandRuntime();
+  moveCommand.selectionSnapshot = selectionSnapshot;
+  moveCommand.mode = "drag_direct";
+  moveCommand.cursorPoint = { x: snap.x, y: snap.y };
+  _startMoveTargetPhase(snap);
+  moveCommand.mode = "drag_direct";
+  return true;
+}
+
+function cancelMoveCommand(restoreGeometry = true) {
+  const hasPreview =
+    moveCommand.startGraphSnap &&
+    moveCommand.startHiddenGraphSnap &&
+    moveCommand.startDimensionsSnap &&
+    moveCommand.startModelSnap;
+  if (restoreGeometry && hasPreview) {
+    restoreGraph(graph, moveCommand.startGraphSnap);
+    restoreGraph(hiddenGraph, moveCommand.startHiddenGraphSnap);
+    restoreDimensions(dimensions, moveCommand.startDimensionsSnap);
+    restoreModel2d(model2d, moveCommand.startModelSnap);
+    emitModel2dTransform();
+  }
+  moveCommand.mode = "idle";
+  stopMoveCommandRuntime();
+}
+
+function confirmMoveStep() {
+  if (moveCommand.mode === "idle") return false;
+
+  if (moveCommand.mode === "await_confirm_selection") {
+    const snap = buildSelectionSnapshotFromCurrentSelection();
+    if (!selectionSnapshotHasAny(snap)) return false;
+    moveCommand.selectionSnapshot = snap;
+    moveCommand.mode = "await_base_point";
+    moveCommand.cursorPoint = null;
+    return true;
+  }
+
+  if (moveCommand.mode === "await_base_point") {
+    if (!moveCommand.cursorPoint) return false;
+    _startMoveTargetPhase(moveCommand.cursorPoint);
+    moveCommand.cursorPoint = { x: moveCommand.basePoint.x, y: moveCommand.basePoint.y };
+    return true;
+  }
+
+  if (moveCommand.mode === "await_target_point") {
+    if (!moveCommand.basePoint || !moveCommand.cursorPoint) return false;
+    const endGraphSnap = snapshotGraph(graph);
+    const endHiddenGraphSnap = snapshotGraph(hiddenGraph);
+    const endDimensionsSnap = snapshotDimensions(dimensions);
+    const endModelSnap = snapshotModel2d(model2d);
+    const moved = !!moveCommand.moved;
+    const startGraphSnap = moveCommand.startGraphSnap;
+    const startHiddenGraphSnap = moveCommand.startHiddenGraphSnap;
+    const startDimensionsSnap = moveCommand.startDimensionsSnap;
+    const startModelSnap = moveCommand.startModelSnap;
+    cancelMoveCommand(false);
+    if (!moved || !startGraphSnap || !startHiddenGraphSnap || !startDimensionsSnap || !startModelSnap) {
+      return true;
+    }
+    restoreGraph(graph, startGraphSnap);
+    restoreGraph(hiddenGraph, startHiddenGraphSnap);
+    restoreDimensions(dimensions, startDimensionsSnap);
+    restoreModel2d(model2d, startModelSnap);
+    emitModel2dTransform();
+    undo.runAction(() => {
+      restoreGraph(graph, endGraphSnap);
+      restoreGraph(hiddenGraph, endHiddenGraphSnap);
+      restoreDimensions(dimensions, endDimensionsSnap);
+      restoreModel2d(model2d, endModelSnap);
+      emitModel2dTransform();
+    });
+    return true;
+  }
+
+  return false;
+}
+
+function updateMoveCommandCursor(worldPoint, shiftKey = false) {
+  if (moveCommand.mode === "idle") return false;
+  moveCommand.cursorPoint = { x: worldPoint.x, y: worldPoint.y };
+  if (moveCommand.mode === "await_target_point" || moveCommand.mode === "drag_direct") {
+    if (!moveCommand.basePoint) return false;
+    if (
+      !moveCommand.startGraphSnap ||
+      !moveCommand.startHiddenGraphSnap ||
+      !moveCommand.startDimensionsSnap ||
+      !moveCommand.startModelSnap
+    ) {
+      return false;
+    }
+    const lock = applyMoveConstraintsFromBase(moveCommand.basePoint, moveCommand.cursorPoint, shiftKey, moveCommand.shiftLockDir);
+    moveCommand.shiftLockDir = lock.dir;
+    moveCommand.cursorPoint = { x: lock.target.x, y: lock.target.y };
+    restoreGraph(graph, moveCommand.startGraphSnap);
+    restoreGraph(hiddenGraph, moveCommand.startHiddenGraphSnap);
+    restoreDimensions(dimensions, moveCommand.startDimensionsSnap);
+    restoreModel2d(model2d, moveCommand.startModelSnap);
+    applySelectionDelta(moveCommand.selectionSnapshot, {
+      x: lock.target.x - moveCommand.basePoint.x,
+      y: lock.target.y - moveCommand.basePoint.y,
+    }, { merge: false });
+    moveCommand.moved = Math.hypot(lock.target.x - moveCommand.basePoint.x, lock.target.y - moveCommand.basePoint.y) > 0.5;
+  }
+  return true;
 }
 function drawSelectedObjectAxes() {
   if (!state.showObjectAxes) return;
@@ -3747,6 +3942,40 @@ function drawSnapOverlay() {
   ctx.restore();
 }
 
+function drawMoveOverlay() {
+  if (moveCommand.mode === "idle") return;
+  if (moveCommand.mode === "await_confirm_selection") return;
+  if (moveCommand.mode === "await_base_point") {
+    const p = moveCommand.cursorPoint;
+    if (!p) return;
+    const s = worldToScreen(p.x, p.y);
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(s.x - 8, s.y);
+    ctx.lineTo(s.x + 8, s.y);
+    ctx.moveTo(s.x, s.y - 8);
+    ctx.lineTo(s.x, s.y + 8);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  if (!moveCommand.basePoint || !moveCommand.cursorPoint) return;
+  const base = worldToScreen(moveCommand.basePoint.x, moveCommand.basePoint.y);
+  const target = worldToScreen(moveCommand.cursorPoint.x, moveCommand.cursorPoint.y);
+  ctx.save();
+  ctx.setLineDash([7, 5]);
+  ctx.strokeStyle = "#0f172a";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(base.x, base.y);
+  ctx.lineTo(target.x, target.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function updateCanvasCursor() {
   // We draw our own cursor inside the canvas. When input is disabled (menus),
   // let the browser show the native cursor.
@@ -4126,6 +4355,7 @@ function loop() {
     drawSelectedObjectAxes();
     drawStandaloneDimensions();
     drawSnapOverlay();
+    drawMoveOverlay();
     if (state.activeTool === "hidden") drawHiddenToolOverlay(hiddenTool);
     if (state.activeTool === "dim") drawDimToolOverlay();
     drawToolCursor();
@@ -4180,6 +4410,7 @@ function detach() {
   _attached = false;
 
   if (dimEditor.active) closeDimEditor(true);
+  hideContextMenu();
   isPanning = false;
 
   if (_rafId != null) cancelAnimationFrame(_rafId);
@@ -4213,6 +4444,10 @@ function destroy() {
     try { dimEditor.input.remove(); } catch (_) {}
     dimEditor.input = null;
   }
+  if (contextMenuState.el) {
+    try { contextMenuState.el.remove(); } catch (_) {}
+    contextMenuState.el = null;
+  }
 }
 
 function onMouseEnter() { isMouseOverCanvas = true; }
@@ -4223,7 +4458,153 @@ function onMouseLeave() {
   hoverObjectAxis = null;
   updateSnapPreview(NaN, NaN);
 }
-function onContextMenu(e) { e.preventDefault(); }
+
+function ensureContextMenuElement() {
+  if (contextMenuState.el) return contextMenuState.el;
+  if (typeof document === "undefined") return null;
+  const el = document.createElement("div");
+  el.style.position = "fixed";
+  el.style.minWidth = "180px";
+  el.style.padding = "8px";
+  el.style.borderRadius = "14px";
+  el.style.background = "rgba(255,255,255,0.98)";
+  el.style.border = "1px solid rgba(15,23,42,0.14)";
+  el.style.boxShadow = "0 18px 40px rgba(15,23,42,0.18)";
+  el.style.backdropFilter = "blur(10px)";
+  el.style.zIndex = "9999";
+  el.style.display = "none";
+  el.style.direction = "rtl";
+  el.style.fontFamily = state.fontFamily || "Tahoma";
+  el.addEventListener("mousedown", (ev) => ev.stopPropagation());
+  document.body.appendChild(el);
+  contextMenuState.el = el;
+  return el;
+}
+
+function hideContextMenu() {
+  contextMenuState.visible = false;
+  if (contextMenuState.el) contextMenuState.el.style.display = "none";
+}
+
+function syncSelectionToHoverForContextMenu() {
+  if (hoverModelOutline) {
+    clearGroupSelection();
+    selectedWallId = null;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    selectedModelOutline = true;
+    return true;
+  }
+  if (hoverWallId) {
+    clearGroupSelection();
+    selectedWallId = hoverWallId;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    selectedModelOutline = false;
+    return true;
+  }
+  if (hoverHiddenId) {
+    clearGroupSelection();
+    selectedWallId = null;
+    selectedHiddenId = hoverHiddenId;
+    selectedDimId = null;
+    selectedModelOutline = false;
+    return true;
+  }
+  if (hoverDimId) {
+    clearGroupSelection();
+    selectedWallId = null;
+    selectedHiddenId = null;
+    selectedDimId = hoverDimId;
+    selectedModelOutline = false;
+    return true;
+  }
+  return hasAnySelection();
+}
+
+function renderContextMenuItems() {
+  const menu = ensureContextMenuElement();
+  if (!menu) return;
+  const items = [
+    { id: "move", label: "انتقال", disabled: !hasAnySelection() },
+    { id: "copy", label: "کپی", disabled: true },
+    { id: "rotate", label: "چرخش", disabled: true },
+    { id: "delete", label: "حذف", disabled: true },
+  ];
+  menu.innerHTML = "";
+  for (const item of items) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = item.label;
+    btn.disabled = !!item.disabled;
+    btn.style.display = "block";
+    btn.style.width = "100%";
+    btn.style.border = "0";
+    btn.style.background = item.disabled ? "transparent" : "#f8fafc";
+    btn.style.color = item.disabled ? "#94a3b8" : "#0f172a";
+    btn.style.padding = "10px 12px";
+    btn.style.margin = "2px 0";
+    btn.style.borderRadius = "10px";
+    btn.style.textAlign = "right";
+    btn.style.cursor = item.disabled ? "not-allowed" : "pointer";
+    btn.style.font = `13px ${state.fontFamily || "Tahoma"}`;
+    if (!item.disabled) {
+      btn.onmouseenter = () => { btn.style.background = "#e2e8f0"; };
+      btn.onmouseleave = () => { btn.style.background = "#f8fafc"; };
+      btn.onclick = () => {
+        hideContextMenu();
+        if (item.id === "move") {
+          if (moveCommand.mode !== "idle") cancelMoveCommand(true);
+          beginMoveCommand();
+          confirmMoveStep();
+        }
+      };
+    }
+    menu.appendChild(btn);
+  }
+}
+
+function showContextMenu(clientX, clientY) {
+  renderContextMenuItems();
+  const menu = ensureContextMenuElement();
+  if (!menu) return;
+  menu.style.display = "block";
+  const vw = (typeof window !== "undefined") ? window.innerWidth : 0;
+  const vh = (typeof window !== "undefined") ? window.innerHeight : 0;
+  const rect = menu.getBoundingClientRect();
+  const left = Math.max(8, Math.min(clientX, vw - rect.width - 8));
+  const top = Math.max(8, Math.min(clientY, vh - rect.height - 8));
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+  contextMenuState.visible = true;
+  contextMenuState.clientX = clientX;
+  contextMenuState.clientY = clientY;
+}
+
+function onContextMenu(e) {
+  e.preventDefault();
+  if (!inputEnabled) return;
+  if (contextMenuState.visible) hideContextMenu();
+  if (dimEditor.active) closeDimEditor(true);
+  const isDrawing =
+    (state.activeTool === "dim") ? !!dimTool.getStatus?.()?.isDrawing :
+    (state.activeTool === "hidden") ? !!hiddenTool.getStatus?.()?.isDrawing :
+    !!tool.getStatus?.()?.isDrawing;
+  if (
+    isDrawing ||
+    axisDrag.active ||
+    wallHandleDrag.active ||
+    wallDimDrag.active ||
+    freeDimDrag.active ||
+    modelDrag.active ||
+    moveCommand.mode !== "idle"
+  ) {
+    return;
+  }
+  updateHover(e.offsetX, e.offsetY);
+  if (!syncSelectionToHoverForContextMenu()) return;
+  showContextMenu(e.clientX, e.clientY);
+}
 
 let isPanning = false;
 let lastMiddleClickMs = 0;
@@ -4840,6 +5221,22 @@ function onMouseDown(e) {
   }
   if (e.button !== 0) return;
 
+  if (moveCommand.mode === "await_base_point") {
+    const raw = screenToWorld(e.offsetX, e.offsetY);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    _startMoveTargetPhase(p);
+    moveCommand.cursorPoint = { x: p.x, y: p.y };
+    return;
+  }
+  if (moveCommand.mode === "await_target_point") {
+    const raw = screenToWorld(e.offsetX, e.offsetY);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    updateMoveCommandCursor(p, !!e.shiftKey);
+    confirmMoveStep();
+    return;
+  }
+  if (moveCommand.mode === "drag_direct") return;
+
   // Dimension tool is modal: left clicks should only place/commit dimensions.
   // Handle it early so wall/hidden hit targets cannot switch the active tool.
   if (state.activeTool === "dim") {
@@ -5302,6 +5699,32 @@ function onWindowMouseUp() {
     boxSelect.active = false;
     applyBoxSelection(x1, y1, x2, y2);
   }
+  if (moveCommand.mode === "drag_direct") {
+    const moved = !!moveCommand.moved;
+    const endGraphSnap = snapshotGraph(graph);
+    const endHiddenGraphSnap = snapshotGraph(hiddenGraph);
+    const endDimensionsSnap = snapshotDimensions(dimensions);
+    const endModelSnap = snapshotModel2d(model2d);
+    const startGraphSnap = moveCommand.startGraphSnap;
+    const startHiddenGraphSnap = moveCommand.startHiddenGraphSnap;
+    const startDimensionsSnap = moveCommand.startDimensionsSnap;
+    const startModelSnap = moveCommand.startModelSnap;
+    cancelMoveCommand(false);
+    if (moved && startGraphSnap && startHiddenGraphSnap && startDimensionsSnap && startModelSnap) {
+      restoreGraph(graph, startGraphSnap);
+      restoreGraph(hiddenGraph, startHiddenGraphSnap);
+      restoreDimensions(dimensions, startDimensionsSnap);
+      restoreModel2d(model2d, startModelSnap);
+      emitModel2dTransform();
+      undo.runAction(() => {
+        restoreGraph(graph, endGraphSnap);
+        restoreGraph(hiddenGraph, endHiddenGraphSnap);
+        restoreDimensions(dimensions, endDimensionsSnap);
+        restoreModel2d(model2d, endModelSnap);
+        emitModel2dTransform();
+      });
+    }
+  }
   if (wallHandleDrag.active) {
     const startSnap = wallHandleDrag.graphStartSnap;
     const graphType = wallHandleDrag.graphType || "wall";
@@ -5463,7 +5886,7 @@ function onWindowMouseMove(e) {
 
   // When integrated in Vue layout, ignore hover/move when pointer is outside the canvas,
   // except while panning or while an active draw command is in progress.
-  if (!inside && !isPanning && !isDrawing && !modelDrag.active && !wallDimDrag.active && !freeDimDrag.active && !wallHandleDrag.active && !boxSelect.active) {
+  if (!inside && !isPanning && !isDrawing && !modelDrag.active && !wallDimDrag.active && !freeDimDrag.active && !wallHandleDrag.active && !boxSelect.active && moveCommand.mode === "idle") {
     updateSnapPreview(NaN, NaN);
     hoverUi = null;
     hoverWallHandle = null;
@@ -5490,6 +5913,21 @@ function onWindowMouseMove(e) {
     return;
   }
   updateSnapPreview(ox, oy);
+
+  if (moveCommand.mode === "await_base_point") {
+    const raw = screenToWorld(ox, oy);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    moveCommand.cursorPoint = { x: p.x, y: p.y };
+    hoverObjectAxis = null;
+    return;
+  }
+  if (moveCommand.mode === "await_target_point" || moveCommand.mode === "drag_direct") {
+    const raw = screenToWorld(ox, oy);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    updateMoveCommandCursor(p, !!e.shiftKey);
+    hoverObjectAxis = null;
+    return;
+  }
 
   if (axisDrag.active) {
     const target = screenToWorld(ox, oy);
@@ -5777,6 +6215,12 @@ function onWindowKeyDown(e) {
   const code = String(e.code || "");
   const ctrl = !!(e.ctrlKey || e.metaKey);
 
+  if (key === "Escape" && contextMenuState.visible) {
+    e.preventDefault();
+    hideContextMenu();
+    return;
+  }
+
   // Ctrl+Z undo (only outside editable inputs)
   if (ctrl && !e.shiftKey && (code === "KeyZ" || key.toLowerCase() === "z")) {
     if (isEditableTarget(e.target)) return;
@@ -5799,6 +6243,26 @@ function onWindowKeyDown(e) {
     e.preventDefault();
     if (dimEditor.active) closeDimEditor(true);
     undo.redo();
+    return;
+  }
+
+  // MOVE command: M then Enter (AutoCAD-like flow)
+  if (!ctrl && (code === "KeyM" || key.toLowerCase() === "m")) {
+    if (isEditableTarget(e.target)) return;
+    e.preventDefault();
+    beginMoveCommand();
+    return;
+  }
+  if ((key === "Enter" || key === " ") && moveCommand.mode !== "idle") {
+    if (isEditableTarget(e.target)) return;
+    e.preventDefault();
+    confirmMoveStep();
+    return;
+  }
+  if (key === "Escape" && moveCommand.mode !== "idle") {
+    if (isEditableTarget(e.target)) return;
+    e.preventDefault();
+    cancelMoveCommand(true);
     return;
   }
 
@@ -6074,6 +6538,10 @@ function fitViewToBounds() {
 
 // Click outside canvas closes inline dimension editor (important when embedded in Vue UI).
 function onWindowMouseDown(e) {
+  if (contextMenuState.visible) {
+    const menu = contextMenuState.el;
+    if (!menu || !menu.contains(e.target)) hideContextMenu();
+  }
   if (!dimEditor.active || !dimEditor.input) return;
   if (e.target === dimEditor.input) return;
   // If click is inside canvas, onMouseDown handles it.
@@ -6096,6 +6564,8 @@ function setActiveTool(name) {
 
   // Cancel other tools when switching modes.
   if (dimEditor.active) closeDimEditor(true);
+  hideContextMenu();
+  if (moveCommand.mode !== "idle") cancelMoveCommand(true);
   tool.stopChaining();
   hiddenTool.stopChaining();
   dimTool.cancel();
@@ -6117,6 +6587,8 @@ function setSnapOn(v) {
 
 function clearAll() {
   if (dimEditor.active) closeDimEditor(true);
+  hideContextMenu();
+  if (moveCommand.mode !== "idle") cancelMoveCommand(true);
   undo.runAction(() => {
     graph.clear();
     hiddenGraph.clear();
@@ -6160,6 +6632,10 @@ function getState() {
       wall: tool?.getStatus?.() || null,
       hidden: hiddenTool?.getStatus?.() || null,
       dim: dimTool?.getStatus?.() || null,
+    },
+    move: {
+      mode: moveCommand.mode,
+      active: moveCommand.mode !== "idle",
     },
     selection: {
       selectedWallId,
@@ -6398,33 +6874,12 @@ function moveSelectedWallsBy(delta = {}) {
   const dy = Number.isFinite(Number(delta.dyMm)) ? Number(delta.dyMm) : 0;
   if (dx === 0 && dy === 0) return false;
 
-  const ids = [];
-  if (selectedWallId) ids.push(selectedWallId);
-  for (const id of selectedWallIds) if (id && !ids.includes(id)) ids.push(id);
-  if (ids.length === 0) return false;
-
-  const nodeIds = new Set();
-  for (const id of ids) {
-    const w = graph.getWall(id);
-    if (!w) continue;
-    nodeIds.add(w.a);
-    nodeIds.add(w.b);
-  }
-  if (nodeIds.size === 0) return false;
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  if (!Array.isArray(snap.wallIds) || snap.wallIds.length === 0) return false;
 
   let changed = false;
   undo.runAction(() => {
-    for (const nodeId of nodeIds) {
-      const node = graph.getNode(nodeId);
-      if (!node) continue;
-      const nextX = node.x + dx;
-      const nextY = node.y + dy;
-      if (node.x !== nextX || node.y !== nextY) {
-        node.x = nextX;
-        node.y = nextY;
-        changed = true;
-      }
-    }
+    changed = applySelectionDelta({ wallIds: snap.wallIds, hiddenIds: [], dimIds: [], hasModel: false }, { x: dx, y: dy }, { merge: false });
   });
 
   if (changed) {
@@ -6515,37 +6970,12 @@ function moveSelectedHiddenWallsBy(delta = {}) {
   const dy = Number.isFinite(Number(delta.dyMm)) ? Number(delta.dyMm) : 0;
   if (dx === 0 && dy === 0) return false;
 
-  const ids = [];
-  if (selectedHiddenId) ids.push(selectedHiddenId);
-  for (const id of selectedHiddenIds) if (id && !ids.includes(id)) ids.push(id);
-  if (ids.length === 0) return false;
-
-  const nodeIds = new Set();
-  for (const id of ids) {
-    const w = hiddenGraph.getWall(id);
-    if (!w) continue;
-    nodeIds.add(w.a);
-    nodeIds.add(w.b);
-  }
-  if (nodeIds.size === 0) return false;
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  if (!Array.isArray(snap.hiddenIds) || snap.hiddenIds.length === 0) return false;
 
   let changed = false;
   undo.runAction(() => {
-    for (const nodeId of nodeIds) {
-      const node = hiddenGraph.getNode(nodeId);
-      if (!node) continue;
-      const nextX = node.x + dx;
-      const nextY = node.y + dy;
-      if (node.x !== nextX || node.y !== nextY) {
-        node.x = nextX;
-        node.y = nextY;
-        changed = true;
-      }
-    }
-    if (changed) {
-      hiddenGraph.mergeCloseNodes(1);
-      hiddenGraph.deleteTinyEdges(1);
-    }
+    changed = applySelectionDelta({ wallIds: [], hiddenIds: snap.hiddenIds, dimIds: [], hasModel: false }, { x: dx, y: dy }, { merge: false });
   });
 
   if (changed) {
@@ -6771,6 +7201,9 @@ return {
   destroy,
 
   setActiveTool,
+  beginMoveCommand,
+  confirmMoveStep,
+  cancelMoveCommand,
   setSnapOn,
   setInputEnabled,
   setModel2dLines,
