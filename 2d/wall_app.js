@@ -5695,6 +5695,13 @@ function onMouseDown(e) {
 
   // Middle: pan
   if (e.button === 1) {
+    const hasActiveTransformCommand =
+      moveCommand.mode !== "idle" ||
+      rotateCommand.mode !== "idle";
+    if (hasActiveTransformCommand) {
+      isPanning = true;
+      return;
+    }
     const now = performance.now();
     if (now - lastMiddleClickMs <= 300) {
       lastMiddleClickMs = 0;
@@ -6422,6 +6429,12 @@ function onWindowMouseMove(e) {
   }
   updateSnapPreview(ox, oy);
 
+  if (isPanning) {
+    state.offsetX += e.movementX;
+    state.offsetY += e.movementY;
+    return;
+  }
+
   if (moveCommand.mode === "await_base_point") {
     const raw = screenToWorld(ox, oy);
     const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
@@ -6717,10 +6730,6 @@ function onWindowMouseMove(e) {
   } else {
     hoverModelOutline = false;
   }
-
-  if (!isPanning) return;
-  state.offsetX += e.movementX;
-  state.offsetY += e.movementY;
 }
 
 function isEditableTarget(el) {
