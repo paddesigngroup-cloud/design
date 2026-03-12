@@ -2648,7 +2648,9 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
   if (!selectionSnapshotHasAny(snapshot) || (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9)) return null;
   if (snapshot.hasModel) return null;
 
-  let nextWallNameIdx = Number.isFinite(Number(opts?.wallNameSeed)) ? Number(opts.wallNameSeed) : getNextWallNameSeed();
+  const sceneWallNameSeed = getNextWallNameSeed();
+  const requestedWallNameSeed = Number.isFinite(Number(opts?.wallNameSeed)) ? Number(opts.wallNameSeed) : sceneWallNameSeed;
+  let nextWallNameIdx = Math.max(sceneWallNameSeed, requestedWallNameSeed);
   let nextDimId = Number.isFinite(Number(dimTool?._did)) ? Number(dimTool._did) : 1;
 
   const result = {
