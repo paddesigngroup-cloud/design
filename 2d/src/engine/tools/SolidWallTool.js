@@ -362,11 +362,13 @@ export class SolidWallTool {
   }
 
   _resolveSnapNode(x, y, useWallMagnet = true) {
-    if (!useWallMagnet) return this.graph.addNode(x, y);
-
     // 1) snap to existing nodes
     const n = this.graph.findNearestNode(x, y, this.snapTolMm);
     if (n) return n;
+
+    // When wall-magnet is off we should still connect to existing points,
+    // but skip segment magnet/splitting behavior.
+    if (!useWallMagnet) return this.graph.addNode(x, y);
 
     // 2) snap to nearest wall segment (split)
     const hit = this.graph.findNearestWallPoint(x, y, this.snapTolMm);

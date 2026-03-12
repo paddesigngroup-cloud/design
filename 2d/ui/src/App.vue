@@ -147,7 +147,7 @@ const presetDrag = ref({ active: false, preset: null, clientX: 0, clientY: 0, st
 const snapMenuItems = [
   { id: "corner", title: "گوشه", icon: "/icons/corner_point.png" },
   { id: "mid", title: "وسط ضلع", icon: "/icons/midpoint.png" },
-  { id: "center", title: "نقطه وسط", icon: "/icons/ax_point.png" },
+  { id: "center", title: "مرکز", icon: "/icons/ax_point.png" },
   { id: "edge", title: "لبه", icon: "/icons/edge_snap.png" },
   { id: "wallMagnet", title: "جذب دیوار", icon: "/icons/magnet.png" },
   { id: "ortho", title: "راستا (راست کلیک)", icon: "/icons/ortho_line.png" },

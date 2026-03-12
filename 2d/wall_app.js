@@ -5668,25 +5668,28 @@ function collectSnapCandidatesWorld(x, y, tolMm) {
   // Hidden-wall graph remains line-based; its nodes are valid corner snaps.
   for (const n of hiddenGraph.nodes.values()) consider("corner", n.x, n.y);
 
-  // Use trimmed wall geometry so connected joints expose the real visible corners.
-  const nodeMap = buildNodeEndpointMap(graph);
-  const jointGammaMap = buildJointGammaMap(nodeMap);
-  for (const w of graph.walls.values()) {
-    const c = computeTrimmedWallCorners(w, jointGammaMap);
-    if (!c) continue;
+  const wallMagnetOn = state.wallMagnetEnabled !== false;
+  if (wallMagnetOn) {
+    // Use trimmed wall geometry so connected joints expose the real visible corners.
+    const nodeMap = buildNodeEndpointMap(graph);
+    const jointGammaMap = buildJointGammaMap(nodeMap);
+    for (const w of graph.walls.values()) {
+      const c = computeTrimmedWallCorners(w, jointGammaMap);
+      if (!c) continue;
 
-    // Center point on wall axis (requested snap).
-    consider("center", (c.ax + c.bx) / 2, (c.ay + c.by) / 2);
+      // Center point on wall axis (requested snap).
+      consider("center", (c.ax + c.bx) / 2, (c.ay + c.by) / 2);
 
-    consider("corner", c.AL.x, c.AL.y);
-    consider("corner", c.AR.x, c.AR.y);
-    consider("corner", c.BL.x, c.BL.y);
-    consider("corner", c.BR.x, c.BR.y);
+      consider("corner", c.AL.x, c.AL.y);
+      consider("corner", c.AR.x, c.AR.y);
+      consider("corner", c.BL.x, c.BL.y);
+      consider("corner", c.BR.x, c.BR.y);
 
-    considerSeg(c.AL.x, c.AL.y, c.BL.x, c.BL.y); // left face
-    considerSeg(c.AR.x, c.AR.y, c.BR.x, c.BR.y); // right face
-    considerSeg(c.AL.x, c.AL.y, c.AR.x, c.AR.y); // cap near A
-    considerSeg(c.BL.x, c.BL.y, c.BR.x, c.BR.y); // cap near B
+      considerSeg(c.AL.x, c.AL.y, c.BL.x, c.BL.y); // left face
+      considerSeg(c.AR.x, c.AR.y, c.BR.x, c.BR.y); // right face
+      considerSeg(c.AL.x, c.AL.y, c.AR.x, c.AR.y); // cap near A
+      considerSeg(c.BL.x, c.BL.y, c.BR.x, c.BR.y); // cap near B
+    }
   }
   for (const w of hiddenGraph.walls.values()) {
     const A = hiddenGraph.getNode(w.a);
@@ -5988,49 +5991,23 @@ function onMouseDown(e) {
   // If an inline editor is open and user clicks outside it, cancel editing.
   if (dimEditor.active && dimEditor.input && e.target !== dimEditor.input) closeDimEditor(true);
 
-  // Right click: toggle angle lock while drawing (tool ignores when idle)
+  // Right click: toggle angle/ortho lock while an active draw/transform command is running.
   if (e.button === 2) {
-    const ev = {
-      button: 2,
-      offsetX: e.offsetX,
-      offsetY: e.offsetY,
-      preventDefault: () => e.preventDefault(),
-    };
-    if (state.activeTool === "dim") dimTool.onPointerDown(ev, {
-      snapOn: state.snapOn,
-      resolveSnapPoint: resolveDimSnapPointWorld,
-      orthoEnabled: state.orthoEnabled !== false,
-      stepDrawEnabled: state.stepDrawEnabled,
-      stepDrawMode: state.stepDrawMode,
-      stepLineEnabled: state.stepLineEnabled,
-      stepDegreeEnabled: state.stepDegreeEnabled,
-      stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
-      stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
-    });
-    else if (state.activeTool === "hidden") hiddenTool.onPointerDown(ev, {
-      snapOn: state.snapOn,
-      resolveSnapPoint: resolveSnapPointWorld,
-      defaultThicknessMm: state.hiddenWallThicknessMm,
-      stepDrawEnabled: state.stepDrawEnabled,
-      stepDrawMode: state.stepDrawMode,
-      stepLineEnabled: state.stepLineEnabled,
-      stepDegreeEnabled: state.stepDegreeEnabled,
-      stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
-      stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
-    });
-    else if (state.activeTool === "wall") {
-      tool.onPointerDown(ev, {
-        snapOn: state.snapOn,
-        resolveSnapPoint: resolveSnapPointWorld,
-        wallMagnetEnabled: state.wallMagnetEnabled,
-        stepDrawEnabled: state.stepDrawEnabled,
-        stepDrawMode: state.stepDrawMode,
-        stepLineEnabled: state.stepLineEnabled,
-        stepDegreeEnabled: state.stepDegreeEnabled,
-        stepLineMm: state.stepLineMm,
-        stepAngleDeg: state.stepAngleDeg,
-      });
-      state.orthoEnabled = !!tool.snapEnabled;
+    const wallDrawing = state.activeTool === "wall" && !!tool.getStatus?.()?.isDrawing;
+    const hiddenDrawing = state.activeTool === "hidden" && !!hiddenTool.getStatus?.()?.isDrawing;
+    const dimDrawing = state.activeTool === "dim" && !!dimTool.getStatus?.()?.isDrawing;
+    const hasActiveTransformCommand =
+      copyCommand.mode !== "idle" ||
+      moveCommand.mode !== "idle" ||
+      rotateCommand.mode !== "idle";
+
+    if (wallDrawing || hiddenDrawing || dimDrawing || hasActiveTransformCommand) {
+      e.preventDefault();
+      const nextOrtho = !(state.orthoEnabled !== false);
+      state.orthoEnabled = nextOrtho;
+      tool.snapEnabled = nextOrtho;
+      if (typeof hiddenTool?.snapEnabled === "boolean") hiddenTool.snapEnabled = nextOrtho;
+      if (typeof dimTool?.orthoLocked === "boolean") dimTool.orthoLocked = nextOrtho;
     }
     return;
   }
