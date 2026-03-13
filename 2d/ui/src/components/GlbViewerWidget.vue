@@ -16,7 +16,7 @@ const props = defineProps({
   },
   wallStyleDraft: {
     type: Object,
-    default: () => ({ thicknessCm: 12, heightCm: 300, color: "#A6A6A6" }),
+    default: () => ({ thicknessCm: 12, heightCm: 300, floorOffsetCm: 0, color: "#A6A6A6" }),
   },
   selectedWallStyle: {
     type: Object,
@@ -52,6 +52,10 @@ const selectedEntityType = computed(
 );
 const showThicknessField = computed(() => selectedEntityType.value === "wall");
 const showHeightField = computed(() => selectedEntityType.value === "wall");
+const showFloorOffsetField = computed(() => {
+  if (selectedEntityType.value !== "wall") return false;
+  return /^Beam\s+/i.test(String(selectedObjectTitle.value || "").trim());
+});
 const showColorField = computed(() => selectedEntityType.value === "wall");
 
 const selectedWallCount = computed(() => {
@@ -95,6 +99,9 @@ const wallMetrics = computed(() => {
   const heightMm = Number.isFinite(Number(wall.heightMm))
     ? Number(wall.heightMm)
     : 2800;
+  const floorOffsetMm = Number.isFinite(Number(wall.floorOffsetMm))
+    ? Number(wall.floorOffsetMm)
+    : 0;
 
   const mmToCm = (v) => (Math.round((v * 0.1) * 10) / 10);
 
@@ -103,6 +110,7 @@ const wallMetrics = computed(() => {
     thicknessCm: mmToCm(thicknessMm),
     lengthCm: mmToCm(lengthMm),
     heightCm: mmToCm(heightMm),
+    floorOffsetCm: mmToCm(floorOffsetMm),
     a: { x: mmToCm(a.x), y: mmToCm(a.y) },
     b: { x: mmToCm(b.x), y: mmToCm(b.y) },
   };
@@ -541,42 +549,80 @@ function clearWalls3d() {
   wallsRoot = null;
 }
 
-function rebuildWalls3d(snapshot) {
-  if (!scene) return;
-  clearWalls3d();
+function normalizeLinearMembers(snapshot = {}, kind = "wall") {
+  const isBeam = kind === "beam";
+  const nodeCandidates = isBeam
+    ? [snapshot?.beamNodes, snapshot?.beams?.nodes, snapshot?.beamGraphSnap?.nodes]
+    : [snapshot?.nodes, snapshot?.walls?.nodes, snapshot?.wallGraphSnap?.nodes];
+  const edgeCandidates = isBeam
+    ? [snapshot?.beamEdges, snapshot?.beams?.edges, snapshot?.beams?.walls, snapshot?.beamGraphSnap?.edges, snapshot?.beamGraphSnap?.walls]
+    : [snapshot?.walls, snapshot?.wallEdges, snapshot?.wallGraphSnap?.walls];
 
-  const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
-  const walls = Array.isArray(snapshot?.walls) ? snapshot.walls : [];
-  if (!nodes.length || !walls.length) return;
+  const nodes = nodeCandidates.find(Array.isArray) || [];
+  const edges = edgeCandidates.find(Array.isArray) || [];
+  return { nodes, edges };
+}
+
+function buildLinearMemberMeshes(root, members, opts = {}) {
+  const {
+    fallbackFillColor = "#C7CCD1",
+    defaultHeightMm = 2800,
+    applyFloorOffset = false,
+  } = opts;
+
+  const nodes = Array.isArray(members?.nodes) ? members.nodes : [];
+  const edges = Array.isArray(members?.edges) ? members.edges : [];
+  if (!nodes.length || !edges.length) return;
 
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const root = new THREE.Group();
-  root.name = "walls2d-extruded";
-  const fallbackFillColor = "#C7CCD1";
+  const jointGammaMap = buildJointGammaMap(edges, byId);
 
-  const jointGammaMap = buildJointGammaMap(walls, byId);
-
-  for (const w of walls) {
-    const corners = computeTrimmedWallCorners(w, byId, jointGammaMap);
+  for (const edge of edges) {
+    const corners = computeTrimmedWallCorners(edge, byId, jointGammaMap);
     if (!corners) continue;
 
-    const heightMm = Number.isFinite(Number(w?.heightMm))
-      ? Number(w.heightMm)
-      : 2800;
+    const heightMm = Number.isFinite(Number(edge?.heightMm))
+      ? Number(edge.heightMm)
+      : defaultHeightMm;
     const heightM = Math.max(0.1, heightMm * 0.001);
 
-    const colorHex = (typeof w?.color3d === "string" && w.color3d)
-      ? w.color3d
-      : ((typeof w?.fillColor === "string" && w.fillColor) ? w.fillColor : fallbackFillColor);
-    const wallMat = new THREE.MeshStandardMaterial({
+    const colorHex = (typeof edge?.color3d === "string" && edge.color3d)
+      ? edge.color3d
+      : ((typeof edge?.fillColor === "string" && edge.fillColor) ? edge.fillColor : fallbackFillColor);
+
+    const mat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(colorHex),
       roughness: 0.86,
       metalness: 0.05,
     });
 
     const mesh = makeWallExtrudedMesh(corners, heightM, wallMat);
+    const floorOffsetMm = Number.isFinite(Number(w?.floorOffsetMm)) ? Number(w.floorOffsetMm) : 0;
+    mesh.position.y = Math.max(0, floorOffsetMm * 0.001);
     root.add(mesh);
   }
+}
+
+function rebuildWalls3d(snapshot) {
+  if (!scene) return;
+  clearWalls3d();
+
+  const wallMembers = normalizeLinearMembers(snapshot, "wall");
+  const beamMembers = normalizeLinearMembers(snapshot, "beam");
+  if (!wallMembers.edges.length && !beamMembers.edges.length) return;
+
+  const root = new THREE.Group();
+  root.name = "walls2d-extruded";
+  buildLinearMemberMeshes(root, wallMembers, {
+    fallbackFillColor: "#C7CCD1",
+    defaultHeightMm: 2800,
+    applyFloorOffset: false,
+  });
+  buildLinearMemberMeshes(root, beamMembers, {
+    fallbackFillColor: "#C7CCD1",
+    defaultHeightMm: 400,
+    applyFloorOffset: true,
+  });
 
   if (!root.children.length) return;
   wallsRoot = root;
@@ -1050,13 +1096,34 @@ onBeforeUnmount(() => {
             @input="patchWallStyleDraft({ heightCm: +$event.target.value })"
           />
         </label>
+        <label v-if="showFloorOffsetField" class="glbWallAttrs__editRow">
+          <span>فاصله از کف (cm)</span>
+          <input
+            class="glbWallAttrs__input"
+            type="number"
+            min="0"
+            step="1"
+            :value="wallStyleDraft.floorOffsetCm"
+            @input="patchWallStyleDraft({ floorOffsetCm: +$event.target.value })"
+          />
+        </label>
         <label v-if="showColorField" class="glbWallAttrs__editRow">
-          <span>رنگ دیوار</span>
+          <span>{{ selectedEntityType === 'beam' ? 'رنگ تیر' : 'رنگ دیوار' }}</span>
           <input
             class="glbWallAttrs__color"
             type="color"
             :value="wallStyleDraft.color"
             @input="patchWallStyleDraft({ color: $event.target.value })"
+          />
+        </label>
+        <label v-if="showFloorOffsetField" class="glbWallAttrs__editRow">
+          <span>کف‌افست (cm)</span>
+          <input
+            class="glbWallAttrs__input"
+            type="number"
+            step="0.1"
+            :value="wallStyleDraft.floorOffsetCm"
+            @input="patchWallStyleDraft({ floorOffsetCm: +$event.target.value })"
           />
         </label>
       </div>

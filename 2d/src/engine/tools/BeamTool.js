@@ -1,9 +1,9 @@
-// src/engine/tools/SolidWallTool.js
-// Segment chain tool:
-// - Click1: set start (no wall created)
-// - Click2: create Wall A
-// - Next clicks: chain Wall B, C...
-// - Escape: stop chaining (keeps existing walls)
+// src/engine/tools/BeamTool.js
+// Segment chain tool for beams:
+// - Click1: set start (no beam created)
+// - Click2: create Beam A
+// - Next clicks: chain Beam B, C...
+// - Escape: stop chaining (keeps existing beams)
 // - Right click: toggle 45° snap
 // - S key: toggle 45° snap
 // Naming stays sequential even if you stop and start elsewhere.
@@ -31,8 +31,6 @@ function snap45(from, to) {
     y: from.y + Math.sin(snapped) * L,
   };
 }
-
-
 
 function quantizeLength(from, to, stepMm) {
   const step = Number(stepMm);
@@ -62,16 +60,14 @@ function quantizeAngle(from, to, stepDeg) {
   };
 }
 
-function entityNameFromIndex(i, prefix = "Wall") {
+function beamNameFromIndex(i) {
   const letter = String.fromCharCode(65 + (i % 26));
   const suffix = i >= 26 ? `-${Math.floor(i / 26)}` : "";
-  return `${prefix} ${letter}${suffix}`;
+  return `Beam ${letter}${suffix}`;
 }
 
-function entityIndexFromName(name, prefix = "Wall") {
-  const escapedPrefix = String(prefix || "Wall").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`^${escapedPrefix}\\s+([A-Z])(?:-(\\d+))?$`, "i");
-  const m = String(name || "").trim().match(re);
+function beamIndexFromName(name) {
+  const m = String(name || "").trim().match(/^Beam\s+([A-Z])(?:-(\d+))?$/i);
   if (!m) return null;
   const letterIdx = String(m[1]).toUpperCase().charCodeAt(0) - 65;
   if (letterIdx < 0 || letterIdx > 25) return null;
@@ -79,21 +75,19 @@ function entityIndexFromName(name, prefix = "Wall") {
   return cycle * 26 + letterIdx;
 }
 
-export class SolidWallTool {
+export class BeamTool {
   constructor({
     graph,
     view,
-    namePrefix = "Wall",
-    defaultThickness = 120,
-    defaultHeightMm = 3000,
-    defaultFloorOffsetMm = 0,
+    defaultThickness = 40,
+    defaultHeightMm = 200,
+    defaultFloorOffsetMm = 2600,
     defaultColor = "#A6A6A6",
     snapTolMm = 30,
     startIndex = 0,
   }) {
     this.graph = graph;
     this.view = view;
-    this.namePrefix = String(namePrefix || "Wall");
 
     this.defaultThickness = defaultThickness;
     this.defaultHeightMm = defaultHeightMm;
@@ -106,7 +100,7 @@ export class SolidWallTool {
     this.shiftLockDir = null;
     this.error = null; // { type:"overlap" } | null
 
-    this.wallIndex = startIndex;
+    this.beamIndex = startIndex;
     this.pendingStartNodeId = null;
     this.pendingStartPos = null;
     this.previewEndPos = null;
@@ -116,7 +110,7 @@ export class SolidWallTool {
     return {
       isDrawing: !!this.pendingStartNodeId,
       snapEnabled: this.snapEnabled,
-      wallName: entityNameFromIndex(this.wallIndex, this.namePrefix),
+      beamName: beamNameFromIndex(this.beamIndex),
       thickness: this.defaultThickness,
       heightMm: this.defaultHeightMm,
       floorOffsetMm: this.defaultFloorOffsetMm,
@@ -131,14 +125,13 @@ export class SolidWallTool {
     return [{ a: this.pendingStartPos, b: this.previewEndPos }];
   }
 
-
-  syncWallIndexFromGraph() {
+  syncBeamIndexFromGraph() {
     let maxIdx = -1;
     for (const w of this.graph.walls.values()) {
-      const idx = entityIndexFromName(w?.name, this.namePrefix);
+      const idx = beamIndexFromName(w?.name);
       if (idx != null && idx > maxIdx) maxIdx = idx;
     }
-    this.wallIndex = maxIdx + 1;
+    this.beamIndex = maxIdx + 1;
   }
 
   stopChaining() {
@@ -173,9 +166,9 @@ export class SolidWallTool {
     const nx = -uy;
     const ny = ux;
 
-    const ANG_EPS = 0.01; // ~0.57 deg
-    const DIST_EPS_MM = 1; // 1mm
-    const OVERLAP_EPS_MM = 1; // 1mm
+    const ANG_EPS = 0.01;
+    const DIST_EPS_MM = 1;
+    const OVERLAP_EPS_MM = 1;
 
     for (const w of this.graph.walls.values()) {
       const A = this.graph.getNode(w.a);
@@ -192,11 +185,9 @@ export class SolidWallTool {
       const sin = Math.abs(cross(abx, aby, cdx, cdy) / (L * L2));
       if (sin > ANG_EPS) continue;
 
-      // distance from existing endpoint to new line (unit normal)
       const dist = Math.abs((cx - ax) * nx + (cy - ay) * ny);
       if (dist > DIST_EPS_MM) continue;
 
-      // overlap in 1D along AB axis
       const tC = (cx - ax) * ux + (cy - ay) * uy;
       const tD = (dx - ax) * ux + (dy - ay) * uy;
       const minCD = Math.min(tC, tD);
@@ -260,10 +251,8 @@ export class SolidWallTool {
   }
 
   onPointerDown(e, opts = {}) {
-    // right click: toggle snap
     if (e.button === 2) {
       e.preventDefault?.();
-      // Only toggle snap while actively drawing; otherwise right-click does nothing.
       if (this.pendingStartNodeId) {
         this.snapEnabled = !this.snapEnabled;
         this.shiftLockDir = null;
@@ -277,7 +266,6 @@ export class SolidWallTool {
     let p = this.view.screenToWorld(e.offsetX, e.offsetY);
     if (snapOn && typeof resolveSnapPoint === "function") p = resolveSnapPoint(p.x, p.y) || p;
 
-    // click1: set start
     if (!this.pendingStartNodeId) {
       const useWallMagnet = snapOn && opts?.wallMagnetEnabled !== false;
       const n0 = this._findSnapTargetPoint(p.x, p.y, useWallMagnet);
@@ -288,7 +276,6 @@ export class SolidWallTool {
       return;
     }
 
-    // click2+: set end and create wall
     const startPos = this.pendingStartPos;
 
     let endPos = this._applyAngle(startPos, { x: p.x, y: p.y }, !!e.shiftKey, opts);
@@ -297,21 +284,18 @@ export class SolidWallTool {
     const useWallMagnet = snapOn && opts?.wallMagnetEnabled !== false;
     const n1 = this._findSnapTargetPoint(endPos.x, endPos.y, useWallMagnet);
     if (n1.id === this.pendingStartNodeId) {
-      // Clicking the same snap point should end current chain,
-      // not restart drawing from the same location.
       this.stopChaining();
       return;
     }
 
-    // Overlap check (collinear overlap with existing walls)
     if (this._checkOverlap(startPos, { x: n1.x, y: n1.y })) {
       this.error = { type: "overlap" };
       return;
     }
     this.error = null;
 
-    this.syncWallIndexFromGraph();
-    const name = entityNameFromIndex(this.wallIndex, this.namePrefix);
+    this.syncBeamIndexFromGraph();
+    const name = beamNameFromIndex(this.beamIndex);
     const w = this.graph.addWallByNodeIds(
       this.pendingStartNodeId,
       n1.id,
@@ -319,19 +303,14 @@ export class SolidWallTool {
       name
     );
     if (w) {
-      w.heightMm = Math.max(1, Number(this.defaultHeightMm) || 3000);
-      w.floorOffsetMm = Math.max(0, Number(this.defaultFloorOffsetMm) || 0);
+      w.heightMm = Math.max(1, Number(this.defaultHeightMm) || 200);
+      w.floorOffsetMm = Math.max(0, Number(this.defaultFloorOffsetMm) || 2600);
       w.color3d = String(this.defaultColor || "#C7CCD1");
-      // Split intersections and cleanup
-      this.graph.intersectAndSplitAll(w.id, 1);
-      this.graph.mergeCloseNodes(1);
-      this.graph.deleteTinyEdges(1);
     }
 
     this.lastDir = normalize(n1.x - startPos.x, n1.y - startPos.y);
 
-    // chain
-    this.wallIndex++;
+    this.beamIndex++;
     this.pendingStartNodeId = n1.id;
     this.pendingStartPos = { x: n1.x, y: n1.y };
     this.previewEndPos = { x: n1.x, y: n1.y };
@@ -350,7 +329,6 @@ export class SolidWallTool {
 
     this.previewEndPos = endPos;
 
-    // Preview-only overlap check (uses raw endPos, without snap node resolution)
     this.error = this._checkOverlap(startPos, endPos) ? { type: "overlap" } : null;
   }
 
@@ -364,28 +342,24 @@ export class SolidWallTool {
     }
   }
 
-
   _findSnapTargetPoint(x, y, useWallMagnet = true) {
     return this._resolveSnapNode(x, y, useWallMagnet);
   }
 
   _resolveSnapNode(x, y, useWallMagnet = true) {
-    // 1) snap to existing nodes
     const n = this.graph.findNearestNode(x, y, this.snapTolMm);
     if (n) return n;
 
-    // When wall-magnet is off we should still connect to existing points,
-    // but skip segment magnet/splitting behavior.
     if (!useWallMagnet) return this.graph.addNode(x, y);
 
-    // 2) snap to nearest wall segment (split)
     const hit = this.graph.findNearestWallPoint(x, y, this.snapTolMm);
     if (hit) {
       const res = this.graph.splitWallAtPoint(hit.wallId, hit.point.x, hit.point.y, 1);
       if (res?.node) return res.node;
     }
 
-    // 3) create new node
     return this.graph.addNode(x, y);
   }
 }
+
+export { beamNameFromIndex, beamIndexFromName };

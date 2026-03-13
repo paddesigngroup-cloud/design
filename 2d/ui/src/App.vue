@@ -44,7 +44,7 @@ const activeMenu = ref(null); // menuId | null
 const openMenuPanel = ref(null); // menuId | null
 const drawUiLock = ref(false); // while drawing, keep submenus closed until Esc
 const designMenuTool = ref(null); // "wall" | "hidden" | "dimension" | "beam" | "column" | null
-const wallStyleDraft = ref({ thicknessCm: 12, heightCm: 300, color: "#A6A6A6" });
+const wallStyleDraft = ref({ thicknessCm: 12, heightCm: 300, floorOffsetCm: 0, color: "#A6A6A6" });
 const selectedWallStyle = ref(null);
 const wallStyleDraftTouched = ref(false);
 
@@ -138,7 +138,7 @@ const designMenuTools = [
   { id: "wall", icon: "/icons/drawing_wall.png", title: "دیوار", mapsToTool: "wall" },
   { id: "hidden", icon: "/icons/drawing_hidden_wall.png", title: "خط راهنما", mapsToTool: "hidden" },
   { id: "dimension", icon: "/icons/drawing_dimension.png", title: "اندازه گذاری", mapsToTool: "dimension" },
-  { id: "beam", icon: "/icons/beam.png", title: "تیر", mapsToTool: null },
+  { id: "beam", icon: "/icons/beam.png", title: "تیر", mapsToTool: "wall" },
   { id: "column", icon: "/icons/column.png", title: "ستون", mapsToTool: null },
 ];
 
@@ -202,14 +202,24 @@ function syncQuickStateFromEditor() {
   const selectedHiddenIds = Array.isArray(full?.selection?.selectedHiddenIds) ? full.selection.selectedHiddenIds : [];
   const selectedWallId = full?.selection?.selectedWallId || selectedWallIds[0] || null;
   const selectedHiddenId = full?.selection?.selectedHiddenId || selectedHiddenIds[0] || null;
+  const beamNodes = Array.isArray(full?.beamGraphSnap?.nodes) ? full.beamGraphSnap.nodes : [];
+  const beams = Array.isArray(full?.beamGraphSnap?.walls) ? full.beamGraphSnap.walls : [];
+  const selectedBeamIds = Array.isArray(full?.selection?.selectedBeamIds) ? full.selection.selectedBeamIds : [];
+  const selectedBeamId = full?.selection?.selectedBeamId || selectedBeamIds[0] || null;
   const selectedWall = selectedWallId ? walls.find((w) => w.id === selectedWallId) : null;
   const selectedHidden = selectedHiddenId ? hiddenWalls.find((w) => w.id === selectedHiddenId) : null;
+  const selectedBeam = selectedBeamId ? beams.find((w) => w.id === selectedBeamId) : null;
   const selectedWallCount = selectedWallIds.length > 0 ? selectedWallIds.length : (selectedWallId ? 1 : 0);
   const selectedHiddenCount = selectedHiddenIds.length > 0 ? selectedHiddenIds.length : (selectedHiddenId ? 1 : 0);
+  const selectedBeamCount = selectedBeamIds.length > 0 ? selectedBeamIds.length : (selectedBeamId ? 1 : 0);
   const hasWallSelection = !!(selectedWall || selectedWallIds.length > 0);
   const hasHiddenSelection = !!(selectedHidden || selectedHiddenIds.length > 0);
-  const metricsEntityType = hasWallSelection ? "wall" : hasHiddenSelection ? "hidden" : "wall";
-  const selectedCount = (metricsEntityType === "hidden") ? selectedHiddenCount : selectedWallCount;
+  const hasBeamSelection = !!(selectedBeam || selectedBeamIds.length > 0);
+  const metricsEntityType = hasBeamSelection ? "beam" : hasWallSelection ? "wall" : hasHiddenSelection ? "hidden" : "wall";
+  const selectedCount =
+    (metricsEntityType === "hidden") ? selectedHiddenCount
+      : (metricsEntityType === "beam") ? selectedBeamCount
+        : selectedWallCount;
 
   walls3dSnapshot.value = {
     nodes: wallNodes,
@@ -219,13 +229,15 @@ function syncQuickStateFromEditor() {
       selectedWallIds,
       selectedHiddenId: full?.selection?.selectedHiddenId || null,
       selectedHiddenIds,
+      selectedBeamId: full?.selection?.selectedBeamId || null,
+      selectedBeamIds,
     },
     metrics: {
-      nodes: metricsEntityType === "hidden" ? hiddenNodes : wallNodes,
-      walls: metricsEntityType === "hidden" ? hiddenWalls : walls,
+      nodes: metricsEntityType === "hidden" ? hiddenNodes : metricsEntityType === "beam" ? beamNodes : wallNodes,
+      walls: metricsEntityType === "hidden" ? hiddenWalls : metricsEntityType === "beam" ? beams : walls,
       selection: {
-        selectedWallId: metricsEntityType === "hidden" ? selectedHiddenId : selectedWallId,
-        selectedWallIds: metricsEntityType === "hidden" ? selectedHiddenIds : selectedWallIds,
+        selectedWallId: metricsEntityType === "hidden" ? selectedHiddenId : metricsEntityType === "beam" ? selectedBeamId : selectedWallId,
+        selectedWallIds: metricsEntityType === "hidden" ? selectedHiddenIds : metricsEntityType === "beam" ? selectedBeamIds : selectedWallIds,
       },
       entityType: metricsEntityType,
     },
@@ -244,25 +256,37 @@ function syncQuickStateFromEditor() {
   if (!wallStyleDraftTouched.value) {
     const defaultThicknessCm = (Number.isFinite(Number(s?.wallThicknessMm)) ? Number(s.wallThicknessMm) : 120) / 10;
     const defaultHeightCm = (Number.isFinite(Number(s?.wallHeightMm)) ? Number(s.wallHeightMm) : 3000) / 10;
+    const defaultBeamThicknessCm = (Number.isFinite(Number(s?.beamThicknessMm)) ? Number(s.beamThicknessMm) : 400) / 10;
+    const defaultBeamHeightCm = (Number.isFinite(Number(s?.beamHeightMm)) ? Number(s.beamHeightMm) : 200) / 10;
+    const defaultBeamFloorOffsetCm = (Number.isFinite(Number(s?.beamFloorOffsetMm)) ? Number(s.beamFloorOffsetMm) : 2600) / 10;
     const defaultColor = (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1";
 
     const selectedObj = (metricsEntityType === "hidden") ? selectedHidden : selectedWall;
+    const selectedName = String(selectedObj?.name || "").trim();
+    const isBeamSelection = /^Beam\s+/i.test(selectedName);
+    const fallbackThicknessCm = isBeamSelection ? defaultBeamThicknessCm : defaultThicknessCm;
+    const fallbackHeightCm = isBeamSelection ? defaultBeamHeightCm : defaultHeightCm;
+    const fallbackFloorOffsetCm = isBeamSelection ? defaultBeamFloorOffsetCm : 0;
     wallStyleDraft.value = selectedObj
       ? {
-          thicknessCm: (Number(selectedObj.thickness) || 120) / 10,
-          heightCm: (Number(selectedObj.heightMm) || Number(s?.wallHeightMm) || 3000) / 10,
+          thicknessCm: (Number(selectedObj.thickness) || (fallbackThicknessCm * 10)) / 10,
+          heightCm: (Number(selectedObj.heightMm) || (fallbackHeightCm * 10)) / 10,
+          floorOffsetCm: (Number(selectedObj.floorOffsetMm) || (fallbackFloorOffsetCm * 10)) / 10,
           color: (typeof selectedObj.color3d === "string" && selectedObj.color3d) ? selectedObj.color3d : defaultColor,
+          floorOffsetCm: (Number(selectedObj.floorOffsetMm) || 0) / 10,
         }
       : {
           thicknessCm: defaultThicknessCm,
           heightCm: defaultHeightCm,
+          floorOffsetCm: 0,
           color: defaultColor,
+          floorOffsetCm: 0,
         };
   }
 
-  const selectedEntity = (metricsEntityType === "hidden") ? selectedHidden : selectedWall;
+  const selectedEntity = (metricsEntityType === "hidden") ? selectedHidden : (metricsEntityType === "beam") ? selectedBeam : selectedWall;
   if (selectedEntity) {
-    const srcNodes = (metricsEntityType === "hidden") ? hiddenNodes : wallNodes;
+    const srcNodes = (metricsEntityType === "hidden") ? hiddenNodes : (metricsEntityType === "beam") ? beamNodes : wallNodes;
     const byId = new Map(srcNodes.map((n) => [n.id, n]));
     const na = byId.get(selectedEntity.a);
     const nb = byId.get(selectedEntity.b);
@@ -273,10 +297,12 @@ function syncQuickStateFromEditor() {
       entityType: metricsEntityType,
       thicknessCm: (Number(selectedEntity.thickness) || 120) / 10,
       heightCm: (Number(selectedEntity.heightMm) || Number(s?.wallHeightMm) || 3000) / 10,
+      floorOffsetCm: (Number(selectedEntity.floorOffsetMm) || 0) / 10,
       lengthCm: lenMm / 10,
       color: (typeof selectedEntity.color3d === "string" && selectedEntity.color3d)
         ? selectedEntity.color3d
         : ((typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1"),
+      floorOffsetCm: (Number(selectedEntity.floorOffsetMm) || 0) / 10,
       a: selectedEntity.a,
       b: selectedEntity.b,
       selectedCount,
@@ -302,8 +328,9 @@ function syncQuickStateFromEditor() {
 function clampWallStyleDraft() {
   const t = Math.max(0.1, Number(wallStyleDraft.value.thicknessCm) || 12);
   const h = Math.max(1, Number(wallStyleDraft.value.heightCm) || 300);
+  const f = Math.max(0, Number(wallStyleDraft.value.floorOffsetCm) || 0);
   const c = String(wallStyleDraft.value.color || "#A6A6A6");
-  wallStyleDraft.value = { thicknessCm: Math.round(t * 10) / 10, heightCm: Math.round(h), color: c };
+  wallStyleDraft.value = { thicknessCm: Math.round(t * 10) / 10, heightCm: Math.round(h), floorOffsetCm: Math.round(f), color: c };
 }
 
 function updateWallStyleDraft(next) {
@@ -311,6 +338,7 @@ function updateWallStyleDraft(next) {
   const draft = {
     thicknessCm: Number(next?.thicknessCm ?? wallStyleDraft.value.thicknessCm),
     heightCm: Number(next?.heightCm ?? wallStyleDraft.value.heightCm),
+    floorOffsetCm: Number(next?.floorOffsetCm ?? wallStyleDraft.value.floorOffsetCm),
     color: String(next?.color ?? wallStyleDraft.value.color),
   };
   wallStyleDraft.value = draft;
@@ -319,16 +347,26 @@ function updateWallStyleDraft(next) {
   const thicknessMm = Math.max(1, wallStyleDraft.value.thicknessCm * 10);
   const heightMm = Math.max(1, wallStyleDraft.value.heightCm * 10);
   const color3d = wallStyleDraft.value.color;
+  const floorOffsetMm = Math.max(0, wallStyleDraft.value.floorOffsetCm * 10);
   const lengthMm = Number.isFinite(Number(next?.lengthCm)) ? Math.max(10, Number(next.lengthCm) * 10) : null;
   const entityType = selectedWallStyle.value?.entityType || "wall";
+  const isBeamEntity = /^Beam\s+/i.test(String(selectedWallStyle.value?.name || "").trim());
 
   // Only update global wall defaults when no wall is selected.
   if (entityType !== "hidden" && !selectedWallStyle.value?.id) {
-    editorRef.value?.setState?.({
-      wallThicknessMm: thicknessMm,
-      wallHeightMm: heightMm,
-      wall3dColor: color3d,
-    });
+    if (isBeamEntity || designMenuTool.value === "beam") {
+      editorRef.value?.setState?.({
+        beamThicknessMm: thicknessMm,
+        beamHeightMm: heightMm,
+        beamFloorOffsetMm: floorOffsetMm,
+      });
+    } else {
+      editorRef.value?.setState?.({
+        wallThicknessMm: thicknessMm,
+        wallHeightMm: heightMm,
+        wall3dColor: color3d,
+      });
+    }
   }
 
   const selectedId = selectedWallStyle.value?.id;
@@ -336,8 +374,11 @@ function updateWallStyleDraft(next) {
   if (selectedId) {
     if (entityType === "hidden") {
       if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedHiddenLength?.(lengthMm);
+    } else if (entityType === "beam") {
+      editorRef.value?.setSelectedBeamStyle?.({ thicknessMm, heightMm, fillColor: color3d, floorOffsetMm });
+      if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedBeamLength?.(lengthMm);
     } else {
-      editorRef.value?.setSelectedWallStyle?.({ thicknessMm, heightMm, fillColor: color3d });
+      editorRef.value?.setSelectedWallStyle?.({ thicknessMm, heightMm, floorOffsetMm, fillColor: color3d });
       if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedWallLength?.(lengthMm);
     }
   }
@@ -357,6 +398,12 @@ function updateSelectedWallCoords(patch) {
         dxMm: dxMm ?? 0,
         dyMm: dyMm ?? 0,
       });
+    } else if (entityType === "beam") {
+      if (editorRef.value?.moveSelectedBeamsBy) {
+        editorRef.value.moveSelectedBeamsBy({ dxMm: dxMm ?? 0, dyMm: dyMm ?? 0 });
+      } else {
+        editorRef.value?.moveSelectedWallsBy?.({ dxMm: dxMm ?? 0, dyMm: dyMm ?? 0 });
+      }
     } else {
       editorRef.value?.moveSelectedWallsBy?.({
         dxMm: dxMm ?? 0,
@@ -372,6 +419,7 @@ function updateSelectedWallCoords(patch) {
   if (Number.isFinite(Number(patch?.bxCm))) payload.bxMm = toMm(patch.bxCm);
   if (Number.isFinite(Number(patch?.byCm))) payload.byMm = toMm(patch.byCm);
   if (entityType === "hidden") editorRef.value?.setSelectedHiddenCoords?.(payload);
+  else if (entityType === "beam") editorRef.value?.setSelectedBeamCoords?.(payload);
   else editorRef.value?.setSelectedWallCoords?.(payload);
 }
 
@@ -623,7 +671,7 @@ function doSeeOrigin() {
 async function setTool(tool) {
   activeTool.value = tool;
 
-  const isDrawingTool = tool === "wall" || tool === "hidden" || tool === "dimension";
+  const isDrawingTool = tool === "wall" || tool === "hidden" || tool === "dimension" || tool === "beam";
   if (route.path !== "/" && isDrawingTool) {
     await router.push("/");
   }
@@ -631,6 +679,7 @@ async function setTool(tool) {
   if (tool === "wall") editorRef.value?.setActiveTool?.("wall");
   else if (tool === "hidden") editorRef.value?.setActiveTool?.("hidden");
   else if (tool === "dimension") editorRef.value?.setActiveTool?.("dim");
+  else if (tool === "beam") editorRef.value?.setActiveTool?.("beam");
 }
 
 async function setDesignMenuTool(id) {
@@ -646,6 +695,26 @@ async function setDesignMenuTool(id) {
     (id === "column") ? "clicker" :
     null;
   editorRef.value?.setUiCursorMode?.(mode);
+
+  if (id === "beam") {
+    const st = editorRef.value?.getState?.()?.state || {};
+    wallStyleDraftTouched.value = false;
+    wallStyleDraft.value = {
+      thicknessCm: (Number.isFinite(Number(st?.beamThicknessMm)) ? Number(st.beamThicknessMm) : 400) / 10,
+      heightCm: (Number.isFinite(Number(st?.beamHeightMm)) ? Number(st.beamHeightMm) : 200) / 10,
+      floorOffsetCm: (Number.isFinite(Number(st?.beamFloorOffsetMm)) ? Number(st.beamFloorOffsetMm) : 2600) / 10,
+      color: String(st?.wall3dColor || "#C7CCD1"),
+    };
+  } else if (id === "wall") {
+    const st = editorRef.value?.getState?.()?.state || {};
+    wallStyleDraftTouched.value = false;
+    wallStyleDraft.value = {
+      thicknessCm: (Number.isFinite(Number(st?.wallThicknessMm)) ? Number(st.wallThicknessMm) : 120) / 10,
+      heightCm: (Number.isFinite(Number(st?.wallHeightMm)) ? Number(st.wallHeightMm) : 3000) / 10,
+      floorOffsetCm: 0,
+      color: String(st?.wall3dColor || "#C7CCD1"),
+    };
+  }
 }
 
 function doUndo() {

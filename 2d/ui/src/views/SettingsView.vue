@@ -13,6 +13,9 @@ const model = reactive({
   wallThicknessMm: 120,
   wallHeightMm: 3000,
   hiddenWallThicknessMm: 1,
+  beamThicknessMm: 400,
+  beamHeightMm: 200,
+  beamOffsetFromFloorMm: 2600,
 
   dimOffsetMm: 150,
   dimFontPx: 15,
@@ -116,6 +119,18 @@ async function handleSaveSettings() {
     patch.hiddenWallThicknessMm = positiveOrFallback(patch.hiddenWallThicknessMm, base.hiddenWallThicknessMm ?? 1, 0);
     model.hiddenWallThicknessMm = patch.hiddenWallThicknessMm;
   }
+  if ("beamThicknessMm" in patch) {
+    patch.beamThicknessMm = positiveOrFallback(patch.beamThicknessMm, base.beamThicknessMm ?? 400);
+    model.beamThicknessMm = patch.beamThicknessMm;
+  }
+  if ("beamHeightMm" in patch) {
+    patch.beamHeightMm = positiveOrFallback(patch.beamHeightMm, base.beamHeightMm ?? 200);
+    model.beamHeightMm = patch.beamHeightMm;
+  }
+  if ("beamOffsetFromFloorMm" in patch) {
+    patch.beamOffsetFromFloorMm = positiveOrFallback(patch.beamOffsetFromFloorMm, base.beamOffsetFromFloorMm ?? 2600, 0);
+    model.beamOffsetFromFloorMm = patch.beamOffsetFromFloorMm;
+  }
 
   if (Object.keys(patch).length > 0) {
     editorRef.value?.setState?.(patch);
@@ -181,6 +196,39 @@ async function handleSaveSettings() {
           step="0.1"
           :value="(model.hiddenWallThicknessMm || 1) / 10"
           @change="applyPatch({ hiddenWallThicknessMm: Math.max(0.1, (+$event.target.value || 0.1) * 10) })"
+        />
+      </div>
+      <div class="row">
+        <label class="label">ضخامت پیش‌فرض تیر (سانتی‌متر)</label>
+        <input
+          class="input ltr"
+          type="number"
+          min="1"
+          step="0.5"
+          :value="(model.beamThicknessMm || 400) / 10"
+          @change="applyPatch({ beamThicknessMm: Math.max(1, (+$event.target.value || 40) * 10) })"
+        />
+      </div>
+      <div class="row">
+        <label class="label">ارتفاع پیش‌فرض تیر (سانتی‌متر)</label>
+        <input
+          class="input ltr"
+          type="number"
+          min="1"
+          step="0.5"
+          :value="(model.beamHeightMm || 200) / 10"
+          @change="applyPatch({ beamHeightMm: Math.max(1, (+$event.target.value || 20) * 10) })"
+        />
+      </div>
+      <div class="row">
+        <label class="label">فاصله پیش‌فرض تیر از کف (سانتی‌متر)</label>
+        <input
+          class="input ltr"
+          type="number"
+          min="0"
+          step="1"
+          :value="(model.beamOffsetFromFloorMm || 2600) / 10"
+          @change="applyPatch({ beamOffsetFromFloorMm: Math.max(0, (+$event.target.value || 260) * 10) })"
         />
       </div>
     </div>

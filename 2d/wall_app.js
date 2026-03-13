@@ -17,6 +17,8 @@ import { SolidWallTool } from "./src/engine/tools/SolidWallTool.js";
 import { HiddenWallTool, drawHiddenWalls } from "./hiddenwall.js";
 import { DimensionTool } from "./src/engine/dimension.js";
 
+const BeamTool = SolidWallTool;
+
 /* =============================
    Runtime Error Overlay (helps debugging on user machines)
 ============================= */
@@ -120,7 +122,7 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   unit: "cm",
 
   // Modal tool selection (AutoCAD-like)
-  activeTool: "wall", // "select" | "wall" | "hidden" | "dim"
+  activeTool: "wall", // "select" | "wall" | "hidden" | "dim" | "beam"
   // Object snap + guides overlay
   snapOn: true,
   snapCornerEnabled: true,
@@ -155,10 +157,20 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   wallTextColor: "#FFFFFF",
   wallHeightColor: "#4B5563",
   wall3dColor: "#C7CCD1",
+
+  // Beam defaults (world millimeters). UI shows cm when needed.
+  beamThicknessMm: 120,
+  beamHeightMm: 3000,
+  beamFloorOffsetMm: 0,
+  beamFillColor: "#A6A6A6",
+  beam3dColor: "#C7CCD1",
   // Global wall thickness (world millimeters). UI shows cm.
   wallThicknessMm: 120,
   // Global wall height (world millimeters). UI shows cm.
   wallHeightMm: 3000,
+  beamThicknessMm: 400,
+  beamHeightMm: 200,
+  beamFloorOffsetMm: 2600,
 
   // Hidden walls (dashed guide-like lines)
   hiddenWallThicknessMm: 1,
@@ -1372,8 +1384,11 @@ function snapshotGraph(g) {
       b: w.b,
       thickness: w.thickness,
       heightMm: (typeof w.heightMm === "number" && isFinite(w.heightMm)) ? Math.max(1, w.heightMm) : null,
+      floorOffsetMm: (typeof w.floorOffsetMm === "number" && isFinite(w.floorOffsetMm)) ? Math.max(0, w.floorOffsetMm) : null,
       fillColor: (typeof w.fillColor === "string" && w.fillColor) ? w.fillColor : null,
       color3d: (typeof w.color3d === "string" && w.color3d) ? w.color3d : null,
+      elementType: (typeof w.elementType === "string" && w.elementType) ? w.elementType : null,
+      floorOffsetMm: (typeof w.floorOffsetMm === "number" && isFinite(w.floorOffsetMm)) ? w.floorOffsetMm : null,
       name: w.name,
       dimSide: w.dimSide ?? "auto",
       offsetSide: w.offsetSide ?? "auto",
@@ -1408,8 +1423,11 @@ function restoreGraph(g, snap) {
       b: w.b,
       thickness: w.thickness,
       heightMm: (typeof w.heightMm === "number" && isFinite(w.heightMm)) ? Math.max(1, w.heightMm) : null,
+      floorOffsetMm: (typeof w.floorOffsetMm === "number" && isFinite(w.floorOffsetMm)) ? Math.max(0, w.floorOffsetMm) : null,
       fillColor: (typeof w.fillColor === "string" && w.fillColor) ? w.fillColor : null,
       color3d: (typeof w.color3d === "string" && w.color3d) ? w.color3d : null,
+      elementType: (typeof w.elementType === "string" && w.elementType) ? w.elementType : null,
+      floorOffsetMm: (typeof w.floorOffsetMm === "number" && isFinite(w.floorOffsetMm)) ? w.floorOffsetMm : null,
       name: w.name,
       dimSide: w.dimSide ?? "auto",
       offsetSide: w.offsetSide ?? "auto",
@@ -1453,6 +1471,14 @@ function restoreTool(t, g, snap) {
     t.previewEndPos = null;
     t.lastDir = null;
   }
+}
+
+function snapshotBeamTool(t) {
+  return snapshotTool(t);
+}
+
+function restoreBeamTool(t, g, snap) {
+  restoreTool(t, g, snap);
 }
 
 function snapshotHiddenTool(t) {
@@ -1556,6 +1582,7 @@ function _stateSignature(snap) {
     hiddenGraph: snap.hiddenGraphSnap,
     tool: snap.toolSnap,
     hiddenTool: snap.hiddenToolSnap,
+    beamTool: snap.beamToolSnap,
     dimTool: snap.dimToolSnap,
     dimensions: snap.dimensionsSnap,
     model2d: snap.model2dSnap,
@@ -1563,11 +1590,12 @@ function _stateSignature(snap) {
 }
 
 class UndoManager {
-  constructor({ graph, tool, hiddenGraph, hiddenTool, dimTool, dimensions, model2d, onModel2dRestore, getSelection, setSelection, maxDepth = 200 }) {
+  constructor({ graph, tool, hiddenGraph, hiddenTool, beamTool, dimTool, dimensions, model2d, onModel2dRestore, getSelection, setSelection, maxDepth = 200 }) {
     this.graph = graph;
     this.tool = tool;
     this.hiddenGraph = hiddenGraph;
     this.hiddenTool = hiddenTool;
+    this.beamTool = beamTool;
     this.dimTool = dimTool;
     this.dimensions = dimensions;
     this.model2d = model2d;
@@ -1585,6 +1613,7 @@ class UndoManager {
     const sel = this.getSelection();
     const hiddenGraphSnap = snapshotGraph(this.hiddenGraph);
     const hiddenToolSnap = snapshotHiddenTool(this.hiddenTool);
+    const beamToolSnap = snapshotBeamTool(this.beamTool);
     const dimToolSnap = snapshotDimTool(this.dimTool);
     const dimensionsSnap = snapshotDimensions(this.dimensions);
     const model2dSnap = snapshotModel2d(this.model2d);
@@ -1593,6 +1622,7 @@ class UndoManager {
       hiddenGraphSnap,
       toolSnap,
       hiddenToolSnap,
+      beamToolSnap,
       dimToolSnap,
       dimensionsSnap,
       model2dSnap,
@@ -1637,6 +1667,7 @@ class UndoManager {
     restoreGraph(this.hiddenGraph, snap.hiddenGraphSnap);
     restoreTool(this.tool, this.graph, snap.toolSnap);
     restoreHiddenTool(this.hiddenTool, this.hiddenGraph, snap.hiddenToolSnap);
+    restoreBeamTool(this.beamTool, this.graph, snap.beamToolSnap);
     restoreDimTool(this.dimTool, snap.dimToolSnap);
     restoreDimensions(this.dimensions, snap.dimensionsSnap);
     restoreModel2d(this.model2d, snap.model2dSnap);
@@ -1695,6 +1726,7 @@ class UndoManager {
     restoreGraph(this.hiddenGraph, snap.hiddenGraphSnap);
     restoreTool(this.tool, this.graph, snap.toolSnap);
     restoreHiddenTool(this.hiddenTool, this.hiddenGraph, snap.hiddenToolSnap);
+    restoreBeamTool(this.beamTool, this.graph, snap.beamToolSnap);
     restoreDimTool(this.dimTool, snap.dimToolSnap);
     restoreDimensions(this.dimensions, snap.dimensionsSnap);
     restoreModel2d(this.model2d, snap.model2dSnap);
@@ -1816,8 +1848,19 @@ function initCursorImagesOnce() {
   loadWallHandleImg("joint", resolveIconUrls("joint_point.png"));
 }
 
+function getNamePrefixFromUiCursorMode(mode) {
+  return mode === "beam" ? "Beam" : "Wall";
+}
+
 function setUiCursorMode(mode) {
   uiCursorMode = mode || null;
+  if (tool) {
+    const nextPrefix = getNamePrefixFromUiCursorMode(uiCursorMode);
+    if (tool.namePrefix !== nextPrefix) {
+      tool.namePrefix = nextPrefix;
+      tool.syncWallIndexFromGraph?.();
+    }
+  }
   updateCanvasCursor();
 }
 
@@ -1975,6 +2018,7 @@ function placeWallPresetAtClient(lines, clientX, clientY, recordUndo = true) {
       const w = graph.addWallByPoints(ax, ay, bx, by, thickness, wallName, 1);
       if (w) {
         w.heightMm = Math.max(1, Number(state.wallHeightMm) || 3000);
+        w.floorOffsetMm = 0;
         w.color3d = (typeof state.wall3dColor === "string" && state.wall3dColor)
           ? state.wall3dColor
           : "#C7CCD1";
@@ -2602,14 +2646,16 @@ function parseRotateAngleValue(text) {
   return (num * Math.PI) / 180;
 }
 
-function wallNameFromIndexLocal(i) {
+function entityNameFromIndexLocal(i, prefix = "Wall") {
   const letter = String.fromCharCode(65 + (i % 26));
   const suffix = i >= 26 ? `-${Math.floor(i / 26)}` : "";
-  return `Wall ${letter}${suffix}`;
+  return `${prefix} ${letter}${suffix}`;
 }
 
-function wallIndexFromNameLocal(name) {
-  const m = String(name || "").trim().match(/^Wall\s+([A-Z])(?:-(\d+))?$/i);
+function entityIndexFromNameLocal(name, prefix = "Wall") {
+  const escapedPrefix = String(prefix || "Wall").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${escapedPrefix}\\s+([A-Z])(?:-(\\d+))?$`, "i");
+  const m = String(name || "").trim().match(re);
   if (!m) return null;
   const letterIdx = String(m[1]).toUpperCase().charCodeAt(0) - 65;
   if (letterIdx < 0 || letterIdx > 25) return null;
@@ -2617,20 +2663,25 @@ function wallIndexFromNameLocal(name) {
   return cycle * 26 + letterIdx;
 }
 
-function getNextWallNameSeed() {
+function getNextNameSeedForPrefix(prefix = "Wall") {
   let maxIdx = -1;
   for (const wall of graph.walls.values()) {
-    const idx = wallIndexFromNameLocal(wall?.name);
+    const idx = entityIndexFromNameLocal(wall?.name, prefix);
     if (idx != null && idx > maxIdx) maxIdx = idx;
   }
   return maxIdx + 1;
+}
+
+function getEntityPrefixFromName(name, fallbackPrefix = "Wall") {
+  const m = String(name || "").trim().match(/^([^\s]+)\s+[A-Z](?:-\d+)?$/i);
+  return m?.[1] || fallbackPrefix;
 }
 
 function syncCreationCountersFromScene() {
   if (typeof tool?.syncWallIndexFromGraph === "function") {
     tool.syncWallIndexFromGraph();
   } else {
-    tool.wallIndex = getNextWallNameSeed();
+    tool.wallIndex = getNextNameSeedForPrefix(tool?.namePrefix || "Wall");
   }
 
   let maxDimNum = 0;
@@ -2648,9 +2699,15 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
   if (!selectionSnapshotHasAny(snapshot) || (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9)) return null;
   if (snapshot.hasModel) return null;
 
-  const sceneWallNameSeed = getNextWallNameSeed();
-  const requestedWallNameSeed = Number.isFinite(Number(opts?.wallNameSeed)) ? Number(opts.wallNameSeed) : sceneWallNameSeed;
-  let nextWallNameIdx = Math.max(sceneWallNameSeed, requestedWallNameSeed);
+  const fallbackPrefix = tool?.namePrefix || "Wall";
+  const requestedWallNameSeed = Number.isFinite(Number(opts?.wallNameSeed)) ? Number(opts.wallNameSeed) : null;
+  const prefixToSeed = new Map();
+  function ensurePrefixSeed(prefix) {
+    if (prefixToSeed.has(prefix)) return;
+    const sceneSeed = getNextNameSeedForPrefix(prefix);
+    const seed = (requestedWallNameSeed == null) ? sceneSeed : Math.max(sceneSeed, requestedWallNameSeed);
+    prefixToSeed.set(prefix, seed);
+  }
   let nextDimId = Number.isFinite(Number(dimTool?._did)) ? Number(dimTool._did) : 1;
 
   const result = {
@@ -2664,17 +2721,22 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
     const a = wall ? graph.getNode(wall.a) : null;
     const b = wall ? graph.getNode(wall.b) : null;
     if (!wall || !a || !b) continue;
+    const namePrefix = getEntityPrefixFromName(wall?.name, fallbackPrefix);
+    ensurePrefixSeed(namePrefix);
+    const nextNameIdx = prefixToSeed.get(namePrefix) || 0;
     const copied = graph.addWallByPoints(
       a.x + dx,
       a.y + dy,
       b.x + dx,
       b.y + dy,
       wall.thickness,
-      wallNameFromIndexLocal(nextWallNameIdx++),
+      entityNameFromIndexLocal(nextNameIdx, namePrefix),
       1
     );
+    prefixToSeed.set(namePrefix, nextNameIdx + 1);
     if (!copied) continue;
     copied.heightMm = (typeof wall.heightMm === "number" && isFinite(wall.heightMm)) ? wall.heightMm : copied.heightMm;
+    copied.floorOffsetMm = (typeof wall.floorOffsetMm === "number" && isFinite(wall.floorOffsetMm)) ? wall.floorOffsetMm : (copied.floorOffsetMm ?? 0);
     copied.fillColor = wall.fillColor ?? null;
     copied.color3d = wall.color3d ?? null;
     copied.dimSide = wall.dimSide ?? "auto";
@@ -2724,7 +2786,8 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
     result.dimIds.push(copied.id);
   }
   dimTool._did = nextDimId;
-  tool.wallIndex = nextWallNameIdx;
+  const activePrefix = tool?.namePrefix || "Wall";
+  tool.wallIndex = prefixToSeed.get(activePrefix) ?? getNextNameSeedForPrefix(activePrefix);
   return result;
 }
 
@@ -4821,12 +4884,13 @@ function drawToolCursor() {
   else if (state.activeTool === "wall") key = "wall";
   else if (state.activeTool === "hidden") key = "hidden";
   else if (state.activeTool === "dim") key = "dim";
+  else if (state.activeTool === "beam") key = "beam";
   else if (isHoverAny) key = "clicker";
   else key = "cursor";
 
   // If no draw tool is "selected" (UI mode null) but the engine tool is wall/hidden/dim,
   // fall back to idle/hover cursors to avoid showing a "start drawing" cursor unexpectedly.
-  if (!uiCursorMode && (state.activeTool === "wall" || state.activeTool === "hidden" || state.activeTool === "dim")) {
+  if (!uiCursorMode && (state.activeTool === "wall" || state.activeTool === "hidden" || state.activeTool === "dim" || state.activeTool === "beam")) {
     key = isHoverAny ? "clicker" : "cursor";
   }
 
@@ -5086,13 +5150,26 @@ const view = { screenToWorld: (x, y) => screenToWorld(x, y) };
 const tool = new SolidWallTool({
   graph,
   view,
+  namePrefix: getNamePrefixFromUiCursorMode(uiCursorMode),
   defaultThickness: state.wallThicknessMm || 120,
   defaultHeightMm: state.wallHeightMm || 3000,
+  defaultFloorOffsetMm: 0,
   defaultColor: state.wall3dColor || "#C7CCD1",
   snapTolMm: 30,
   startIndex: 0,
 });
 tool.snapEnabled = state.orthoEnabled !== false;
+
+const beamTool = new BeamTool({
+  graph,
+  view,
+  defaultThickness: state.beamThicknessMm || 120,
+  defaultHeightMm: state.beamHeightMm || 3000,
+  defaultColor: state.beam3dColor || "#C7CCD1",
+  snapTolMm: 30,
+  startIndex: 0,
+});
+beamTool.snapEnabled = state.orthoEnabled !== false;
 
 const hiddenTool = new HiddenWallTool({
   graph: hiddenGraph,
@@ -5111,6 +5188,7 @@ const undo = new UndoManager({
   tool,
   hiddenGraph,
   hiddenTool,
+  beamTool,
   dimTool,
   dimensions,
   model2d,
@@ -5174,6 +5252,7 @@ function loop() {
     drawCopyOverlay();
     drawRotateOverlay();
     if (state.activeTool === "hidden") drawHiddenToolOverlay(hiddenTool);
+    if (state.activeTool === "beam") drawToolOverlay(beamTool);
     if (state.activeTool === "dim") drawDimToolOverlay();
     drawToolCursor();
     drawBoxSelectOverlay();
@@ -5416,6 +5495,7 @@ function onContextMenu(e) {
   const isDrawing =
     (state.activeTool === "dim") ? !!dimTool.getStatus?.()?.isDrawing :
     (state.activeTool === "hidden") ? !!hiddenTool.getStatus?.()?.isDrawing :
+    (state.activeTool === "beam") ? !!beamTool.getStatus?.()?.isDrawing :
     !!tool.getStatus?.()?.isDrawing;
   if (
     isDrawing ||
@@ -5994,6 +6074,7 @@ function onMouseDown(e) {
   // Right click: toggle angle/ortho lock while an active draw/transform command is running.
   if (e.button === 2) {
     const wallDrawing = state.activeTool === "wall" && !!tool.getStatus?.()?.isDrawing;
+    const beamDrawing = state.activeTool === "beam" && !!beamTool.getStatus?.()?.isDrawing;
     const hiddenDrawing = state.activeTool === "hidden" && !!hiddenTool.getStatus?.()?.isDrawing;
     const dimDrawing = state.activeTool === "dim" && !!dimTool.getStatus?.()?.isDrawing;
     const hasActiveTransformCommand =
@@ -6001,11 +6082,12 @@ function onMouseDown(e) {
       moveCommand.mode !== "idle" ||
       rotateCommand.mode !== "idle";
 
-    if (wallDrawing || hiddenDrawing || dimDrawing || hasActiveTransformCommand) {
+    if (wallDrawing || beamDrawing || hiddenDrawing || dimDrawing || hasActiveTransformCommand) {
       e.preventDefault();
       const nextOrtho = !(state.orthoEnabled !== false);
       state.orthoEnabled = nextOrtho;
       tool.snapEnabled = nextOrtho;
+      beamTool.snapEnabled = nextOrtho;
       if (typeof hiddenTool?.snapEnabled === "boolean") hiddenTool.snapEnabled = nextOrtho;
       if (typeof dimTool?.orthoLocked === "boolean") dimTool.orthoLocked = nextOrtho;
     }
@@ -6123,7 +6205,7 @@ function onMouseDown(e) {
 
   // In drawing tools, clicking an active snap point should draw from/to that point,
   // even if the cursor is over selectable geometry.
-  if (state.snapOn && (state.activeTool === "wall" || state.activeTool === "hidden")) {
+  if (state.snapOn && (state.activeTool === "wall" || state.activeTool === "hidden" || state.activeTool === "beam")) {
     const clickW = screenToWorld(e.offsetX, e.offsetY);
     const snapAtClick = resolveSnapPointWorld(clickW.x, clickW.y);
     if (snapAtClick) {
@@ -6144,6 +6226,37 @@ function onMouseDown(e) {
           }
         ));
         selectLatestDrawnWall({ graphType: "hidden", beforeIds: beforeHiddenIds });
+        return;
+      }
+      if (state.activeTool === "beam") {
+        const beforeBeamIds = new Set(graph.walls.keys());
+        undo.runAction(() => {
+          beamTool.onPointerDown(
+            { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
+            {
+              snapOn: state.snapOn,
+              resolveSnapPoint: resolveSnapPointWorld,
+              wallMagnetEnabled: state.wallMagnetEnabled,
+              stepDrawEnabled: state.stepDrawEnabled,
+              stepDrawMode: state.stepDrawMode,
+              stepLineEnabled: state.stepLineEnabled,
+              stepDegreeEnabled: state.stepDegreeEnabled,
+              stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+              stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+            }
+          );
+          for (const id of graph.walls.keys()) {
+            if (beforeBeamIds.has(id)) continue;
+            const w = graph.getWall(id);
+            if (!w) continue;
+            w.fillColor = state.beamFillColor || w.fillColor || null;
+            w.color3d = state.beam3dColor || w.color3d || null;
+            w.heightMm = Math.max(1, Number(state.beamHeightMm) || 3000);
+            w.floorOffsetMm = Number.isFinite(Number(state.beamFloorOffsetMm)) ? Number(state.beamFloorOffsetMm) : 0;
+            w.elementType = "beam";
+          }
+        });
+        selectLatestDrawnWall({ graphType: "wall", beforeIds: beforeBeamIds });
         return;
       }
       const beforeWallIds = new Set(graph.walls.keys());
@@ -6389,6 +6502,37 @@ function onMouseDown(e) {
     selectLatestDrawnWall({ graphType: "hidden", beforeIds: beforeHiddenIds });
     return;
   }
+  if (state.activeTool === "beam" && beamTool.getStatus()?.isDrawing) {
+    const beforeBeamIds = new Set(graph.walls.keys());
+    undo.runAction(() => {
+      beamTool.onPointerDown(
+        { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
+        {
+          snapOn: state.snapOn,
+          resolveSnapPoint: resolveSnapPointWorld,
+          wallMagnetEnabled: state.wallMagnetEnabled,
+          stepDrawEnabled: state.stepDrawEnabled,
+          stepDrawMode: state.stepDrawMode,
+          stepLineEnabled: state.stepLineEnabled,
+          stepDegreeEnabled: state.stepDegreeEnabled,
+          stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+          stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+        }
+      );
+      for (const id of graph.walls.keys()) {
+        if (beforeBeamIds.has(id)) continue;
+        const w = graph.getWall(id);
+        if (!w) continue;
+        w.fillColor = state.beamFillColor || w.fillColor || null;
+        w.color3d = state.beam3dColor || w.color3d || null;
+        w.heightMm = Math.max(1, Number(state.beamHeightMm) || 3000);
+        w.floorOffsetMm = Number.isFinite(Number(state.beamFloorOffsetMm)) ? Number(state.beamFloorOffsetMm) : 0;
+        w.elementType = "beam";
+      }
+    });
+    selectLatestDrawnWall({ graphType: "wall", beforeIds: beforeBeamIds });
+    return;
+  }
   if (state.activeTool === "wall" && tool.getStatus()?.isDrawing) {
     const beforeWallIds = new Set(graph.walls.keys());
     undo.runAction(() => {
@@ -6462,7 +6606,7 @@ function onMouseDown(e) {
   const hadDimSelection = !!selectedDimId || (Array.isArray(selectedDimIds) && selectedDimIds.length > 0);
   if (
     hadDimSelection &&
-    (state.activeTool === "wall" || state.activeTool === "hidden")
+    (state.activeTool === "wall" || state.activeTool === "hidden" || state.activeTool === "beam")
   ) {
     selectedDimId = null;
     hoverDimId = null;
@@ -6514,7 +6658,51 @@ function onMouseDown(e) {
       }
     ));
     selectLatestDrawnWall({ graphType: "hidden", beforeIds: beforeHiddenIds });
+  } else if (state.activeTool === "beam") {
+    const beforeBeamIds = new Set(graph.walls.keys());
+    undo.runAction(() => {
+      beamTool.onPointerDown(
+        { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
+        {
+          snapOn: state.snapOn,
+          resolveSnapPoint: resolveSnapPointWorld,
+          wallMagnetEnabled: state.wallMagnetEnabled,
+          stepDrawEnabled: state.stepDrawEnabled,
+          stepDrawMode: state.stepDrawMode,
+          stepLineEnabled: state.stepLineEnabled,
+          stepDegreeEnabled: state.stepDegreeEnabled,
+          stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+          stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+        }
+      );
+      for (const id of graph.walls.keys()) {
+        if (beforeBeamIds.has(id)) continue;
+        const w = graph.getWall(id);
+        if (!w) continue;
+        w.fillColor = state.beamFillColor || w.fillColor || null;
+        w.color3d = state.beam3dColor || w.color3d || null;
+        w.heightMm = Math.max(1, Number(state.beamHeightMm) || 3000);
+        w.floorOffsetMm = Number.isFinite(Number(state.beamFloorOffsetMm)) ? Number(state.beamFloorOffsetMm) : 0;
+        w.elementType = "beam";
+      }
+      enforceLockedInsideLengths();
+    });
+    selectLatestDrawnWall({ graphType: "wall", beforeIds: beforeBeamIds });
   } else if (state.activeTool === "wall") {
+    const nextPrefix = getNamePrefixFromUiCursorMode(uiCursorMode);
+    if (tool.namePrefix !== nextPrefix) {
+      tool.namePrefix = nextPrefix;
+      tool.syncWallIndexFromGraph?.();
+    }
+    if (nextPrefix === "Beam") {
+      tool.defaultThickness = Math.max(1, Number(state.beamThicknessMm) || 400);
+      tool.defaultHeightMm = Math.max(1, Number(state.beamHeightMm) || 200);
+      tool.defaultFloorOffsetMm = Math.max(0, Number(state.beamFloorOffsetMm) || 2600);
+    } else {
+      tool.defaultThickness = Math.max(1, Number(state.wallThicknessMm) || 120);
+      tool.defaultHeightMm = Math.max(1, Number(state.wallHeightMm) || 3000);
+      tool.defaultFloorOffsetMm = 0;
+    }
     const beforeWallIds = new Set(graph.walls.keys());
     undo.runAction(() => {
       const beforeWalls = graph.walls.size;
@@ -6730,6 +6918,7 @@ function onWindowMouseMove(e) {
   const isDrawing =
     (state.activeTool === "dim") ? !!dimTool.getStatus()?.isDrawing :
     (state.activeTool === "hidden") ? !!hiddenTool.getStatus()?.isDrawing :
+    (state.activeTool === "beam") ? !!beamTool.getStatus()?.isDrawing :
     !!tool.getStatus()?.isDrawing;
 
   // When integrated in Vue layout, ignore hover/move when pointer is outside the canvas,
@@ -7013,6 +7202,20 @@ function onWindowMouseMove(e) {
     {
       snapOn: state.snapOn,
       resolveSnapPoint: resolveSnapPointWorld,
+      stepDrawEnabled: state.stepDrawEnabled,
+      stepDrawMode: state.stepDrawMode,
+      stepLineEnabled: state.stepLineEnabled,
+      stepDegreeEnabled: state.stepDegreeEnabled,
+      stepLineMm: Math.max(1, Number(state.stepLineCm || 5) * 10),
+      stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
+    }
+  );
+  else if (state.activeTool === "beam") beamTool.onPointerMove(
+    { offsetX: ox, offsetY: oy, shiftKey: e.shiftKey },
+    {
+      snapOn: state.snapOn,
+      resolveSnapPoint: resolveSnapPointWorld,
+      wallMagnetEnabled: state.wallMagnetEnabled,
       stepDrawEnabled: state.stepDrawEnabled,
       stepDrawMode: state.stepDrawMode,
       stepLineEnabled: state.stepLineEnabled,
@@ -7327,9 +7530,15 @@ function onWindowKeyDown(e) {
 
   if (state.activeTool === "dim") dimTool.onKeyDown(e);
   else if (state.activeTool === "hidden") hiddenTool.onKeyDown(e);
+  else if (state.activeTool === "beam") {
+    beamTool.onKeyDown(e);
+    state.orthoEnabled = !!beamTool.snapEnabled;
+    tool.snapEnabled = state.orthoEnabled;
+  }
   else {
     tool.onKeyDown(e);
     state.orthoEnabled = !!tool.snapEnabled;
+    beamTool.snapEnabled = state.orthoEnabled;
   }
 
   if (key === "Escape") {
@@ -7396,6 +7605,7 @@ function onDblClick(e) {
   const isDrawing =
     (state.activeTool === "dim") ? !!dimTool.getStatus()?.isDrawing :
     (state.activeTool === "hidden") ? !!hiddenTool.getStatus()?.isDrawing :
+    (state.activeTool === "beam") ? !!beamTool.getStatus()?.isDrawing :
     !!tool.getStatus()?.isDrawing;
   if (isDrawing) return;
   e.preventDefault();
@@ -7505,7 +7715,7 @@ const _ui = {
 function setActiveTool(name) {
   const next =
     (name === "select") ? "select" :
-    (name === "hidden" || name === "dim" || name === "wall") ? name :
+    (name === "hidden" || name === "dim" || name === "wall" || name === "beam") ? name :
     "wall";
   if (state.activeTool === next) return;
 
@@ -7517,10 +7727,12 @@ function setActiveTool(name) {
   if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
   tool.stopChaining();
   hiddenTool.stopChaining();
+  beamTool.stopChaining();
   dimTool.cancel();
 
   state.activeTool = next;
   if (next === "wall") tool.snapEnabled = state.orthoEnabled !== false;
+  if (next === "beam") beamTool.snapEnabled = state.orthoEnabled !== false;
   if (next === "dim") dimTool.orthoLocked = state.orthoEnabled !== false;
   _ui.updateToolButtons();
   updateCanvasCursor();
@@ -7550,6 +7762,7 @@ function clearAll() {
     tool.wallIndex = 0;
     tool.stopChaining();
     hiddenTool.stopChaining();
+    beamTool.stopChaining();
     dimTool.cancel();
 
     selectedWallId = null;
@@ -7565,10 +7778,12 @@ function clearAll() {
 function getState() {
   const graphSnap = snapshotGraph(graph);
   const hiddenGraphSnap = snapshotGraph(hiddenGraph);
+  const beamGraphSnap = { nodes: [], walls: [] };
   return {
     state: { ...state },
     graphSnap,
     hiddenGraphSnap,
+    beamGraphSnap,
     counts: {
       solidNodes: graphSnap.nodes.length,
       solidWalls: graphSnap.walls.length,
@@ -7582,6 +7797,7 @@ function getState() {
     tools: {
       wall: tool?.getStatus?.() || null,
       hidden: hiddenTool?.getStatus?.() || null,
+      beam: beamTool?.getStatus?.() || null,
       dim: dimTool?.getStatus?.() || null,
     },
     move: {
@@ -7603,6 +7819,8 @@ function getState() {
       selectedWallIds: selectedWallIds.slice(),
       selectedHiddenId,
       selectedHiddenIds: selectedHiddenIds.slice(),
+      selectedBeamId: null,
+      selectedBeamIds: [],
       selectedDimId,
       selectedDimIds: selectedDimIds.slice(),
       selectedModelOutline,
@@ -7636,12 +7854,28 @@ function setState(patch) {
     state.wallHeightMm = mm;
     tool.defaultHeightMm = mm;
   }
+  if (typeof patch.beamThicknessMm === "number" && isFinite(patch.beamThicknessMm) && patch.beamThicknessMm > 0) {
+    state.beamThicknessMm = Math.max(1, patch.beamThicknessMm);
+  }
+  if (typeof patch.beamHeightMm === "number" && isFinite(patch.beamHeightMm) && patch.beamHeightMm > 0) {
+    state.beamHeightMm = Math.max(1, patch.beamHeightMm);
+  }
+  if (typeof patch.beamFloorOffsetMm === "number" && isFinite(patch.beamFloorOffsetMm) && patch.beamFloorOffsetMm >= 0) {
+    state.beamFloorOffsetMm = Math.max(0, patch.beamFloorOffsetMm);
+  }
   if (typeof patch.wallFillColor === "string" && patch.wallFillColor) {
     state.wallFillColor = patch.wallFillColor;
   }
   if (typeof patch.wall3dColor === "string" && patch.wall3dColor) {
     state.wall3dColor = patch.wall3dColor;
     tool.defaultColor = patch.wall3dColor;
+  }
+  if (typeof patch.beamFillColor === "string" && patch.beamFillColor) {
+    state.beamFillColor = patch.beamFillColor;
+  }
+  if (typeof patch.beam3dColor === "string" && patch.beam3dColor) {
+    state.beam3dColor = patch.beam3dColor;
+    beamTool.defaultColor = patch.beam3dColor;
   }
   if (typeof patch.wallMagnetEnabled === "boolean") {
     state.wallMagnetEnabled = patch.wallMagnetEnabled;
@@ -7658,6 +7892,7 @@ function setState(patch) {
     state.orthoEnabled = patch.orthoEnabled;
     // Keep wall tool lock-step state synced with the public ortho flag.
     tool.snapEnabled = state.orthoEnabled;
+    beamTool.snapEnabled = state.orthoEnabled;
     if (!dimTool.getStatus?.()?.isDrawing) dimTool.orthoLocked = state.orthoEnabled;
   }
   if (Number.isFinite(Number(patch.stepLineCm))) {
@@ -7695,7 +7930,7 @@ function setState(patch) {
 }
 
 
-function setSelectedWallStyle({ thicknessMm = null, heightMm = null, fillColor = null } = {}) {
+function setSelectedWallStyle({ thicknessMm = null, heightMm = null, floorOffsetMm = null, fillColor = null } = {}) {
   const ids = [];
   if (selectedWallId) ids.push(selectedWallId);
   for (const id of selectedWallIds) if (id && !ids.includes(id)) ids.push(id);
@@ -7714,6 +7949,10 @@ function setSelectedWallStyle({ thicknessMm = null, heightMm = null, fillColor =
         w.heightMm = Math.max(1, Number(heightMm));
         changed = true;
       }
+      if (Number.isFinite(Number(floorOffsetMm)) && Number(floorOffsetMm) >= 0) {
+        w.floorOffsetMm = Math.max(0, Number(floorOffsetMm));
+        changed = true;
+      }
       if (typeof fillColor === "string" && fillColor) {
         w.color3d = fillColor;
         changed = true;
@@ -7729,6 +7968,46 @@ function setSelectedWallStyle({ thicknessMm = null, heightMm = null, fillColor =
 }
 
 
+
+
+function setSelectedBeamStyle({ thicknessMm = null, heightMm = null, fillColor = null, floorOffsetMm = null } = {}) {
+  const ids = [];
+  if (selectedWallId) ids.push(selectedWallId);
+  for (const id of selectedWallIds) if (id && !ids.includes(id)) ids.push(id);
+  if (ids.length === 0) return false;
+
+  let changed = false;
+  undo.runAction(() => {
+    for (const id of ids) {
+      const w = graph.getWall(id);
+      if (!w) continue;
+      if (w.elementType !== "beam") continue;
+      if (Number.isFinite(Number(thicknessMm)) && Number(thicknessMm) > 0) {
+        w.thickness = Math.max(1, Number(thicknessMm));
+        changed = true;
+      }
+      if (Number.isFinite(Number(heightMm)) && Number(heightMm) > 0) {
+        w.heightMm = Math.max(1, Number(heightMm));
+        changed = true;
+      }
+      if (typeof fillColor === "string" && fillColor) {
+        w.color3d = fillColor;
+        w.fillColor = fillColor;
+        changed = true;
+      }
+      if (Number.isFinite(Number(floorOffsetMm))) {
+        w.floorOffsetMm = Number(floorOffsetMm);
+        changed = true;
+      }
+    }
+  });
+
+  if (changed) {
+    saveSettings();
+    return true;
+  }
+  return false;
+}
 
 function setSelectedWallLength(lengthMm) {
   const w = selectedWallId ? graph.getWall(selectedWallId) : null;
@@ -7944,6 +8223,45 @@ function moveSelectedHiddenWallsBy(delta = {}) {
     return true;
   }
   return false;
+}
+
+function setSelectedBeamStyle({ thicknessMm = null, heightMm = null, fillColor = null, floorOffsetMm = null } = {}) {
+  const changed = setSelectedWallStyle({ thicknessMm, heightMm, fillColor });
+  if (!Number.isFinite(Number(floorOffsetMm))) return changed;
+
+  const ids = [];
+  if (selectedWallId) ids.push(selectedWallId);
+  for (const id of selectedWallIds) if (id && !ids.includes(id)) ids.push(id);
+  if (ids.length === 0) return changed;
+
+  let floorChanged = false;
+  undo.runAction(() => {
+    for (const id of ids) {
+      const w = graph.getWall(id);
+      if (!w) continue;
+      const mm = Number(floorOffsetMm);
+      if (!Number.isFinite(mm)) continue;
+      const next = Math.round(mm * 10) / 10;
+      if ((Number(w.floorOffsetMm) || 0) !== next) {
+        w.floorOffsetMm = next;
+        floorChanged = true;
+      }
+    }
+  });
+  if (floorChanged) saveSettings();
+  return changed || floorChanged;
+}
+
+function setSelectedBeamLength(lengthMm) {
+  return setSelectedWallLength(lengthMm);
+}
+
+function setSelectedBeamCoords(coords = {}) {
+  return setSelectedWallCoords(coords);
+}
+
+function moveSelectedBeamsBy(delta = {}) {
+  return moveSelectedWallsBy(delta);
 }
 
 function bindStandaloneUiIfPresent() {
@@ -8193,6 +8511,7 @@ return {
   getState,
   setState,
   setSelectedWallStyle,
+  setSelectedBeamStyle,
   setSelectedHiddenStyle,
   setSelectedWallLength,
   setSelectedWallCoords,
@@ -8200,5 +8519,9 @@ return {
   setSelectedHiddenLength,
   setSelectedHiddenCoords,
   moveSelectedHiddenWallsBy,
+  setSelectedBeamStyle,
+  setSelectedBeamLength,
+  setSelectedBeamCoords,
+  moveSelectedBeamsBy,
 };
 }
