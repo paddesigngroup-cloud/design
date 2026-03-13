@@ -549,80 +549,55 @@ function clearWalls3d() {
   wallsRoot = null;
 }
 
-function normalizeLinearMembers(snapshot = {}, kind = "wall") {
-  const isBeam = kind === "beam";
-  const nodeCandidates = isBeam
-    ? [snapshot?.beamNodes, snapshot?.beams?.nodes, snapshot?.beamGraphSnap?.nodes]
-    : [snapshot?.nodes, snapshot?.walls?.nodes, snapshot?.wallGraphSnap?.nodes];
-  const edgeCandidates = isBeam
-    ? [snapshot?.beamEdges, snapshot?.beams?.edges, snapshot?.beams?.walls, snapshot?.beamGraphSnap?.edges, snapshot?.beamGraphSnap?.walls]
-    : [snapshot?.walls, snapshot?.wallEdges, snapshot?.wallGraphSnap?.walls];
-
-  const nodes = nodeCandidates.find(Array.isArray) || [];
-  const edges = edgeCandidates.find(Array.isArray) || [];
-  return { nodes, edges };
+function normalizeLinearMembers(snapshot) {
+  const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
+  const walls = Array.isArray(snapshot?.walls) ? snapshot.walls : [];
+  return { nodes, walls };
 }
 
-function buildLinearMemberMeshes(root, members, opts = {}) {
-  const {
-    fallbackFillColor = "#C7CCD1",
-    defaultHeightMm = 2800,
-    applyFloorOffset = false,
-  } = opts;
+function buildLinearMemberMesh(w, byId, jointGammaMap, fallbackFillColor = "#C7CCD1") {
+  const corners = computeTrimmedWallCorners(w, byId, jointGammaMap);
+  if (!corners) return null;
 
-  const nodes = Array.isArray(members?.nodes) ? members.nodes : [];
-  const edges = Array.isArray(members?.edges) ? members.edges : [];
-  if (!nodes.length || !edges.length) return;
+  const heightMm = Number.isFinite(Number(w?.heightMm))
+    ? Number(w.heightMm)
+    : 2800;
+  const heightM = Math.max(0.1, heightMm * 0.001);
 
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const jointGammaMap = buildJointGammaMap(edges, byId);
+  const colorHex = (typeof w?.color3d === "string" && w.color3d)
+    ? w.color3d
+    : ((typeof w?.fillColor === "string" && w.fillColor) ? w.fillColor : fallbackFillColor);
 
-  for (const edge of edges) {
-    const corners = computeTrimmedWallCorners(edge, byId, jointGammaMap);
-    if (!corners) continue;
+  const memberMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(colorHex),
+    roughness: 0.86,
+    metalness: 0.05,
+  });
 
-    const heightMm = Number.isFinite(Number(edge?.heightMm))
-      ? Number(edge.heightMm)
-      : defaultHeightMm;
-    const heightM = Math.max(0.1, heightMm * 0.001);
-
-    const colorHex = (typeof edge?.color3d === "string" && edge.color3d)
-      ? edge.color3d
-      : ((typeof edge?.fillColor === "string" && edge.fillColor) ? edge.fillColor : fallbackFillColor);
-
-    const mat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(colorHex),
-      roughness: 0.86,
-      metalness: 0.05,
-    });
-
-    const mesh = makeWallExtrudedMesh(corners, heightM, wallMat);
-    const floorOffsetMm = Number.isFinite(Number(w?.floorOffsetMm)) ? Number(w.floorOffsetMm) : 0;
-    mesh.position.y = Math.max(0, floorOffsetMm * 0.001);
-    root.add(mesh);
-  }
+  const mesh = makeWallExtrudedMesh(corners, heightM, memberMat);
+  const floorOffsetMm = Number.isFinite(Number(w?.floorOffsetMm)) ? Number(w.floorOffsetMm) : 0;
+  mesh.position.y = Math.max(0, floorOffsetMm * 0.001);
+  return mesh;
 }
 
 function rebuildWalls3d(snapshot) {
   if (!scene) return;
   clearWalls3d();
 
-  const wallMembers = normalizeLinearMembers(snapshot, "wall");
-  const beamMembers = normalizeLinearMembers(snapshot, "beam");
-  if (!wallMembers.edges.length && !beamMembers.edges.length) return;
+  const { nodes, walls } = normalizeLinearMembers(snapshot);
+  if (!nodes.length || !walls.length) return;
 
   const root = new THREE.Group();
   root.name = "walls2d-extruded";
-  buildLinearMemberMeshes(root, wallMembers, {
-    fallbackFillColor: "#C7CCD1",
-    defaultHeightMm: 2800,
-    applyFloorOffset: false,
-  });
-  buildLinearMemberMeshes(root, beamMembers, {
-    fallbackFillColor: "#C7CCD1",
-    defaultHeightMm: 400,
-    applyFloorOffset: true,
-  });
+  const fallbackFillColor = "#C7CCD1";
+
+  const jointGammaMap = buildJointGammaMap(walls, byId);
+
+  for (const w of walls) {
+    const mesh = buildLinearMemberMesh(w, byId, jointGammaMap, fallbackFillColor);
+    if (!mesh) continue;
+    root.add(mesh);
+  }
 
   if (!root.children.length) return;
   wallsRoot = root;
@@ -995,16 +970,22 @@ onBeforeUnmount(() => {
 
   try {
     controls?.dispose?.();
-  } catch (_) {}
+  } catch (_) {
+    // no-op
+  }
   controls = null;
 
   try {
     disposeScene(scene);
-  } catch (_) {}
+  } catch (_) {
+    // no-op
+  }
 
   try {
     renderer?.dispose?.();
-  } catch (_) {}
+  } catch (_) {
+    // no-op
+  }
 
   renderer = null;
   scene = null;
@@ -1015,9 +996,12 @@ onBeforeUnmount(() => {
 
   try {
     axesHelper?.removeFromParent?.();
-  } catch (_) {}
+  } catch (_) {
+    // no-op
+  }
   axesHelper = null;
 });
+
 </script>
 
 <template>
