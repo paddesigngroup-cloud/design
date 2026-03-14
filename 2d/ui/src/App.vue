@@ -139,11 +139,10 @@ const designMenuTools = [
   { id: "hidden", icon: "/icons/drawing_hidden_wall.png", title: "خط راهنما", mapsToTool: "hidden" },
   { id: "dimension", icon: "/icons/drawing_dimension.png", title: "اندازه گذاری", mapsToTool: "dimension" },
   { id: "beam", icon: "/icons/beam.png", title: "تیر", mapsToTool: "wall" },
-  { id: "column", icon: "/icons/column.png", title: "ستون", mapsToTool: "beam" },
+  { id: "column", icon: "/icons/column.png", title: "ستون", mapsToTool: null },
 ];
 
 const wallPresets = WALL_READY_PRESETS;
-const columnPreset = { id: "column_basic", title: "ستون" };
 const presetDrag = ref({ active: false, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false });
 const snapMenuItems = [
   { id: "corner", title: "گوشه", icon: "/icons/corner_point.png" },
@@ -269,7 +268,7 @@ function syncQuickStateFromEditor() {
     const defaultColumnColor = (typeof s?.column3dColor === "string" && s.column3dColor) ? s.column3dColor : "#C7CCD1";
     const defaultColor = (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1";
 
-    const selectedObj = (metricsEntityType === "hidden") ? selectedHidden : selectedWall;
+    const selectedObj = (metricsEntityType === "hidden") ? selectedHidden : (metricsEntityType === "beam" ? selectedBeam : selectedWall);
     const selectedName = String(selectedObj?.name || "").trim();
     const isBeamSelection = selectedElementType === "beam" || /^Beam\s+/i.test(selectedName);
     const isColumnSelection = selectedElementType === "column" || /^Column\s+/i.test(selectedName);
@@ -290,7 +289,6 @@ function syncQuickStateFromEditor() {
           heightCm: defaultHeightCm,
           floorOffsetCm: 0,
           color: defaultColor,
-          floorOffsetCm: 0,
         };
   }
 
@@ -312,7 +310,6 @@ function syncQuickStateFromEditor() {
       color: (typeof selectedEntity.color3d === "string" && selectedEntity.color3d)
         ? selectedEntity.color3d
         : ((typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1"),
-      floorOffsetCm: (Number(selectedEntity.floorOffsetMm) || 0) / 10,
       a: selectedEntity.a,
       b: selectedEntity.b,
       selectedCount,
@@ -706,12 +703,13 @@ async function setDesignMenuTool(id) {
   designMenuTool.value = id;
   const it = designMenuTools.find((x) => x.id === id);
   if (it?.mapsToTool) await setTool(it.mapsToTool);
+  else if (id === "column") await setTool("select");
 
   const mode =
     (id === "wall") ? "wall" :
     (id === "hidden") ? "hidden" :
     (id === "dimension") ? "dim" :
-    (id === "beam" || id === "column") ? "beam" :
+    (id === "beam") ? "beam" :
     null;
   editorRef.value?.setUiCursorMode?.(mode);
 
@@ -845,6 +843,10 @@ function onDesignToolPointerDown(it, ev) {
   startColumnPresetDrag(ev);
 }
 
+function isColumnPreset(preset) {
+  return String(preset?.type || "").toLowerCase() === "column" || String(preset?.kind || "").toLowerCase() === "column";
+}
+
 function onPresetPointerUp(ev) {
   const stageRect = stageEl.value?.getBoundingClientRect();
   const inStage = !!stageRect && ev.clientX >= stageRect.left && ev.clientX <= stageRect.right
@@ -853,13 +855,16 @@ function onPresetPointerUp(ev) {
   const dragDy = ev.clientY - (presetDrag.value.startY || ev.clientY);
   const movedEnough = Math.hypot(dragDx, dragDy) >= 12;
 
-  if (inStage && movedEnough && presetDrag.value.enteredStage && presetDrag.value.preset) {
-    if (presetDrag.value.preset?.type === "column") {
-      editorRef.value?.placeColumnAtClient?.(ev.clientX, ev.clientY);
-    } else {
-      const lines = buildPresetLines(presetDrag.value.preset.kind);
-      editorRef.value?.placeWallPresetAtClient?.(lines, ev.clientX, ev.clientY);
-    }
+  const preset = presetDrag.value.preset;
+  const isColumnDrop = isColumnPreset(preset);
+  const shouldPlaceColumn = !!preset && isColumnDrop && inStage;
+  const shouldPlaceWallPreset = !!preset && !isColumnDrop && inStage && movedEnough && presetDrag.value.enteredStage;
+
+  if (shouldPlaceColumn) {
+    editorRef.value?.placeColumnAtClient?.(ev.clientX, ev.clientY);
+  } else if (shouldPlaceWallPreset) {
+    const lines = buildPresetLines(preset.kind);
+    editorRef.value?.placeWallPresetAtClient?.(lines, ev.clientX, ev.clientY);
   }
   presetDrag.value = { active: false, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false };
   window.removeEventListener("pointermove", onPresetPointerMove);
@@ -1359,21 +1364,10 @@ onBeforeUnmount(() => {
 
               <div class="designMenu__sep" role="separator"></div>
 
-              <div class="designMenu__presetsHead">{{ designMenuTool === "column" ? "مدل ستون" : "مدل های دیوار" }}</div>
-              <div class="designMenu__presets" :aria-label="designMenuTool === 'column' ? 'Column Presets' : 'Wall Presets'">
+              <div class="designMenu__presetsHead">مدل های دیوار</div>
+              <div class="designMenu__presets" aria-label="Wall Presets">
                 <button
-                  v-if="designMenuTool === 'column'"
-                  type="button"
-                  class="presetTile"
-                  :title="columnPreset.title"
-                  @pointerdown.prevent="startColumnPresetDrag($event)"
-                >
-                  <svg class="presetTile__svg" viewBox="0 0 44 44" aria-hidden="true">
-                    <rect x="9" y="12" width="26" height="20" fill="#A6A6A6" stroke="#111827" stroke-width="2" />
-                  </svg>
-                </button>
-                <button
-                  v-for="p in (designMenuTool === 'column' ? [] : wallPresets)"
+                  v-for="p in wallPresets"
                   :key="p.id"
                   type="button"
                   class="presetTile"
@@ -1550,7 +1544,8 @@ onBeforeUnmount(() => {
             :style="{ left: `${presetDrag.clientX}px`, top: `${presetDrag.clientY}px` }"
             aria-hidden="true"
           >
-            <svg class="presetDragGhost__svg" viewBox="0 0 44 44">
+            <img v-if="isColumnPreset(presetDrag.preset)" class="presetDragGhost__icon" src="/icons/column.png" alt="" />
+            <svg v-else class="presetDragGhost__svg" viewBox="0 0 44 44">
               <g fill="none" stroke="#111827" stroke-linecap="square" stroke-linejoin="miter">
                 <line
                   v-for="(w,idx) in getPresetIconWalls(presetDrag.preset?.kind)"

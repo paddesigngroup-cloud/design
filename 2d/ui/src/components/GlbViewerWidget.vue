@@ -1118,16 +1118,6 @@ onBeforeUnmount(() => {
             @input="patchWallStyleDraft({ color: $event.target.value })"
           />
         </label>
-        <label v-if="showFloorOffsetField" class="glbWallAttrs__editRow">
-          <span>کف‌افست (cm)</span>
-          <input
-            class="glbWallAttrs__input"
-            type="number"
-            step="0.1"
-            :value="wallStyleDraft.floorOffsetCm"
-            @input="patchWallStyleDraft({ floorOffsetCm: +$event.target.value })"
-          />
-        </label>
       </div>
 
       <div class="glbWallAttrs__sep"></div>

@@ -526,6 +526,11 @@ textarea {
   width: 42px;
   height: 42px;
 }
+.presetDragGhost__icon {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
 
 
 .menuList {

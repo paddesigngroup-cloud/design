@@ -2078,17 +2078,15 @@ function placeColumnAtClient(clientX, clientY, recordUndo = true) {
     w.color3d = color3d;
     w.fillColor = color3d;
     w.elementType = "column";
-    if (!w.name || /^Wall\s+/i.test(String(w.name)) || /^Column\s+/i.test(String(w.name))) {
-      let maxIdx = 0;
-      for (const ex of graph.walls.values()) {
-        if (!ex || ex.elementType !== "column") continue;
-        const m = String(ex.name || "").trim().match(/^C(\d+)$/i);
-        if (!m) continue;
-        const n = Number(m[1]);
-        if (Number.isFinite(n) && n > maxIdx) maxIdx = n;
-      }
-      w.name = `C${maxIdx + 1}`;
+    let maxIdx = 0;
+    for (const ex of graph.walls.values()) {
+      if (!ex || ex.id === w.id || ex.elementType !== "column") continue;
+      const m = String(ex.name || "").trim().match(/^C(\d+)$/i);
+      if (!m) continue;
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n > maxIdx) maxIdx = n;
     }
+    w.name = `C${maxIdx + 1}`;
 
     clearGroupSelection();
     selectedWallId = w.id;
