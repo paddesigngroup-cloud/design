@@ -144,6 +144,7 @@ const designMenuTools = [
 
 const wallPresets = WALL_READY_PRESETS;
 const presetDrag = ref({ active: false, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false });
+const PRESET_PREVIEW_MIN_DRAG_PX = 12;
 const snapMenuItems = [
   { id: "corner", title: "گوشه", icon: "/icons/corner_point.png" },
   { id: "mid", title: "وسط ضلع", icon: "/icons/midpoint.png" },
@@ -897,7 +898,7 @@ function onPresetPointerUp(ev) {
     && ev.clientY >= stageRect.top && ev.clientY <= stageRect.bottom;
   const dragDx = ev.clientX - (presetDrag.value.startX || ev.clientX);
   const dragDy = ev.clientY - (presetDrag.value.startY || ev.clientY);
-  const movedEnough = Math.hypot(dragDx, dragDy) >= 12;
+  const movedEnough = Math.hypot(dragDx, dragDy) >= PRESET_PREVIEW_MIN_DRAG_PX;
 
   if (inStage && movedEnough && presetDrag.value.enteredStage && presetDrag.value.preset) {
     const lines = buildPresetLines(presetDrag.value.preset.kind);
@@ -907,6 +908,84 @@ function onPresetPointerUp(ev) {
   window.removeEventListener("pointermove", onPresetPointerMove);
   enable2dInput();
 }
+
+const presetPreview = computed(() => {
+  const drag = presetDrag.value;
+  if (!drag.active || !drag.preset) return null;
+
+  const dx = drag.clientX - (drag.startX || drag.clientX);
+  const dy = drag.clientY - (drag.startY || drag.clientY);
+  const movedEnough = Math.hypot(dx, dy) >= PRESET_PREVIEW_MIN_DRAG_PX;
+  if (!movedEnough) return null;
+
+  const stageRect = stageEl.value?.getBoundingClientRect();
+  if (!stageRect) return null;
+
+  const stageX = drag.clientX - stageRect.left;
+  const stageY = drag.clientY - stageRect.top;
+  const insideStage = stageX >= 0 && stageY >= 0 && stageX <= stageRect.width && stageY <= stageRect.height;
+  if (!insideStage && !drag.enteredStage) return null;
+
+  const full = editorRef.value?.getState?.();
+  const st = full?.state || {};
+  const zoom = Number(st.zoom);
+  const offsetX = Number(st.offsetX);
+  const offsetY = Number(st.offsetY);
+  if (!Number.isFinite(zoom) || !Number.isFinite(offsetX) || !Number.isFinite(offsetY) || zoom <= 0) return null;
+
+  const lines = buildPresetLines(drag.preset.kind);
+  if (!Array.isArray(lines) || lines.length === 0) return null;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const l of lines) {
+    minX = Math.min(minX, Number(l.ax), Number(l.bx));
+    maxX = Math.max(maxX, Number(l.ax), Number(l.bx));
+    minY = Math.min(minY, Number(l.ay), Number(l.by));
+    maxY = Math.max(maxY, Number(l.ay), Number(l.by));
+  }
+  if (!isFinite(minX) || !isFinite(maxX) || !isFinite(minY) || !isFinite(maxY)) return null;
+
+  const centerWorldX = (stageX - offsetX) / zoom;
+  const centerWorldY = -(stageY - offsetY) / zoom;
+  const cx = (minX + maxX) * 0.5;
+  const cy = (minY + maxY) * 0.5;
+  const wallFill = walls3dSnapshot.value?.state?.wallFillColor || "#A6A6A6";
+
+  const screenLines = lines.map((l, idx) => {
+    const ax = Number(l.ax) - cx + centerWorldX;
+    const ay = Number(l.ay) - cy + centerWorldY;
+    const bx = Number(l.bx) - cx + centerWorldX;
+    const by = Number(l.by) - cy + centerWorldY;
+    const x1 = ax * zoom + offsetX;
+    const y1 = -ay * zoom + offsetY;
+    const x2 = bx * zoom + offsetX;
+    const y2 = -by * zoom + offsetY;
+    const thickness = Math.max(1, Number(l.thickness) || Number(st.wallThicknessMm) || 120);
+    const sw = Math.max(4, thickness * zoom);
+    return {
+      id: `${drag.preset.id}-${idx}`,
+      x1,
+      y1,
+      x2,
+      y2,
+      sw,
+      label: l.name || `Wall ${idx + 1}`,
+      midX: (x1 + x2) * 0.5,
+      midY: (y1 + y2) * 0.5,
+      angle: Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI,
+    };
+  });
+
+  return {
+    width: stageRect.width,
+    height: stageRect.height,
+    lines: screenLines,
+    fill: wallFill,
+  };
+});
 
 function toggleMenu(menuId, e) {
   // While drawing, keep submenus closed (AutoCAD-like).
@@ -1576,34 +1655,56 @@ onBeforeUnmount(() => {
             </KeepAlive>
           </RouterView>
 
-          <div
-            v-if="presetDrag.active"
-            class="presetDragGhost"
-            :style="{ left: `${presetDrag.clientX}px`, top: `${presetDrag.clientY}px` }"
-            aria-hidden="true"
-          >
-            <svg class="presetDragGhost__svg" viewBox="0 0 44 44">
-              <g fill="none" stroke="#111827" stroke-linecap="square" stroke-linejoin="miter">
+          <div v-if="presetPreview" class="presetStagePreview" aria-hidden="true">
+            <svg
+              class="presetStagePreview__svg"
+              :viewBox="`0 0 ${presetPreview.width} ${presetPreview.height}`"
+              :width="presetPreview.width"
+              :height="presetPreview.height"
+            >
+              <g class="presetStagePreview__glow" stroke-linecap="square" stroke-linejoin="miter">
                 <line
-                  v-for="(w,idx) in getPresetIconWalls(presetDrag.preset?.kind)"
-                  :key="`ghost-edge-${idx}`"
-                  :x1="w.x1"
-                  :y1="w.y1"
-                  :x2="w.x2"
-                  :y2="w.y2"
-                  :stroke-width="w.sw + 1.5"
+                  v-for="line in presetPreview.lines"
+                  :key="`preview-glow-${line.id}`"
+                  :x1="line.x1"
+                  :y1="line.y1"
+                  :x2="line.x2"
+                  :y2="line.y2"
+                  :stroke-width="line.sw + 18"
                 />
               </g>
-              <g fill="none" stroke="#A6A6A6" stroke-linecap="square" stroke-linejoin="miter">
+              <g class="presetStagePreview__edge" stroke-linecap="square" stroke-linejoin="miter">
                 <line
-                  v-for="(w,idx) in getPresetIconWalls(presetDrag.preset?.kind)"
-                  :key="`ghost-fill-${idx}`"
-                  :x1="w.x1"
-                  :y1="w.y1"
-                  :x2="w.x2"
-                  :y2="w.y2"
-                  :stroke-width="w.sw"
+                  v-for="line in presetPreview.lines"
+                  :key="`preview-edge-${line.id}`"
+                  :x1="line.x1"
+                  :y1="line.y1"
+                  :x2="line.x2"
+                  :y2="line.y2"
+                  :stroke-width="line.sw + 2"
                 />
+              </g>
+              <g :stroke="presetPreview.fill" stroke-linecap="square" stroke-linejoin="miter">
+                <line
+                  v-for="line in presetPreview.lines"
+                  :key="`preview-fill-${line.id}`"
+                  :x1="line.x1"
+                  :y1="line.y1"
+                  :x2="line.x2"
+                  :y2="line.y2"
+                  :stroke-width="line.sw"
+                />
+              </g>
+              <g class="presetStagePreview__labels">
+                <text
+                  v-for="line in presetPreview.lines"
+                  :key="`preview-label-${line.id}`"
+                  :x="line.midX"
+                  :y="line.midY"
+                  :transform="`rotate(${line.angle} ${line.midX} ${line.midY})`"
+                >
+                  {{ line.label }}
+                </text>
               </g>
             </svg>
           </div>
