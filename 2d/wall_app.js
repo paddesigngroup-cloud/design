@@ -865,13 +865,15 @@ const copyCommand = {
   moved: false,
 };
 const extendCommand = {
-  mode: "idle", // idle | await_first_endpoint | await_second_member_or_endpoint | preview_ready
+  mode: "idle", // idle | await_second_member_or_endpoint | preview_ready
   kind: null, // wall | beam | hidden
   selectedIds: [],
+  firstWallId: null,
+  secondWallId: null,
   first: null,
   second: null,
   preview: null,
-  hoverEndpoint: null,
+  hoverWallId: null,
 };
 let typedCommandBuffer = "";
 let typedCommandBufferUntil = 0;
@@ -1138,6 +1140,29 @@ function pickNearestEndpointOnEdge(kind, wallId, offsetX, offsetY) {
   return dist2(offsetX, offsetY, ap.x, ap.y) <= dist2(offsetX, offsetY, bp.x, bp.y) ? a : b;
 }
 
+function computeBestExtendPreviewForWalls(kind, firstWallId, secondWallId) {
+  if (!firstWallId || !secondWallId || firstWallId === secondWallId) {
+    return { valid: false, reason: "invalid_selection" };
+  }
+  const candidates = [];
+  for (const roleA of ["a", "b"]) {
+    const first = buildExtendEndpoint(kind, firstWallId, roleA);
+    if (!first) continue;
+    for (const roleB of ["a", "b"]) {
+      const second = buildExtendEndpoint(kind, secondWallId, roleB);
+      if (!second) continue;
+      const preview = computeExtendPreview(first, second);
+      if (!preview?.valid) continue;
+      const d1 = Math.hypot(preview.target.x - first.moving.x, preview.target.y - first.moving.y);
+      const d2 = Math.hypot(preview.target.x - second.moving.x, preview.target.y - second.moving.y);
+      candidates.push({ preview, score: d1 + d2, maxScore: Math.max(d1, d2) });
+    }
+  }
+  if (!candidates.length) return { valid: false, reason: "parallel" };
+  candidates.sort((a, b) => (a.score - b.score) || (a.maxScore - b.maxScore));
+  return candidates[0].preview;
+}
+
 function computeExtendPreview(first, second) {
   if (!first || !second || first.wallId === second.wallId || first.kind !== second.kind) {
     return { valid: false, reason: "invalid_selection" };
@@ -1173,10 +1198,12 @@ function resetExtendCommand() {
   extendCommand.mode = "idle";
   extendCommand.kind = null;
   extendCommand.selectedIds = [];
+  extendCommand.firstWallId = null;
+  extendCommand.secondWallId = null;
   extendCommand.first = null;
   extendCommand.second = null;
   extendCommand.preview = null;
-  extendCommand.hoverEndpoint = null;
+  extendCommand.hoverWallId = null;
 }
 
 function beginExtendCommand() {
@@ -1194,9 +1221,23 @@ function beginExtendCommand() {
   dimTool.cancel();
   resetTypedCommandBuffer();
   resetExtendCommand();
-  extendCommand.mode = "await_first_endpoint";
   extendCommand.kind = sel.kind;
   extendCommand.selectedIds = sel.ids.slice();
+  extendCommand.firstWallId = sel.ids[0] || null;
+  if (!extendCommand.firstWallId) return false;
+  if (sel.ids.length >= 2) {
+    extendCommand.secondWallId = sel.ids[1];
+    extendCommand.preview = computeBestExtendPreviewForWalls(extendCommand.kind, extendCommand.firstWallId, extendCommand.secondWallId);
+    if (extendCommand.preview?.valid) {
+      extendCommand.first = extendCommand.preview.first;
+      extendCommand.second = extendCommand.preview.second;
+      extendCommand.mode = "preview_ready";
+      return cancelExtendCommand(true);
+    }
+    extendCommand.mode = "await_second_member_or_endpoint";
+    return true;
+  }
+  extendCommand.mode = "await_second_member_or_endpoint";
   return true;
 }
 
@@ -1237,43 +1278,27 @@ function cancelExtendCommand(commit = false) {
 
 function updateExtendPreviewFromPointer(offsetX, offsetY) {
   if (extendCommand.mode === "idle" || !extendCommand.kind) return;
-  if (extendCommand.mode === "await_first_endpoint") {
-    extendCommand.hoverEndpoint = pickNearestExtendEndpoint(
-      extendCommand.kind,
-      offsetX,
-      offsetY,
-      extendCommand.selectedIds.length ? extendCommand.selectedIds : null,
-      null
-    );
-    return;
-  }
   if (extendCommand.mode !== "await_second_member_or_endpoint" && extendCommand.mode !== "preview_ready") return;
 
   const selectedIds = extendCommand.selectedIds || [];
   const candidateIds = selectedIds.length === 2
-    ? selectedIds.filter((id) => id !== extendCommand.first?.wallId)
+    ? selectedIds.filter((id) => id !== extendCommand.firstWallId)
     : null;
-  let endpoint = pickNearestExtendEndpoint(
+  const edge = pickNearestExtendMember(
     extendCommand.kind,
     offsetX,
     offsetY,
     candidateIds,
-    extendCommand.first?.wallId || null
+    extendCommand.firstWallId || null
   );
-  if (!endpoint) {
-    const edge = pickNearestExtendMember(
-      extendCommand.kind,
-      offsetX,
-      offsetY,
-      candidateIds,
-      extendCommand.first?.wallId || null
-    );
-    if (edge) endpoint = pickNearestEndpointOnEdge(extendCommand.kind, edge.id, offsetX, offsetY);
-  }
-  extendCommand.hoverEndpoint = endpoint;
-  extendCommand.second = endpoint;
-  extendCommand.preview = endpoint ? computeExtendPreview(extendCommand.first, endpoint) : null;
-  extendCommand.mode = endpoint ? "preview_ready" : "await_second_member_or_endpoint";
+  extendCommand.hoverWallId = edge?.id || null;
+  extendCommand.secondWallId = edge?.id || null;
+  extendCommand.preview = edge
+    ? computeBestExtendPreviewForWalls(extendCommand.kind, extendCommand.firstWallId, edge.id)
+    : null;
+  extendCommand.first = extendCommand.preview?.first || null;
+  extendCommand.second = extendCommand.preview?.second || null;
+  extendCommand.mode = edge ? "preview_ready" : "await_second_member_or_endpoint";
 }
 
 function _cloneModel2dLines(lines) {
@@ -5221,9 +5246,30 @@ function drawExtendOverlay() {
   if (extendCommand.mode === "idle" || !extendCommand.kind) return;
 
   const first = extendCommand.first;
-  const hover = extendCommand.hoverEndpoint;
+  const hoverWallId = extendCommand.hoverWallId;
   const preview = extendCommand.preview;
   const valid = !!preview?.valid;
+  const g = getGraphForExtendKind(extendCommand.kind);
+
+  const drawWallMarker = (wallId, color) => {
+    if (!wallId) return;
+    const edge = getExtendEdge(extendCommand.kind, wallId);
+    if (!edge) return;
+    const A = g.getNode(edge.a);
+    const B = g.getNode(edge.b);
+    if (!A || !B) return;
+    const a = worldToScreen(A.x, A.y);
+    const b = worldToScreen(B.x, B.y);
+    ctx.save();
+    ctx.setLineDash([10, 6]);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.restore();
+  };
 
   const drawEndpoint = (endpoint, stroke, fill = "#ffffff", radius = 6) => {
     if (!endpoint) return;
@@ -5255,9 +5301,10 @@ function drawExtendOverlay() {
     ctx.restore();
   };
 
+  drawWallMarker(extendCommand.firstWallId, "#2563eb");
+  drawWallMarker(hoverWallId, valid ? "#16a34a" : "#dc2626");
   drawEndpoint(first, "#2563eb");
-  if (hover && extendCommand.mode !== "await_first_endpoint") drawEndpoint(hover, valid ? "#16a34a" : "#dc2626");
-  else if (hover) drawEndpoint(hover, "#0f172a");
+  drawEndpoint(preview?.second || null, valid ? "#16a34a" : "#dc2626");
 
   if (first) drawGuide(first.anchor, first.moving, "#2563eb");
   if (preview?.target && first) drawGuide(first.moving, preview.target, valid ? "#16a34a" : "#dc2626");
@@ -5279,9 +5326,8 @@ function drawExtendOverlay() {
   }
 
   const label =
-    extendCommand.mode === "await_first_endpoint" ? "EXT: endpoint اول" :
-    extendCommand.mode === "await_second_member_or_endpoint" ? "EXT: عضو/endpoint دوم" :
-    valid ? "EXT: Enter یا کلیک دوم برای اجرا" :
+    extendCommand.mode === "await_second_member_or_endpoint" ? "EXT: آبجکت دوم را انتخاب کنید" :
+    valid ? "EXT: با انتخاب آبجکت دوم ادغام می‌شود" :
     "EXT: نتیجه نامعتبر";
   ctx.save();
   ctx.font = `12px ${state.fontFamily || "Tahoma"}`;
@@ -6600,22 +6646,6 @@ function onMouseDown(e) {
   }
   if (e.button !== 0) return;
 
-  if (extendCommand.mode === "await_first_endpoint") {
-    const endpoint = pickNearestExtendEndpoint(
-      extendCommand.kind,
-      e.offsetX,
-      e.offsetY,
-      extendCommand.selectedIds.length ? extendCommand.selectedIds : null,
-      null
-    );
-    if (endpoint) {
-      extendCommand.first = endpoint;
-      extendCommand.hoverEndpoint = null;
-      extendCommand.preview = null;
-      extendCommand.mode = "await_second_member_or_endpoint";
-    }
-    return;
-  }
   if (extendCommand.mode === "await_second_member_or_endpoint" || extendCommand.mode === "preview_ready") {
     updateExtendPreviewFromPointer(e.offsetX, e.offsetY);
     if (extendCommand.mode === "preview_ready" && extendCommand.preview?.valid) {
@@ -7456,18 +7486,6 @@ function onWindowMouseMove(e) {
 
   const ox = clamp(oxRaw, 0, rect.width);
   const oy = clamp(oyRaw, 0, rect.height);
-  if (extendCommand.mode !== "idle") {
-    updateExtendPreviewFromPointer(ox, oy);
-    hoverUi = null;
-    hoverWallHandle = null;
-    hoverDimTextWallId = null;
-    hoverWallId = null;
-    hoverHiddenId = null;
-    hoverDimId = null;
-    hoverObjectAxis = null;
-    hoverModelOutline = false;
-    return;
-  }
   if (boxSelect.active) {
     boxSelect.curX = ox;
     boxSelect.curY = oy;
@@ -7485,6 +7503,19 @@ function onWindowMouseMove(e) {
   if (isPanning) {
     state.offsetX += e.movementX;
     state.offsetY += e.movementY;
+    return;
+  }
+
+  if (extendCommand.mode !== "idle") {
+    updateExtendPreviewFromPointer(ox, oy);
+    hoverUi = null;
+    hoverWallHandle = null;
+    hoverDimTextWallId = null;
+    hoverWallId = null;
+    hoverHiddenId = null;
+    hoverDimId = null;
+    hoverObjectAxis = null;
+    hoverModelOutline = false;
     return;
   }
 
@@ -8389,6 +8420,8 @@ function getState() {
       active: extendCommand.mode !== "idle",
       kind: extendCommand.kind,
       selectedIds: extendCommand.selectedIds.slice(),
+      firstWallId: extendCommand.firstWallId,
+      secondWallId: extendCommand.secondWallId,
       first: extendCommand.first ? {
         wallId: extendCommand.first.wallId,
         role: extendCommand.first.role,
