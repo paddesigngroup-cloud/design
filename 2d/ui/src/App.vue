@@ -392,6 +392,9 @@ function updateWallStyleDraft(next) {
     floorOffsetCm: Number(next?.floorOffsetCm ?? wallStyleDraft.value.floorOffsetCm),
     color: String(next?.color ?? wallStyleDraft.value.color),
   };
+  if ("lengthCm" in (next || {}) || "lengthCm" in wallStyleDraft.value) {
+    draft.lengthCm = Number(next?.lengthCm ?? wallStyleDraft.value.lengthCm);
+  }
   wallStyleDraft.value = draft;
   clampWallStyleDraft();
 
@@ -399,7 +402,10 @@ function updateWallStyleDraft(next) {
   const heightMm = Math.max(1, wallStyleDraft.value.heightCm * 10);
   const color3d = wallStyleDraft.value.color;
   const floorOffsetMm = Math.max(0, wallStyleDraft.value.floorOffsetCm * 10);
-  const lengthMm = Number.isFinite(Number(next?.lengthCm)) ? Math.max(10, Number(next.lengthCm) * 10) : null;
+  const hasLengthPatch = Object.prototype.hasOwnProperty.call(next || {}, "lengthCm");
+  const lengthMm = hasLengthPatch && Number.isFinite(Number(next?.lengthCm))
+    ? Math.max(10, Number(next.lengthCm) * 10)
+    : null;
   const entityType =
     selectedWallStyle.value?.entityType
     || (designMenuTool.value === "column" ? "column" : null)

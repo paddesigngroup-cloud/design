@@ -835,6 +835,7 @@ const boxSelect = {
   startY: 0,
   curX: 0,
   curY: 0,
+  mode: "replace",
 };
 const modelDrag = {
   active: false,
@@ -926,6 +927,82 @@ function clearGroupSelection() {
   selectedWallIds = [];
   selectedHiddenIds = [];
   selectedDimIds = [];
+}
+
+function normalizeSelectionIds(ids) {
+  const out = [];
+  const seen = new Set();
+  for (const id of Array.isArray(ids) ? ids : []) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+function setSingleOrMultiSelection(kind, ids) {
+  const next = normalizeSelectionIds(ids);
+  if (kind === "wall") {
+    selectedWallId = next.length === 1 ? next[0] : null;
+    selectedWallIds = next.length > 1 ? next : [];
+    return;
+  }
+  if (kind === "hidden") {
+    selectedHiddenId = next.length === 1 ? next[0] : null;
+    selectedHiddenIds = next.length > 1 ? next : [];
+    return;
+  }
+  if (kind === "dim") {
+    selectedDimId = next.length === 1 ? next[0] : null;
+    selectedDimIds = next.length > 1 ? next : [];
+  }
+}
+
+function applySelectionSnapshot(snapshot) {
+  const next = snapshot || {};
+  setSingleOrMultiSelection("wall", next.wallIds);
+  setSingleOrMultiSelection("hidden", next.hiddenIds);
+  setSingleOrMultiSelection("dim", next.dimIds);
+  selectedModelOutline = !!next.hasModel;
+}
+
+function mergeSelectionSnapshots(base, patch, mode = "replace") {
+  const current = base || {};
+  const incoming = patch || {};
+  const baseWallIds = normalizeSelectionIds(current.wallIds);
+  const baseHiddenIds = normalizeSelectionIds(current.hiddenIds);
+  const baseDimIds = normalizeSelectionIds(current.dimIds);
+  const hitWallIds = normalizeSelectionIds(incoming.wallIds);
+  const hitHiddenIds = normalizeSelectionIds(incoming.hiddenIds);
+  const hitDimIds = normalizeSelectionIds(incoming.dimIds);
+
+  if (mode === "add") {
+    return {
+      wallIds: normalizeSelectionIds([...baseWallIds, ...hitWallIds]),
+      hiddenIds: normalizeSelectionIds([...baseHiddenIds, ...hitHiddenIds]),
+      dimIds: normalizeSelectionIds([...baseDimIds, ...hitDimIds]),
+      hasModel: !!current.hasModel || !!incoming.hasModel,
+    };
+  }
+
+  if (mode === "remove") {
+    const hitWalls = new Set(hitWallIds);
+    const hitHiddens = new Set(hitHiddenIds);
+    const hitDims = new Set(hitDimIds);
+    return {
+      wallIds: baseWallIds.filter((id) => !hitWalls.has(id)),
+      hiddenIds: baseHiddenIds.filter((id) => !hitHiddens.has(id)),
+      dimIds: baseDimIds.filter((id) => !hitDims.has(id)),
+      hasModel: !!current.hasModel && !incoming.hasModel,
+    };
+  }
+
+  return {
+    wallIds: hitWallIds,
+    hiddenIds: hitHiddenIds,
+    dimIds: hitDimIds,
+    hasModel: !!incoming.hasModel,
+  };
 }
 
 function hasAnySelection() {
@@ -1045,6 +1122,52 @@ function toggleHiddenSelectionByModifier(wallId) {
   selectedWallId = null;
   selectedDimId = null;
   selectedModelOutline = false;
+}
+
+function addWallSelection(wallId) {
+  if (!wallId) return;
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  applySelectionSnapshot(mergeSelectionSnapshots(snap, { wallIds: [wallId] }, "add"));
+}
+
+function removeWallSelection(wallId) {
+  if (!wallId) return;
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  applySelectionSnapshot(mergeSelectionSnapshots(snap, { wallIds: [wallId] }, "remove"));
+}
+
+function addHiddenSelection(wallId) {
+  if (!wallId) return;
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  applySelectionSnapshot(mergeSelectionSnapshots(snap, { hiddenIds: [wallId] }, "add"));
+}
+
+function removeHiddenSelection(wallId) {
+  if (!wallId) return;
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  applySelectionSnapshot(mergeSelectionSnapshots(snap, { hiddenIds: [wallId] }, "remove"));
+}
+
+function addDimSelection(dimId) {
+  if (!dimId) return;
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  applySelectionSnapshot(mergeSelectionSnapshots(snap, { dimIds: [dimId] }, "add"));
+}
+
+function removeDimSelection(dimId) {
+  if (!dimId) return;
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  applySelectionSnapshot(mergeSelectionSnapshots(snap, { dimIds: [dimId] }, "remove"));
+}
+
+function addModelSelection() {
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  applySelectionSnapshot(mergeSelectionSnapshots(snap, { hasModel: true }, "add"));
+}
+
+function removeModelSelection() {
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  applySelectionSnapshot(mergeSelectionSnapshots(snap, { hasModel: true }, "remove"));
 }
 
 function findNewestCreatedWallId(targetGraph, beforeIds = null) {
@@ -6186,7 +6309,7 @@ function pointInPolygonScreen(x, y, pts) {
   return inside;
 }
 
-function applyBoxSelection(x1, y1, x2, y2) {
+function applyBoxSelection(x1, y1, x2, y2, mode = "replace") {
   const r = rectFrom2Points(x1, y1, x2, y2);
   if (r.w < 3 && r.h < 3) return false;
   const crossing = x2 < x1; // AutoCAD-like: drag left => crossing, right => window
@@ -6262,13 +6385,13 @@ function applyBoxSelection(x1, y1, x2, y2) {
   }
 
   if (wallHits.length || hiddenHits.length || dimHits.length || modelHit) {
-    selectedWallId = null;
-    selectedHiddenId = null;
-    selectedDimId = null;
-    selectedWallIds = wallHits.slice();
-    selectedHiddenIds = hiddenHits.slice();
-    selectedDimIds = dimHits.slice();
-    selectedModelOutline = !!modelHit;
+    const current = buildSelectionSnapshotFromCurrentSelection();
+    applySelectionSnapshot(mergeSelectionSnapshots(current, {
+      wallIds: wallHits.slice(),
+      hiddenIds: hiddenHits.slice(),
+      dimIds: dimHits.slice(),
+      hasModel: !!modelHit,
+    }, mode));
     return true;
   }
   return false;
@@ -6652,7 +6775,8 @@ function deleteOrphanNodes(g, keepNodeIds = null) {
 function onMouseDown(e) {
   if (!inputEnabled) return;
   const effectiveMode = getEffectiveDrawingMode();
-  const isMultiSelectModifier = !!(e.ctrlKey || e.metaKey);
+  const isAddSelectModifier = !!(e.ctrlKey || e.metaKey);
+  const isRemoveSelectModifier = !!e.altKey;
   // If an inline editor is open and user clicks outside it, cancel editing.
   if (dimEditor.active && dimEditor.input && e.target !== dimEditor.input) closeDimEditor(true);
 
@@ -7182,6 +7306,14 @@ function onMouseDown(e) {
 
   // 3) Object hit (hovered) => select and STOP
   if (hoverModelOutline) {
+    if (isRemoveSelectModifier) {
+      removeModelSelection();
+      return;
+    }
+    if (isAddSelectModifier) {
+      addModelSelection();
+      return;
+    }
     clearGroupSelection();
     selectedModelOutline = true;
     selectedWallId = null;
@@ -7191,8 +7323,12 @@ function onMouseDown(e) {
     return;
   }
   if (hoverWallId) {
-    if (isMultiSelectModifier) {
-      toggleWallSelectionByModifier(hoverWallId);
+    if (isRemoveSelectModifier) {
+      removeWallSelection(hoverWallId);
+      return;
+    }
+    if (isAddSelectModifier) {
+      addWallSelection(hoverWallId);
       return;
     }
     clearGroupSelection();
@@ -7203,8 +7339,12 @@ function onMouseDown(e) {
     return;
   }
   if (hoverHiddenId) {
-    if (isMultiSelectModifier) {
-      toggleHiddenSelectionByModifier(hoverHiddenId);
+    if (isRemoveSelectModifier) {
+      removeHiddenSelection(hoverHiddenId);
+      return;
+    }
+    if (isAddSelectModifier) {
+      addHiddenSelection(hoverHiddenId);
       return;
     }
     clearGroupSelection();
@@ -7215,6 +7355,14 @@ function onMouseDown(e) {
     return;
   }
   if (hoverDimId) {
+    if (isRemoveSelectModifier) {
+      removeDimSelection(hoverDimId);
+      return;
+    }
+    if (isAddSelectModifier) {
+      addDimSelection(hoverDimId);
+      return;
+    }
     clearGroupSelection();
     selectedWallId = null;
     selectedHiddenId = null;
@@ -7237,14 +7385,16 @@ function onMouseDown(e) {
     return;
   }
 
-  selectedWallId = null;
+  if (!isAddSelectModifier && !isRemoveSelectModifier) {
+    selectedWallId = null;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    clearGroupSelection();
+    selectedModelOutline = false;
+  }
   hoverWallId = null;
-  selectedHiddenId = null;
   hoverHiddenId = null;
-  selectedDimId = null;
   hoverDimId = null;
-  clearGroupSelection();
-  selectedModelOutline = false;
 
   if (effectiveMode === "select") {
     // AutoCAD-like box selection (window/crossing) in select mode.
@@ -7253,6 +7403,7 @@ function onMouseDown(e) {
     boxSelect.startY = e.offsetY;
     boxSelect.curX = e.offsetX;
     boxSelect.curY = e.offsetY;
+    boxSelect.mode = isRemoveSelectModifier ? "remove" : (isAddSelectModifier ? "add" : "replace");
     hoverUi = null;
     hoverWallHandle = null;
     hoverDimTextWallId = null;
@@ -7355,8 +7506,10 @@ function onWindowMouseUp() {
     const y1 = boxSelect.startY;
     const x2 = boxSelect.curX;
     const y2 = boxSelect.curY;
+    const mode = boxSelect.mode || "replace";
     boxSelect.active = false;
-    applyBoxSelection(x1, y1, x2, y2);
+    boxSelect.mode = "replace";
+    applyBoxSelection(x1, y1, x2, y2, mode);
   }
   if (moveCommand.mode === "drag_direct") {
     const moved = !!moveCommand.moved;

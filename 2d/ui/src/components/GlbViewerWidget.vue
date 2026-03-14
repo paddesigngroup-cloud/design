@@ -54,8 +54,7 @@ const isBeamLikeEntity = computed(() => selectedEntityType.value === "beam" || s
 const showLengthField = computed(() => selectedEntityType.value !== "hidden");
 const showThicknessField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
 const showHeightField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
-const showFloorDistanceField = computed(() => selectedEntityType.value === "wall" || selectedEntityType.value === "beam");
-const showFloorOffsetField = computed(() => selectedEntityType.value === "beam");
+const showFloorDistanceField = computed(() => selectedEntityType.value === "beam");
 const lengthFieldLabel = computed(() => selectedEntityType.value === "column" ? "عرض (cm)" : "طول (cm)");
 const thicknessFieldLabel = computed(() => selectedEntityType.value === "column" ? "عمق (cm)" : "ضخامت (cm)");
 const colorFieldLabel = computed(() => {
@@ -231,10 +230,7 @@ function patchByPointKey(pointKey, axis, value) {
 
 
 function patchWallStyleDraft(patch) {
-  emit("update:wallStyleDraft", {
-    ...props.wallStyleDraft,
-    ...patch,
-  });
+  emit("update:wallStyleDraft", patch);
 }
 
 function patchSelectedWallCoords(patch) {
@@ -1101,7 +1097,7 @@ onBeforeUnmount(() => {
           />
         </label>
         <label v-if="showFloorDistanceField" class="glbWallAttrs__editRow">
-          <span>فاصله از کف (cm)</span>
+          <span>ارتفاع از کف (cm)</span>
           <input
             class="glbWallAttrs__input"
             type="number"
@@ -1118,16 +1114,6 @@ onBeforeUnmount(() => {
             type="color"
             :value="wallStyleDraft.color"
             @input="patchWallStyleDraft({ color: $event.target.value })"
-          />
-        </label>
-        <label v-if="showFloorOffsetField" class="glbWallAttrs__editRow">
-          <span>کف‌افست (cm)</span>
-          <input
-            class="glbWallAttrs__input"
-            type="number"
-            step="0.1"
-            :value="wallStyleDraft.floorOffsetCm"
-            @input="patchWallStyleDraft({ floorOffsetCm: +$event.target.value })"
           />
         </label>
       </div>
