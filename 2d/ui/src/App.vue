@@ -138,7 +138,7 @@ const designMenuTools = [
   { id: "wall", icon: "/icons/drawing_wall.png", title: "دیوار", mapsToTool: "wall" },
   { id: "hidden", icon: "/icons/drawing_hidden_wall.png", title: "خط راهنما", mapsToTool: "hidden" },
   { id: "dimension", icon: "/icons/drawing_dimension.png", title: "اندازه گذاری", mapsToTool: "dimension" },
-  { id: "beam", icon: "/icons/beam.png", title: "تیر", mapsToTool: "wall" },
+  { id: "beam", icon: "/icons/beam.png", title: "تیر", mapsToTool: "beam" },
   { id: "column", icon: "/icons/column.png", title: "ستون", mapsToTool: null },
 ];
 
@@ -857,14 +857,21 @@ function onPresetPointerUp(ev) {
 
   const preset = presetDrag.value.preset;
   const isColumnDrop = isColumnPreset(preset);
-  const shouldPlaceColumn = !!preset && isColumnDrop && inStage;
+  const columnEnteredStage = !!presetDrag.value.enteredStage;
+  const shouldPlaceColumn = !!preset && isColumnDrop && (inStage || columnEnteredStage);
   const shouldPlaceWallPreset = !!preset && !isColumnDrop && inStage && movedEnough && presetDrag.value.enteredStage;
 
   if (shouldPlaceColumn) {
-    editorRef.value?.placeColumnAtClient?.(ev.clientX, ev.clientY);
+    const dropX = inStage ? ev.clientX : presetDrag.value.clientX;
+    const dropY = inStage ? ev.clientY : presetDrag.value.clientY;
+    editorRef.value?.placeColumnAtClient?.(dropX, dropY);
   } else if (shouldPlaceWallPreset) {
     const lines = buildPresetLines(preset.kind);
-    editorRef.value?.placeWallPresetAtClient?.(lines, ev.clientX, ev.clientY);
+    if (designMenuTool.value === "beam" && editorRef.value?.placeBeamPresetAtClient) {
+      editorRef.value.placeBeamPresetAtClient(lines, ev.clientX, ev.clientY);
+    } else {
+      editorRef.value?.placeWallPresetAtClient?.(lines, ev.clientX, ev.clientY);
+    }
   }
   presetDrag.value = { active: false, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false };
   window.removeEventListener("pointermove", onPresetPointerMove);

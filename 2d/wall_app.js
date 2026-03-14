@@ -1976,7 +1976,7 @@ function clearModel2dLines(recordUndo = true) {
   });
 }
 
-function placeWallPresetAtClient(lines, clientX, clientY, recordUndo = true) {
+function placeWallPresetAtClient(lines, clientX, clientY, recordUndo = true, entityType = "wall") {
   if (!Array.isArray(lines) || lines.length === 0 || !isFinite(clientX) || !isFinite(clientY)) return;
 
   const rect = canvas.getBoundingClientRect();
@@ -2010,6 +2010,7 @@ function placeWallPresetAtClient(lines, clientX, clientY, recordUndo = true) {
   const cy = (minY + maxY) * 0.5;
 
   const apply = () => {
+    const placeAsBeam = String(entityType || "wall").toLowerCase() === "beam";
     let firstWallId = null;
     for (const l of lines) {
       const ax = Number(l?.ax) - cx + centerWorld.x;
@@ -2019,15 +2020,42 @@ function placeWallPresetAtClient(lines, clientX, clientY, recordUndo = true) {
       if (!isFinite(ax) || !isFinite(ay) || !isFinite(bx) || !isFinite(by)) continue;
       const thickness = (typeof l?.thickness === "number" && isFinite(l.thickness) && l.thickness > 0)
         ? l.thickness
-        : Math.max(1, state.wallThicknessMm || 120);
+        : Math.max(1, placeAsBeam ? (state.beamThicknessMm || 400) : (state.wallThicknessMm || 120));
       const wallName = (typeof l?.name === "string" && l.name) ? l.name : "";
       const w = graph.addWallByPoints(ax, ay, bx, by, thickness, wallName, 1);
       if (w) {
-        w.heightMm = Math.max(1, Number(state.wallHeightMm) || 3000);
-        w.floorOffsetMm = 0;
-        w.color3d = (typeof state.wall3dColor === "string" && state.wall3dColor)
-          ? state.wall3dColor
-          : "#C7CCD1";
+        if (placeAsBeam) {
+          let nextBeamIndex = 0;
+          for (const ex of graph.walls.values()) {
+            if (!ex || ex.id === w.id || ex.elementType !== "beam") continue;
+            const m = String(ex.name || "").trim().match(/^Beam\s+([A-Z]+)$/i);
+            if (!m) continue;
+            const str = m[1].toUpperCase();
+            let v = 0;
+            for (const ch of str) v = v * 26 + (ch.charCodeAt(0) - 64);
+            if (v > nextBeamIndex) nextBeamIndex = v;
+          }
+          const n = nextBeamIndex + 1;
+          let label = "";
+          let x = n;
+          while (x > 0) {
+            const rem = (x - 1) % 26;
+            label = String.fromCharCode(65 + rem) + label;
+            x = Math.floor((x - 1) / 26);
+          }
+          w.name = `Beam ${label}`;
+          w.heightMm = Math.max(1, Number(state.beamHeightMm) || 200);
+          w.floorOffsetMm = Number.isFinite(Number(state.beamFloorOffsetMm)) ? Math.max(0, Number(state.beamFloorOffsetMm)) : 2600;
+          w.fillColor = state.beamFillColor || w.fillColor || null;
+          w.color3d = state.beam3dColor || w.color3d || "#C7CCD1";
+          w.elementType = "beam";
+        } else {
+          w.heightMm = Math.max(1, Number(state.wallHeightMm) || 3000);
+          w.floorOffsetMm = 0;
+          w.color3d = (typeof state.wall3dColor === "string" && state.wall3dColor)
+            ? state.wall3dColor
+            : "#C7CCD1";
+        }
       }
       if (w && !firstWallId) firstWallId = w.id;
     }
@@ -2103,6 +2131,11 @@ function placeColumnAtClient(clientX, clientY, recordUndo = true) {
   undo.runAction(() => {
     apply();
   });
+}
+
+
+function placeBeamPresetAtClient(lines, clientX, clientY, recordUndo = true) {
+  return placeWallPresetAtClient(lines, clientX, clientY, recordUndo, "beam");
 }
 
 function placeModel2dPresetAtClient(lines, clientX, clientY, recordUndo = true) {
@@ -8548,6 +8581,14 @@ return {
   addRectModel2dPreset,
   placeModel2dPresetAtClient,
   placeWallPresetAtClient,
+<<<<<<< ours
+<<<<<<< ours
+=======
+  placeBeamPresetAtClient,
+>>>>>>> theirs
+=======
+  placeBeamPresetAtClient,
+>>>>>>> theirs
   placeColumnAtClient,
   setUiCursorMode,
 
