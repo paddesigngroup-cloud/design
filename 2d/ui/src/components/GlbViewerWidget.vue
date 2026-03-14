@@ -584,24 +584,37 @@ function rebuildWalls3d(snapshot) {
   if (!scene) return;
   clearWalls3d();
 
-  const { nodes, walls } = normalizeLinearMembers(snapshot);
-  if (!nodes.length || !walls.length) return;
+  try {
+    const normalized =
+      (typeof normalizeLinearMembers === "function")
+        ? normalizeLinearMembers(snapshot)
+        : {
+            nodes: Array.isArray(snapshot?.nodes) ? snapshot.nodes : [],
+            walls: Array.isArray(snapshot?.walls) ? snapshot.walls : [],
+          };
+    const nodes = Array.isArray(normalized?.nodes) ? normalized.nodes : [];
+    const walls = Array.isArray(normalized?.walls) ? normalized.walls : [];
+    if (!nodes.length || !walls.length) return;
 
-  const root = new THREE.Group();
-  root.name = "walls2d-extruded";
-  const fallbackFillColor = "#C7CCD1";
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const root = new THREE.Group();
+    root.name = "walls2d-extruded";
+    const fallbackFillColor = "#C7CCD1";
 
-  const jointGammaMap = buildJointGammaMap(walls, byId);
+    const jointGammaMap = buildJointGammaMap(walls, byId);
 
-  for (const w of walls) {
-    const mesh = buildLinearMemberMesh(w, byId, jointGammaMap, fallbackFillColor);
-    if (!mesh) continue;
-    root.add(mesh);
+    for (const w of walls) {
+      const mesh = buildLinearMemberMesh(w, byId, jointGammaMap, fallbackFillColor);
+      if (!mesh) continue;
+      root.add(mesh);
+    }
+
+    if (!root.children.length) return;
+    wallsRoot = root;
+    scene.add(root);
+  } catch (err) {
+    console.error("[GlbViewerWidget] rebuildWalls3d failed", err);
   }
-
-  if (!root.children.length) return;
-  wallsRoot = root;
-  scene.add(root);
 }
 
 function computeRenderableSceneBounds() {
