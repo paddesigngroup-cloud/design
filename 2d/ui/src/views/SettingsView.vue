@@ -16,6 +16,10 @@ const model = reactive({
   beamThicknessMm: 400,
   beamHeightMm: 200,
   beamOffsetFromFloorMm: 2600,
+  columnWidthMm: 500,
+  columnDepthMm: 400,
+  columnHeightMm: 2800,
+  column3dColor: "#C7CCD1",
 
   dimOffsetMm: 150,
   dimFontPx: 15,
@@ -130,6 +134,19 @@ async function handleSaveSettings() {
   if ("beamOffsetFromFloorMm" in patch) {
     patch.beamOffsetFromFloorMm = positiveOrFallback(patch.beamOffsetFromFloorMm, base.beamOffsetFromFloorMm ?? 2600, 0);
     model.beamOffsetFromFloorMm = patch.beamOffsetFromFloorMm;
+    patch.beamFloorOffsetMm = patch.beamOffsetFromFloorMm;
+  }
+  if ("columnWidthMm" in patch) {
+    patch.columnWidthMm = positiveOrFallback(patch.columnWidthMm, base.columnWidthMm ?? 500);
+    model.columnWidthMm = patch.columnWidthMm;
+  }
+  if ("columnDepthMm" in patch) {
+    patch.columnDepthMm = positiveOrFallback(patch.columnDepthMm, base.columnDepthMm ?? 400);
+    model.columnDepthMm = patch.columnDepthMm;
+  }
+  if ("columnHeightMm" in patch) {
+    patch.columnHeightMm = positiveOrFallback(patch.columnHeightMm, base.columnHeightMm ?? 2800);
+    model.columnHeightMm = patch.columnHeightMm;
   }
 
   if (Object.keys(patch).length > 0) {
@@ -229,6 +246,48 @@ async function handleSaveSettings() {
           step="1"
           :value="(model.beamOffsetFromFloorMm || 2600) / 10"
           @change="applyPatch({ beamOffsetFromFloorMm: Math.max(0, (+$event.target.value || 260) * 10) })"
+        />
+      </div>
+      <div class="row">
+        <label class="label">عرض پیش‌فرض ستون (سانتی‌متر)</label>
+        <input
+          class="input ltr"
+          type="number"
+          min="1"
+          step="0.5"
+          :value="(model.columnWidthMm || 500) / 10"
+          @change="applyPatch({ columnWidthMm: Math.max(1, (+$event.target.value || 50) * 10) })"
+        />
+      </div>
+      <div class="row">
+        <label class="label">عمق پیش‌فرض ستون (سانتی‌متر)</label>
+        <input
+          class="input ltr"
+          type="number"
+          min="1"
+          step="0.5"
+          :value="(model.columnDepthMm || 400) / 10"
+          @change="applyPatch({ columnDepthMm: Math.max(1, (+$event.target.value || 40) * 10) })"
+        />
+      </div>
+      <div class="row">
+        <label class="label">ارتفاع پیش‌فرض ستون (سانتی‌متر)</label>
+        <input
+          class="input ltr"
+          type="number"
+          min="1"
+          step="1"
+          :value="(model.columnHeightMm || 2800) / 10"
+          @change="applyPatch({ columnHeightMm: Math.max(1, (+$event.target.value || 280) * 10) })"
+        />
+      </div>
+      <div class="row">
+        <label class="label">رنگ ستون</label>
+        <input
+          class="input"
+          type="color"
+          :value="model.column3dColor || '#C7CCD1'"
+          @change="applyPatch({ column3dColor: $event.target.value || '#C7CCD1' })"
         />
       </div>
     </div>

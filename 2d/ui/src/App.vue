@@ -139,10 +139,11 @@ const designMenuTools = [
   { id: "hidden", icon: "/icons/drawing_hidden_wall.png", title: "خط راهنما", mapsToTool: "hidden" },
   { id: "dimension", icon: "/icons/drawing_dimension.png", title: "اندازه گذاری", mapsToTool: "dimension" },
   { id: "beam", icon: "/icons/beam.png", title: "تیر", mapsToTool: "wall" },
-  { id: "column", icon: "/icons/column.png", title: "ستون", mapsToTool: null },
+  { id: "column", icon: "/icons/column.png", title: "ستون", mapsToTool: "beam" },
 ];
 
 const wallPresets = WALL_READY_PRESETS;
+const columnPreset = { id: "column_basic", title: "ستون" };
 const presetDrag = ref({ active: false, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false });
 const snapMenuItems = [
   { id: "corner", title: "گوشه", icon: "/icons/corner_point.png" },
@@ -206,16 +207,19 @@ function syncQuickStateFromEditor() {
   const beams = Array.isArray(full?.beamGraphSnap?.walls) ? full.beamGraphSnap.walls : [];
   const selectedBeamIds = Array.isArray(full?.selection?.selectedBeamIds) ? full.selection.selectedBeamIds : [];
   const selectedBeamId = full?.selection?.selectedBeamId || selectedBeamIds[0] || null;
-  const selectedWall = selectedWallId ? walls.find((w) => w.id === selectedWallId) : null;
-  const selectedHidden = selectedHiddenId ? hiddenWalls.find((w) => w.id === selectedHiddenId) : null;
-  const selectedBeam = selectedBeamId ? beams.find((w) => w.id === selectedBeamId) : null;
+  const selectedWall = (selectedWallId || selectedWallIds[0]) ? walls.find((w) => w.id === (selectedWallId || selectedWallIds[0])) : null;
+  const selectedHidden = (selectedHiddenId || selectedHiddenIds[0]) ? hiddenWalls.find((w) => w.id === (selectedHiddenId || selectedHiddenIds[0])) : null;
+  const selectedBeam = (selectedBeamId || selectedBeamIds[0]) ? beams.find((w) => w.id === (selectedBeamId || selectedBeamIds[0])) : null;
   const selectedWallCount = selectedWallIds.length > 0 ? selectedWallIds.length : (selectedWallId ? 1 : 0);
   const selectedHiddenCount = selectedHiddenIds.length > 0 ? selectedHiddenIds.length : (selectedHiddenId ? 1 : 0);
   const selectedBeamCount = selectedBeamIds.length > 0 ? selectedBeamIds.length : (selectedBeamId ? 1 : 0);
   const hasWallSelection = !!(selectedWall || selectedWallIds.length > 0);
   const hasHiddenSelection = !!(selectedHidden || selectedHiddenIds.length > 0);
   const hasBeamSelection = !!(selectedBeam || selectedBeamIds.length > 0);
-  const metricsEntityType = hasBeamSelection ? "beam" : hasWallSelection ? "wall" : hasHiddenSelection ? "hidden" : "wall";
+  const selectedLinearEntity = selectedWall || selectedBeam;
+  const selectedElementType = String(selectedLinearEntity?.elementType || "").toLowerCase();
+  const inferredEntityType = selectedElementType === "column" ? "column" : (selectedElementType === "beam" ? "beam" : "wall");
+  const metricsEntityType = hasBeamSelection ? "beam" : hasWallSelection ? inferredEntityType : hasHiddenSelection ? "hidden" : "wall";
   const selectedCount =
     (metricsEntityType === "hidden") ? selectedHiddenCount
       : (metricsEntityType === "beam") ? selectedBeamCount
@@ -237,7 +241,7 @@ function syncQuickStateFromEditor() {
       walls: metricsEntityType === "hidden" ? hiddenWalls : metricsEntityType === "beam" ? beams : walls,
       selection: {
         selectedWallId: metricsEntityType === "hidden" ? selectedHiddenId : metricsEntityType === "beam" ? selectedBeamId : selectedWallId,
-        selectedWallIds: metricsEntityType === "hidden" ? selectedHiddenIds : metricsEntityType === "beam" ? selectedBeamIds : selectedWallIds,
+        selectedWallIds: metricsEntityType === "hidden" ? selectedHiddenIds : selectedWallIds,
       },
       entityType: metricsEntityType,
     },
@@ -259,20 +263,26 @@ function syncQuickStateFromEditor() {
     const defaultBeamThicknessCm = (Number.isFinite(Number(s?.beamThicknessMm)) ? Number(s.beamThicknessMm) : 400) / 10;
     const defaultBeamHeightCm = (Number.isFinite(Number(s?.beamHeightMm)) ? Number(s.beamHeightMm) : 200) / 10;
     const defaultBeamFloorOffsetCm = (Number.isFinite(Number(s?.beamFloorOffsetMm)) ? Number(s.beamFloorOffsetMm) : 2600) / 10;
+    const defaultColumnWidthCm = (Number.isFinite(Number(s?.columnWidthMm)) ? Number(s.columnWidthMm) : 500) / 10;
+    const defaultColumnDepthCm = (Number.isFinite(Number(s?.columnDepthMm)) ? Number(s.columnDepthMm) : 400) / 10;
+    const defaultColumnHeightCm = (Number.isFinite(Number(s?.columnHeightMm)) ? Number(s.columnHeightMm) : 2800) / 10;
+    const defaultColumnColor = (typeof s?.column3dColor === "string" && s.column3dColor) ? s.column3dColor : "#C7CCD1";
     const defaultColor = (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1";
 
     const selectedObj = (metricsEntityType === "hidden") ? selectedHidden : selectedWall;
     const selectedName = String(selectedObj?.name || "").trim();
-    const isBeamSelection = /^Beam\s+/i.test(selectedName);
-    const fallbackThicknessCm = isBeamSelection ? defaultBeamThicknessCm : defaultThicknessCm;
-    const fallbackHeightCm = isBeamSelection ? defaultBeamHeightCm : defaultHeightCm;
+    const isBeamSelection = selectedElementType === "beam" || /^Beam\s+/i.test(selectedName);
+    const isColumnSelection = selectedElementType === "column" || /^Column\s+/i.test(selectedName);
+    const fallbackThicknessCm = isColumnSelection ? defaultColumnDepthCm : (isBeamSelection ? defaultBeamThicknessCm : defaultThicknessCm);
+    const fallbackHeightCm = isColumnSelection ? defaultColumnHeightCm : (isBeamSelection ? defaultBeamHeightCm : defaultHeightCm);
     const fallbackFloorOffsetCm = isBeamSelection ? defaultBeamFloorOffsetCm : 0;
+    const fallbackColor = isColumnSelection ? defaultColumnColor : defaultColor;
     wallStyleDraft.value = selectedObj
       ? {
           thicknessCm: (Number(selectedObj.thickness) || (fallbackThicknessCm * 10)) / 10,
           heightCm: (Number(selectedObj.heightMm) || (fallbackHeightCm * 10)) / 10,
           floorOffsetCm: (Number(selectedObj.floorOffsetMm) || (fallbackFloorOffsetCm * 10)) / 10,
-          color: (typeof selectedObj.color3d === "string" && selectedObj.color3d) ? selectedObj.color3d : defaultColor,
+          color: (typeof selectedObj.color3d === "string" && selectedObj.color3d) ? selectedObj.color3d : fallbackColor,
           floorOffsetCm: (Number(selectedObj.floorOffsetMm) || 0) / 10,
         }
       : {
@@ -350,11 +360,21 @@ function updateWallStyleDraft(next) {
   const floorOffsetMm = Math.max(0, wallStyleDraft.value.floorOffsetCm * 10);
   const lengthMm = Number.isFinite(Number(next?.lengthCm)) ? Math.max(10, Number(next.lengthCm) * 10) : null;
   const entityType = selectedWallStyle.value?.entityType || "wall";
-  const isBeamEntity = /^Beam\s+/i.test(String(selectedWallStyle.value?.name || "").trim());
+  const selectedName = String(selectedWallStyle.value?.name || "").trim();
+  const selectedEntityType = selectedWallStyle.value?.entityType || "wall";
+  const isBeamEntity = selectedEntityType === "beam" || /^Beam\s+/i.test(selectedName);
+  const isColumnEntity = selectedEntityType === "column" || /^Column\s+/i.test(selectedName);
 
   // Only update global wall defaults when no wall is selected.
   if (entityType !== "hidden" && !selectedWallStyle.value?.id) {
-    if (isBeamEntity || designMenuTool.value === "beam") {
+    if (isColumnEntity || designMenuTool.value === "column") {
+      editorRef.value?.setState?.({
+        columnWidthMm: lengthMm ?? Math.max(10, Number(wallStyleDraft.value.thicknessCm) * 10),
+        columnDepthMm: thicknessMm,
+        columnHeightMm: heightMm,
+        column3dColor: color3d,
+      });
+    } else if (isBeamEntity || designMenuTool.value === "beam") {
       editorRef.value?.setState?.({
         beamThicknessMm: thicknessMm,
         beamHeightMm: heightMm,
@@ -374,7 +394,7 @@ function updateWallStyleDraft(next) {
   if (selectedId) {
     if (entityType === "hidden") {
       if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedHiddenLength?.(lengthMm);
-    } else if (entityType === "beam") {
+    } else if (entityType === "beam" || entityType === "column") {
       editorRef.value?.setSelectedBeamStyle?.({ thicknessMm, heightMm, fillColor: color3d, floorOffsetMm });
       if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedBeamLength?.(lengthMm);
     } else {
@@ -691,8 +711,7 @@ async function setDesignMenuTool(id) {
     (id === "wall") ? "wall" :
     (id === "hidden") ? "hidden" :
     (id === "dimension") ? "dim" :
-    (id === "beam") ? "beam" :
-    (id === "column") ? "clicker" :
+    (id === "beam" || id === "column") ? "beam" :
     null;
   editorRef.value?.setUiCursorMode?.(mode);
 
@@ -703,7 +722,17 @@ async function setDesignMenuTool(id) {
       thicknessCm: (Number.isFinite(Number(st?.beamThicknessMm)) ? Number(st.beamThicknessMm) : 400) / 10,
       heightCm: (Number.isFinite(Number(st?.beamHeightMm)) ? Number(st.beamHeightMm) : 200) / 10,
       floorOffsetCm: (Number.isFinite(Number(st?.beamFloorOffsetMm)) ? Number(st.beamFloorOffsetMm) : 2600) / 10,
-      color: String(st?.wall3dColor || "#C7CCD1"),
+      color: String(st?.beam3dColor || st?.wall3dColor || "#C7CCD1"),
+    };
+  } else if (id === "column") {
+    const st = editorRef.value?.getState?.()?.state || {};
+    wallStyleDraftTouched.value = false;
+    wallStyleDraft.value = {
+      thicknessCm: (Number.isFinite(Number(st?.columnDepthMm)) ? Number(st.columnDepthMm) : 400) / 10,
+      heightCm: (Number.isFinite(Number(st?.columnHeightMm)) ? Number(st.columnHeightMm) : 2800) / 10,
+      floorOffsetCm: 0,
+      color: String(st?.column3dColor || "#C7CCD1"),
+      lengthCm: (Number.isFinite(Number(st?.columnWidthMm)) ? Number(st.columnWidthMm) : 500) / 10,
     };
   } else if (id === "wall") {
     const st = editorRef.value?.getState?.()?.state || {};
@@ -805,6 +834,17 @@ function onPresetPointerMove(ev) {
   };
 }
 
+function startColumnPresetDrag(ev) {
+  if (!ev?.isPrimary) return;
+  startWallPresetDrag(ev, { id: "column", title: "ستون", kind: "column", type: "column" });
+}
+
+function onDesignToolPointerDown(it, ev) {
+  if (!it || it.id !== "column") return;
+  setDesignMenuTool("column");
+  startColumnPresetDrag(ev);
+}
+
 function onPresetPointerUp(ev) {
   const stageRect = stageEl.value?.getBoundingClientRect();
   const inStage = !!stageRect && ev.clientX >= stageRect.left && ev.clientX <= stageRect.right
@@ -814,8 +854,12 @@ function onPresetPointerUp(ev) {
   const movedEnough = Math.hypot(dragDx, dragDy) >= 12;
 
   if (inStage && movedEnough && presetDrag.value.enteredStage && presetDrag.value.preset) {
-    const lines = buildPresetLines(presetDrag.value.preset.kind);
-    editorRef.value?.placeWallPresetAtClient?.(lines, ev.clientX, ev.clientY);
+    if (presetDrag.value.preset?.type === "column") {
+      editorRef.value?.placeColumnAtClient?.(ev.clientX, ev.clientY);
+    } else {
+      const lines = buildPresetLines(presetDrag.value.preset.kind);
+      editorRef.value?.placeWallPresetAtClient?.(lines, ev.clientX, ev.clientY);
+    }
   }
   presetDrag.value = { active: false, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false };
   window.removeEventListener("pointermove", onPresetPointerMove);
@@ -1304,6 +1348,7 @@ onBeforeUnmount(() => {
                   class="designToolBtn"
                   :class="{ 'is-active': designMenuTool === it.id }"
                   :title="it.title"
+                  @pointerdown="onDesignToolPointerDown(it, $event)"
                   @click="setDesignMenuTool(it.id)"
                 >
                   <img :src="it.icon" alt="" />
@@ -1314,10 +1359,21 @@ onBeforeUnmount(() => {
 
               <div class="designMenu__sep" role="separator"></div>
 
-              <div class="designMenu__presetsHead">مدل های دیوار</div>
-              <div class="designMenu__presets" aria-label="Wall Presets">
+              <div class="designMenu__presetsHead">{{ designMenuTool === "column" ? "مدل ستون" : "مدل های دیوار" }}</div>
+              <div class="designMenu__presets" :aria-label="designMenuTool === 'column' ? 'Column Presets' : 'Wall Presets'">
                 <button
-                  v-for="p in wallPresets"
+                  v-if="designMenuTool === 'column'"
+                  type="button"
+                  class="presetTile"
+                  :title="columnPreset.title"
+                  @pointerdown.prevent="startColumnPresetDrag($event)"
+                >
+                  <svg class="presetTile__svg" viewBox="0 0 44 44" aria-hidden="true">
+                    <rect x="9" y="12" width="26" height="20" fill="#A6A6A6" stroke="#111827" stroke-width="2" />
+                  </svg>
+                </button>
+                <button
+                  v-for="p in (designMenuTool === 'column' ? [] : wallPresets)"
                   :key="p.id"
                   type="button"
                   class="presetTile"

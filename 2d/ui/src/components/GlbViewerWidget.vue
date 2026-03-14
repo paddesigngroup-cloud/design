@@ -50,13 +50,18 @@ const attrsSnapshot = computed(() => props.walls2d?.metrics || props.walls2d || 
 const selectedEntityType = computed(
   () => attrsSnapshot.value?.entityType || props.selectedWallStyle?.entityType || "wall"
 );
-const showThicknessField = computed(() => selectedEntityType.value === "wall");
-const showHeightField = computed(() => selectedEntityType.value === "wall");
-const showFloorOffsetField = computed(() => {
-  if (selectedEntityType.value !== "wall") return false;
-  return /^Beam\s+/i.test(String(selectedObjectTitle.value || "").trim());
+const isBeamLikeEntity = computed(() => selectedEntityType.value === "beam" || selectedEntityType.value === "column");
+const showThicknessField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
+const showHeightField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
+const showFloorOffsetField = computed(() => selectedEntityType.value === "beam");
+const showColorField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
+const lengthFieldLabel = computed(() => selectedEntityType.value === "column" ? "عرض (cm)" : "طول (cm)");
+const thicknessFieldLabel = computed(() => selectedEntityType.value === "column" ? "عمق (cm)" : "ضخامت (cm)");
+const colorFieldLabel = computed(() => {
+  if (selectedEntityType.value === "column") return "رنگ ستون";
+  if (selectedEntityType.value === "beam") return "رنگ تیر";
+  return "رنگ دیوار";
 });
-const showColorField = computed(() => selectedEntityType.value === "wall");
 
 const selectedWallCount = computed(() => {
   const selectedIds = Array.isArray(attrsSnapshot.value?.selection?.selectedWallIds)
@@ -1060,7 +1065,7 @@ onBeforeUnmount(() => {
       <div v-if="selectedObjectTitle" class="glbWallAttrs__objectTitle">{{ selectedObjectTitle }}</div>
       <div class="glbWallAttrs__editor glbWallAttrs__editor--attrs">
         <label class="glbWallAttrs__editRow">
-          <span>طول (cm)</span>
+          <span>{{ lengthFieldLabel }}</span>
           <input
             class="glbWallAttrs__input"
             type="number"
@@ -1072,7 +1077,7 @@ onBeforeUnmount(() => {
           />
         </label>
         <label v-if="showThicknessField" class="glbWallAttrs__editRow">
-          <span>ضخامت (cm)</span>
+          <span>{{ thicknessFieldLabel }}</span>
           <input
             class="glbWallAttrs__input"
             type="number"
@@ -1105,7 +1110,7 @@ onBeforeUnmount(() => {
           />
         </label>
         <label v-if="showColorField" class="glbWallAttrs__editRow">
-          <span>{{ selectedEntityType === 'beam' ? 'رنگ تیر' : 'رنگ دیوار' }}</span>
+          <span>{{ colorFieldLabel }}</span>
           <input
             class="glbWallAttrs__color"
             type="color"

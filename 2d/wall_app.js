@@ -164,6 +164,12 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   beamFloorOffsetMm: 0,
   beamFillColor: "#A6A6A6",
   beam3dColor: "#C7CCD1",
+
+  // Column defaults (world millimeters)
+  columnWidthMm: 500,
+  columnDepthMm: 400,
+  columnHeightMm: 2800,
+  column3dColor: "#C7CCD1",
   // Global wall thickness (world millimeters). UI shows cm.
   wallThicknessMm: 120,
   // Global wall height (world millimeters). UI shows cm.
@@ -2029,6 +2035,63 @@ function placeWallPresetAtClient(lines, clientX, clientY, recordUndo = true) {
     graph.mergeCloseNodes(1);
     clearGroupSelection();
     selectedWallId = firstWallId;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    selectedModelOutline = false;
+    hoverModelOutline = false;
+  };
+
+  if (!recordUndo) {
+    apply();
+    return;
+  }
+  undo.runAction(() => {
+    apply();
+  });
+}
+
+function placeColumnAtClient(clientX, clientY, recordUndo = true) {
+  if (!isFinite(clientX) || !isFinite(clientY)) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const sx = clientX - rect.left;
+  const sy = clientY - rect.top;
+  const centerWorld = screenToWorld(sx, sy);
+
+  const widthMm = Math.max(10, Number(state.columnWidthMm) || 500);
+  const depthMm = Math.max(10, Number(state.columnDepthMm) || 400);
+  const heightMm = Math.max(10, Number(state.columnHeightMm) || 2800);
+  const color3d = (typeof state.column3dColor === "string" && state.column3dColor)
+    ? state.column3dColor
+    : "#C7CCD1";
+
+  const ax = centerWorld.x - (widthMm * 0.5);
+  const ay = centerWorld.y;
+  const bx = centerWorld.x + (widthMm * 0.5);
+  const by = centerWorld.y;
+
+  const apply = () => {
+    const w = graph.addWallByPoints(ax, ay, bx, by, depthMm, "", 1);
+    if (!w) return;
+    w.heightMm = heightMm;
+    w.floorOffsetMm = 0;
+    w.color3d = color3d;
+    w.fillColor = color3d;
+    w.elementType = "column";
+    if (!w.name || /^Wall\s+/i.test(String(w.name)) || /^Column\s+/i.test(String(w.name))) {
+      let maxIdx = 0;
+      for (const ex of graph.walls.values()) {
+        if (!ex || ex.elementType !== "column") continue;
+        const m = String(ex.name || "").trim().match(/^C(\d+)$/i);
+        if (!m) continue;
+        const n = Number(m[1]);
+        if (Number.isFinite(n) && n > maxIdx) maxIdx = n;
+      }
+      w.name = `C${maxIdx + 1}`;
+    }
+
+    clearGroupSelection();
+    selectedWallId = w.id;
     selectedHiddenId = null;
     selectedDimId = null;
     selectedModelOutline = false;
@@ -7877,6 +7940,18 @@ function setState(patch) {
     state.beam3dColor = patch.beam3dColor;
     beamTool.defaultColor = patch.beam3dColor;
   }
+  if (typeof patch.column3dColor === "string" && patch.column3dColor) {
+    state.column3dColor = patch.column3dColor;
+  }
+  if (typeof patch.columnWidthMm === "number" && isFinite(patch.columnWidthMm) && patch.columnWidthMm > 0) {
+    state.columnWidthMm = Math.max(10, patch.columnWidthMm);
+  }
+  if (typeof patch.columnDepthMm === "number" && isFinite(patch.columnDepthMm) && patch.columnDepthMm > 0) {
+    state.columnDepthMm = Math.max(10, patch.columnDepthMm);
+  }
+  if (typeof patch.columnHeightMm === "number" && isFinite(patch.columnHeightMm) && patch.columnHeightMm > 0) {
+    state.columnHeightMm = Math.max(10, patch.columnHeightMm);
+  }
   if (typeof patch.wallMagnetEnabled === "boolean") {
     state.wallMagnetEnabled = patch.wallMagnetEnabled;
   }
@@ -7981,7 +8056,7 @@ function setSelectedBeamStyle({ thicknessMm = null, heightMm = null, fillColor =
     for (const id of ids) {
       const w = graph.getWall(id);
       if (!w) continue;
-      if (w.elementType !== "beam") continue;
+      if (w.elementType !== "beam" && w.elementType !== "column") continue;
       if (Number.isFinite(Number(thicknessMm)) && Number(thicknessMm) > 0) {
         w.thickness = Math.max(1, Number(thicknessMm));
         changed = true;
@@ -7996,8 +8071,11 @@ function setSelectedBeamStyle({ thicknessMm = null, heightMm = null, fillColor =
         changed = true;
       }
       if (Number.isFinite(Number(floorOffsetMm))) {
-        w.floorOffsetMm = Number(floorOffsetMm);
-        changed = true;
+        const nextFloor = Math.max(0, Math.round(Number(floorOffsetMm) * 10) / 10);
+        if ((Number(w.floorOffsetMm) || 0) !== nextFloor) {
+          w.floorOffsetMm = nextFloor;
+          changed = true;
+        }
       }
     }
   });
@@ -8225,32 +8303,6 @@ function moveSelectedHiddenWallsBy(delta = {}) {
   return false;
 }
 
-function setSelectedBeamStyle({ thicknessMm = null, heightMm = null, fillColor = null, floorOffsetMm = null } = {}) {
-  const changed = setSelectedWallStyle({ thicknessMm, heightMm, fillColor });
-  if (!Number.isFinite(Number(floorOffsetMm))) return changed;
-
-  const ids = [];
-  if (selectedWallId) ids.push(selectedWallId);
-  for (const id of selectedWallIds) if (id && !ids.includes(id)) ids.push(id);
-  if (ids.length === 0) return changed;
-
-  let floorChanged = false;
-  undo.runAction(() => {
-    for (const id of ids) {
-      const w = graph.getWall(id);
-      if (!w) continue;
-      const mm = Number(floorOffsetMm);
-      if (!Number.isFinite(mm)) continue;
-      const next = Math.round(mm * 10) / 10;
-      if ((Number(w.floorOffsetMm) || 0) !== next) {
-        w.floorOffsetMm = next;
-        floorChanged = true;
-      }
-    }
-  });
-  if (floorChanged) saveSettings();
-  return changed || floorChanged;
-}
 
 function setSelectedBeamLength(lengthMm) {
   return setSelectedWallLength(lengthMm);
@@ -8498,6 +8550,7 @@ return {
   addRectModel2dPreset,
   placeModel2dPresetAtClient,
   placeWallPresetAtClient,
+  placeColumnAtClient,
   setUiCursorMode,
 
   undo: () => { if (dimEditor.active) closeDimEditor(true); undo.undo(); },
@@ -8519,7 +8572,6 @@ return {
   setSelectedHiddenLength,
   setSelectedHiddenCoords,
   moveSelectedHiddenWallsBy,
-  setSelectedBeamStyle,
   setSelectedBeamLength,
   setSelectedBeamCoords,
   moveSelectedBeamsBy,
