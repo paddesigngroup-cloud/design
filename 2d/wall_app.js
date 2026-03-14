@@ -159,19 +159,15 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   wall3dColor: "#C7CCD1",
 
   // Beam defaults (world millimeters). UI shows cm when needed.
-  beamThicknessMm: 120,
-  beamHeightMm: 3000,
-  beamFloorOffsetMm: 0,
+  beamThicknessMm: 400,
+  beamHeightMm: 200,
+  beamFloorOffsetMm: 2600,
   beamFillColor: "#A6A6A6",
   beam3dColor: "#C7CCD1",
   // Global wall thickness (world millimeters). UI shows cm.
   wallThicknessMm: 120,
   // Global wall height (world millimeters). UI shows cm.
   wallHeightMm: 3000,
-  beamThicknessMm: 400,
-  beamHeightMm: 200,
-  beamFloorOffsetMm: 2600,
-
   // Hidden walls (dashed guide-like lines)
   hiddenWallThicknessMm: 1,
   hiddenWallColor: "#D8D4D4",
@@ -2043,6 +2039,65 @@ function placeWallPresetAtClient(lines, clientX, clientY, recordUndo = true) {
     apply();
   });
 }
+
+function placeColumnAtClient(clientX, clientY, recordUndo = true) {
+  if (!isFinite(clientX) || !isFinite(clientY)) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const sx = clientX - rect.left;
+  const sy = clientY - rect.top;
+  const centerWorld = screenToWorld(sx, sy);
+
+  const widthMm = Math.max(10, Number(state.columnWidthMm) || 500);
+  const depthMm = Math.max(10, Number(state.columnDepthMm) || 400);
+  const heightMm = Math.max(10, Number(state.columnHeightMm) || 2800);
+  const color3d = (typeof state.column3dColor === "string" && state.column3dColor)
+    ? state.column3dColor
+    : "#C7CCD1";
+
+  const ax = centerWorld.x - (widthMm * 0.5);
+  const ay = centerWorld.y;
+  const bx = centerWorld.x + (widthMm * 0.5);
+  const by = centerWorld.y;
+
+  const apply = () => {
+    const w = graph.addWallByPoints(ax, ay, bx, by, depthMm, "", 1);
+    if (!w) return;
+    w.heightMm = heightMm;
+    w.floorOffsetMm = 0;
+    w.color3d = color3d;
+    w.fillColor = color3d;
+    w.elementType = "column";
+    let maxIdx = 0;
+    for (const ex of graph.walls.values()) {
+      if (!ex || ex.id === w.id || ex.elementType !== "column") continue;
+      const m = String(ex.name || "").trim().match(/^C(\d+)$/i);
+      if (!m) continue;
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n > maxIdx) maxIdx = n;
+    }
+    w.name = `C${maxIdx + 1}`;
+
+    clearGroupSelection();
+    selectedWallId = w.id;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    selectedModelOutline = false;
+    hoverModelOutline = false;
+  };
+
+  if (!recordUndo) {
+    apply();
+    return;
+  }
+  undo.runAction(() => {
+    apply();
+  });
+}
+
+
+const placeBeamPresetAtClientFn = (lines, clientX, clientY, recordUndo = true) =>
+  placeWallPresetAtClient(lines, clientX, clientY, recordUndo, "beam");
 
 function placeModel2dPresetAtClient(lines, clientX, clientY, recordUndo = true) {
   if (!Array.isArray(lines) || lines.length === 0 || !isFinite(clientX) || !isFinite(clientY)) return;
@@ -8498,6 +8553,8 @@ return {
   addRectModel2dPreset,
   placeModel2dPresetAtClient,
   placeWallPresetAtClient,
+  placeBeamPresetAtClient: placeBeamPresetAtClientFn,
+  placeColumnAtClient,
   setUiCursorMode,
 
   undo: () => { if (dimEditor.active) closeDimEditor(true); undo.undo(); },

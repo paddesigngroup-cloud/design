@@ -50,11 +50,16 @@ const attrsSnapshot = computed(() => props.walls2d?.metrics || props.walls2d || 
 const selectedEntityType = computed(
   () => attrsSnapshot.value?.entityType || props.selectedWallStyle?.entityType || "wall"
 );
-const showThicknessField = computed(() => selectedEntityType.value === "wall");
-const showHeightField = computed(() => selectedEntityType.value === "wall");
-const showFloorOffsetField = computed(() => {
-  if (selectedEntityType.value !== "wall") return false;
-  return /^Beam\s+/i.test(String(selectedObjectTitle.value || "").trim());
+const isBeamLikeEntity = computed(() => selectedEntityType.value === "beam" || selectedEntityType.value === "column");
+const showThicknessField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
+const showHeightField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
+const showFloorDistanceField = computed(() => showHeightField.value);
+const lengthFieldLabel = computed(() => selectedEntityType.value === "column" ? "عرض (cm)" : "طول (cm)");
+const thicknessFieldLabel = computed(() => selectedEntityType.value === "column" ? "عمق (cm)" : "ضخامت (cm)");
+const colorFieldLabel = computed(() => {
+  if (selectedEntityType.value === "column") return "رنگ ستون";
+  if (selectedEntityType.value === "beam") return "رنگ تیر";
+  return "رنگ دیوار";
 });
 const showColorField = computed(() => selectedEntityType.value === "wall");
 
@@ -1093,19 +1098,19 @@ onBeforeUnmount(() => {
             @input="patchWallStyleDraft({ heightCm: +$event.target.value })"
           />
         </label>
-        <label v-if="showFloorOffsetField" class="glbWallAttrs__editRow">
+        <label v-if="showFloorDistanceField" class="glbWallAttrs__editRow">
           <span>فاصله از کف (cm)</span>
           <input
             class="glbWallAttrs__input"
             type="number"
             min="0"
-            step="1"
+            step="0.1"
             :value="wallStyleDraft.floorOffsetCm"
             @input="patchWallStyleDraft({ floorOffsetCm: +$event.target.value })"
           />
         </label>
-        <label v-if="showColorField" class="glbWallAttrs__editRow">
-          <span>{{ selectedEntityType === 'beam' ? 'رنگ تیر' : 'رنگ دیوار' }}</span>
+        <label v-if="showThicknessField" class="glbWallAttrs__editRow">
+          <span>{{ colorFieldLabel }}</span>
           <input
             class="glbWallAttrs__color"
             type="color"
