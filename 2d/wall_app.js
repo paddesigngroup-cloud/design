@@ -165,6 +165,9 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   beamEdgeColor: "#000000",
   beamTextColor: "#FFFFFF",
   beam3dColor: "#C7CCD1",
+  columnWidthMm: 500,
+  columnDepthMm: 400,
+  columnHeightMm: 2800,
   columnFillColor: "#A6A6A6",
   columnEdgeColor: "#000000",
   columnTextColor: "#FFFFFF",
@@ -8603,6 +8606,15 @@ function setState(patch) {
   }
   if (typeof patch.columnFillColor === "string" && patch.columnFillColor) {
     state.columnFillColor = patch.columnFillColor;
+  }
+  if (typeof patch.columnWidthMm === "number" && isFinite(patch.columnWidthMm) && patch.columnWidthMm > 0) {
+    state.columnWidthMm = Math.max(1, patch.columnWidthMm);
+  }
+  if (typeof patch.columnDepthMm === "number" && isFinite(patch.columnDepthMm) && patch.columnDepthMm > 0) {
+    state.columnDepthMm = Math.max(1, patch.columnDepthMm);
+  }
+  if (typeof patch.columnHeightMm === "number" && isFinite(patch.columnHeightMm) && patch.columnHeightMm > 0) {
+    state.columnHeightMm = Math.max(1, patch.columnHeightMm);
   }
   if (typeof patch.columnEdgeColor === "string" && patch.columnEdgeColor) {
     state.columnEdgeColor = patch.columnEdgeColor;

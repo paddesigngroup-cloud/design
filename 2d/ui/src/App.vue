@@ -143,7 +143,7 @@ const designMenuTools = [
 ];
 
 const wallPresets = WALL_READY_PRESETS;
-const presetDrag = ref({ active: false, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false });
+const presetDrag = ref({ active: false, type: null, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false });
 const PRESET_PREVIEW_MIN_DRAG_PX = 12;
 const snapMenuItems = [
   { id: "corner", title: "گوشه", icon: "/icons/corner_point.png" },
@@ -255,6 +255,12 @@ function syncQuickStateFromEditor() {
       wallHeightMm: Number.isFinite(s?.wallHeightMm) ? s.wallHeightMm : 2800,
       wallFillColor: (typeof s?.wallFillColor === "string" && s.wallFillColor) ? s.wallFillColor : "#A6A6A6",
       wall3dColor: (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1",
+      beam3dColor: (typeof s?.beam3dColor === "string" && s.beam3dColor) ? s.beam3dColor : "#C7CCD1",
+      columnFillColor: (typeof s?.columnFillColor === "string" && s.columnFillColor) ? s.columnFillColor : "#A6A6A6",
+      column3dColor: (typeof s?.column3dColor === "string" && s.column3dColor) ? s.column3dColor : "#C7CCD1",
+      columnWidthMm: Number.isFinite(Number(s?.columnWidthMm)) ? Number(s.columnWidthMm) : 500,
+      columnDepthMm: Number.isFinite(Number(s?.columnDepthMm)) ? Number(s.columnDepthMm) : 400,
+      columnHeightMm: Number.isFinite(Number(s?.columnHeightMm)) ? Number(s.columnHeightMm) : 2800,
       axisXColor: (typeof s?.axisXColor === "string" && s.axisXColor) ? s.axisXColor : "#9CC9B4",
       axisYColor: (typeof s?.axisYColor === "string" && s.axisYColor) ? s.axisYColor : "#BCC8EB",
       axisZColor: (typeof s?.axisZColor === "string" && s.axisZColor) ? s.axisZColor : "#0000FF",
@@ -272,12 +278,22 @@ function syncQuickStateFromEditor() {
     const defaultWallColor = (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1";
     const defaultBeamColor = (typeof s?.beam3dColor === "string" && s.beam3dColor) ? s.beam3dColor : "#C7CCD1";
     const defaultColumnColor = (typeof s?.column3dColor === "string" && s.column3dColor) ? s.column3dColor : "#C7CCD1";
+    const defaultColumnWidthCm = (Number.isFinite(Number(s?.columnWidthMm)) ? Number(s.columnWidthMm) : 500) / 10;
+    const defaultColumnDepthCm = (Number.isFinite(Number(s?.columnDepthMm)) ? Number(s.columnDepthMm) : 400) / 10;
+    const defaultColumnHeightCm = (Number.isFinite(Number(s?.columnHeightMm)) ? Number(s.columnHeightMm) : 2800) / 10;
 
     const selectedObj = (metricsEntityType === "hidden") ? selectedHidden : selectedWall;
     const selectedSolidType = getSolidEntityType(selectedObj);
-    const fallbackThicknessCm = selectedSolidType === "beam" ? defaultBeamThicknessCm : defaultThicknessCm;
-    const fallbackHeightCm = selectedSolidType === "beam" ? defaultBeamHeightCm : defaultHeightCm;
+    const fallbackThicknessCm =
+      selectedSolidType === "beam" ? defaultBeamThicknessCm :
+      selectedSolidType === "column" ? defaultColumnDepthCm :
+      defaultThicknessCm;
+    const fallbackHeightCm =
+      selectedSolidType === "beam" ? defaultBeamHeightCm :
+      selectedSolidType === "column" ? defaultColumnHeightCm :
+      defaultHeightCm;
     const fallbackFloorOffsetCm = selectedSolidType === "beam" ? defaultBeamFloorOffsetCm : 0;
+    const fallbackLengthCm = selectedSolidType === "column" ? defaultColumnWidthCm : null;
     const fallbackColor =
       selectedSolidType === "beam" ? defaultBeamColor :
       selectedSolidType === "column" ? defaultColumnColor :
@@ -286,16 +302,16 @@ function syncQuickStateFromEditor() {
       ? {
           thicknessCm: (Number(selectedObj.thickness) || (fallbackThicknessCm * 10)) / 10,
           heightCm: (Number(selectedObj.heightMm) || (fallbackHeightCm * 10)) / 10,
+          lengthCm: fallbackLengthCm,
           floorOffsetCm: (Number(selectedObj.floorOffsetMm) || (fallbackFloorOffsetCm * 10)) / 10,
           color: (typeof selectedObj.color3d === "string" && selectedObj.color3d) ? selectedObj.color3d : fallbackColor,
-          floorOffsetCm: (Number(selectedObj.floorOffsetMm) || 0) / 10,
         }
       : {
-          thicknessCm: defaultThicknessCm,
-          heightCm: defaultHeightCm,
+          thicknessCm: designMenuTool.value === "column" ? defaultColumnDepthCm : defaultThicknessCm,
+          heightCm: designMenuTool.value === "column" ? defaultColumnHeightCm : defaultHeightCm,
+          lengthCm: designMenuTool.value === "column" ? defaultColumnWidthCm : null,
           floorOffsetCm: 0,
-          color: defaultWallColor,
-          floorOffsetCm: 0,
+          color: designMenuTool.value === "column" ? defaultColumnColor : defaultWallColor,
         };
   }
 
@@ -311,7 +327,9 @@ function syncQuickStateFromEditor() {
       name: selectedEntity.name || selectedEntity.id,
       entityType: metricsEntityType,
       thicknessCm: (Number(selectedEntity.thickness) || 120) / 10,
-      heightCm: (Number(selectedEntity.heightMm) || Number(s?.wallHeightMm) || 3000) / 10,
+      heightCm: (Number(selectedEntity.heightMm)
+        || (metricsEntityType === "column" ? Number(s?.columnHeightMm) : Number(s?.wallHeightMm))
+        || 3000) / 10,
       floorOffsetCm: (Number(selectedEntity.floorOffsetMm) || 0) / 10,
       lengthCm: lenMm / 10,
       color: (typeof selectedEntity.color3d === "string" && selectedEntity.color3d)
@@ -323,7 +341,6 @@ function syncQuickStateFromEditor() {
               ? ((typeof s?.column3dColor === "string" && s.column3dColor) ? s.column3dColor : "#C7CCD1")
               : ((typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1"))
         ),
-      floorOffsetCm: (Number(selectedEntity.floorOffsetMm) || 0) / 10,
       a: selectedEntity.a,
       b: selectedEntity.b,
       selectedCount,
@@ -347,11 +364,24 @@ function syncQuickStateFromEditor() {
 }
 
 function clampWallStyleDraft() {
-  const t = Math.max(0.1, Number(wallStyleDraft.value.thicknessCm) || 12);
-  const h = Math.max(1, Number(wallStyleDraft.value.heightCm) || 300);
+  const entityType = selectedWallStyle.value?.entityType || designMenuTool.value || "wall";
+  const fallbackThickness = entityType === "column" ? 40 : 12;
+  const fallbackHeight = entityType === "column" ? 280 : 300;
+  const t = Math.max(0.1, Number(wallStyleDraft.value.thicknessCm) || fallbackThickness);
+  const h = Math.max(1, Number(wallStyleDraft.value.heightCm) || fallbackHeight);
   const f = Math.max(0, Number(wallStyleDraft.value.floorOffsetCm) || 0);
   const c = String(wallStyleDraft.value.color || "#A6A6A6");
-  wallStyleDraft.value = { thicknessCm: Math.round(t * 10) / 10, heightCm: Math.round(h), floorOffsetCm: Math.round(f), color: c };
+  const lengthRaw = Number(wallStyleDraft.value.lengthCm);
+  const next = {
+    thicknessCm: Math.round(t * 10) / 10,
+    heightCm: Math.round(h),
+    floorOffsetCm: Math.round(f * 10) / 10,
+    color: c,
+  };
+  if (entityType === "column" || Number.isFinite(lengthRaw)) {
+    next.lengthCm = Math.round((Math.max(0.1, lengthRaw || 50)) * 10) / 10;
+  }
+  wallStyleDraft.value = next;
 }
 
 function updateWallStyleDraft(next) {
@@ -370,12 +400,23 @@ function updateWallStyleDraft(next) {
   const color3d = wallStyleDraft.value.color;
   const floorOffsetMm = Math.max(0, wallStyleDraft.value.floorOffsetCm * 10);
   const lengthMm = Number.isFinite(Number(next?.lengthCm)) ? Math.max(10, Number(next.lengthCm) * 10) : null;
-  const entityType = selectedWallStyle.value?.entityType || "wall";
+  const entityType =
+    selectedWallStyle.value?.entityType
+    || (designMenuTool.value === "column" ? "column" : null)
+    || (designMenuTool.value === "beam" ? "beam" : null)
+    || "wall";
   const isBeamEntity = /^Beam\s+/i.test(String(selectedWallStyle.value?.name || "").trim());
 
   // Only update global wall defaults when no wall is selected.
   if (entityType !== "hidden" && !selectedWallStyle.value?.id) {
-    if (isBeamEntity || designMenuTool.value === "beam") {
+    if (designMenuTool.value === "column") {
+      editorRef.value?.setState?.({
+        columnWidthMm: Number.isFinite(lengthMm) ? lengthMm : Math.max(10, (Number(wallStyleDraft.value.lengthCm) || 50) * 10),
+        columnDepthMm: thicknessMm,
+        columnHeightMm: heightMm,
+        column3dColor: color3d,
+      });
+    } else if (isBeamEntity || designMenuTool.value === "beam") {
       editorRef.value?.setState?.({
         beamThicknessMm: thicknessMm,
         beamHeightMm: heightMm,
@@ -398,6 +439,9 @@ function updateWallStyleDraft(next) {
     } else if (entityType === "beam") {
       editorRef.value?.setSelectedBeamStyle?.({ thicknessMm, heightMm, fillColor: color3d, floorOffsetMm });
       if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedBeamLength?.(lengthMm);
+    } else if (entityType === "column") {
+      editorRef.value?.setSelectedWallStyle?.({ thicknessMm, heightMm, fillColor: color3d });
+      if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedWallLength?.(lengthMm);
     } else {
       editorRef.value?.setSelectedWallStyle?.({ thicknessMm, heightMm, floorOffsetMm, fillColor: color3d });
       if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedWallLength?.(lengthMm);
@@ -782,26 +826,7 @@ async function setDesignMenuTool(id) {
     (id === "column") ? "clicker" :
     null;
   editorRef.value?.setUiCursorMode?.(mode);
-
-  if (id === "beam") {
-    const st = editorRef.value?.getState?.()?.state || {};
-    wallStyleDraftTouched.value = false;
-    wallStyleDraft.value = {
-      thicknessCm: (Number.isFinite(Number(st?.beamThicknessMm)) ? Number(st.beamThicknessMm) : 400) / 10,
-      heightCm: (Number.isFinite(Number(st?.beamHeightMm)) ? Number(st.beamHeightMm) : 200) / 10,
-      floorOffsetCm: (Number.isFinite(Number(st?.beamFloorOffsetMm)) ? Number(st.beamFloorOffsetMm) : 2600) / 10,
-      color: String(st?.beam3dColor || "#C7CCD1"),
-    };
-  } else if (id === "wall") {
-    const st = editorRef.value?.getState?.()?.state || {};
-    wallStyleDraftTouched.value = false;
-    wallStyleDraft.value = {
-      thicknessCm: (Number.isFinite(Number(st?.wallThicknessMm)) ? Number(st.wallThicknessMm) : 120) / 10,
-      heightCm: (Number.isFinite(Number(st?.wallHeightMm)) ? Number(st.wallHeightMm) : 3000) / 10,
-      floorOffsetCm: 0,
-      color: String(st?.wall3dColor || "#C7CCD1"),
-    };
-  }
+  setDraftFromDesignTool(id);
 }
 
 function doUndo() {
@@ -862,11 +887,67 @@ function onGlbModel2d(payload) {
   editorRef.value?.setModel2dLines?.(lines, payload?.opts || null);
 }
 
+function getEditorStateSnapshot() {
+  return editorRef.value?.getState?.()?.state || {};
+}
+
+function setDraftFromDesignTool(id) {
+  const st = getEditorStateSnapshot();
+  wallStyleDraftTouched.value = false;
+  if (id === "beam") {
+    wallStyleDraft.value = {
+      thicknessCm: (Number.isFinite(Number(st?.beamThicknessMm)) ? Number(st.beamThicknessMm) : 400) / 10,
+      heightCm: (Number.isFinite(Number(st?.beamHeightMm)) ? Number(st.beamHeightMm) : 200) / 10,
+      floorOffsetCm: (Number.isFinite(Number(st?.beamFloorOffsetMm)) ? Number(st.beamFloorOffsetMm) : 2600) / 10,
+      color: String(st?.beam3dColor || "#C7CCD1"),
+    };
+    return;
+  }
+  if (id === "column") {
+    wallStyleDraft.value = {
+      thicknessCm: (Number.isFinite(Number(st?.columnDepthMm)) ? Number(st.columnDepthMm) : 400) / 10,
+      heightCm: (Number.isFinite(Number(st?.columnHeightMm)) ? Number(st.columnHeightMm) : 2800) / 10,
+      floorOffsetCm: 0,
+      lengthCm: (Number.isFinite(Number(st?.columnWidthMm)) ? Number(st.columnWidthMm) : 500) / 10,
+      color: String(st?.column3dColor || "#C7CCD1"),
+    };
+    return;
+  }
+  if (id === "wall") {
+    wallStyleDraft.value = {
+      thicknessCm: (Number.isFinite(Number(st?.wallThicknessMm)) ? Number(st.wallThicknessMm) : 120) / 10,
+      heightCm: (Number.isFinite(Number(st?.wallHeightMm)) ? Number(st.wallHeightMm) : 3000) / 10,
+      floorOffsetCm: 0,
+      color: String(st?.wall3dColor || "#C7CCD1"),
+    };
+  }
+}
+
 function startWallPresetDrag(ev, preset) {
   if (!preset || !ev?.isPrimary) return;
   presetDrag.value = {
     active: true,
+    type: "wallPreset",
     preset,
+    clientX: ev.clientX,
+    clientY: ev.clientY,
+    startX: ev.clientX,
+    startY: ev.clientY,
+    enteredStage: false,
+  };
+  disable2dInput();
+  window.addEventListener("pointermove", onPresetPointerMove);
+  window.addEventListener("pointerup", onPresetPointerUp, { once: true });
+}
+
+function startColumnDrag(ev) {
+  if (!ev?.isPrimary) return;
+  designMenuTool.value = "column";
+  setDraftFromDesignTool("column");
+  presetDrag.value = {
+    active: true,
+    type: "column",
+    preset: null,
     clientX: ev.clientX,
     clientY: ev.clientY,
     startX: ev.clientX,
@@ -900,18 +981,23 @@ function onPresetPointerUp(ev) {
   const dragDy = ev.clientY - (presetDrag.value.startY || ev.clientY);
   const movedEnough = Math.hypot(dragDx, dragDy) >= PRESET_PREVIEW_MIN_DRAG_PX;
 
-  if (inStage && movedEnough && presetDrag.value.enteredStage && presetDrag.value.preset) {
-    const lines = buildPresetLines(presetDrag.value.preset.kind);
-    editorRef.value?.placeWallPresetAtClient?.(lines, ev.clientX, ev.clientY);
+  if (inStage && movedEnough && presetDrag.value.enteredStage) {
+    if (presetDrag.value.type === "column") {
+      editorRef.value?.placeColumnAtClient?.(ev.clientX, ev.clientY);
+    } else if (presetDrag.value.preset) {
+      const lines = buildPresetLines(presetDrag.value.preset.kind);
+      editorRef.value?.placeWallPresetAtClient?.(lines, ev.clientX, ev.clientY);
+    }
   }
-  presetDrag.value = { active: false, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false };
+  presetDrag.value = { active: false, type: null, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false };
   window.removeEventListener("pointermove", onPresetPointerMove);
   enable2dInput();
 }
 
 const presetPreview = computed(() => {
   const drag = presetDrag.value;
-  if (!drag.active || !drag.preset) return null;
+  if (!drag.active) return null;
+  if (drag.type !== "column" && !drag.preset) return null;
 
   const dx = drag.clientX - (drag.startX || drag.clientX);
   const dy = drag.clientY - (drag.startY || drag.clientY);
@@ -933,7 +1019,20 @@ const presetPreview = computed(() => {
   const offsetY = Number(st.offsetY);
   if (!Number.isFinite(zoom) || !Number.isFinite(offsetX) || !Number.isFinite(offsetY) || zoom <= 0) return null;
 
-  const lines = buildPresetLines(drag.preset.kind);
+  const lines = drag.type === "column"
+    ? (() => {
+        const widthMm = Math.max(10, Number(st?.columnWidthMm) || 500);
+        return [{
+          ax: -(widthMm * 0.5),
+          ay: 0,
+          bx: widthMm * 0.5,
+          by: 0,
+          thickness: Math.max(10, Number(st?.columnDepthMm) || 400),
+          heightMm: Math.max(10, Number(st?.columnHeightMm) || 2800),
+          name: "Column",
+        }];
+      })()
+    : buildPresetLines(drag.preset.kind);
   if (!Array.isArray(lines) || lines.length === 0) return null;
 
   let minX = Infinity;
@@ -952,7 +1051,10 @@ const presetPreview = computed(() => {
   const centerWorldY = -(stageY - offsetY) / zoom;
   const cx = (minX + maxX) * 0.5;
   const cy = (minY + maxY) * 0.5;
-  const wallFill = walls3dSnapshot.value?.state?.wallFillColor || "#A6A6A6";
+  const previewFill = drag.type === "column"
+    ? (walls3dSnapshot.value?.state?.columnFillColor || "#A6A6A6")
+    : (walls3dSnapshot.value?.state?.wallFillColor || "#A6A6A6");
+  const previewIdBase = drag.type === "column" ? "column-preview" : drag.preset.id;
 
   const screenLines = lines.map((l, idx) => {
     const ax = Number(l.ax) - cx + centerWorldX;
@@ -966,13 +1068,13 @@ const presetPreview = computed(() => {
     const thickness = Math.max(1, Number(l.thickness) || Number(st.wallThicknessMm) || 120);
     const sw = Math.max(4, thickness * zoom);
     return {
-      id: `${drag.preset.id}-${idx}`,
+      id: `${previewIdBase}-${idx}`,
       x1,
       y1,
       x2,
       y2,
       sw,
-      label: l.name || `Wall ${idx + 1}`,
+      label: drag.type === "column" ? `C${idx + 1}` : (l.name || `Wall ${idx + 1}`),
       midX: (x1 + x2) * 0.5,
       midY: (y1 + y2) * 0.5,
       angle: Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI,
@@ -983,7 +1085,7 @@ const presetPreview = computed(() => {
     width: stageRect.width,
     height: stageRect.height,
     lines: screenLines,
-    fill: wallFill,
+    fill: previewFill,
   };
 });
 
@@ -1471,6 +1573,7 @@ onBeforeUnmount(() => {
                   class="designToolBtn"
                   :class="{ 'is-active': designMenuTool === it.id }"
                   :title="it.title"
+                  @pointerdown.prevent="it.id === 'column' ? startColumnDrag($event) : null"
                   @click="setDesignMenuTool(it.id)"
                 >
                   <img :src="it.icon" alt="" />

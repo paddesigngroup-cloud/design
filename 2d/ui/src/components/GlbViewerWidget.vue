@@ -51,18 +51,19 @@ const selectedEntityType = computed(
   () => attrsSnapshot.value?.entityType || props.selectedWallStyle?.entityType || "wall"
 );
 const isBeamLikeEntity = computed(() => selectedEntityType.value === "beam" || selectedEntityType.value === "column");
+const showLengthField = computed(() => selectedEntityType.value !== "hidden");
 const showThicknessField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
 const showHeightField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
-const showFloorDistanceField = computed(() => showHeightField.value);
-const showFloorOffsetField = computed(() => showHeightField.value);
+const showFloorDistanceField = computed(() => selectedEntityType.value === "wall" || selectedEntityType.value === "beam");
+const showFloorOffsetField = computed(() => selectedEntityType.value === "beam");
 const lengthFieldLabel = computed(() => selectedEntityType.value === "column" ? "عرض (cm)" : "طول (cm)");
 const thicknessFieldLabel = computed(() => selectedEntityType.value === "column" ? "عمق (cm)" : "ضخامت (cm)");
 const colorFieldLabel = computed(() => {
-  if (selectedEntityType.value === "column") return "رنگ ستون";
-  if (selectedEntityType.value === "beam") return "رنگ تیر";
-  return "رنگ دیوار";
+  if (selectedEntityType.value === "column") return "رنگ سه بعدی ستون";
+  if (selectedEntityType.value === "beam") return "رنگ سه بعدی تیر";
+  return "رنگ سه بعدی دیوار";
 });
-const showColorField = computed(() => selectedEntityType.value === "wall");
+const showColorField = computed(() => selectedEntityType.value === "wall" || selectedEntityType.value === "beam" || selectedEntityType.value === "column");
 
 const selectedWallCount = computed(() => {
   const selectedIds = Array.isArray(attrsSnapshot.value?.selection?.selectedWallIds)
@@ -1065,8 +1066,8 @@ onBeforeUnmount(() => {
     <template v-if="wallMetrics">
       <div v-if="selectedObjectTitle" class="glbWallAttrs__objectTitle">{{ selectedObjectTitle }}</div>
       <div class="glbWallAttrs__editor glbWallAttrs__editor--attrs">
-        <label class="glbWallAttrs__editRow">
-          <span>طول (cm)</span>
+        <label v-if="showLengthField" class="glbWallAttrs__editRow">
+          <span>{{ lengthFieldLabel }}</span>
           <input
             class="glbWallAttrs__input"
             type="number"
@@ -1078,7 +1079,7 @@ onBeforeUnmount(() => {
           />
         </label>
         <label v-if="showThicknessField" class="glbWallAttrs__editRow">
-          <span>ضخامت (cm)</span>
+          <span>{{ thicknessFieldLabel }}</span>
           <input
             class="glbWallAttrs__input"
             type="number"
@@ -1110,7 +1111,7 @@ onBeforeUnmount(() => {
             @input="patchWallStyleDraft({ floorOffsetCm: +$event.target.value })"
           />
         </label>
-        <label v-if="showThicknessField" class="glbWallAttrs__editRow">
+        <label v-if="showColorField" class="glbWallAttrs__editRow">
           <span>{{ colorFieldLabel }}</span>
           <input
             class="glbWallAttrs__color"
