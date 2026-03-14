@@ -14,10 +14,9 @@
 import { WallGraph } from "./src/engine/wall_graph_v2.js";
 import { Node as RuleNode, Wall as RuleWall, computeGammaForJoint } from "./src/engine/wall_rules_v2.js";
 import { SolidWallTool } from "./src/engine/tools/SolidWallTool.js";
+import { BeamTool } from "./src/engine/tools/BeamTool.js";
 import { HiddenWallTool, drawHiddenWalls } from "./hiddenwall.js";
 import { DimensionTool } from "./src/engine/dimension.js";
-
-const BeamTool = SolidWallTool;
 
 /* =============================
    Runtime Error Overlay (helps debugging on user machines)
@@ -325,6 +324,18 @@ function applyShiftLockFromAnchor(anchor, target, shiftKey, lockDir = null) {
     target: { x: anchor.x + dir.x * signedLen, y: anchor.y + dir.y * signedLen },
     dir,
   };
+}
+function dist2(ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  return dx * dx + dy * dy;
+}
+function isBeamEdge(edge) {
+  return String(edge?.elementType || "").toLowerCase() === "beam";
+}
+function getEdgeKind(edge, graphType = "wall") {
+  if (graphType === "hidden") return "hidden";
+  return isBeamEdge(edge) ? "beam" : "wall";
 }
 
 const MODEL_WALL_SNAP_DIST_MM = 140;
@@ -853,6 +864,17 @@ const copyCommand = {
   startHiddenToolSnap: null,
   moved: false,
 };
+const extendCommand = {
+  mode: "idle", // idle | await_first_endpoint | await_second_member_or_endpoint | preview_ready
+  kind: null, // wall | beam | hidden
+  selectedIds: [],
+  first: null,
+  second: null,
+  preview: null,
+  hoverEndpoint: null,
+};
+let typedCommandBuffer = "";
+let typedCommandBufferUntil = 0;
 const contextMenuState = {
   visible: false,
   clientX: 0,
@@ -876,6 +898,59 @@ function hasAnySelection() {
     selectedHiddenIds.length ||
     selectedDimIds.length
   );
+}
+
+function resetTypedCommandBuffer() {
+  typedCommandBuffer = "";
+  typedCommandBufferUntil = 0;
+}
+
+function pushTypedCommandChar(ch) {
+  const now = Date.now();
+  if (typedCommandBufferUntil < now) typedCommandBuffer = "";
+  typedCommandBuffer = (typedCommandBuffer + String(ch || "").toLowerCase()).slice(-3);
+  typedCommandBufferUntil = now + 1500;
+}
+
+function getPrimarySelectedWallIds() {
+  const ids = [];
+  if (selectedWallId) ids.push(selectedWallId);
+  for (const id of selectedWallIds) if (id && !ids.includes(id)) ids.push(id);
+  return ids;
+}
+
+function getPrimarySelectedHiddenIds() {
+  const ids = [];
+  if (selectedHiddenId) ids.push(selectedHiddenId);
+  for (const id of selectedHiddenIds) if (id && !ids.includes(id)) ids.push(id);
+  return ids;
+}
+
+function getExtendSelectionInfo() {
+  const hiddenIds = getPrimarySelectedHiddenIds();
+  const wallIds = getPrimarySelectedWallIds();
+  if (selectedDimId || selectedDimIds.length || selectedModelOutline) return null;
+
+  if (hiddenIds.length > 0) {
+    if (hiddenIds.length > 2 || wallIds.length > 0) return null;
+    return { kind: "hidden", graphType: "hidden", ids: hiddenIds.slice() };
+  }
+
+  if (wallIds.length === 0 || wallIds.length > 2) return null;
+  let beamCount = 0;
+  let wallCount = 0;
+  for (const id of wallIds) {
+    const edge = graph.getWall(id);
+    if (!edge) return null;
+    if (isBeamEdge(edge)) beamCount++;
+    else wallCount++;
+  }
+  if (beamCount && wallCount) return null;
+  return {
+    kind: beamCount ? "beam" : "wall",
+    graphType: "wall",
+    ids: wallIds.slice(),
+  };
 }
 
 function toggleWallSelectionByModifier(wallId) {
@@ -964,6 +1039,241 @@ function selectLatestDrawnWall({ graphType, beforeIds = null }) {
     selectedWallId = newestId;
   }
   return true;
+}
+
+function getGraphForExtendKind(kind) {
+  return kind === "hidden" ? hiddenGraph : graph;
+}
+
+function getExtendEdges(kind) {
+  const g = getGraphForExtendKind(kind);
+  const out = [];
+  for (const edge of g.walls.values()) {
+    if (getEdgeKind(edge, kind === "hidden" ? "hidden" : "wall") !== kind) continue;
+    out.push(edge);
+  }
+  return out;
+}
+
+function getExtendEdge(kind, wallId) {
+  const g = getGraphForExtendKind(kind);
+  const edge = g.getWall(wallId);
+  if (!edge) return null;
+  if (getEdgeKind(edge, kind === "hidden" ? "hidden" : "wall") !== kind) return null;
+  return edge;
+}
+
+function buildExtendEndpoint(kind, wallId, role) {
+  const g = getGraphForExtendKind(kind);
+  const edge = getExtendEdge(kind, wallId);
+  if (!edge) return null;
+  const movingNodeId = role === "a" ? edge.a : edge.b;
+  const anchorNodeId = role === "a" ? edge.b : edge.a;
+  const moving = g.getNode(movingNodeId);
+  const anchor = g.getNode(anchorNodeId);
+  if (!moving || !anchor) return null;
+  return {
+    kind,
+    wallId: edge.id,
+    role,
+    movingNodeId,
+    anchorNodeId,
+    moving: { x: moving.x, y: moving.y },
+    anchor: { x: anchor.x, y: anchor.y },
+  };
+}
+
+function pickNearestExtendEndpoint(kind, offsetX, offsetY, wallIds = null, excludeWallId = null) {
+  const g = getGraphForExtendKind(kind);
+  const ids = Array.isArray(wallIds) && wallIds.length ? wallIds : getExtendEdges(kind).map((edge) => edge.id);
+  let best = null;
+  let bestD2 = 18 * 18;
+  for (const wallId of ids) {
+    if (!wallId || wallId === excludeWallId) continue;
+    const edge = getExtendEdge(kind, wallId);
+    if (!edge) continue;
+    for (const role of ["a", "b"]) {
+      const endpoint = buildExtendEndpoint(kind, wallId, role);
+      if (!endpoint) continue;
+      const p = worldToScreen(endpoint.moving.x, endpoint.moving.y);
+      const d2 = dist2(offsetX, offsetY, p.x, p.y);
+      if (d2 <= bestD2) {
+        bestD2 = d2;
+        best = endpoint;
+      }
+    }
+  }
+  return best;
+}
+
+function pickNearestExtendMember(kind, offsetX, offsetY, wallIds = null, excludeWallId = null) {
+  const g = getGraphForExtendKind(kind);
+  const ids = Array.isArray(wallIds) && wallIds.length ? wallIds : getExtendEdges(kind).map((edge) => edge.id);
+  const p = screenToWorld(offsetX, offsetY);
+  let best = null;
+  let bestDist = Infinity;
+  const maxDistMm = Math.max(60, 18 / Math.max(0.001, state.zoom));
+  for (const wallId of ids) {
+    if (!wallId || wallId === excludeWallId) continue;
+    const edge = getExtendEdge(kind, wallId);
+    if (!edge) continue;
+    const A = g.getNode(edge.a);
+    const B = g.getNode(edge.b);
+    if (!A || !B) continue;
+    const d = pointToSegmentDistance(p.x, p.y, A.x, A.y, B.x, B.y);
+    if (d <= maxDistMm && d < bestDist) {
+      bestDist = d;
+      best = edge;
+    }
+  }
+  return best;
+}
+
+function pickNearestEndpointOnEdge(kind, wallId, offsetX, offsetY) {
+  const a = buildExtendEndpoint(kind, wallId, "a");
+  const b = buildExtendEndpoint(kind, wallId, "b");
+  if (!a || !b) return null;
+  const ap = worldToScreen(a.moving.x, a.moving.y);
+  const bp = worldToScreen(b.moving.x, b.moving.y);
+  return dist2(offsetX, offsetY, ap.x, ap.y) <= dist2(offsetX, offsetY, bp.x, bp.y) ? a : b;
+}
+
+function computeExtendPreview(first, second) {
+  if (!first || !second || first.wallId === second.wallId || first.kind !== second.kind) {
+    return { valid: false, reason: "invalid_selection" };
+  }
+
+  const d1 = normalize(first.moving.x - first.anchor.x, first.moving.y - first.anchor.y);
+  const d2 = normalize(second.moving.x - second.anchor.x, second.moving.y - second.anchor.y);
+  const p1 = first.moving;
+  const p2 = second.moving;
+  const EPS = 1e-6;
+  const cr = cross2(d1.x, d1.y, d2.x, d2.y);
+  const off = { x: p2.x - p1.x, y: p2.y - p1.y };
+
+  if (Math.abs(cr) <= EPS) {
+    const col = Math.abs(cross2(off.x, off.y, d1.x, d1.y));
+    if (col > 1e-3) return { valid: false, reason: "parallel" };
+    const facing = dot(d1.x, d1.y, d2.x, d2.y) < -0.5;
+    const along12 = dot(off.x, off.y, d1.x, d1.y);
+    const along21 = dot(-off.x, -off.y, d2.x, d2.y);
+    if (!facing || along12 < -EPS || along21 < -EPS) return { valid: false, reason: "parallel" };
+    const target = { x: p2.x, y: p2.y };
+    return { valid: true, reason: "collinear_merge", target, first, second };
+  }
+
+  const t1 = cross2(off.x, off.y, d2.x, d2.y) / cr;
+  const t2 = cross2(off.x, off.y, d1.x, d1.y) / cr;
+  if (t1 < -EPS || t2 < -EPS) return { valid: false, reason: "backward" };
+  const target = { x: p1.x + d1.x * t1, y: p1.y + d1.y * t1 };
+  return { valid: true, reason: "intersection", target, first, second };
+}
+
+function resetExtendCommand() {
+  extendCommand.mode = "idle";
+  extendCommand.kind = null;
+  extendCommand.selectedIds = [];
+  extendCommand.first = null;
+  extendCommand.second = null;
+  extendCommand.preview = null;
+  extendCommand.hoverEndpoint = null;
+}
+
+function beginExtendCommand() {
+  const sel = getExtendSelectionInfo();
+  if (!sel) return false;
+  if (dimEditor.active) closeDimEditor(true);
+  hideContextMenu();
+  if (copyCommand.mode !== "idle") cancelCopyCommand(true);
+  if (moveCommand.mode !== "idle") cancelMoveCommand(true);
+  if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
+  if (extendCommand.mode !== "idle") cancelExtendCommand(false);
+  tool.stopChaining();
+  hiddenTool.stopChaining();
+  beamTool.stopChaining();
+  dimTool.cancel();
+  resetTypedCommandBuffer();
+  resetExtendCommand();
+  extendCommand.mode = "await_first_endpoint";
+  extendCommand.kind = sel.kind;
+  extendCommand.selectedIds = sel.ids.slice();
+  return true;
+}
+
+function commitExtendCommand() {
+  if (extendCommand.mode !== "preview_ready" || !extendCommand.preview?.valid) return false;
+  const preview = extendCommand.preview;
+  const g = getGraphForExtendKind(preview.first.kind);
+  let changed = false;
+  undo.runAction(() => {
+    const moveNode = (nodeId, x, y) => {
+      const node = g.getNode(nodeId);
+      if (!node) return;
+      if (Math.hypot(node.x - x, node.y - y) > 1e-6) {
+        node.x = x;
+        node.y = y;
+        changed = true;
+      }
+    };
+    moveNode(preview.first.movingNodeId, preview.target.x, preview.target.y);
+    moveNode(preview.second.movingNodeId, preview.target.x, preview.target.y);
+    if (changed) {
+      g.mergeCloseNodes(1);
+      g.deleteTinyEdges(1);
+      if (preview.first.kind !== "hidden") enforceLockedInsideLengths();
+    }
+  });
+  if (!changed) return false;
+  saveSettings();
+  return true;
+}
+
+function cancelExtendCommand(commit = false) {
+  let changed = false;
+  if (commit) changed = commitExtendCommand();
+  resetExtendCommand();
+  return changed;
+}
+
+function updateExtendPreviewFromPointer(offsetX, offsetY) {
+  if (extendCommand.mode === "idle" || !extendCommand.kind) return;
+  if (extendCommand.mode === "await_first_endpoint") {
+    extendCommand.hoverEndpoint = pickNearestExtendEndpoint(
+      extendCommand.kind,
+      offsetX,
+      offsetY,
+      extendCommand.selectedIds.length ? extendCommand.selectedIds : null,
+      null
+    );
+    return;
+  }
+  if (extendCommand.mode !== "await_second_member_or_endpoint" && extendCommand.mode !== "preview_ready") return;
+
+  const selectedIds = extendCommand.selectedIds || [];
+  const candidateIds = selectedIds.length === 2
+    ? selectedIds.filter((id) => id !== extendCommand.first?.wallId)
+    : null;
+  let endpoint = pickNearestExtendEndpoint(
+    extendCommand.kind,
+    offsetX,
+    offsetY,
+    candidateIds,
+    extendCommand.first?.wallId || null
+  );
+  if (!endpoint) {
+    const edge = pickNearestExtendMember(
+      extendCommand.kind,
+      offsetX,
+      offsetY,
+      candidateIds,
+      extendCommand.first?.wallId || null
+    );
+    if (edge) endpoint = pickNearestEndpointOnEdge(extendCommand.kind, edge.id, offsetX, offsetY);
+  }
+  extendCommand.hoverEndpoint = endpoint;
+  extendCommand.second = endpoint;
+  extendCommand.preview = endpoint ? computeExtendPreview(extendCommand.first, endpoint) : null;
+  extendCommand.mode = endpoint ? "preview_ready" : "await_second_member_or_endpoint";
 }
 
 function _cloneModel2dLines(lines) {
@@ -1470,11 +1780,31 @@ function restoreTool(t, g, snap) {
 }
 
 function snapshotBeamTool(t) {
-  return snapshotTool(t);
+  return {
+    beamIndex: t?.beamIndex ?? 0,
+    pendingStartNodeId: t?.pendingStartNodeId ?? null,
+    snapEnabled: (typeof t?.snapEnabled === "boolean") ? t.snapEnabled : true,
+    lastDir: t?.lastDir ? { x: t.lastDir.x, y: t.lastDir.y } : null,
+  };
 }
 
 function restoreBeamTool(t, g, snap) {
-  restoreTool(t, g, snap);
+  if (!t) return;
+  t.beamIndex = snap?.beamIndex ?? t.beamIndex ?? 0;
+  t.pendingStartNodeId = snap?.pendingStartNodeId ?? null;
+  if (typeof snap?.snapEnabled === "boolean") t.snapEnabled = snap.snapEnabled;
+  t.lastDir = snap?.lastDir ? { x: snap.lastDir.x, y: snap.lastDir.y } : null;
+
+  const n = t.pendingStartNodeId ? g.getNode(t.pendingStartNodeId) : null;
+  if (n) {
+    t.pendingStartPos = { x: n.x, y: n.y };
+    t.previewEndPos = { x: n.x, y: n.y };
+  } else {
+    t.pendingStartNodeId = null;
+    t.pendingStartPos = null;
+    t.previewEndPos = null;
+    t.lastDir = null;
+  }
 }
 
 function snapshotHiddenTool(t) {
@@ -2737,6 +3067,11 @@ function syncCreationCountersFromScene() {
     tool.syncWallIndexFromGraph();
   } else {
     tool.wallIndex = getNextNameSeedForPrefix(tool?.namePrefix || "Wall");
+  }
+  if (typeof beamTool?.syncBeamIndexFromGraph === "function") {
+    beamTool.syncBeamIndexFromGraph();
+  } else {
+    beamTool.beamIndex = getNextNameSeedForPrefix("Beam");
   }
 
   let maxDimNum = 0;
@@ -4324,13 +4659,19 @@ function drawWallEditHandles() {
   const chainA = rectCenter(aS.x - tx * CHAIN_PUSH, aS.y - ty * CHAIN_PUSH, CHAIN_SZ, CHAIN_SZ);
   const chainB = rectCenter(bS.x + tx * CHAIN_PUSH, bS.y + ty * CHAIN_PUSH, CHAIN_SZ, CHAIN_SZ);
 
+  const isBeamElement = String(w.elementType || "").toLowerCase() === "beam";
+
   addRectTarget("wall_len_a", w.id, lenA);
   addRectTarget("wall_len_b", w.id, lenB);
   addRectTarget("wall_free_a", w.id, freeA);
   addRectTarget("wall_free_b", w.id, freeB);
   addRectTarget("wall_mid_move", w.id, mid);
-  addRectTarget("wall_chain_a", w.id, chainA);
-  addRectTarget("wall_chain_b", w.id, chainB);
+
+  // Temporary product decision: disable chain-handle continuation for Beam.
+  if (!isBeamElement) {
+    addRectTarget("wall_chain_a", w.id, chainA);
+    addRectTarget("wall_chain_b", w.id, chainB);
+  }
 
   const wallAng = Math.atan2(ty, tx);
   drawHandleIcon(lenA, "len_a", wallAng, "#ffd18a", "#d97706");
@@ -4338,8 +4679,10 @@ function drawWallEditHandles() {
   drawHandleIcon(freeA, "free_a", wallAng + Math.PI, "#ddf9d3", "#16a34a");
   drawHandleIcon(freeB, "free_b", wallAng, "#ddf9d3", "#16a34a");
   drawHandleIcon(mid, "mid", wallAng, "#ffd18a", "#d97706");
-  drawHandleIcon(chainA, "joint", wallAng + Math.PI / 2, "#cfe3ff", "#2563eb");
-  drawHandleIcon(chainB, "joint", wallAng + Math.PI / 2, "#cfe3ff", "#2563eb");
+  if (!isBeamElement) {
+    drawHandleIcon(chainA, "joint", wallAng + Math.PI / 2, "#cfe3ff", "#2563eb");
+    drawHandleIcon(chainB, "joint", wallAng + Math.PI / 2, "#cfe3ff", "#2563eb");
+  }
 }
 
 /* =============================
@@ -4874,6 +5217,82 @@ function drawRotateOverlay() {
   ctx.restore();
 }
 
+function drawExtendOverlay() {
+  if (extendCommand.mode === "idle" || !extendCommand.kind) return;
+
+  const first = extendCommand.first;
+  const hover = extendCommand.hoverEndpoint;
+  const preview = extendCommand.preview;
+  const valid = !!preview?.valid;
+
+  const drawEndpoint = (endpoint, stroke, fill = "#ffffff", radius = 6) => {
+    if (!endpoint) return;
+    const p = worldToScreen(endpoint.moving.x, endpoint.moving.y);
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = stroke;
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  const drawGuide = (from, to, color, dashed = true) => {
+    if (!from || !to) return;
+    const a = worldToScreen(from.x, from.y);
+    const b = worldToScreen(to.x, to.y);
+    ctx.save();
+    ctx.setLineDash(dashed ? [8, 5] : []);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  drawEndpoint(first, "#2563eb");
+  if (hover && extendCommand.mode !== "await_first_endpoint") drawEndpoint(hover, valid ? "#16a34a" : "#dc2626");
+  else if (hover) drawEndpoint(hover, "#0f172a");
+
+  if (first) drawGuide(first.anchor, first.moving, "#2563eb");
+  if (preview?.target && first) drawGuide(first.moving, preview.target, valid ? "#16a34a" : "#dc2626");
+  if (preview?.target && preview?.second) drawGuide(preview.second.moving, preview.target, valid ? "#16a34a" : "#dc2626");
+
+  if (preview?.target) {
+    const tp = worldToScreen(preview.target.x, preview.target.y);
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = valid ? "#16a34a" : "#dc2626";
+    ctx.beginPath();
+    ctx.moveTo(tp.x - 7, tp.y);
+    ctx.lineTo(tp.x + 7, tp.y);
+    ctx.moveTo(tp.x, tp.y - 7);
+    ctx.lineTo(tp.x, tp.y + 7);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  const label =
+    extendCommand.mode === "await_first_endpoint" ? "EXT: endpoint اول" :
+    extendCommand.mode === "await_second_member_or_endpoint" ? "EXT: عضو/endpoint دوم" :
+    valid ? "EXT: Enter یا کلیک دوم برای اجرا" :
+    "EXT: نتیجه نامعتبر";
+  ctx.save();
+  ctx.font = `12px ${state.fontFamily || "Tahoma"}`;
+  ctx.fillStyle = valid || extendCommand.mode !== "preview_ready" ? "#111827" : "#dc2626";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.direction = "ltr";
+  ctx.fillText(label, 12, 28);
+  ctx.restore();
+}
+
 function drawCopyOverlay() {
   if (copyCommand.mode === "idle") return;
   if (copyCommand.mode === "await_confirm_selection") return;
@@ -5306,6 +5725,7 @@ function loop() {
     drawMoveOverlay();
     drawCopyOverlay();
     drawRotateOverlay();
+    drawExtendOverlay();
     if (state.activeTool === "hidden") drawHiddenToolOverlay(hiddenTool);
     if (state.activeTool === "beam") drawToolOverlay(beamTool);
     if (state.activeTool === "dim") drawDimToolOverlay();
@@ -5364,6 +5784,7 @@ function detach() {
   hideContextMenu();
   if (copyCommand.mode !== "idle") cancelCopyCommand(true);
   if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
+  if (extendCommand.mode !== "idle") cancelExtendCommand(false);
   isPanning = false;
 
   if (_rafId != null) cancelAnimationFrame(_rafId);
@@ -5478,7 +5899,9 @@ function syncSelectionToHoverForContextMenu() {
 function renderContextMenuItems() {
   const menu = ensureContextMenuElement();
   if (!menu) return;
+  const extendSelection = getExtendSelectionInfo();
   const items = [
+    { id: "extend", label: "ادغام", disabled: !extendSelection },
     { id: "move", label: "انتقال", disabled: !hasAnySelection() },
     { id: "copy", label: "کپی", disabled: !hasAnySelection() || !!selectedModelOutline },
     { id: "rotate", label: "چرخش", disabled: !hasAnySelection() },
@@ -5506,7 +5929,9 @@ function renderContextMenuItems() {
       btn.onmouseleave = () => { btn.style.background = "#f8fafc"; };
       btn.onclick = () => {
         hideContextMenu();
-        if (item.id === "move") {
+        if (item.id === "extend") {
+          beginExtendCommand();
+        } else if (item.id === "move") {
           if (moveCommand.mode !== "idle") cancelMoveCommand(true);
           beginMoveCommand();
           confirmMoveStep();
@@ -5559,6 +5984,7 @@ function onContextMenu(e) {
     wallDimDrag.active ||
     freeDimDrag.active ||
     modelDrag.active ||
+    extendCommand.mode !== "idle" ||
     copyCommand.mode !== "idle" ||
     moveCommand.mode !== "idle" ||
     rotateCommand.mode !== "idle"
@@ -6135,7 +6561,8 @@ function onMouseDown(e) {
     const hasActiveTransformCommand =
       copyCommand.mode !== "idle" ||
       moveCommand.mode !== "idle" ||
-      rotateCommand.mode !== "idle";
+      rotateCommand.mode !== "idle" ||
+      extendCommand.mode !== "idle";
 
     if (wallDrawing || beamDrawing || hiddenDrawing || dimDrawing || hasActiveTransformCommand) {
       e.preventDefault();
@@ -6154,7 +6581,8 @@ function onMouseDown(e) {
     const hasActiveTransformCommand =
       copyCommand.mode !== "idle" ||
       moveCommand.mode !== "idle" ||
-      rotateCommand.mode !== "idle";
+      rotateCommand.mode !== "idle" ||
+      extendCommand.mode !== "idle";
     if (hasActiveTransformCommand) {
       isPanning = true;
       return;
@@ -6171,6 +6599,30 @@ function onMouseDown(e) {
     return;
   }
   if (e.button !== 0) return;
+
+  if (extendCommand.mode === "await_first_endpoint") {
+    const endpoint = pickNearestExtendEndpoint(
+      extendCommand.kind,
+      e.offsetX,
+      e.offsetY,
+      extendCommand.selectedIds.length ? extendCommand.selectedIds : null,
+      null
+    );
+    if (endpoint) {
+      extendCommand.first = endpoint;
+      extendCommand.hoverEndpoint = null;
+      extendCommand.preview = null;
+      extendCommand.mode = "await_second_member_or_endpoint";
+    }
+    return;
+  }
+  if (extendCommand.mode === "await_second_member_or_endpoint" || extendCommand.mode === "preview_ready") {
+    updateExtendPreviewFromPointer(e.offsetX, e.offsetY);
+    if (extendCommand.mode === "preview_ready" && extendCommand.preview?.valid) {
+      cancelExtendCommand(true);
+    }
+    return;
+  }
 
   if (copyCommand.mode === "await_base_point") {
     const raw = screenToWorld(e.offsetX, e.offsetY);
@@ -6258,9 +6710,12 @@ function onMouseDown(e) {
     if (started) return;
   }
 
+  // UI handles must win over generic snap-click drawing.
+  const t = hitTest(e.offsetX, e.offsetY) || hitTestSelectedWallUiFallback(e.offsetX, e.offsetY);
+
   // In drawing tools, clicking an active snap point should draw from/to that point,
-  // even if the cursor is over selectable geometry.
-  if (state.snapOn && (state.activeTool === "wall" || state.activeTool === "hidden" || state.activeTool === "beam")) {
+  // but not when the pointer is on a dedicated UI handle.
+  if (!t && state.snapOn && (state.activeTool === "wall" || state.activeTool === "hidden" || state.activeTool === "beam")) {
     const clickW = screenToWorld(e.offsetX, e.offsetY);
     const snapAtClick = resolveSnapPointWorld(clickW.x, clickW.y);
     if (snapAtClick) {
@@ -6339,7 +6794,6 @@ function onMouseDown(e) {
   }
 
   // 1) UI hit => handle and STOP (does not start drawing)
-  const t = hitTest(e.offsetX, e.offsetY) || hitTestSelectedWallUiFallback(e.offsetX, e.offsetY);
   if (t) {
     if (t.type === "free_dim_text") {
       const d = dimensions.find((x) => x && x.id === t.wallId);
@@ -6371,10 +6825,20 @@ function onMouseDown(e) {
       selectedHiddenId = null;
       selectedDimId = null;
       selectedWallId = w.id;
-      setActiveTool("wall");
-      tool.pendingStartNodeId = nodeId;
-      tool.pendingStartPos = { x: n.x, y: n.y };
-      tool.previewEndPos = { x: n.x, y: n.y };
+      if (String(w.elementType || "").toLowerCase() === "beam") {
+        setUiCursorMode("beam");
+        setActiveTool("beam");
+        beamTool.syncBeamIndexFromGraph?.();
+        beamTool.pendingStartNodeId = nodeId;
+        beamTool.pendingStartPos = { x: n.x, y: n.y };
+        beamTool.previewEndPos = { x: n.x, y: n.y };
+      } else {
+        setUiCursorMode("wall");
+        setActiveTool("wall");
+        tool.pendingStartNodeId = nodeId;
+        tool.pendingStartPos = { x: n.x, y: n.y };
+        tool.previewEndPos = { x: n.x, y: n.y };
+      }
       return;
     }
     if (t.type === "hidden_chain_a" || t.type === "hidden_chain_b") {
@@ -6978,7 +7442,7 @@ function onWindowMouseMove(e) {
 
   // When integrated in Vue layout, ignore hover/move when pointer is outside the canvas,
   // except while panning or while an active draw command is in progress.
-  if (!inside && !isPanning && !isDrawing && !modelDrag.active && !wallDimDrag.active && !freeDimDrag.active && !wallHandleDrag.active && !boxSelect.active && moveCommand.mode === "idle" && rotateCommand.mode === "idle" && copyCommand.mode === "idle") {
+  if (!inside && !isPanning && !isDrawing && !modelDrag.active && !wallDimDrag.active && !freeDimDrag.active && !wallHandleDrag.active && !boxSelect.active && moveCommand.mode === "idle" && rotateCommand.mode === "idle" && copyCommand.mode === "idle" && extendCommand.mode === "idle") {
     updateSnapPreview(NaN, NaN);
     hoverUi = null;
     hoverWallHandle = null;
@@ -6992,6 +7456,18 @@ function onWindowMouseMove(e) {
 
   const ox = clamp(oxRaw, 0, rect.width);
   const oy = clamp(oyRaw, 0, rect.height);
+  if (extendCommand.mode !== "idle") {
+    updateExtendPreviewFromPointer(ox, oy);
+    hoverUi = null;
+    hoverWallHandle = null;
+    hoverDimTextWallId = null;
+    hoverWallId = null;
+    hoverHiddenId = null;
+    hoverDimId = null;
+    hoverObjectAxis = null;
+    hoverModelOutline = false;
+    return;
+  }
   if (boxSelect.active) {
     boxSelect.curX = ox;
     boxSelect.curY = oy;
@@ -7382,6 +7858,20 @@ function onWindowKeyDown(e) {
     return;
   }
 
+  if ((key === "Enter" || key === " ") && extendCommand.mode !== "idle") {
+    if (isEditableTarget(e.target)) return;
+    e.preventDefault();
+    cancelExtendCommand(true);
+    return;
+  }
+  if (key === "Escape" && extendCommand.mode !== "idle") {
+    if (isEditableTarget(e.target)) return;
+    e.preventDefault();
+    cancelExtendCommand(false);
+    return;
+  }
+  if (extendCommand.mode !== "idle") return;
+
   // MOVE command: M then Enter (AutoCAD-like flow)
   if (!ctrl && (code === "KeyC" || key.toLowerCase() === "c")) {
     if (isEditableTarget(e.target)) return;
@@ -7412,6 +7902,28 @@ function onWindowKeyDown(e) {
     e.preventDefault();
     beginMoveCommand();
     return;
+  }
+  const commandTypingAllowed =
+    copyCommand.mode === "idle" &&
+    moveCommand.mode === "idle" &&
+    rotateCommand.mode === "idle" &&
+    extendCommand.mode === "idle";
+  if (!ctrl && commandTypingAllowed && key.length === 1 && /[a-z]/i.test(key)) {
+    if (isEditableTarget(e.target)) return;
+    pushTypedCommandChar(key);
+    return;
+  }
+  if ((key === "Enter" || key === " ") && commandTypingAllowed) {
+    if (isEditableTarget(e.target)) return;
+    if (typedCommandBuffer === "ext") {
+      e.preventDefault();
+      beginExtendCommand();
+      resetTypedCommandBuffer();
+      return;
+    }
+    resetTypedCommandBuffer();
+  } else if (commandTypingAllowed && !ctrl && key !== "Shift" && key !== "Control" && key !== "Alt" && key !== "Meta") {
+    resetTypedCommandBuffer();
   }
   if ((key === "Enter" || key === " ") && rotateCommand.mode !== "idle") {
     if (isEditableTarget(e.target)) return;
@@ -7780,6 +8292,7 @@ function setActiveTool(name) {
   if (copyCommand.mode !== "idle") cancelCopyCommand(true);
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);
   if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
+  if (extendCommand.mode !== "idle") cancelExtendCommand(false);
   tool.stopChaining();
   hiddenTool.stopChaining();
   beamTool.stopChaining();
@@ -7807,6 +8320,7 @@ function clearAll() {
   if (copyCommand.mode !== "idle") cancelCopyCommand(true);
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);
   if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
+  if (extendCommand.mode !== "idle") cancelExtendCommand(false);
   undo.runAction(() => {
     graph.clear();
     hiddenGraph.clear();
@@ -7815,6 +8329,7 @@ function clearAll() {
     clearModel2dLines(false);
 
     tool.wallIndex = 0;
+    beamTool.beamIndex = 0;
     tool.stopChaining();
     hiddenTool.stopChaining();
     beamTool.stopChaining();
@@ -7869,6 +8384,25 @@ function getState() {
       inputMode: rotateCommand.inputMode,
       pivot: rotateCommand.pivot ? { x: rotateCommand.pivot.x, y: rotateCommand.pivot.y } : null,
     },
+    extend: {
+      mode: extendCommand.mode,
+      active: extendCommand.mode !== "idle",
+      kind: extendCommand.kind,
+      selectedIds: extendCommand.selectedIds.slice(),
+      first: extendCommand.first ? {
+        wallId: extendCommand.first.wallId,
+        role: extendCommand.first.role,
+      } : null,
+      second: extendCommand.second ? {
+        wallId: extendCommand.second.wallId,
+        role: extendCommand.second.role,
+      } : null,
+      preview: extendCommand.preview ? {
+        valid: !!extendCommand.preview.valid,
+        reason: extendCommand.preview.reason || null,
+        target: extendCommand.preview.target ? { x: extendCommand.preview.target.x, y: extendCommand.preview.target.y } : null,
+      } : null,
+    },
     selection: {
       selectedWallId,
       selectedWallIds: selectedWallIds.slice(),
@@ -7911,12 +8445,15 @@ function setState(patch) {
   }
   if (typeof patch.beamThicknessMm === "number" && isFinite(patch.beamThicknessMm) && patch.beamThicknessMm > 0) {
     state.beamThicknessMm = Math.max(1, patch.beamThicknessMm);
+    beamTool.defaultThickness = state.beamThicknessMm;
   }
   if (typeof patch.beamHeightMm === "number" && isFinite(patch.beamHeightMm) && patch.beamHeightMm > 0) {
     state.beamHeightMm = Math.max(1, patch.beamHeightMm);
+    beamTool.defaultHeightMm = state.beamHeightMm;
   }
   if (typeof patch.beamFloorOffsetMm === "number" && isFinite(patch.beamFloorOffsetMm) && patch.beamFloorOffsetMm >= 0) {
     state.beamFloorOffsetMm = Math.max(0, patch.beamFloorOffsetMm);
+    beamTool.defaultFloorOffsetMm = state.beamFloorOffsetMm;
   }
   if (typeof patch.wallFillColor === "string" && patch.wallFillColor) {
     state.wallFillColor = patch.wallFillColor;
@@ -8544,6 +9081,8 @@ return {
   beginRotateCommand,
   confirmRotateStep,
   cancelRotateCommand,
+  beginExtendCommand,
+  cancelExtendCommand,
   setRotateInputValue,
   setRotateMode,
   setSnapOn,
