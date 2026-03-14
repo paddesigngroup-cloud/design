@@ -54,6 +54,7 @@ const isBeamLikeEntity = computed(() => selectedEntityType.value === "beam" || s
 const showThicknessField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
 const showHeightField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
 const showFloorDistanceField = computed(() => showHeightField.value);
+const showFloorOffsetField = computed(() => showHeightField.value);
 const lengthFieldLabel = computed(() => selectedEntityType.value === "column" ? "عرض (cm)" : "طول (cm)");
 const thicknessFieldLabel = computed(() => selectedEntityType.value === "column" ? "عمق (cm)" : "ضخامت (cm)");
 const colorFieldLabel = computed(() => {

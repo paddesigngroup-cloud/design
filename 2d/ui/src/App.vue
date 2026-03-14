@@ -187,6 +187,14 @@ function getStepPatch(nextModes) {
   };
 }
 
+function getSolidEntityType(entity) {
+  const rawType = String(entity?.elementType || "").toLowerCase();
+  const rawName = String(entity?.name || "").trim();
+  if (rawType === "column" || /^c\d+$/i.test(rawName)) return "column";
+  if (rawType === "beam" || /^beam\s+/i.test(rawName)) return "beam";
+  return "wall";
+}
+
 function syncQuickStateFromEditor() {
   const full = editorRef.value?.getState?.();
   const s = full?.state;
@@ -215,7 +223,8 @@ function syncQuickStateFromEditor() {
   const hasWallSelection = !!(selectedWall || selectedWallIds.length > 0);
   const hasHiddenSelection = !!(selectedHidden || selectedHiddenIds.length > 0);
   const hasBeamSelection = !!(selectedBeam || selectedBeamIds.length > 0);
-  const metricsEntityType = hasBeamSelection ? "beam" : hasWallSelection ? "wall" : hasHiddenSelection ? "hidden" : "wall";
+  const selectedSolidEntityType = selectedWall ? getSolidEntityType(selectedWall) : "wall";
+  const metricsEntityType = hasBeamSelection ? "beam" : hasWallSelection ? selectedSolidEntityType : hasHiddenSelection ? "hidden" : "wall";
   const selectedCount =
     (metricsEntityType === "hidden") ? selectedHiddenCount
       : (metricsEntityType === "beam") ? selectedBeamCount
@@ -259,27 +268,32 @@ function syncQuickStateFromEditor() {
     const defaultBeamThicknessCm = (Number.isFinite(Number(s?.beamThicknessMm)) ? Number(s.beamThicknessMm) : 400) / 10;
     const defaultBeamHeightCm = (Number.isFinite(Number(s?.beamHeightMm)) ? Number(s.beamHeightMm) : 200) / 10;
     const defaultBeamFloorOffsetCm = (Number.isFinite(Number(s?.beamFloorOffsetMm)) ? Number(s.beamFloorOffsetMm) : 2600) / 10;
-    const defaultColor = (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1";
+    const defaultWallColor = (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1";
+    const defaultBeamColor = (typeof s?.beam3dColor === "string" && s.beam3dColor) ? s.beam3dColor : "#C7CCD1";
+    const defaultColumnColor = (typeof s?.column3dColor === "string" && s.column3dColor) ? s.column3dColor : "#C7CCD1";
 
     const selectedObj = (metricsEntityType === "hidden") ? selectedHidden : selectedWall;
-    const selectedName = String(selectedObj?.name || "").trim();
-    const isBeamSelection = /^Beam\s+/i.test(selectedName);
-    const fallbackThicknessCm = isBeamSelection ? defaultBeamThicknessCm : defaultThicknessCm;
-    const fallbackHeightCm = isBeamSelection ? defaultBeamHeightCm : defaultHeightCm;
-    const fallbackFloorOffsetCm = isBeamSelection ? defaultBeamFloorOffsetCm : 0;
+    const selectedSolidType = getSolidEntityType(selectedObj);
+    const fallbackThicknessCm = selectedSolidType === "beam" ? defaultBeamThicknessCm : defaultThicknessCm;
+    const fallbackHeightCm = selectedSolidType === "beam" ? defaultBeamHeightCm : defaultHeightCm;
+    const fallbackFloorOffsetCm = selectedSolidType === "beam" ? defaultBeamFloorOffsetCm : 0;
+    const fallbackColor =
+      selectedSolidType === "beam" ? defaultBeamColor :
+      selectedSolidType === "column" ? defaultColumnColor :
+      defaultWallColor;
     wallStyleDraft.value = selectedObj
       ? {
           thicknessCm: (Number(selectedObj.thickness) || (fallbackThicknessCm * 10)) / 10,
           heightCm: (Number(selectedObj.heightMm) || (fallbackHeightCm * 10)) / 10,
           floorOffsetCm: (Number(selectedObj.floorOffsetMm) || (fallbackFloorOffsetCm * 10)) / 10,
-          color: (typeof selectedObj.color3d === "string" && selectedObj.color3d) ? selectedObj.color3d : defaultColor,
+          color: (typeof selectedObj.color3d === "string" && selectedObj.color3d) ? selectedObj.color3d : fallbackColor,
           floorOffsetCm: (Number(selectedObj.floorOffsetMm) || 0) / 10,
         }
       : {
           thicknessCm: defaultThicknessCm,
           heightCm: defaultHeightCm,
           floorOffsetCm: 0,
-          color: defaultColor,
+          color: defaultWallColor,
           floorOffsetCm: 0,
         };
   }
@@ -301,7 +315,13 @@ function syncQuickStateFromEditor() {
       lengthCm: lenMm / 10,
       color: (typeof selectedEntity.color3d === "string" && selectedEntity.color3d)
         ? selectedEntity.color3d
-        : ((typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1"),
+        : (
+          metricsEntityType === "beam"
+            ? ((typeof s?.beam3dColor === "string" && s.beam3dColor) ? s.beam3dColor : "#C7CCD1")
+            : (metricsEntityType === "column"
+              ? ((typeof s?.column3dColor === "string" && s.column3dColor) ? s.column3dColor : "#C7CCD1")
+              : ((typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1"))
+        ),
       floorOffsetCm: (Number(selectedEntity.floorOffsetMm) || 0) / 10,
       a: selectedEntity.a,
       b: selectedEntity.b,
@@ -424,25 +444,91 @@ function updateSelectedWallCoords(patch) {
 }
 
 
-async function doCopyWallsJson() {
-  const full = editorRef.value?.getState?.();
+function buildSolidDebugBuckets(full) {
   const nodes = Array.isArray(full?.graphSnap?.nodes) ? full.graphSnap.nodes : [];
   const walls = Array.isArray(full?.graphSnap?.walls) ? full.graphSnap.walls : [];
-  const payload = {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const normalizeKind = (item) => {
+    const rawType = String(item?.elementType || "").toLowerCase();
+    const rawName = String(item?.name || "").trim();
+    if (rawType === "column" || /^c\d+$/i.test(rawName)) return "column";
+    if (rawType === "beam" || /^beam\s+/i.test(rawName)) return "beam";
+    return "wall";
+  };
+  const hydrate = (item) => ({
+    ...item,
+    kind: normalizeKind(item),
+    nodeA: byId.get(item?.a) || null,
+    nodeB: byId.get(item?.b) || null,
+  });
+  return {
+    nodes,
+    walls: walls.filter((item) => normalizeKind(item) === "wall").map(hydrate),
+    beams: walls.filter((item) => normalizeKind(item) === "beam").map(hydrate),
+    columns: walls.filter((item) => normalizeKind(item) === "column").map(hydrate),
+    all: walls.map(hydrate),
+  };
+}
+
+function buildHiddenDebugBucket(full) {
+  const nodes = Array.isArray(full?.hiddenGraphSnap?.nodes) ? full.hiddenGraphSnap.nodes : [];
+  const walls = Array.isArray(full?.hiddenGraphSnap?.walls) ? full.hiddenGraphSnap.walls : [];
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  return {
+    nodes,
+    walls: walls.map((item) => ({
+      ...item,
+      kind: "hidden",
+      nodeA: byId.get(item?.a) || null,
+      nodeB: byId.get(item?.b) || null,
+    })),
+  };
+}
+
+function buildDebugJsonPayload() {
+  const full = editorRef.value?.getState?.();
+  if (!full) return null;
+  const solid = buildSolidDebugBuckets(full);
+  const hidden = buildHiddenDebugBucket(full);
+  return {
     exportedAt: new Date().toISOString(),
     unit: "mm",
-    wallsCount: walls.length,
-    nodesCount: nodes.length,
-    nodes,
-    walls,
+    counts: {
+      solidNodes: solid.nodes.length,
+      walls: solid.walls.length,
+      beams: solid.beams.length,
+      columns: solid.columns.length,
+      hiddenNodes: hidden.nodes.length,
+      hiddenWalls: hidden.walls.length,
+      dimensions: Number(full?.counts?.dimensions) || 0,
+    },
+    editorState: full,
+    objects2d: {
+      walls: solid.walls,
+      beams: solid.beams,
+      columns: solid.columns,
+      hiddenWalls: hidden.walls,
+    },
+    uiState: {
+      activeTool: activeTool.value,
+      designMenuTool: designMenuTool.value,
+      wallStyleDraft: wallStyleDraft.value,
+      selectedWallStyle: selectedWallStyle.value,
+      walls3dSnapshot: walls3dSnapshot.value,
+    },
   };
+}
+
+async function doCopyWallsJson() {
+  const payload = buildDebugJsonPayload();
+  if (!payload) return;
   const text = JSON.stringify(payload, null, 2);
 
   try {
     await navigator.clipboard.writeText(text);
-    showAlert("JSON دیوارها کپی شد. لطفا برای من ارسال کنید.", { title: "کپی موفق" });
+    showAlert("JSON دیباگ دیوار، تیر و ستون کپی شد. برای من ارسال کنید.", { title: "کپی موفق" });
   } catch (_) {
-    await showPrompt("کپی خودکار ممکن نبود. متن زیر را دستی کپی کنید:", text, { title: "کپی JSON دیوارها" });
+    await showPrompt("کپی خودکار ممکن نبود. متن زیر را دستی کپی کنید:", text, { title: "کپی JSON دیباگ" });
   }
 }
 
@@ -703,7 +789,7 @@ async function setDesignMenuTool(id) {
       thicknessCm: (Number.isFinite(Number(st?.beamThicknessMm)) ? Number(st.beamThicknessMm) : 400) / 10,
       heightCm: (Number.isFinite(Number(st?.beamHeightMm)) ? Number(st.beamHeightMm) : 200) / 10,
       floorOffsetCm: (Number.isFinite(Number(st?.beamFloorOffsetMm)) ? Number(st.beamFloorOffsetMm) : 2600) / 10,
-      color: String(st?.wall3dColor || "#C7CCD1"),
+      color: String(st?.beam3dColor || "#C7CCD1"),
     };
   } else if (id === "wall") {
     const st = editorRef.value?.getState?.()?.state || {};
@@ -1187,9 +1273,11 @@ onBeforeUnmount(() => {
         <button class="iconbtn" title="چسباندن">
           <img src="/icons/paste.png" alt="" />
         </button>
-        <button class="iconbtn" title="کپی">
+        <!--
+        <button class="iconbtn" title="کپی JSON دیباگ" @click="doCopyWallsJson">
           <img src="/icons/copy.png" alt="" />
         </button>
+        -->
         <button class="iconbtn" title="لایه ها">
           <img src="/icons/layers.png" alt="" />
         </button>
@@ -1390,7 +1478,7 @@ onBeforeUnmount(() => {
             <!--
             <button
               class="iconbtn iconbtn--sm stageQuickBar__btn"
-              title="کپی JSON دیوارها (تستی)"
+              title="کپی JSON دیباگ"
               @click="doCopyWallsJson"
             >
               <img src="/icons/copy.png" alt="" />

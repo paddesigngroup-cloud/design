@@ -50,7 +50,15 @@ const model = reactive({
   wallFillColor: "#A6A6A6",
   wallEdgeColor: "#000000",
   wallTextColor: "#FFFFFF",
-  wallHeightColor: "#4B5563",
+  wall3dColor: "#C7CCD1",
+  beamFillColor: "#A6A6A6",
+  beamEdgeColor: "#000000",
+  beamTextColor: "#FFFFFF",
+  beam3dColor: "#C7CCD1",
+  columnFillColor: "#A6A6A6",
+  columnEdgeColor: "#000000",
+  columnTextColor: "#FFFFFF",
+  column3dColor: "#C7CCD1",
 
   dimColor: "#E8A559",
   hiddenWallColor: "#D8D4D4",
@@ -492,17 +500,30 @@ async function handleSaveSettings() {
         </div>
       </div>
       <div class="row">
-        <label class="label">Wall (Fill / Edge / Text)</label>
-        <div style="display:flex; gap:10px; align-items:center;">
-          <input type="color" :value="model.wallFillColor" @input="applyPatch({ wallFillColor: $event.target.value })" />
-          <input type="color" :value="model.wallEdgeColor" @input="applyPatch({ wallEdgeColor: $event.target.value })" />
-          <input type="color" :value="model.wallTextColor" @input="applyPatch({ wallTextColor: $event.target.value })" />
+        <label class="label">دیوار: داخلی 2D / متن / خط بیرونی / 3D</label>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <input type="color" :value="model.wallFillColor" title="رنگ داخلی دوبعدی دیوار" @input="applyPatch({ wallFillColor: $event.target.value })" />
+          <input type="color" :value="model.wallTextColor" title="رنگ متن دیوار" @input="applyPatch({ wallTextColor: $event.target.value })" />
+          <input type="color" :value="model.wallEdgeColor" title="رنگ خط بیرونی دیوار" @input="applyPatch({ wallEdgeColor: $event.target.value })" />
+          <input type="color" :value="model.wall3dColor" title="رنگ سه بعدی دیوار" @input="applyPatch({ wall3dColor: $event.target.value })" />
         </div>
       </div>
       <div class="row">
-        <label class="label">Wall Height (Temp)</label>
-        <div style="display:flex; gap:10px; align-items:center;">
-          <input type="color" :value="model.wallHeightColor" @input="applyPatch({ wallHeightColor: $event.target.value })" />
+        <label class="label">تیر: داخلی 2D / متن / خط بیرونی / 3D</label>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <input type="color" :value="model.beamFillColor" title="رنگ داخلی دوبعدی تیر" @input="applyPatch({ beamFillColor: $event.target.value })" />
+          <input type="color" :value="model.beamTextColor" title="رنگ متن تیر" @input="applyPatch({ beamTextColor: $event.target.value })" />
+          <input type="color" :value="model.beamEdgeColor" title="رنگ خط بیرونی تیر" @input="applyPatch({ beamEdgeColor: $event.target.value })" />
+          <input type="color" :value="model.beam3dColor" title="رنگ سه بعدی تیر" @input="applyPatch({ beam3dColor: $event.target.value })" />
+        </div>
+      </div>
+      <div class="row">
+        <label class="label">ستون: داخلی 2D / متن / خط بیرونی / 3D</label>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <input type="color" :value="model.columnFillColor" title="رنگ داخلی دوبعدی ستون" @input="applyPatch({ columnFillColor: $event.target.value })" />
+          <input type="color" :value="model.columnTextColor" title="رنگ متن ستون" @input="applyPatch({ columnTextColor: $event.target.value })" />
+          <input type="color" :value="model.columnEdgeColor" title="رنگ خط بیرونی ستون" @input="applyPatch({ columnEdgeColor: $event.target.value })" />
+          <input type="color" :value="model.column3dColor" title="رنگ سه بعدی ستون" @input="applyPatch({ column3dColor: $event.target.value })" />
         </div>
       </div>
       <div class="row">

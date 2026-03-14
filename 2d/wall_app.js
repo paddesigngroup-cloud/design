@@ -162,7 +162,13 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   beamHeightMm: 200,
   beamFloorOffsetMm: 2600,
   beamFillColor: "#A6A6A6",
+  beamEdgeColor: "#000000",
+  beamTextColor: "#FFFFFF",
   beam3dColor: "#C7CCD1",
+  columnFillColor: "#A6A6A6",
+  columnEdgeColor: "#000000",
+  columnTextColor: "#FFFFFF",
+  column3dColor: "#C7CCD1",
   // Global wall thickness (world millimeters). UI shows cm.
   wallThicknessMm: 120,
   // Global wall height (world millimeters). UI shows cm.
@@ -330,12 +336,41 @@ function dist2(ax, ay, bx, by) {
   const dy = by - ay;
   return dx * dx + dy * dy;
 }
+function isColumnEdge(edge) {
+  if (String(edge?.elementType || "").toLowerCase() === "column") return true;
+  return /^C\d+$/i.test(String(edge?.name || "").trim());
+}
 function isBeamEdge(edge) {
-  return String(edge?.elementType || "").toLowerCase() === "beam";
+  if (String(edge?.elementType || "").toLowerCase() === "beam") return true;
+  return /^Beam\s+/i.test(String(edge?.name || "").trim());
 }
 function getEdgeKind(edge, graphType = "wall") {
   if (graphType === "hidden") return "hidden";
+  if (isColumnEdge(edge)) return "column";
   return isBeamEdge(edge) ? "beam" : "wall";
+}
+
+function get2dColorsForEdge(edge) {
+  const kind = getEdgeKind(edge);
+  if (kind === "beam") {
+    return {
+      fill: edge?.fillColor || state.beamFillColor || state.wallFillColor,
+      edge: state.beamEdgeColor || state.wallEdgeColor,
+      text: state.beamTextColor || state.wallTextColor,
+    };
+  }
+  if (kind === "column") {
+    return {
+      fill: edge?.fillColor || state.columnFillColor || state.wallFillColor,
+      edge: state.columnEdgeColor || state.wallEdgeColor,
+      text: state.columnTextColor || state.wallTextColor,
+    };
+  }
+  return {
+    fill: edge?.fillColor || state.wallFillColor,
+    edge: state.wallEdgeColor,
+    text: state.wallTextColor,
+  };
 }
 
 const MODEL_WALL_SNAP_DIST_MM = 140;
@@ -2147,6 +2182,7 @@ const model2d = {
 let hoverModelOutline = false;
 let selectedModelOutline = false;
 let uiCursorMode = null; // null | "wall" | "hidden" | "dim" | "beam" | "clicker"
+let forcedChainMode = null; // null | "wall" | "beam" | "hidden"
 const cursorImgs = new Map();
 const wallHandleImgs = new Map();
 
@@ -2213,6 +2249,10 @@ function setUiCursorMode(mode) {
     }
   }
   updateCanvasCursor();
+}
+
+function setForcedChainMode(mode = null) {
+  forcedChainMode = mode || null;
 }
 
 function cross2(ax, ay, bx, by) { return ax * by - ay * bx; }
@@ -2409,6 +2449,9 @@ function placeColumnAtClient(clientX, clientY, recordUndo = true) {
   const color3d = (typeof state.column3dColor === "string" && state.column3dColor)
     ? state.column3dColor
     : "#C7CCD1";
+  const fillColor2d = (typeof state.columnFillColor === "string" && state.columnFillColor)
+    ? state.columnFillColor
+    : state.wallFillColor;
 
   const ax = centerWorld.x - (widthMm * 0.5);
   const ay = centerWorld.y;
@@ -2421,7 +2464,7 @@ function placeColumnAtClient(clientX, clientY, recordUndo = true) {
     w.heightMm = heightMm;
     w.floorOffsetMm = 0;
     w.color3d = color3d;
-    w.fillColor = color3d;
+    w.fillColor = fillColor2d;
     w.elementType = "column";
     let maxIdx = 0;
     for (const ex of graph.walls.values()) {
@@ -4212,6 +4255,7 @@ function drawDimensionFromLayout(layout) {
    Offset toggle arrow (per wall)
 ============================= */
 function computeOffsetMidpoint(edge) {
+  if (isBeamEdge(edge)) return null;
   const A = graph.getNode(edge.a);
   const B = graph.getNode(edge.b);
   if (!A || !B) return null;
@@ -4261,6 +4305,7 @@ function drawOffsetWalls(nodeMap) {
   const offsets = [];
 
   for (const e of graph.walls.values()) {
+    if (isBeamEdge(e)) continue;
     const A = graph.getNode(e.a);
     const B = graph.getNode(e.b);
 
@@ -4684,19 +4729,13 @@ function drawWallEditHandles() {
   const chainA = rectCenter(aS.x - tx * CHAIN_PUSH, aS.y - ty * CHAIN_PUSH, CHAIN_SZ, CHAIN_SZ);
   const chainB = rectCenter(bS.x + tx * CHAIN_PUSH, bS.y + ty * CHAIN_PUSH, CHAIN_SZ, CHAIN_SZ);
 
-  const isBeamElement = String(w.elementType || "").toLowerCase() === "beam";
-
   addRectTarget("wall_len_a", w.id, lenA);
   addRectTarget("wall_len_b", w.id, lenB);
   addRectTarget("wall_free_a", w.id, freeA);
   addRectTarget("wall_free_b", w.id, freeB);
   addRectTarget("wall_mid_move", w.id, mid);
-
-  // Temporary product decision: disable chain-handle continuation for Beam.
-  if (!isBeamElement) {
-    addRectTarget("wall_chain_a", w.id, chainA);
-    addRectTarget("wall_chain_b", w.id, chainB);
-  }
+  addRectTarget("wall_chain_a", w.id, chainA);
+  addRectTarget("wall_chain_b", w.id, chainB);
 
   const wallAng = Math.atan2(ty, tx);
   drawHandleIcon(lenA, "len_a", wallAng, "#ffd18a", "#d97706");
@@ -4704,10 +4743,8 @@ function drawWallEditHandles() {
   drawHandleIcon(freeA, "free_a", wallAng + Math.PI, "#ddf9d3", "#16a34a");
   drawHandleIcon(freeB, "free_b", wallAng, "#ddf9d3", "#16a34a");
   drawHandleIcon(mid, "mid", wallAng, "#ffd18a", "#d97706");
-  if (!isBeamElement) {
-    drawHandleIcon(chainA, "joint", wallAng + Math.PI / 2, "#cfe3ff", "#2563eb");
-    drawHandleIcon(chainB, "joint", wallAng + Math.PI / 2, "#cfe3ff", "#2563eb");
-  }
+  drawHandleIcon(chainA, "joint", wallAng + Math.PI / 2, "#cfe3ff", "#2563eb");
+  drawHandleIcon(chainB, "joint", wallAng + Math.PI / 2, "#cfe3ff", "#2563eb");
 }
 
 /* =============================
@@ -4875,10 +4912,11 @@ function drawWallBodyFromCorners(c, edge) {
   const s2 = worldToScreen(c.BL.x, c.BL.y);
   const s3 = worldToScreen(c.BR.x, c.BR.y);
   const s4 = worldToScreen(c.AR.x, c.AR.y);
+  const colors = get2dColorsForEdge(edge);
 
   ctx.save();
-  ctx.fillStyle = edge?.fillColor || state.wallFillColor;
-  ctx.strokeStyle = state.wallEdgeColor;
+  ctx.fillStyle = colors.fill;
+  ctx.strokeStyle = colors.edge;
   ctx.lineWidth = 1;
   ctx.setLineDash([]);
 
@@ -4903,11 +4941,12 @@ function drawWallName(edge, ax, ay, bx, by) {
   if (rot > Math.PI / 2) rot -= Math.PI;
   else if (rot < -Math.PI / 2) rot += Math.PI;
 
+  const colors = get2dColorsForEdge(edge);
   ctx.save();
   ctx.translate(midS.x, midS.y);
   ctx.rotate(rot);
 
-  ctx.fillStyle = state.wallTextColor;
+  ctx.fillStyle = colors.text;
   ctx.font = `${state.wallNameFontPx}px ${state.fontFamily}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -4926,6 +4965,9 @@ function drawToolOverlay(tool) {
   const st = tool.getStatus();
   const thickness = st?.thickness || 120;
   const PREVIEW_COLOR = st?.error ? "#FF2D2D" : "#FF7A00";
+  const previewColors = (tool === beamTool)
+    ? { fill: state.beamFillColor || state.wallFillColor, edge: state.beamEdgeColor || state.wallEdgeColor, text: state.beamTextColor || state.wallTextColor }
+    : { fill: state.wallFillColor, edge: state.wallEdgeColor, text: state.wallTextColor };
 
   for (const s of segs) {
     const ax = s.a.x, ay = s.a.y;
@@ -4946,8 +4988,8 @@ function drawToolOverlay(tool) {
     const p4 = worldToScreen(AR.x, AR.y);
 
     ctx.save();
-    ctx.fillStyle = st?.fillColor || state.wallFillColor;
-    ctx.strokeStyle = state.wallEdgeColor;
+    ctx.fillStyle = (tool === beamTool) ? previewColors.fill : (st?.fillColor || previewColors.fill);
+    ctx.strokeStyle = previewColors.edge;
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
 
@@ -5011,7 +5053,7 @@ function drawToolOverlay(tool) {
   if (st?.isDrawing) {
     ctx.save();
     ctx.font = `12px ${state.fontFamily}`;
-    ctx.fillStyle = "#000000";
+    ctx.fillStyle = previewColors.text;
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.direction = "ltr";
@@ -5576,6 +5618,7 @@ function drawWallsNodeBased(tool) {
     for (const it of wallDrawList) {
       const edge = it.edge;
       const c = it.corners;
+      if (isBeamEdge(edge)) continue;
 
       const dimPref = edge.dimSide || "auto";
       const dimLayout = computeDimensionLayout(
@@ -5702,6 +5745,17 @@ const dimTool = new DimensionTool({
   view,
   snapTolMm: 30,
 });
+
+function getEffectiveDrawingMode() {
+  if (forcedChainMode === "hidden" && hiddenTool.getStatus?.()?.isDrawing) return "hidden";
+  if (forcedChainMode === "beam" && beamTool.getStatus?.()?.isDrawing) return "beam";
+  if (forcedChainMode === "wall" && tool.getStatus?.()?.isDrawing) return "wall";
+  if (dimTool.getStatus?.()?.isDrawing) return "dim";
+  if (hiddenTool.getStatus?.()?.isDrawing) return "hidden";
+  if (beamTool.getStatus?.()?.isDrawing) return "beam";
+  if (tool.getStatus?.()?.isDrawing) return "wall";
+  return state.activeTool;
+}
 
 const undo = new UndoManager({
   graph,
@@ -6594,16 +6648,17 @@ function deleteOrphanNodes(g, keepNodeIds = null) {
 
 function onMouseDown(e) {
   if (!inputEnabled) return;
+  const effectiveMode = getEffectiveDrawingMode();
   const isMultiSelectModifier = !!(e.ctrlKey || e.metaKey);
   // If an inline editor is open and user clicks outside it, cancel editing.
   if (dimEditor.active && dimEditor.input && e.target !== dimEditor.input) closeDimEditor(true);
 
   // Right click: toggle angle/ortho lock while an active draw/transform command is running.
   if (e.button === 2) {
-    const wallDrawing = state.activeTool === "wall" && !!tool.getStatus?.()?.isDrawing;
-    const beamDrawing = state.activeTool === "beam" && !!beamTool.getStatus?.()?.isDrawing;
-    const hiddenDrawing = state.activeTool === "hidden" && !!hiddenTool.getStatus?.()?.isDrawing;
-    const dimDrawing = state.activeTool === "dim" && !!dimTool.getStatus?.()?.isDrawing;
+    const wallDrawing = effectiveMode === "wall" && !!tool.getStatus?.()?.isDrawing;
+    const beamDrawing = effectiveMode === "beam" && !!beamTool.getStatus?.()?.isDrawing;
+    const hiddenDrawing = effectiveMode === "hidden" && !!hiddenTool.getStatus?.()?.isDrawing;
+    const dimDrawing = effectiveMode === "dim" && !!dimTool.getStatus?.()?.isDrawing;
     const hasActiveTransformCommand =
       copyCommand.mode !== "idle" ||
       moveCommand.mode !== "idle" ||
@@ -6706,7 +6761,7 @@ function onMouseDown(e) {
 
   // Dimension tool is modal: left clicks should only place/commit dimensions.
   // Handle it early so wall/hidden hit targets cannot switch the active tool.
-  if (state.activeTool === "dim") {
+  if (effectiveMode === "dim") {
     undo.runAction(() => dimTool.onPointerDown(
       { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
       {
@@ -6745,11 +6800,11 @@ function onMouseDown(e) {
 
   // In drawing tools, clicking an active snap point should draw from/to that point,
   // but not when the pointer is on a dedicated UI handle.
-  if (!t && state.snapOn && (state.activeTool === "wall" || state.activeTool === "hidden" || state.activeTool === "beam")) {
+  if (!t && state.snapOn && (effectiveMode === "wall" || effectiveMode === "hidden" || effectiveMode === "beam")) {
     const clickW = screenToWorld(e.offsetX, e.offsetY);
     const snapAtClick = resolveSnapPointWorld(clickW.x, clickW.y);
     if (snapAtClick) {
-      if (state.activeTool === "hidden") {
+      if (effectiveMode === "hidden") {
         const beforeHiddenIds = new Set(hiddenGraph.walls.keys());
         undo.runAction(() => hiddenTool.onPointerDown(
           { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
@@ -6768,7 +6823,7 @@ function onMouseDown(e) {
         selectLatestDrawnWall({ graphType: "hidden", beforeIds: beforeHiddenIds });
         return;
       }
-      if (state.activeTool === "beam") {
+      if (effectiveMode === "beam") {
         const beforeBeamIds = new Set(graph.walls.keys());
         undo.runAction(() => {
           beamTool.onPointerDown(
@@ -6855,9 +6910,14 @@ function onMouseDown(e) {
       selectedHiddenId = null;
       selectedDimId = null;
       selectedWallId = w.id;
-      if (String(w.elementType || "").toLowerCase() === "beam") {
+      if (isBeamEdge(w)) {
         setUiCursorMode("beam");
         setActiveTool("beam");
+        setForcedChainMode("beam");
+        tool.stopChaining();
+        beamTool.defaultThickness = Math.max(1, Number(state.beamThicknessMm) || 400);
+        beamTool.defaultHeightMm = Math.max(1, Number(state.beamHeightMm) || 200);
+        beamTool.defaultFloorOffsetMm = Math.max(0, Number(state.beamFloorOffsetMm) || 2600);
         beamTool.syncBeamIndexFromGraph?.();
         beamTool.pendingStartNodeId = nodeId;
         beamTool.pendingStartPos = { x: n.x, y: n.y };
@@ -6865,6 +6925,13 @@ function onMouseDown(e) {
       } else {
         setUiCursorMode("wall");
         setActiveTool("wall");
+        setForcedChainMode("wall");
+        beamTool.stopChaining();
+        tool.namePrefix = "Wall";
+        tool.defaultThickness = Math.max(1, Number(state.wallThicknessMm) || 120);
+        tool.defaultHeightMm = Math.max(1, Number(state.wallHeightMm) || 3000);
+        tool.defaultFloorOffsetMm = 0;
+        tool.syncWallIndexFromGraph?.();
         tool.pendingStartNodeId = nodeId;
         tool.pendingStartPos = { x: n.x, y: n.y };
         tool.previewEndPos = { x: n.x, y: n.y };
@@ -6879,6 +6946,7 @@ function onMouseDown(e) {
       selectedDimId = null;
       selectedHiddenId = w.id;
       setActiveTool("hidden");
+      setForcedChainMode("hidden");
       hiddenTool.pendingStartNodeId = nodeId;
       hiddenTool.pendingStartPos = { x: n.x, y: n.y };
       hiddenTool.previewEndPos = { x: n.x, y: n.y };
@@ -7032,7 +7100,7 @@ function onMouseDown(e) {
   }
 
   // 2) If active tool is drawing, next click continues that chain.
-  if (state.activeTool === "hidden" && hiddenTool.getStatus()?.isDrawing) {
+  if (effectiveMode === "hidden" && hiddenTool.getStatus()?.isDrawing) {
     const beforeHiddenIds = new Set(hiddenGraph.walls.keys());
     undo.runAction(() => hiddenTool.onPointerDown(
       { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
@@ -7048,10 +7116,11 @@ function onMouseDown(e) {
         stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
       }
     ));
+    setForcedChainMode(hiddenTool.getStatus()?.isDrawing ? "hidden" : null);
     selectLatestDrawnWall({ graphType: "hidden", beforeIds: beforeHiddenIds });
     return;
   }
-  if (state.activeTool === "beam" && beamTool.getStatus()?.isDrawing) {
+  if (effectiveMode === "beam" && beamTool.getStatus()?.isDrawing) {
     const beforeBeamIds = new Set(graph.walls.keys());
     undo.runAction(() => {
       beamTool.onPointerDown(
@@ -7079,10 +7148,11 @@ function onMouseDown(e) {
         w.elementType = "beam";
       }
     });
+    setForcedChainMode(beamTool.getStatus()?.isDrawing ? "beam" : null);
     selectLatestDrawnWall({ graphType: "wall", beforeIds: beforeBeamIds });
     return;
   }
-  if (state.activeTool === "wall" && tool.getStatus()?.isDrawing) {
+  if (effectiveMode === "wall" && tool.getStatus()?.isDrawing) {
     const beforeWallIds = new Set(graph.walls.keys());
     undo.runAction(() => {
       const beforeWalls = graph.walls.size;
@@ -7102,6 +7172,7 @@ function onMouseDown(e) {
       );
       if (graph.walls.size !== beforeWalls) enforceLockedInsideLengths();
     });
+    setForcedChainMode(tool.getStatus()?.isDrawing ? "wall" : null);
     selectLatestDrawnWall({ graphType: "wall", beforeIds: beforeWallIds });
     return;
   }
@@ -7155,7 +7226,7 @@ function onMouseDown(e) {
   const hadDimSelection = !!selectedDimId || (Array.isArray(selectedDimIds) && selectedDimIds.length > 0);
   if (
     hadDimSelection &&
-    (state.activeTool === "wall" || state.activeTool === "hidden" || state.activeTool === "beam")
+    (effectiveMode === "wall" || effectiveMode === "hidden" || effectiveMode === "beam")
   ) {
     selectedDimId = null;
     hoverDimId = null;
@@ -7172,7 +7243,7 @@ function onMouseDown(e) {
   clearGroupSelection();
   selectedModelOutline = false;
 
-  if (state.activeTool === "select") {
+  if (effectiveMode === "select") {
     // AutoCAD-like box selection (window/crossing) in select mode.
     boxSelect.active = true;
     boxSelect.startX = e.offsetX;
@@ -7190,7 +7261,7 @@ function onMouseDown(e) {
     return;
   }
 
-  if (state.activeTool === "hidden") {
+  if (effectiveMode === "hidden") {
     const beforeHiddenIds = new Set(hiddenGraph.walls.keys());
     undo.runAction(() => hiddenTool.onPointerDown(
       { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
@@ -7207,7 +7278,7 @@ function onMouseDown(e) {
       }
     ));
     selectLatestDrawnWall({ graphType: "hidden", beforeIds: beforeHiddenIds });
-  } else if (state.activeTool === "beam") {
+  } else if (effectiveMode === "beam") {
     const beforeBeamIds = new Set(graph.walls.keys());
     undo.runAction(() => {
       beamTool.onPointerDown(
@@ -7237,7 +7308,7 @@ function onMouseDown(e) {
       enforceLockedInsideLengths();
     });
     selectLatestDrawnWall({ graphType: "wall", beforeIds: beforeBeamIds });
-  } else if (state.activeTool === "wall") {
+  } else if (effectiveMode === "wall") {
     const nextPrefix = getNamePrefixFromUiCursorMode(uiCursorMode);
     if (tool.namePrefix !== nextPrefix) {
       tool.namePrefix = nextPrefix;
@@ -7453,6 +7524,7 @@ function onWindowMouseMove(e) {
     isMouseOverCanvas = false;
     return;
   }
+  const effectiveMode = getEffectiveDrawingMode();
   const rect = canvas.getBoundingClientRect();
   const oxRaw = e.clientX - rect.left;
   const oyRaw = e.clientY - rect.top;
@@ -7465,9 +7537,9 @@ function onWindowMouseMove(e) {
   }
 
   const isDrawing =
-    (state.activeTool === "dim") ? !!dimTool.getStatus()?.isDrawing :
-    (state.activeTool === "hidden") ? !!hiddenTool.getStatus()?.isDrawing :
-    (state.activeTool === "beam") ? !!beamTool.getStatus()?.isDrawing :
+    (effectiveMode === "dim") ? !!dimTool.getStatus()?.isDrawing :
+    (effectiveMode === "hidden") ? !!hiddenTool.getStatus()?.isDrawing :
+    (effectiveMode === "beam") ? !!beamTool.getStatus()?.isDrawing :
     !!tool.getStatus()?.isDrawing;
 
   // When integrated in Vue layout, ignore hover/move when pointer is outside the canvas,
@@ -7745,7 +7817,7 @@ function onWindowMouseMove(e) {
     }
   }
 
-  if (state.activeTool === "dim") dimTool.onPointerMove(
+  if (effectiveMode === "dim") dimTool.onPointerMove(
     { offsetX: ox, offsetY: oy, shiftKey: e.shiftKey },
     {
       snapOn: state.snapOn,
@@ -7759,7 +7831,7 @@ function onWindowMouseMove(e) {
       stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
     }
   );
-  else if (state.activeTool === "hidden") hiddenTool.onPointerMove(
+  else if (effectiveMode === "hidden") hiddenTool.onPointerMove(
     { offsetX: ox, offsetY: oy, shiftKey: e.shiftKey },
     {
       snapOn: state.snapOn,
@@ -7772,7 +7844,7 @@ function onWindowMouseMove(e) {
       stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
     }
   );
-  else if (state.activeTool === "beam") beamTool.onPointerMove(
+  else if (effectiveMode === "beam") beamTool.onPointerMove(
     { offsetX: ox, offsetY: oy, shiftKey: e.shiftKey },
     {
       snapOn: state.snapOn,
@@ -7854,6 +7926,7 @@ function isEditableTarget(el) {
 
 function onWindowKeyDown(e) {
   if (!inputEnabled) return;
+  const effectiveMode = getEffectiveDrawingMode();
   const key = String(e.key || "");
   const code = String(e.code || "");
   const ctrl = !!(e.ctrlKey || e.metaKey);
@@ -8126,9 +8199,9 @@ function onWindowKeyDown(e) {
     return;
   }
 
-  if (state.activeTool === "dim") dimTool.onKeyDown(e);
-  else if (state.activeTool === "hidden") hiddenTool.onKeyDown(e);
-  else if (state.activeTool === "beam") {
+  if (effectiveMode === "dim") dimTool.onKeyDown(e);
+  else if (effectiveMode === "hidden") hiddenTool.onKeyDown(e);
+  else if (effectiveMode === "beam") {
     beamTool.onKeyDown(e);
     state.orthoEnabled = !!beamTool.snapEnabled;
     tool.snapEnabled = state.orthoEnabled;
@@ -8140,6 +8213,7 @@ function onWindowKeyDown(e) {
   }
 
   if (key === "Escape") {
+    setForcedChainMode(null);
     if (boxSelect.active) {
       boxSelect.active = false;
       return;
@@ -8324,6 +8398,7 @@ function setActiveTool(name) {
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);
   if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
   if (extendCommand.mode !== "idle") cancelExtendCommand(false);
+  setForcedChainMode(null);
   tool.stopChaining();
   hiddenTool.stopChaining();
   beamTool.stopChaining();
@@ -8352,6 +8427,7 @@ function clearAll() {
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);
   if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
   if (extendCommand.mode !== "idle") cancelExtendCommand(false);
+  setForcedChainMode(null);
   undo.runAction(() => {
     graph.clear();
     hiddenGraph.clear();
@@ -8379,7 +8455,18 @@ function clearAll() {
 function getState() {
   const graphSnap = snapshotGraph(graph);
   const hiddenGraphSnap = snapshotGraph(hiddenGraph);
-  const beamGraphSnap = { nodes: [], walls: [] };
+  const beamNodeIds = new Set();
+  const beamWalls = [];
+  for (const w of graphSnap.walls) {
+    if (!isBeamEdge(w)) continue;
+    beamWalls.push({ ...w });
+    beamNodeIds.add(w.a);
+    beamNodeIds.add(w.b);
+  }
+  const beamGraphSnap = {
+    nodes: graphSnap.nodes.filter((n) => beamNodeIds.has(n.id)).map((n) => ({ ...n })),
+    walls: beamWalls,
+  };
   return {
     state: { ...state },
     graphSnap,
@@ -8441,8 +8528,8 @@ function getState() {
       selectedWallIds: selectedWallIds.slice(),
       selectedHiddenId,
       selectedHiddenIds: selectedHiddenIds.slice(),
-      selectedBeamId: null,
-      selectedBeamIds: [],
+      selectedBeamId: (selectedWallId && isBeamEdge(graph.getWall(selectedWallId))) ? selectedWallId : null,
+      selectedBeamIds: selectedWallIds.filter((id) => isBeamEdge(graph.getWall(id))),
       selectedDimId,
       selectedDimIds: selectedDimIds.slice(),
       selectedModelOutline,
@@ -8491,6 +8578,12 @@ function setState(patch) {
   if (typeof patch.wallFillColor === "string" && patch.wallFillColor) {
     state.wallFillColor = patch.wallFillColor;
   }
+  if (typeof patch.wallEdgeColor === "string" && patch.wallEdgeColor) {
+    state.wallEdgeColor = patch.wallEdgeColor;
+  }
+  if (typeof patch.wallTextColor === "string" && patch.wallTextColor) {
+    state.wallTextColor = patch.wallTextColor;
+  }
   if (typeof patch.wall3dColor === "string" && patch.wall3dColor) {
     state.wall3dColor = patch.wall3dColor;
     tool.defaultColor = patch.wall3dColor;
@@ -8498,9 +8591,27 @@ function setState(patch) {
   if (typeof patch.beamFillColor === "string" && patch.beamFillColor) {
     state.beamFillColor = patch.beamFillColor;
   }
+  if (typeof patch.beamEdgeColor === "string" && patch.beamEdgeColor) {
+    state.beamEdgeColor = patch.beamEdgeColor;
+  }
+  if (typeof patch.beamTextColor === "string" && patch.beamTextColor) {
+    state.beamTextColor = patch.beamTextColor;
+  }
   if (typeof patch.beam3dColor === "string" && patch.beam3dColor) {
     state.beam3dColor = patch.beam3dColor;
     beamTool.defaultColor = patch.beam3dColor;
+  }
+  if (typeof patch.columnFillColor === "string" && patch.columnFillColor) {
+    state.columnFillColor = patch.columnFillColor;
+  }
+  if (typeof patch.columnEdgeColor === "string" && patch.columnEdgeColor) {
+    state.columnEdgeColor = patch.columnEdgeColor;
+  }
+  if (typeof patch.columnTextColor === "string" && patch.columnTextColor) {
+    state.columnTextColor = patch.columnTextColor;
+  }
+  if (typeof patch.column3dColor === "string" && patch.column3dColor) {
+    state.column3dColor = patch.column3dColor;
   }
   if (typeof patch.wallMagnetEnabled === "boolean") {
     state.wallMagnetEnabled = patch.wallMagnetEnabled;
@@ -8606,7 +8717,7 @@ function setSelectedBeamStyle({ thicknessMm = null, heightMm = null, fillColor =
     for (const id of ids) {
       const w = graph.getWall(id);
       if (!w) continue;
-      if (w.elementType !== "beam") continue;
+      if (!isBeamEdge(w)) continue;
       if (Number.isFinite(Number(thicknessMm)) && Number(thicknessMm) > 0) {
         w.thickness = Math.max(1, Number(thicknessMm));
         changed = true;
