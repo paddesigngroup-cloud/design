@@ -5866,6 +5866,7 @@ const hiddenTool = new HiddenWallTool({
   snapTolMm: 30,
   defaultThickness: state.hiddenWallThicknessMm || 1,
 });
+hiddenTool.angleLocked = state.orthoEnabled !== false;
 
 const dimTool = new DimensionTool({
   view,
@@ -6798,7 +6799,7 @@ function onMouseDown(e) {
       state.orthoEnabled = nextOrtho;
       tool.snapEnabled = nextOrtho;
       beamTool.snapEnabled = nextOrtho;
-      if (typeof hiddenTool?.snapEnabled === "boolean") hiddenTool.snapEnabled = nextOrtho;
+      if (typeof hiddenTool?.angleLocked === "boolean") hiddenTool.angleLocked = nextOrtho;
       if (typeof dimTool?.orthoLocked === "boolean") dimTool.orthoLocked = nextOrtho;
     }
     return;
@@ -8563,6 +8564,7 @@ function setActiveTool(name) {
   state.activeTool = next;
   if (next === "wall") tool.snapEnabled = state.orthoEnabled !== false;
   if (next === "beam") beamTool.snapEnabled = state.orthoEnabled !== false;
+  if (next === "hidden") hiddenTool.angleLocked = state.orthoEnabled !== false;
   if (next === "dim") dimTool.orthoLocked = state.orthoEnabled !== false;
   _ui.updateToolButtons();
   updateCanvasCursor();
@@ -8794,6 +8796,7 @@ function setState(patch) {
     // Keep wall tool lock-step state synced with the public ortho flag.
     tool.snapEnabled = state.orthoEnabled;
     beamTool.snapEnabled = state.orthoEnabled;
+    hiddenTool.angleLocked = state.orthoEnabled;
     if (!dimTool.getStatus?.()?.isDrawing) dimTool.orthoLocked = state.orthoEnabled;
   }
   if (Number.isFinite(Number(patch.stepLineCm))) {
