@@ -5,6 +5,7 @@ import { editorRef, model2dTransformRef } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
 import { useDialogService } from "./dialog_service.js";
 import { WALL_READY_PRESETS, buildPresetLines, getPresetIconWalls } from "./features/wall_preset_drag.js";
+import { CURRENT_ADMIN_ID, PART_KINDS_CATALOG } from "./features/part_kinds_catalog.js";
 
 const activeTool = ref("select");
 const snapOn = ref(true);
@@ -153,6 +154,460 @@ const snapMenuItems = [
   { id: "wallMagnet", title: "جذب دیوار", icon: "/icons/magnet.png" },
   { id: "ortho", title: "راستا (راست کلیک)", icon: "/icons/ortho_line.png" },
 ];
+const currentAdminId = ref(CURRENT_ADMIN_ID);
+const constructionWizardOpen = ref(false);
+const constructionStep = ref("part_kinds");
+const editablePartKinds = ref(PART_KINDS_CATALOG.map((item) => ({ ...item })));
+const constructionLoading = ref(false);
+const constructionSavingIds = ref([]);
+const constructionDeletingIds = ref([]);
+const constructionDeletedPartKindIds = ref([]);
+const constructionImportInputEl = ref(null);
+const constructionImportPreviewRows = ref([]);
+const constructionImportFileName = ref("");
+const constructionTables = [
+  { id: "part_kinds", title: "انواع قطعات", status: "active" },
+  { id: "part_sizes", title: "ابعاد پایه", status: "planned" },
+  { id: "joinery_rules", title: "قواعد اتصال", status: "planned" },
+  { id: "hardware_sets", title: "ست یراق", status: "planned" },
+];
+const constructionPartKinds = computed(() =>
+  editablePartKinds.value
+    .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
+    .slice()
+    .sort((a, b) => {
+      const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return String(a.org_part_kind_title || a.title || "").localeCompare(
+        String(b.org_part_kind_title || b.title || ""),
+        "fa"
+      );
+    })
+);
+const systemPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => item.admin_id === null).length);
+const adminPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => item.admin_id === currentAdminId.value).length);
+const constructionHasPendingChanges = computed(
+  () =>
+    constructionDeletedPartKindIds.value.length > 0 ||
+    editablePartKinds.value.some((item) => !!item.__isNew || !!item.__dirty)
+);
+const constructionImportPreviewCount = computed(() => constructionImportPreviewRows.value.length);
+
+function openConstructionWizard() {
+  constructionWizardOpen.value = true;
+  constructionStep.value = "part_kinds";
+  activeMenu.value = "construction";
+  openMenuPanel.value = null;
+  openMode.value = "menu";
+  loadConstructionPartKinds();
+  constructionDeletedPartKindIds.value = [];
+}
+
+function addConstructionPartKind() {
+  createConstructionPartKind();
+}
+
+function removeConstructionPartKind(id) {
+  deleteConstructionPartKind(id);
+}
+
+async function closeConstructionWizard() {
+  if (constructionHasPendingChanges.value) {
+    const ok = await showConfirm("تغییرات ذخیره نشده‌اند. پنجره بدون ذخیره بسته شود؟", {
+      title: "بستن شیوه ساخت",
+      confirmText: "بستن بدون ذخیره",
+      cancelText: "بازگشت",
+    });
+    if (!ok) return;
+  }
+  constructionWizardOpen.value = false;
+  if (activeMenu.value === "construction") activeMenu.value = null;
+}
+
+function normalizePartKindPayload(item) {
+  return {
+    admin_id: item.admin_id,
+    part_kind_id: Number(item.part_kind_id),
+    part_kind_code: String(item.part_kind_code || "").trim(),
+    org_part_kind_title: String(item.org_part_kind_title || "").trim(),
+    sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.part_kind_id),
+    is_system: !!item.is_system,
+  };
+}
+
+function toPersianDigits(value) {
+  return String(value ?? "").replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
+}
+
+function buildPartKindDraft(item, overrides = {}) {
+  return {
+    ...item,
+    ...overrides,
+  };
+}
+
+function withConstructionDraftState(item) {
+  return buildPartKindDraft(item, { __isNew: false, __dirty: false });
+}
+
+function markConstructionPartKindDirty(item) {
+  if (!item || item.__isNew) return;
+  item.__dirty = true;
+}
+
+function toggleConstructionPartKindScope(item) {
+  item.admin_id = item.admin_id === null ? currentAdminId.value : null;
+  item.is_system = item.admin_id === null;
+  if (!item.__isNew) item.__dirty = true;
+}
+
+function validateConstructionPartKinds() {
+  for (const item of editablePartKinds.value) {
+    const partKindId = Number(item.part_kind_id);
+    const partKindCode = String(item.part_kind_code || "").trim();
+    const orgTitle = String(item.org_part_kind_title || "").trim();
+    if (!Number.isInteger(partKindId) || partKindId < 1) {
+      showAlert("برای همه ردیف‌ها شناسه معتبر و بزرگ‌تر از صفر وارد کنید.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!partKindCode) {
+      showAlert("کد نوع قطعه نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!orgTitle) {
+      showAlert("عنوان نوع قطعه نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+  }
+  const ids = editablePartKinds.value.map((item) => Number(item.part_kind_id));
+  if (new Set(ids).size !== ids.length) {
+    showAlert("شناسه نوع قطعه باید یکتا باشد.", { title: "اعتبارسنجی" });
+    return false;
+  }
+  const codes = editablePartKinds.value.map((item) => String(item.part_kind_code || "").trim().toLowerCase());
+  if (new Set(codes).size !== codes.length) {
+    showAlert("کد نوع قطعه باید یکتا باشد.", { title: "اعتبارسنجی" });
+    return false;
+  }
+  return true;
+}
+
+function getConstructionCsvHeaders() {
+  return ["part_kind_id", "part_kind_code", "org_part_kind_title", "admin_mode"];
+}
+
+function getConstructionCsvRows(items = constructionPartKinds.value) {
+  return items.map((item) => [
+    Number(item.part_kind_id) || "",
+    String(item.part_kind_code || "").trim(),
+    String(item.org_part_kind_title || "").trim(),
+    item.admin_id === null ? "system" : "admin",
+  ]);
+}
+
+function escapeCsvCell(value) {
+  const text = String(value ?? "");
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+  return text;
+}
+
+function buildCsvText(headers, rows) {
+  const lines = [
+    headers.map(escapeCsvCell).join(","),
+    ...rows.map((row) => row.map(escapeCsvCell).join(",")),
+  ];
+  return `\uFEFF${lines.join("\r\n")}`;
+}
+
+function parseCsvText(text) {
+  const rows = [];
+  let current = [];
+  let value = "";
+  let inQuotes = false;
+  const source = String(text || "").replace(/^\uFEFF/, "");
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i];
+    const next = source[i + 1];
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        value += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      current.push(value);
+      value = "";
+      continue;
+    }
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") i += 1;
+      current.push(value);
+      rows.push(current);
+      current = [];
+      value = "";
+      continue;
+    }
+    value += char;
+  }
+  if (value.length > 0 || current.length > 0) {
+    current.push(value);
+    rows.push(current);
+  }
+  return rows.filter((row) => row.some((cell) => String(cell || "").trim() !== ""));
+}
+
+function triggerConstructionImport() {
+  constructionImportInputEl.value?.click?.();
+}
+
+function clearConstructionImportPreview() {
+  constructionImportPreviewRows.value = [];
+  constructionImportFileName.value = "";
+  if (constructionImportInputEl.value) constructionImportInputEl.value.value = "";
+}
+
+function downloadConstructionExcelTemplate() {
+  const csv = buildCsvText(getConstructionCsvHeaders(), getConstructionCsvRows());
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "part_kinds_excel_template.csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(link.href);
+}
+
+async function onConstructionImportFileChange(event) {
+  const file = event?.target?.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const rows = parseCsvText(text);
+    if (rows.length < 2) throw new Error("empty-file");
+    const headers = rows[0].map((value) => String(value || "").trim());
+    const expected = getConstructionCsvHeaders();
+    if (expected.some((header, index) => headers[index] !== header)) {
+      throw new Error("invalid-headers");
+    }
+    const previewRows = rows.slice(1).map((row, index) => {
+      const partKindId = Number(row[0]);
+      const partKindCode = String(row[1] || "").trim();
+      const orgPartKindTitle = String(row[2] || "").trim();
+      const adminMode = String(row[3] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+      return {
+        lineNo: index + 2,
+        part_kind_id: partKindId,
+        part_kind_code: partKindCode,
+        org_part_kind_title: orgPartKindTitle,
+        admin_mode: adminMode,
+      };
+    });
+    if (!previewRows.length) throw new Error("empty-file");
+    const invalidRow = previewRows.find(
+      (row) =>
+        !Number.isInteger(row.part_kind_id) ||
+        row.part_kind_id < 1 ||
+        !row.part_kind_code ||
+        !row.org_part_kind_title
+    );
+    if (invalidRow) {
+      throw new Error(`invalid-row-${invalidRow.lineNo}`);
+    }
+    constructionImportPreviewRows.value = previewRows;
+    constructionImportFileName.value = file.name;
+  } catch (error) {
+    clearConstructionImportPreview();
+    showAlert("خواندن فایل اکسل انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.", { title: "آپلود فایل" });
+  }
+}
+
+function buildImportedConstructionDrafts(rows) {
+  const existingByPartKindId = new Map(editablePartKinds.value.map((item) => [Number(item.part_kind_id), item]));
+  const nextRows = rows.map((row, index) => {
+    const existing = existingByPartKindId.get(Number(row.part_kind_id));
+    const adminId = row.admin_mode === "system" ? null : currentAdminId.value;
+    const nextPayload = {
+      admin_id: adminId,
+      part_kind_id: Number(row.part_kind_id),
+      part_kind_code: String(row.part_kind_code || "").trim(),
+      org_part_kind_title: String(row.org_part_kind_title || "").trim(),
+      code: String(row.part_kind_code || "").trim(),
+      title: String(row.org_part_kind_title || "").trim(),
+      sort_order: index + 1,
+      is_system: adminId === null,
+    };
+    if (!existing) {
+      return buildPartKindDraft(nextPayload, {
+        id: `draft-import-${Date.now()}-${index}`,
+        __isNew: true,
+        __dirty: false,
+      });
+    }
+    const changed =
+      existing.admin_id !== nextPayload.admin_id ||
+      Number(existing.part_kind_id) !== nextPayload.part_kind_id ||
+      String(existing.part_kind_code || "").trim() !== nextPayload.part_kind_code ||
+      String(existing.org_part_kind_title || "").trim() !== nextPayload.org_part_kind_title ||
+      Number(existing.sort_order) !== nextPayload.sort_order ||
+      !!existing.is_system !== nextPayload.is_system;
+    return buildPartKindDraft(existing, {
+      ...nextPayload,
+      __isNew: false,
+      __dirty: changed,
+    });
+  });
+
+  const importedExistingIds = new Set(
+    nextRows.filter((item) => !item.__isNew).map((item) => String(item.id))
+  );
+  const deletedIds = editablePartKinds.value
+    .filter((item) => !item.__isNew && !importedExistingIds.has(String(item.id)))
+    .map((item) => String(item.id));
+
+  return { nextRows, deletedIds };
+}
+
+async function loadConstructionPartKinds() {
+  constructionLoading.value = true;
+  try {
+    const url = `/api/part-kinds?admin_id=${encodeURIComponent(currentAdminId.value)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("load-failed");
+    editablePartKinds.value = (await res.json()).map(withConstructionDraftState);
+    constructionDeletedPartKindIds.value = [];
+  } catch (_) {
+    showAlert("خواندن جدول انواع قطعات از دیتابیس انجام نشد.", { title: "خطا" });
+  } finally {
+    constructionLoading.value = false;
+  }
+}
+
+async function createConstructionPartKind() {
+  const nextId = editablePartKinds.value.reduce((max, item) => Math.max(max, Number(item.part_kind_id) || 0), 0) + 1;
+  editablePartKinds.value = [
+    ...editablePartKinds.value,
+    {
+      id: `draft-${Date.now()}-${nextId}`,
+      admin_id: currentAdminId.value,
+      part_kind_id: nextId,
+      part_kind_code: `custom_part_${nextId}`,
+      org_part_kind_title: `نوع قطعه ${nextId}`,
+      code: `custom_part_${nextId}`,
+      title: `نوع قطعه ${nextId}`,
+      sort_order: nextId,
+      is_system: false,
+      __isNew: true,
+      __dirty: false,
+    },
+  ];
+}
+
+async function saveConstructionPartKinds(options = {}) {
+  if (!constructionHasPendingChanges.value) {
+    showAlert("تغییری برای ذخیره وجود ندارد.", { title: "ذخیره تغییرات" });
+    return;
+  }
+  if (!validateConstructionPartKinds()) return;
+  if (!options.skipConfirm) {
+    const ok = await showConfirm("تغییرات جدول انواع قطعات در دیتابیس ذخیره شود؟", {
+      title: "ذخیره تغییرات",
+      confirmText: "ذخیره",
+      cancelText: "انصراف",
+    });
+    if (!ok) return;
+  }
+
+  const draftIds = editablePartKinds.value
+    .filter((item) => item.__isNew)
+    .map((item) => String(item.id));
+  const dirtyIds = editablePartKinds.value
+    .filter((item) => !item.__isNew && item.__dirty)
+    .map((item) => String(item.id));
+  constructionSavingIds.value = [...new Set([...draftIds, ...dirtyIds])];
+  try {
+    for (const id of constructionDeletedPartKindIds.value) {
+      const res = await fetch(`/api/part-kinds/${encodeURIComponent(String(id))}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("delete-failed");
+    }
+
+    for (const item of editablePartKinds.value.filter((row) => row.__isNew)) {
+      const res = await fetch("/api/part-kinds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizePartKindPayload(item)),
+      });
+      if (!res.ok) throw new Error("create-failed");
+    }
+
+    for (const item of editablePartKinds.value.filter((row) => !row.__isNew && row.__dirty)) {
+      const res = await fetch(`/api/part-kinds/${encodeURIComponent(String(item.id))}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizePartKindPayload(item)),
+      });
+      if (!res.ok) throw new Error("save-failed");
+    }
+
+    await loadConstructionPartKinds();
+    showAlert(options.successMessage || "تغییرات جدول انواع قطعات با موفقیت ذخیره شد.", {
+      title: options.successTitle || "ذخیره تغییرات",
+    });
+  } catch (_) {
+    showAlert("ذخیره تغییرات جدول انواع قطعات در دیتابیس انجام نشد.", { title: "خطا" });
+    await loadConstructionPartKinds();
+  } finally {
+    constructionSavingIds.value = [];
+  }
+}
+
+async function applyConstructionImportPreview() {
+  if (!constructionImportPreviewRows.value.length) return;
+  const ok = await showConfirm("پیش‌نمایش فایل اکسل روی جدول انواع قطعات اعمال شود؟", {
+    title: "تایید بروزرسانی",
+    confirmText: "اعمال",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  const { nextRows, deletedIds } = buildImportedConstructionDrafts(constructionImportPreviewRows.value);
+  editablePartKinds.value = nextRows;
+  constructionDeletedPartKindIds.value = deletedIds;
+  clearConstructionImportPreview();
+  await saveConstructionPartKinds({
+    skipConfirm: true,
+    successTitle: "آپلود فایل",
+    successMessage: "فایل اکسل با موفقیت روی جدول اعمال شد.",
+  });
+}
+
+async function deleteConstructionPartKind(id) {
+  const item = editablePartKinds.value.find((row) => String(row.id) === String(id));
+  if (!item) return;
+  const ok = await showConfirm(`نوع قطعه «${item.org_part_kind_title || item.title || "بدون عنوان"}» حذف شود؟`, {
+    title: "حذف نوع قطعه",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  constructionDeletingIds.value = [...constructionDeletingIds.value, String(id)];
+  try {
+    editablePartKinds.value = editablePartKinds.value.filter((item) => String(item.id) !== String(id));
+    if (!item.__isNew) {
+      constructionDeletedPartKindIds.value = [...new Set([...constructionDeletedPartKindIds.value, String(id)])];
+    }
+  } catch (_) {
+    showAlert("حذف نوع قطعه از جدول انجام نشد.", { title: "خطا" });
+  } finally {
+    constructionDeletingIds.value = constructionDeletingIds.value.filter((value) => value !== String(id));
+  }
+}
 
 function applyEditorPatch(patch) {
   editorRef.value?.setState?.(patch);
@@ -872,6 +1327,11 @@ function setMenu(menuId) {
 }
 
 function closeMenuPanel() {
+  if (constructionWizardOpen.value) {
+    closeConstructionWizard();
+    scheduleSubRailPosition();
+    return;
+  }
   openMenuPanel.value = null;
   activeMenu.value = null;
   activeSubRail.value = null;
@@ -1098,6 +1558,12 @@ const presetPreview = computed(() => {
 function toggleMenu(menuId, e) {
   // While drawing, keep submenus closed (AutoCAD-like).
   if (drawUiLock.value && route.path === "/") return;
+  if (menuId === "construction") {
+    if (constructionWizardOpen.value) closeConstructionWizard();
+    else openConstructionWizard();
+    scheduleSubRailPosition();
+    return;
+  }
   if (openMenuPanel.value === menuId) {
     openMenuPanel.value = null;
     activeMenu.value = null;
@@ -1274,6 +1740,7 @@ onMounted(() => {
     }
 
     // Reset UI selection state: menus closed and icons unselected.
+    constructionWizardOpen.value = false;
     openMenuPanel.value = null;
     activeMenu.value = null;
     activeSubRail.value = null;
@@ -1629,6 +2096,73 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
+          <template v-else-if="openMenuPanel === 'construction'">
+            <div class="constructionMenu">
+              <div class="constructionMenu__summary">
+                <div class="constructionMenu__summaryText">
+                  <div class="constructionMenu__eyebrow">کنترل شیوه ساخت از جدول `part_kinds`</div>
+                  <div class="constructionMenu__headline">انواع قطعات فعال برای ادمین جاری</div>
+                </div>
+                <div class="constructionMenu__stats">
+                  <div class="constructionMenu__stat">
+                    <span class="constructionMenu__statValue">{{ toPersianDigits(constructionPartKinds.length) }}</span>
+                    <span class="constructionMenu__statLabel">کل</span>
+                  </div>
+                  <div class="constructionMenu__stat">
+                    <span class="constructionMenu__statValue">{{ toPersianDigits(systemPartKindsCount) }}</span>
+                    <span class="constructionMenu__statLabel">سیستمی</span>
+                  </div>
+                  <div class="constructionMenu__stat">
+                    <span class="constructionMenu__statValue">{{ toPersianDigits(adminPartKindsCount) }}</span>
+                    <span class="constructionMenu__statLabel">اختصاصی</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="constructionMenu__hint">
+                این لیست فعلاً از mirror داده‌ی دیتابیس نمایش داده می‌شود و در فاز بعدی به API واقعی ادمین وصل خواهد شد.
+              </div>
+
+              <div class="constructionMenu__list" aria-label="Part Kinds">
+                <article
+                  v-for="item in constructionPartKinds"
+                  :key="item.id"
+                  class="constructionMenu__card"
+                >
+                  <div class="constructionMenu__cardHead">
+                    <div class="constructionMenu__titleBlock">
+                      <div class="constructionMenu__title">{{ item.org_part_kind_title }}</div>
+                      <div class="constructionMenu__subtitle">{{ item.part_kind_code }}</div>
+                    </div>
+                    <span
+                      class="constructionMenu__scope"
+                      :class="item.admin_id === null ? 'constructionMenu__scope--system' : 'constructionMenu__scope--admin'"
+                    >
+                      {{ item.admin_id === null ? "سیستمی" : "اختصاصی ادمین" }}
+                    </span>
+                  </div>
+
+                  <div class="constructionMenu__meta">
+                    <div class="constructionMenu__metaRow">
+                      <span class="constructionMenu__metaLabel">شناسه نوع</span>
+                      <span class="constructionMenu__metaValue">{{ item.part_kind_id }}</span>
+                    </div>
+                    <div class="constructionMenu__metaRow">
+                      <span class="constructionMenu__metaLabel">کد اصلی</span>
+                      <span class="constructionMenu__metaValue constructionMenu__metaValue--mono">{{ item.code }}</span>
+                    </div>
+                    <div class="constructionMenu__metaRow">
+                      <span class="constructionMenu__metaLabel">مالک ساختار</span>
+                      <span class="constructionMenu__metaValue constructionMenu__metaValue--mono">
+                        {{ item.admin_id || "SYSTEM" }}
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </template>
+
           <div v-else class="menuPanel__hint">محتوای این بخش در حال تکمیل است.</div>
         </div>
       </aside>
@@ -1968,6 +2502,228 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </nav>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="constructionWizardOpen" class="constructionDialog" role="dialog" aria-modal="true">
+    <div class="constructionDialog__backdrop" @click="closeConstructionWizard"></div>
+    <div class="constructionDialog__card" dir="rtl">
+      <div class="constructionDialog__head">
+        <div class="constructionDialog__headActions">
+          <button
+            type="button"
+            class="constructionDialog__headIconBtn"
+            :class="{ 'is-disabled': !constructionHasPendingChanges || constructionSavingIds.length > 0 }"
+            :disabled="!constructionHasPendingChanges || constructionSavingIds.length > 0"
+            title="ذخیره تغییرات"
+            @click="saveConstructionPartKinds"
+          >
+            <img src="/icons/construction-save.svg" alt="ذخیره" />
+          </button>
+          <button
+            type="button"
+            class="constructionDialog__headIconBtn"
+            title="دانلود اکسل"
+            @click="downloadConstructionExcelTemplate"
+          >
+            <img src="/icons/construction-download.svg" alt="دانلود" />
+          </button>
+          <button
+            type="button"
+            class="constructionDialog__headIconBtn"
+            title="آپلود اکسل"
+            @click="triggerConstructionImport"
+          >
+            <img src="/icons/construction-upload.svg" alt="آپلود" />
+          </button>
+        </div>
+        <div class="constructionDialog__titleWrap">
+          <div class="constructionDialog__eyebrow">کنترل مرحله‌ای جداول شیوه ساخت</div>
+          <div class="constructionDialog__title menuPanel__title">مدیریت ساختار نرم افزار ادمین</div>
+        </div>
+        <button type="button" class="constructionDialog__close" title="بستن" @click="closeConstructionWizard">×</button>
+      </div>
+
+      <div class="constructionDialog__body">
+        <aside class="constructionDialog__steps" aria-label="Construction Steps">
+          <button
+            v-for="step in constructionTables"
+            :key="step.id"
+            type="button"
+            class="constructionDialog__step"
+            :class="{
+              'is-active': constructionStep === step.id,
+              'is-planned': step.status !== 'active',
+            }"
+            @click="constructionStep = step.id"
+          >
+            <span class="constructionDialog__stepTitle">{{ step.title }}</span>
+            <span class="constructionDialog__stepStatus">{{ step.status === "active" ? "فعال" : "بعدی" }}</span>
+          </button>
+        </aside>
+
+        <section class="constructionDialog__content">
+          <template v-if="constructionStep === 'part_kinds'">
+            <input
+              ref="constructionImportInputEl"
+              class="constructionDialog__fileInput"
+              type="file"
+              accept=".csv"
+              @change="onConstructionImportFileChange"
+            />
+            <div class="constructionDialog__toolbar">
+              <div class="constructionDialog__toolbarMain">
+                <div class="constructionDialog__sectionTitle">جدول انواع قطعات</div>
+                <div class="constructionDialog__sectionHint">
+                  پیش‌فرض‌ها از سمت ما تعریف می‌شوند و ادمین می‌تواند آن‌ها را برای ساختار نرم‌افزار خودش ویرایش، اضافه یا حذف کند.
+                </div>
+              </div>
+              <div class="constructionDialog__toolbarActions">
+                <button type="button" class="constructionDialog__textBtn" @click="addConstructionPartKind">افزودن نوع قطعه</button>
+              </div>
+            </div>
+
+            <div v-if="constructionLoading" class="constructionDialog__loading">در حال خواندن داده‌های جدول از دیتابیس...</div>
+
+            <div v-if="constructionImportPreviewCount" class="constructionDialog__importPreview">
+              <div class="constructionDialog__importHead">
+                <div>
+                  <div class="constructionDialog__sectionTitle">پیش‌نمایش فایل اکسل</div>
+                  <div class="constructionDialog__sectionHint">
+                    فایل {{ constructionImportFileName }} خوانده شد. قبل از بروزرسانی، جدول واردشده را بررسی و سپس تایید کنید.
+                  </div>
+                </div>
+                <div class="constructionDialog__toolbarActions">
+                  <button type="button" class="constructionDialog__textBtn" @click="clearConstructionImportPreview">لغو</button>
+                  <button type="button" class="constructionDialog__textBtn is-primary" @click="applyConstructionImportPreview">
+                    تایید بروزرسانی
+                  </button>
+                </div>
+              </div>
+              <div class="constructionDialog__previewMeta">
+                <span>{{ constructionImportPreviewCount }} ردیف</span>
+                <span>فایل CSV قابل ویرایش در Excel</span>
+              </div>
+              <div class="constructionDialog__previewTableWrap">
+                <table class="constructionDialog__table constructionDialog__table--preview">
+                  <thead>
+                    <tr>
+                      <th>شناسه</th>
+                      <th>کد</th>
+                      <th>عنوان</th>
+                      <th>نوع مالک</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in constructionImportPreviewRows" :key="`${row.lineNo}-${row.part_kind_id}`">
+                      <td>{{ row.part_kind_id }}</td>
+                      <td>{{ row.part_kind_code }}</td>
+                      <td>{{ row.org_part_kind_title }}</td>
+                      <td>{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionPartKinds.length) }}</span>
+                <span class="constructionDialog__summaryLabel">کل</span>
+              </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(systemPartKindsCount) }}</span>
+                <span class="constructionDialog__summaryLabel">پیش‌فرض</span>
+              </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(adminPartKindsCount) }}</span>
+                <span class="constructionDialog__summaryLabel">اختصاصی</span>
+              </div>
+            </div>
+
+            <div class="constructionDialog__tableWrap">
+              <table class="constructionDialog__table">
+                <thead>
+                  <tr>
+                    <th>شناسه</th>
+                    <th>کد</th>
+                    <th>عنوان</th>
+                    <th>مالک</th>
+                    <th>نوع رکورد</th>
+                    <th>عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in constructionPartKinds" :key="item.id">
+                    <td>
+                      <input
+                        v-model.number="item.part_kind_id"
+                        class="constructionDialog__input"
+                        type="number"
+                        min="1"
+                        step="1"
+                        @input="markConstructionPartKindDirty(item)"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        v-model="item.part_kind_code"
+                        class="constructionDialog__input constructionDialog__input--mono"
+                        type="text"
+                        @input="markConstructionPartKindDirty(item)"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        v-model="item.org_part_kind_title"
+                        class="constructionDialog__input"
+                        type="text"
+                        @input="markConstructionPartKindDirty(item)"
+                      />
+                    </td>
+                    <td>
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">
+                        {{ item.admin_id || "SYSTEM" }}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        class="constructionDialog__scopeBtn"
+                        :class="item.admin_id === null ? 'is-system' : 'is-admin'"
+                        @click="toggleConstructionPartKindScope(item)"
+                      >
+                        {{ item.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین" }}
+                      </button>
+                    </td>
+                    <td>
+                      <div class="constructionDialog__actionsCell">
+                        <span v-if="constructionDeletingIds.includes(String(item.id))" class="constructionDialog__saving">در حال حذف</span>
+                        <span v-else-if="constructionSavingIds.includes(String(item.id))" class="constructionDialog__saving">در حال ذخیره</span>
+                        <span v-else-if="item.__isNew" class="constructionDialog__saving">جدید</span>
+                        <span v-else-if="item.__dirty" class="constructionDialog__saving">ذخیره نشده</span>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="removeConstructionPartKind(item.id)">×</button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="constructionDialog__sheetHint">
+              خروجی و ورودی اکسل این جدول به‌صورت CSV سازگار با Excel است. ابتدا فایل را دانلود کنید، در Excel ویرایش کنید، سپس دوباره همان فایل را آپلود و پیش‌نمایش را تایید کنید.
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="constructionDialog__placeholder">
+              <div class="constructionDialog__placeholderTitle">مرحله {{ constructionTables.find((x) => x.id === constructionStep)?.title }}</div>
+              <div class="constructionDialog__placeholderMsg">
+                این مرحله برای جدول بعدی شیوه ساخت رزرو شده و پس از مشخص کردن فیلدهای دیتابیس به همین wizard متصل می‌شود.
+              </div>
+            </div>
+          </template>
+        </section>
       </div>
     </div>
   </div>

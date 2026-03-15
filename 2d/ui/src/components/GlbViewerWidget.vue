@@ -41,11 +41,22 @@ let modelRoot = null;
 let modelBasePosition = null;
 let modelBaseRotationY = 0;
 let wallsRoot = null;
+let placeholderBoxesRoot = null;
 
 let axesHelper = null;
 
 const DEFAULT_WALL_HEIGHT_M = 2.8;
 const DEFAULT_MITER_LIMIT = 10;
+const PLACEHOLDER_BOX_SPECS_MM = [
+  { width: 800, depth: 550, height: 16, cx: 400, cy: 325, cz: 146 },
+  { width: 16, depth: 550, height: 704, cx: 8, cy: 325, cz: 506 },
+  { width: 16, depth: 550, height: 704, cx: 792, cy: 325, cz: 506 },
+  { width: 782, depth: 3, height: 711, cx: 400, cy: 582.5, cz: 502.5 },
+  { width: 768, depth: 80, height: 16, cx: 400, cy: 90, cz: 850 },
+  { width: 768, depth: 80, height: 16, cx: 400, cy: 541, cz: 850 },
+  { width: 768, depth: 16, height: 80, cx: 400, cy: 592, cz: 818 },
+  { width: 768, depth: 16, height: 80, cx: 400, cy: 592, cz: 194 },
+];
 const attrsSnapshot = computed(() => props.walls2d?.metrics || props.walls2d || {});
 const selectedEntityType = computed(
   () => attrsSnapshot.value?.entityType || props.selectedWallStyle?.entityType || "wall"
@@ -78,6 +89,8 @@ const selectedObjectTitle = computed(() => {
 });
 const wallMoveDeltaCm = ref({ x: 0, y: 0 });
 const coordInputDrafts = ref({});
+const showPlaceholderEdges = ref(true);
+const placeholderOpacity = ref(100);
 
 
 const wallMetrics = computed(() => {
@@ -552,6 +565,114 @@ function clearWalls3d() {
   wallsRoot = null;
 }
 
+function clearPlaceholderBoxes() {
+  if (!scene || !placeholderBoxesRoot) return;
+  placeholderBoxesRoot.traverse((n) => {
+    if (n.geometry) n.geometry.dispose?.();
+    if (n.material) {
+      const mats = Array.isArray(n.material) ? n.material : [n.material];
+      for (const m of mats) m.dispose?.();
+    }
+  });
+  scene.remove(placeholderBoxesRoot);
+  placeholderBoxesRoot = null;
+}
+
+function rebuildPlaceholderBoxes() {
+  if (!scene) return;
+  clearPlaceholderBoxes();
+
+  const root = new THREE.Group();
+  root.name = "placeholder-boxes";
+
+  for (const spec of PLACEHOLDER_BOX_SPECS_MM) {
+    const widthM = Math.max(0.001, Number(spec.width) * 0.001);
+    const depthM = Math.max(0.001, Number(spec.depth) * 0.001);
+    const heightM = Math.max(0.001, Number(spec.height) * 0.001);
+    const cxM = Number(spec.cx) * 0.001;
+    const cyM = Number(spec.cy) * 0.001;
+    const czM = Number(spec.cz) * 0.001;
+
+    const geometry = new THREE.BoxGeometry(widthM, heightM, depthM);
+    const material = new THREE.MeshStandardMaterial({
+      color: new THREE.Color("#D9D4CB"),
+      roughness: 0.82,
+      metalness: 0.04,
+      transparent: true,
+      opacity: 1,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.userData.isPlaceholderSolid = true;
+    const edges = new THREE.EdgesGeometry(geometry);
+    const edgeLines = new THREE.LineSegments(
+      edges,
+      new THREE.LineBasicMaterial({
+        color: new THREE.Color("#5F5A52"),
+        transparent: true,
+        opacity: 0.95,
+        depthTest: true,
+        depthWrite: false,
+      })
+    );
+    edgeLines.userData.isPlaceholderEdge = true;
+
+    // Blender-like center-based data:
+    // X = width axis
+    // Y = depth axis
+    // Z = height axis
+    // Scene mapping in this viewer:
+    // X -> X, Z(height) -> Y, Y(depth) -> -Z
+    mesh.position.set(cxM, czM, -cyM);
+    edgeLines.position.copy(mesh.position);
+    root.add(mesh);
+    root.add(edgeLines);
+  }
+
+  if (!root.children.length) return;
+  placeholderBoxesRoot = root;
+  scene.add(root);
+
+  try {
+    const lines = projectModelTo2DLines(root);
+    emit("model2d", {
+      lines,
+      opts: { color: "#8a98a3", lineWidthPx: 1, dash: [4, 7], alpha: 0.5 },
+    });
+  } catch (_) {
+    // no-op
+  }
+
+  syncPlaceholderEdgeVisibility();
+  syncPlaceholderOpacity();
+}
+
+function syncPlaceholderEdgeVisibility() {
+  if (!placeholderBoxesRoot) return;
+  placeholderBoxesRoot.traverse((obj) => {
+    if (obj?.userData?.isPlaceholderEdge) obj.visible = !!showPlaceholderEdges.value;
+  });
+}
+
+function togglePlaceholderEdges() {
+  showPlaceholderEdges.value = !showPlaceholderEdges.value;
+  syncPlaceholderEdgeVisibility();
+}
+
+function syncPlaceholderOpacity() {
+  if (!placeholderBoxesRoot) return;
+  const nextOpacity = Math.max(0, Math.min(1, Number(placeholderOpacity.value) / 100));
+  placeholderBoxesRoot.traverse((obj) => {
+    if (!obj?.userData?.isPlaceholderSolid) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of mats) {
+      if (!mat) continue;
+      mat.transparent = nextOpacity < 1;
+      mat.opacity = nextOpacity;
+      mat.needsUpdate = true;
+    }
+  });
+}
+
 function normalizeLinearMembers(snapshot) {
   const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
   const walls = Array.isArray(snapshot?.walls) ? snapshot.walls : [];
@@ -928,30 +1049,35 @@ onMounted(async () => {
   scene.add(dir);
 
   rebuildWalls3d(props.walls2d);
+  rebuildPlaceholderBoxes();
 
-  try {
-    const gltf = await loadGlb(props.src);
-    const root = gltf.scene || gltf.scenes?.[0];
-    if (root) {
-      modelRoot = root;
-      modelBasePosition = root.position.clone();
-      modelBaseRotationY = root.rotation.y || 0;
-      scene.add(root);
-      applyModel2dTransformTo3d(props.model2dTransform);
-
-      try {
-        const lines = projectModelTo2DLines(root);
-        emit("model2d", {
-          lines,
-          opts: { color: "#8a98a3", lineWidthPx: 1, dash: [4, 7], alpha: 0.5 },
-        });
-      } catch (_) {}
-
-      fitCameraToAll();
-    }
-  } catch (_) {
-    // ignore
-  }
+  // GLB model loading is temporarily disabled.
+  // This keeps the 3D widget active for generated walls while removing
+  // the imported model from both the 3D scene and its 2D projected overlay.
+  // try {
+  //   const gltf = await loadGlb(props.src);
+  //   const root = gltf.scene || gltf.scenes?.[0];
+  //   if (root) {
+  //     modelRoot = root;
+  //     modelBasePosition = root.position.clone();
+  //     modelBaseRotationY = root.rotation.y || 0;
+  //     scene.add(root);
+  //     applyModel2dTransformTo3d(props.model2dTransform);
+  //
+  //     try {
+  //       const lines = projectModelTo2DLines(root);
+  //       emit("model2d", {
+  //         lines,
+  //         opts: { color: "#8a98a3", lineWidthPx: 1, dash: [4, 7], alpha: 0.5 },
+  //       });
+  //     } catch (_) {}
+  //
+  //     fitCameraToAll();
+  //   }
+  // } catch (_) {
+  //   // ignore
+  // }
+  fitCameraToAll();
 
   baseSize = getWidgetSizePx();
 
@@ -1009,6 +1135,7 @@ onBeforeUnmount(() => {
   modelRoot = null;
   modelBasePosition = null;
   clearWalls3d();
+  clearPlaceholderBoxes();
 
   try {
     axesHelper?.removeFromParent?.();
@@ -1047,6 +1174,32 @@ onBeforeUnmount(() => {
             <button class="glbWidget__viewItem" type="button" @click="setViewDir(1, 1, -1)">ایزو SE</button>
             <button class="glbWidget__viewItem" type="button" @click="setViewDir(-1, 1, -1)">ایزو SW</button>
           </div>
+        </div>
+
+        <div class="glbWidget__edgeToggle" @mouseenter.stop @mouseleave.stop>
+          <button
+            type="button"
+            class="glbWidget__viewBtn"
+            :class="{ 'is-active': showPlaceholderEdges }"
+            :title="showPlaceholderEdges ? 'مخفی کردن لبه ها' : 'نمایش لبه ها'"
+            @click="togglePlaceholderEdges"
+          >
+            <span class="glbWidget__edgeIcon">{{ showPlaceholderEdges ? "⬚" : "□" }}</span>
+          </button>
+        </div>
+
+        <div class="glbWidget__opacity" @mouseenter.stop @mouseleave.stop>
+          <span class="glbWidget__opacityValue">0</span>
+          <input
+            v-model="placeholderOpacity"
+            class="glbWidget__opacitySlider"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            @input="syncPlaceholderOpacity"
+          />
+          <span class="glbWidget__opacityValue">100</span>
         </div>
       </div>
     </div>

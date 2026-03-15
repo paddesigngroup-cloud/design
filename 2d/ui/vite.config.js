@@ -7,6 +7,12 @@ import path from "node:path";
 export default defineConfig({
   plugins: [vue()],
   server: {
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
+    },
     fs: {
       // Allow importing the 2D engine modules from the parent folder (C:\DesignKP\2d\).
       allow: [path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")],

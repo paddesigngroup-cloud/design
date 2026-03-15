@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from designkp_backend.api.routers.part_kinds import router as part_kinds_router
+from designkp_backend.db.models import import_model_modules
+
+
+app = FastAPI(title="DesignKP Backend", version="0.1.0")
+
+import_model_modules()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+app.include_router(part_kinds_router, prefix="/api")

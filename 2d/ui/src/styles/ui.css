@@ -462,6 +462,137 @@ textarea {
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
+.constructionMenu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.constructionMenu__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(52, 20, 31, 0.1);
+  background:
+    radial-gradient(120% 120% at 100% 0%, rgba(118, 45, 71, 0.12) 0%, rgba(118, 45, 71, 0) 50%),
+    rgba(255, 255, 255, 0.24);
+}
+.constructionMenu__eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(118, 45, 71, 0.92);
+}
+.constructionMenu__headline {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+}
+.constructionMenu__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.constructionMenu__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 58px;
+  border-radius: 14px;
+  border: 1px solid rgba(52, 20, 31, 0.1);
+  background: rgba(255, 255, 255, 0.34);
+}
+.constructionMenu__statValue {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+}
+.constructionMenu__statLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.constructionMenu__hint {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px dashed rgba(52, 20, 31, 0.18);
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.constructionMenu__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.constructionMenu__card {
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(52, 20, 31, 0.1);
+  background: rgba(255, 255, 255, 0.26);
+  box-shadow: 0 10px 18px rgba(11, 34, 48, 0.05);
+}
+.constructionMenu__cardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.constructionMenu__title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+}
+.constructionMenu__subtitle {
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.constructionMenu__scope {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+.constructionMenu__scope--system {
+  color: #29543c;
+  background: rgba(156, 201, 180, 0.36);
+}
+.constructionMenu__scope--admin {
+  color: #6d2940;
+  background: rgba(223, 170, 188, 0.42);
+}
+.constructionMenu__meta {
+  margin-top: 10px;
+  display: grid;
+  gap: 7px;
+}
+.constructionMenu__metaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.constructionMenu__metaLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.constructionMenu__metaValue {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.constructionMenu__metaValue--mono {
+  direction: ltr;
+  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
 .presetTile {
   aspect-ratio: 1/1;
   border-radius: 14px;
@@ -559,6 +690,12 @@ textarea {
 }
 .menuItem:active {
   filter: brightness(0.98);
+}
+.menuItem:disabled,
+.menuItem--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: none;
 }
 .menuItem--grow {
   flex: 1;
@@ -710,6 +847,41 @@ textarea {
   width: 28px;
   height: 28px;
 }
+.glbWidget__edgeToggle {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
+}
+.glbWidget__opacity {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(11, 34, 48, 0.12);
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(10px);
+}
+.glbWidget__opacityValue {
+  min-width: 24px;
+  color: rgba(52, 20, 31, 0.82);
+  font-family: Vazirmatn, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+.glbWidget__opacitySlider {
+  width: 120px;
+  accent-color: rgba(118, 45, 71, 0.92);
+  cursor: pointer;
+}
 .glbWidget__viewBtn {
   width: 28px;
   height: 28px;
@@ -723,8 +895,18 @@ textarea {
   justify-content: center;
   padding: 0;
 }
+.glbWidget__viewBtn.is-active {
+  background: rgba(255, 255, 255, 0.42);
+  border-color: rgba(11, 34, 48, 0.24);
+}
 .glbWidget__viewBtn:hover {
   background: rgba(255, 255, 255, 0.24);
+}
+.glbWidget__edgeIcon {
+  display: block;
+  color: rgba(52, 20, 31, 0.82);
+  font-size: 15px;
+  line-height: 1;
 }
 .glbWidget__viewIcon {
   width: 18px;
@@ -1348,6 +1530,448 @@ textarea {
   position: fixed;
   inset: 0;
   z-index: 4000;
+}
+.constructionDialog {
+  position: fixed;
+  inset: 0;
+  z-index: 3600;
+}
+.constructionDialog__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(22, 10, 15, 0.4);
+  backdrop-filter: blur(5px);
+}
+.constructionDialog__card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(980px, calc(100vw - 40px));
+  height: min(680px, calc(100vh - 40px));
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(120% 120% at 100% 0%, rgba(118, 45, 71, 0.12) 0%, rgba(118, 45, 71, 0) 42%),
+    rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(118, 45, 71, 0.24);
+  border-radius: 28px;
+  box-shadow: 0 34px 90px rgba(11, 34, 48, 0.28);
+  overflow: hidden;
+  font-family: Vazirmatn, sans-serif;
+}
+.constructionDialog__card button,
+.constructionDialog__card input,
+.constructionDialog__card table,
+.constructionDialog__card th,
+.constructionDialog__card td,
+.constructionDialog__card div,
+.constructionDialog__card span {
+  font-family: Vazirmatn, sans-serif;
+}
+.constructionDialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(52, 20, 31, 0.1);
+}
+.constructionDialog__headActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.constructionDialog__eyebrow {
+  font-family: Vazirmatn, sans-serif !important;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.constructionDialog__title {
+  font-family: Vazirmatn, sans-serif !important;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.constructionDialog__close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(52, 20, 31, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.constructionDialog__headIconBtn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(52, 20, 31, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.75);
+  color: rgba(52, 20, 31, 0.72);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+.constructionDialog__headIconBtn:hover {
+  background: rgba(243, 222, 230, 0.88);
+  border-color: rgba(118, 45, 71, 0.18);
+  color: rgba(118, 45, 71, 0.92);
+}
+.constructionDialog__headIconBtn img {
+  width: 17px;
+  height: 17px;
+  display: block;
+  object-fit: contain;
+}
+.constructionDialog__headIconBtn.is-disabled,
+.constructionDialog__headIconBtn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.constructionDialog__body {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+}
+.constructionDialog__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-left: 1px solid rgba(52, 20, 31, 0.08);
+  background: rgba(255, 255, 255, 0.42);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.constructionDialog__step {
+  font-family: Vazirmatn, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 11px;
+  border: 1px solid rgba(52, 20, 31, 0.1);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
+  cursor: pointer;
+  text-align: right;
+}
+.constructionDialog__step.is-active {
+  background: rgba(243, 222, 230, 0.92);
+  border-color: rgba(118, 45, 71, 0.2);
+}
+.constructionDialog__step.is-planned {
+  opacity: 0.88;
+}
+.constructionDialog__stepTitle {
+  font-family: Vazirmatn, sans-serif !important;
+  font-size: 12px;
+  font-weight: 700;
+}
+.constructionDialog__stepStatus {
+  font-family: Vazirmatn, sans-serif !important;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  opacity: 0.66;
+}
+.constructionDialog__content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 16px;
+  overflow: auto;
+}
+.constructionDialog__fileInput {
+  display: none;
+}
+.constructionDialog__toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.constructionDialog__toolbarMain {
+  min-width: 0;
+}
+.constructionDialog__toolbarActions {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.constructionDialog__textBtn {
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid rgba(52, 20, 31, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+.constructionDialog__textBtn.is-primary {
+  background: rgba(243, 222, 230, 0.92);
+  border-color: rgba(118, 45, 71, 0.18);
+}
+.constructionDialog__sectionTitle {
+  font-family: Vazirmatn, sans-serif !important;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.constructionDialog__sectionHint {
+  font-family: Vazirmatn, sans-serif !important;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.constructionDialog__title,
+.constructionDialog__eyebrow,
+.constructionDialog__stepTitle,
+.constructionDialog__stepStatus,
+.constructionDialog__sectionTitle {
+  font-family: Vazirmatn, sans-serif !important;
+}
+.constructionDialog__summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.constructionDialog__loading {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px dashed rgba(52, 20, 31, 0.18);
+  background: rgba(255, 255, 255, 0.52);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.constructionDialog__summaryItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding: 6px 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(52, 20, 31, 0.07);
+  background: rgba(255, 255, 255, 0.58);
+}
+.constructionDialog__summaryValue {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+}
+.constructionDialog__summaryLabel {
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  line-height: 1.2;
+}
+.constructionDialog__importPreview {
+  border: 1px solid rgba(52, 20, 31, 0.1);
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.74);
+}
+.constructionDialog__importHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.constructionDialog__previewMeta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.constructionDialog__previewTableWrap {
+  margin-top: 10px;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid rgba(52, 20, 31, 0.08);
+  border-radius: 14px;
+}
+.constructionDialog__tableWrap {
+  border: 1px solid rgba(52, 20, 31, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 220px;
+}
+.constructionDialog__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.constructionDialog__table th,
+.constructionDialog__table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid rgba(52, 20, 31, 0.08);
+  text-align: center;
+  vertical-align: middle;
+}
+.constructionDialog__table th + th,
+.constructionDialog__table td + td {
+  border-inline-start: 1px solid rgba(148, 156, 166, 0.18);
+}
+.constructionDialog__table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(248, 237, 241, 0.92);
+  font-family: Vazirmatn, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.constructionDialog__table--preview th,
+.constructionDialog__table--preview td {
+  padding: 8px 8px;
+}
+.constructionDialog__input {
+  width: 100%;
+  min-width: 110px;
+  padding: 7px 9px;
+  border: 1px solid rgba(52, 20, 31, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--text);
+  font-size: 12px;
+  text-align: center;
+}
+.constructionDialog__input--mono {
+  direction: ltr;
+  text-align: center;
+  font-family: Vazirmatn, sans-serif;
+}
+.constructionDialog__pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(52, 20, 31, 0.1);
+}
+.constructionDialog__pill--mono {
+  direction: ltr;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: Vazirmatn, sans-serif;
+}
+.constructionDialog__scopeBtn {
+  min-height: 34px;
+  padding: 6px 9px;
+  border-radius: 10px;
+  border: 0;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.constructionDialog__scopeBtn.is-system {
+  color: #29543c;
+  background: rgba(156, 201, 180, 0.36);
+}
+.constructionDialog__scopeBtn.is-admin {
+  color: #6d2940;
+  background: rgba(223, 170, 188, 0.42);
+}
+.constructionDialog__iconBtn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(175, 34, 69, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #8b1839;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.constructionDialog__actionsCell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.constructionDialog__saving {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.constructionDialog__sheetHint {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.8;
+}
+.constructionDialog__placeholder {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  border: 1px dashed rgba(52, 20, 31, 0.16);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.42);
+  text-align: center;
+}
+.constructionDialog__placeholderTitle {
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--text);
+}
+.constructionDialog__placeholderMsg {
+  margin-top: 10px;
+  max-width: 460px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.9;
+}
+@media (max-width: 900px) {
+  .constructionDialog__card {
+    width: calc(100vw - 24px);
+    height: calc(100vh - 24px);
+    border-radius: 22px;
+  }
+  .constructionDialog__body {
+    grid-template-columns: 1fr;
+  }
+  .constructionDialog__steps {
+    border-left: 0;
+    border-bottom: 1px solid rgba(52, 20, 31, 0.08);
+  }
+  .constructionDialog__summary {
+    grid-template-columns: 1fr;
+  }
+  .constructionDialog__toolbar {
+    flex-direction: column;
+  }
+  .constructionDialog__importHead {
+    flex-direction: column;
+  }
 }
 .appDialog__backdrop {
   position: absolute;
