@@ -161,6 +161,13 @@ const editablePartKinds = ref(PART_KINDS_CATALOG.map((item) => ({ ...item })));
 const editableParamGroups = ref([]);
 const editableParams = ref([]);
 const editableBaseFormulas = ref([]);
+const baseFormulaBuilderOpen = ref(false);
+const baseFormulaBuilderMode = ref("create");
+const baseFormulaBuilderTargetRowId = ref(null);
+const baseFormulaBuilderDraft = ref(null);
+const baseFormulaBuilderTokens = ref([]);
+const baseFormulaBuilderSyncWarning = ref("");
+const baseFormulaBuilderNumberInput = ref("");
 const constructionLoading = ref(false);
 const constructionSavingIds = ref([]);
 const constructionDeletingIds = ref([]);
@@ -247,9 +254,44 @@ const constructionBaseFormulas = computed(() =>
 );
 const systemBaseFormulasCount = computed(() => constructionBaseFormulas.value.filter((item) => item.admin_id === null).length);
 const adminBaseFormulasCount = computed(() => constructionBaseFormulas.value.filter((item) => item.admin_id === currentAdminId.value).length);
+const baseFormulaBuilderAvailableParams = computed(() =>
+  editableParams.value
+    .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
+    .slice()
+    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0))
+    .map((item) => ({
+      value: String(item.param_code || "").trim(),
+      label: `${String(item.param_code || "").trim()} - ${String(item.param_title_fa || item.title || "").trim()}`,
+    }))
+    .filter((item) => item.value)
+);
+const baseFormulaBuilderKnownParamCodes = computed(() => new Set(baseFormulaBuilderAvailableParams.value.map((item) => item.value)));
+const baseFormulaBuilderValidationErrors = computed(() => {
+  const draft = baseFormulaBuilderDraft.value;
+  if (!draft) return [];
+  const errors = validateFormulaExpression(String(draft.formula || "").trim(), baseFormulaBuilderKnownParamCodes.value);
+  const foId = Number(draft.fo_id);
+  const paramFormula = String(draft.param_formula || "").trim().toLowerCase();
+  if (!Number.isInteger(foId) || foId < 1) errors.unshift("شناسه فرمول پایه معتبر نیست.");
+  if (!paramFormula) errors.unshift("کد فرمول پایه خالی است.");
+  for (const item of editableBaseFormulas.value) {
+    if (String(item.id) === String(baseFormulaBuilderTargetRowId.value)) continue;
+    if (Number(item.fo_id) === foId) errors.unshift("شناسه فرمول پایه تکراری است.");
+    if (String(item.param_formula || "").trim().toLowerCase() === paramFormula) errors.unshift("کد فرمول پایه تکراری است.");
+  }
+  return [...new Set(errors)];
+});
+const isBaseFormulaBuilderApplyDisabled = computed(() => !baseFormulaBuilderDraft.value || baseFormulaBuilderValidationErrors.value.length > 0);
 const constructionParamGroupDuplicateState = computed(() => buildDuplicateState(editableParamGroups.value, ["param_group_id", "param_group_code"]));
 const constructionParamDuplicateState = computed(() => buildDuplicateState(editableParams.value, ["param_id", "param_code"]));
 const constructionBaseFormulaDuplicateState = computed(() => buildDuplicateState(editableBaseFormulas.value, ["fo_id", "param_formula"]));
+const baseFormulaCodeWidthCh = computed(() => {
+  const liveCodes = constructionBaseFormulas.value.map((item) => String(item?.param_formula || "").trim().length);
+  const previewCodes = constructionImportPreviewKind.value === "base_formulas"
+    ? constructionImportPreviewRows.value.map((item) => String(item?.param_formula || "").trim().length)
+    : [];
+  return Math.max(3, ...liveCodes, ...previewCodes);
+});
 
 function openConstructionWizard() {
   constructionWizardOpen.value = true;
@@ -444,6 +486,297 @@ function getConstructionBaseFormulaDuplicateMessage(item) {
   return { tone: "good", text: "تکراری نیست" };
 }
 
+function getBaseFormulaCodeCellStyle() {
+  const widthCh = baseFormulaCodeWidthCh.value;
+  return {
+    width: `calc(${widthCh}ch + 36px)`,
+    minWidth: `calc(${widthCh}ch + 36px)`,
+    maxWidth: `calc(${widthCh}ch + 36px)`,
+  };
+}
+
+function getBaseFormulaCodeInputStyle() {
+  return {
+    width: `calc(${baseFormulaCodeWidthCh.value}ch + 20px)`,
+    minWidth: `calc(${baseFormulaCodeWidthCh.value}ch + 20px)`,
+  };
+}
+
+function createBaseFormulaDraft(item, overrides = {}) {
+  return {
+    ...item,
+    ...overrides,
+  };
+}
+
+function buildNewBaseFormulaDraft() {
+  const nextId = editableBaseFormulas.value.reduce((max, item) => Math.max(max, Number(item.fo_id) || 0), 0) + 1;
+  return createBaseFormulaDraft({
+    id: `draft-base-formula-row-${Date.now()}-${nextId}`,
+    admin_id: currentAdminId.value,
+    fo_id: nextId,
+    param_formula: `f${nextId}`,
+    formula: "(u_f_o)",
+    code: `f${nextId}`,
+    title: `f${nextId}`,
+    sort_order: nextId,
+    is_system: false,
+    __isNew: true,
+    __dirty: false,
+  });
+}
+
+function formulaTokenToText(token) {
+  return String(token?.value || "");
+}
+
+function serializeFormulaTokens(tokens) {
+  return tokens.map(formulaTokenToText).join("");
+}
+
+function isFormulaNumberToken(value) {
+  return /^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(String(value || "").trim());
+}
+
+function normalizeBaseFormulaNumberInput(value) {
+  return String(value || "").replace(/[^\d.\-]/g, "").replace(/(?!^)-/g, "");
+}
+
+function tokenizeFormulaExpression(expression) {
+  const source = String(expression || "").trim();
+  if (!source) return { tokens: [], errors: [] };
+  const tokens = [];
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index];
+    if (/\s/.test(char)) {
+      index += 1;
+      continue;
+    }
+    const previousToken = tokens[tokens.length - 1] || null;
+    const canReadNegativeNumber = char === "-" && (!previousToken || previousToken.value === "(" || ["+", "-", "*", "/"].includes(previousToken.value));
+    if (/[A-Za-z_]/.test(char)) {
+      let end = index + 1;
+      while (end < source.length && /[A-Za-z0-9_]/.test(source[end])) end += 1;
+      tokens.push({ type: "parameter", value: source.slice(index, end) });
+      index = end;
+      continue;
+    }
+    if (/\d|\./.test(char) || canReadNegativeNumber) {
+      let end = index + (canReadNegativeNumber ? 1 : 0);
+      let hasDigit = false;
+      let hasDot = false;
+      while (end < source.length) {
+        const current = source[end];
+        if (/\d/.test(current)) {
+          hasDigit = true;
+          end += 1;
+          continue;
+        }
+        if (current === "." && !hasDot) {
+          hasDot = true;
+          end += 1;
+          continue;
+        }
+        break;
+      }
+      const value = source.slice(index, end);
+      if (hasDigit && isFormulaNumberToken(value)) {
+        tokens.push({ type: "number", value });
+        index = end;
+        continue;
+      }
+    }
+    if ("()+-*/".includes(char)) {
+      tokens.push({ type: char === "(" || char === ")" ? "paren" : "operator", value: char });
+      index += 1;
+      continue;
+    }
+    return {
+      tokens: [],
+      errors: [`عبارت فرمول نزدیک «${source.slice(index, index + 12)}» معتبر نیست.`],
+    };
+  }
+  return { tokens, errors: [] };
+}
+
+function validateFormulaExpression(expression, knownParamCodes = new Set()) {
+  const text = String(expression || "").trim();
+  if (!text) return ["عبارت فرمول خالی است."];
+
+  const { tokens, errors } = tokenizeFormulaExpression(text);
+  if (errors.length) return errors;
+
+  const result = [];
+  let depth = 0;
+  let expectingOperand = true;
+  let previousValue = null;
+
+  for (const token of tokens) {
+    if (expectingOperand) {
+      if (token.value === "(") {
+        depth += 1;
+      } else if (token.type === "parameter") {
+        if (knownParamCodes.size > 0 && !knownParamCodes.has(token.value)) {
+          result.push(`پارامتر «${token.value}» شناخته‌شده نیست.`);
+          break;
+        }
+        expectingOperand = false;
+      } else if (token.type === "number") {
+        expectingOperand = false;
+      } else if (token.value === ")") {
+        result.push("پرانتزها متوازن نیستند.");
+        break;
+      } else {
+        result.push(previousValue ? "دو عملگر یا ترتیب نامعتبر در فرمول وجود دارد." : "فرمول نمی‌تواند با عملگر شروع شود.");
+        break;
+      }
+    } else if (token.value === ")") {
+      if (previousValue === "(") {
+        result.push("پرانتز خالی مجاز نیست.");
+        break;
+      }
+      depth -= 1;
+      if (depth < 0) {
+        result.push("پرانتزها متوازن نیستند.");
+        break;
+      }
+    } else if (["+","-","*","/"].includes(token.value)) {
+      expectingOperand = true;
+    } else if (token.value === "(") {
+      result.push("الگوی فرمول نامعتبر است.");
+      break;
+    } else {
+      result.push("الگوی فرمول نامعتبر است.");
+      break;
+    }
+
+    previousValue = token.value;
+  }
+
+  if (!result.length && expectingOperand) result.push("فرمول نمی‌تواند با عملگر تمام شود.");
+  if (!result.length && depth !== 0) result.push("پرانتزها متوازن نیستند.");
+  return result;
+}
+
+function syncBaseFormulaBuilderFromFormulaText(options = {}) {
+  const draft = baseFormulaBuilderDraft.value;
+  if (!draft) return;
+  const parsed = tokenizeFormulaExpression(draft.formula);
+  if (parsed.errors.length) {
+    if (!options.silent) baseFormulaBuilderSyncWarning.value = "عبارت دستی کامل parse نشد. می‌توانید ادامه را تایپ کنید یا از پاک‌سازی tokenها استفاده کنید.";
+    return;
+  }
+  baseFormulaBuilderTokens.value = parsed.tokens;
+  baseFormulaBuilderSyncWarning.value = "";
+}
+
+function updateBaseFormulaBuilderFormula(text, options = {}) {
+  if (!baseFormulaBuilderDraft.value) return;
+  baseFormulaBuilderDraft.value.formula = text;
+  if (options.syncTokens !== false) syncBaseFormulaBuilderFromFormulaText({ silent: options.silent });
+}
+
+function openBaseFormulaBuilder(item, mode = "edit") {
+  baseFormulaBuilderMode.value = mode;
+  baseFormulaBuilderTargetRowId.value = item?.id ?? null;
+  baseFormulaBuilderDraft.value = createBaseFormulaDraft(item);
+  baseFormulaBuilderNumberInput.value = "";
+  baseFormulaBuilderTokens.value = [];
+  baseFormulaBuilderOpen.value = true;
+  syncBaseFormulaBuilderFromFormulaText({ silent: true });
+}
+
+async function closeBaseFormulaBuilder() {
+  const draft = baseFormulaBuilderDraft.value;
+  if (!baseFormulaBuilderOpen.value || !draft) {
+    baseFormulaBuilderOpen.value = false;
+    return;
+  }
+  const original = editableBaseFormulas.value.find((item) => String(item.id) === String(baseFormulaBuilderTargetRowId.value));
+  const hasChanges = baseFormulaBuilderMode.value === "create"
+    ? !!String(draft.param_formula || "").trim() || !!String(draft.formula || "").trim()
+    : !!original && (
+      Number(original.fo_id) !== Number(draft.fo_id) ||
+      String(original.param_formula || "").trim() !== String(draft.param_formula || "").trim() ||
+      String(original.formula || "").trim() !== String(draft.formula || "").trim() ||
+      String(original.admin_id || "") !== String(draft.admin_id || "")
+    );
+  if (hasChanges) {
+    const ok = await showConfirm("تغییرات سازنده فرمول اعمال نشده‌اند. پنجره بسته شود؟", {
+      title: "بستن سازنده فرمول",
+      confirmText: "بستن",
+      cancelText: "بازگشت",
+    });
+    if (!ok) return;
+  }
+  baseFormulaBuilderOpen.value = false;
+  baseFormulaBuilderDraft.value = null;
+  baseFormulaBuilderTargetRowId.value = null;
+  baseFormulaBuilderTokens.value = [];
+  baseFormulaBuilderSyncWarning.value = "";
+  baseFormulaBuilderNumberInput.value = "";
+}
+
+function appendBaseFormulaToken(type, value) {
+  const nextToken = { type, value: String(value) };
+  const nextTokens = [...baseFormulaBuilderTokens.value, nextToken];
+  baseFormulaBuilderTokens.value = nextTokens;
+  updateBaseFormulaBuilderFormula(serializeFormulaTokens(nextTokens), { syncTokens: false, silent: true });
+  baseFormulaBuilderSyncWarning.value = "";
+}
+
+function removeLastBaseFormulaToken() {
+  if (!baseFormulaBuilderTokens.value.length) return;
+  const nextTokens = baseFormulaBuilderTokens.value.slice(0, -1);
+  baseFormulaBuilderTokens.value = nextTokens;
+  updateBaseFormulaBuilderFormula(serializeFormulaTokens(nextTokens), { syncTokens: false, silent: true });
+  baseFormulaBuilderSyncWarning.value = "";
+}
+
+function clearBaseFormulaTokens() {
+  baseFormulaBuilderTokens.value = [];
+  updateBaseFormulaBuilderFormula("", { syncTokens: false, silent: true });
+  baseFormulaBuilderSyncWarning.value = "";
+}
+
+function addBaseFormulaBuilderNumber() {
+  const value = String(baseFormulaBuilderNumberInput.value || "").trim();
+  if (!isFormulaNumberToken(value)) return;
+  appendBaseFormulaToken("number", value);
+  baseFormulaBuilderNumberInput.value = "";
+}
+
+function applyBaseFormulaBuilder() {
+  const draft = baseFormulaBuilderDraft.value;
+  if (!draft || baseFormulaBuilderValidationErrors.value.length > 0) return;
+  const normalized = createBaseFormulaDraft(draft, {
+    param_formula: String(draft.param_formula || "").trim(),
+    formula: String(draft.formula || "").trim(),
+    code: String(draft.param_formula || "").trim(),
+    title: String(draft.param_formula || "").trim(),
+    sort_order: Number.isFinite(Number(draft.sort_order)) ? Number(draft.sort_order) : Number(draft.fo_id),
+    is_system: draft.admin_id === null,
+  });
+  if (baseFormulaBuilderMode.value === "create") {
+    editableBaseFormulas.value = [...editableBaseFormulas.value, normalized];
+  } else {
+    editableBaseFormulas.value = editableBaseFormulas.value.map((item) => {
+      if (String(item.id) !== String(baseFormulaBuilderTargetRowId.value)) return item;
+      return createBaseFormulaDraft(normalized, {
+        __isNew: !!item.__isNew,
+        __dirty: item.__isNew ? false : true,
+      });
+    });
+  }
+  baseFormulaBuilderOpen.value = false;
+  baseFormulaBuilderDraft.value = null;
+  baseFormulaBuilderTargetRowId.value = null;
+  baseFormulaBuilderTokens.value = [];
+  baseFormulaBuilderSyncWarning.value = "";
+  baseFormulaBuilderNumberInput.value = "";
+}
+
 function withConstructionDraftState(item) {
   return buildPartKindDraft(item, { __isNew: false, __dirty: false });
 }
@@ -607,6 +940,14 @@ function validateConstructionBaseFormulas() {
     }
     if (!paramFormula || !formula) {
       showAlert("کد فرمول و عبارت فرمول نباید خالی باشند.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    const formulaErrors = validateFormulaExpression(formula, new Set(editableParams.value
+      .filter((param) => param.admin_id === null || param.admin_id === currentAdminId.value)
+      .map((param) => String(param.param_code || "").trim())
+      .filter(Boolean)));
+    if (formulaErrors.length > 0) {
+      showAlert(formulaErrors[0], { title: "اعتبارسنجی" });
       return false;
     }
   }
@@ -1270,23 +1611,7 @@ function addConstructionParam() {
 }
 
 function addConstructionBaseFormula() {
-  const nextId = editableBaseFormulas.value.reduce((max, item) => Math.max(max, Number(item.fo_id) || 0), 0) + 1;
-  editableBaseFormulas.value = [
-    ...editableBaseFormulas.value,
-    {
-      id: `draft-base-formula-row-${Date.now()}-${nextId}`,
-      admin_id: currentAdminId.value,
-      fo_id: nextId,
-      param_formula: `f${nextId}`,
-      formula: "(u_f_o)",
-      code: `f${nextId}`,
-      title: `f${nextId}`,
-      sort_order: nextId,
-      is_system: false,
-      __isNew: true,
-      __dirty: false,
-    },
-  ];
+  openBaseFormulaBuilder(buildNewBaseFormulaDraft(), "create");
 }
 
 async function readApiErrorMessage(response, fallbackMessage) {
@@ -4176,16 +4501,16 @@ onBeforeUnmount(() => {
                   <thead>
                     <tr>
                       <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
-                      <th class="constructionDialog__col constructionDialog__col--code">کد فرمول</th>
-                      <th class="constructionDialog__col constructionDialog__col--title">فرمول</th>
+                      <th class="constructionDialog__col constructionDialog__col--formulaCode" :style="getBaseFormulaCodeCellStyle()">کد فرمول</th>
+                      <th class="constructionDialog__col constructionDialog__col--formulaExpr">فرمول</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr v-for="row in constructionImportPreviewRows" :key="`${row.lineNo}-${row.fo_id}`">
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.fo_id }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--code">{{ row.param_formula }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--title constructionDialog__col--formula">{{ row.formula }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--formulaCode" :style="getBaseFormulaCodeCellStyle()">{{ row.param_formula }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--formulaExpr">{{ row.formula }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
                     </tr>
                   </tbody>
@@ -4213,8 +4538,8 @@ onBeforeUnmount(() => {
                 <thead>
                   <tr>
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
-                    <th class="constructionDialog__col constructionDialog__col--code">کد فرمول</th>
-                    <th class="constructionDialog__col constructionDialog__col--title">فرمول</th>
+                    <th class="constructionDialog__col constructionDialog__col--formulaCode" :style="getBaseFormulaCodeCellStyle()">کد فرمول</th>
+                    <th class="constructionDialog__col constructionDialog__col--formulaExpr">فرمول</th>
                     <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
                     <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
                     <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
@@ -4225,7 +4550,7 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--id">
                       <input v-model.number="item.fo_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionBaseFormulaDirty(item)" />
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--code">
+                    <td class="constructionDialog__col constructionDialog__col--formulaCode" :style="getBaseFormulaCodeCellStyle()">
                       <input
                         v-model="item.param_formula"
                         :class="[
@@ -4233,12 +4558,16 @@ onBeforeUnmount(() => {
                           'constructionDialog__input--mono',
                           `is-${getDuplicateInputTone(item, 'param_formula', constructionBaseFormulaDuplicateState)}`
                         ]"
+                        :style="getBaseFormulaCodeInputStyle()"
                         type="text"
                         @input="markConstructionBaseFormulaDirty(item)"
                       />
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--title constructionDialog__col--formula">
-                      <textarea v-model="item.formula" class="constructionDialog__input constructionDialog__input--mono constructionDialog__textarea" rows="2" @input="markConstructionBaseFormulaDirty(item)"></textarea>
+                    <td class="constructionDialog__col constructionDialog__col--formulaExpr">
+                      <button type="button" class="constructionDialog__formulaBtn" @click="openBaseFormulaBuilder(item, 'edit')">
+                        <span class="constructionDialog__formulaBtnText">{{ item.formula }}</span>
+                        <span class="constructionDialog__formulaBtnAction">ویرایش فرمول</span>
+                      </button>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--owner">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.admin_id || "SYSTEM" }}</span>
@@ -4250,17 +4579,17 @@ onBeforeUnmount(() => {
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--actions">
                       <div class="constructionDialog__actionsCell">
-                        <span v-if="constructionDeletingIds.includes(String(item.id))" class="constructionDialog__saving">در حال حذف</span>
-                        <span v-else-if="constructionSavingIds.includes(String(item.id))" class="constructionDialog__saving">در حال ذخیره</span>
-                        <span v-else-if="item.__isNew" class="constructionDialog__saving">جدید</span>
-                        <span v-else-if="item.__dirty" class="constructionDialog__saving">ذخیره نشده</span>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionBaseFormula(item.id)">×</button>
+                        <span v-if="constructionDeletingIds.includes(String(item.id))" class="constructionDialog__saving constructionDialog__saving--compact">در حال حذف</span>
+                        <span v-else-if="constructionSavingIds.includes(String(item.id))" class="constructionDialog__saving constructionDialog__saving--compact">در حال ذخیره</span>
+                        <span v-else-if="item.__isNew" class="constructionDialog__saving constructionDialog__saving--compact">جدید</span>
+                        <span v-else-if="item.__dirty" class="constructionDialog__saving constructionDialog__saving--compact">ذخیره نشده</span>
                         <span
-                          class="constructionDialog__duplicateState"
+                          class="constructionDialog__duplicateState constructionDialog__duplicateState--compact"
                           :class="`is-${getConstructionBaseFormulaDuplicateMessage(item).tone}`"
                         >
                           {{ getConstructionBaseFormulaDuplicateMessage(item).text }}
                         </span>
-                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionBaseFormula(item.id)">×</button>
                       </div>
                     </td>
                   </tr>
@@ -4281,6 +4610,89 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="baseFormulaBuilderOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeBaseFormulaBuilder"></div>
+    <div class="appDialog__card appDialog__card--builder" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">سازنده فرمول پایه</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeBaseFormulaBuilder">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        فقط از پارامترهای معتبر همین ساختار استفاده کنید. اعداد ثابت مجازند و پرانتزها باید کامل باشند.
+      </div>
+
+      <div v-if="baseFormulaBuilderDraft" class="formulaBuilder">
+        <div class="formulaBuilder__meta">
+          <label class="formulaBuilder__field">
+            <span>شناسه</span>
+            <input v-model.number="baseFormulaBuilderDraft.fo_id" class="constructionDialog__input" type="number" min="1" step="1" />
+          </label>
+          <label class="formulaBuilder__field">
+            <span>کد فرمول</span>
+            <input v-model="baseFormulaBuilderDraft.param_formula" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+          </label>
+          <div class="formulaBuilder__field">
+            <span>نوع رکورد</span>
+            <button type="button" class="constructionDialog__scopeBtn" :class="baseFormulaBuilderDraft.admin_id === null ? 'is-system' : 'is-admin'" @click="baseFormulaBuilderDraft.admin_id = baseFormulaBuilderDraft.admin_id === null ? currentAdminId : null">
+              {{ baseFormulaBuilderDraft.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین" }}
+            </button>
+          </div>
+        </div>
+
+        <div class="formulaBuilder__toolbar">
+          <div class="formulaBuilder__operators">
+            <button v-for="token in ['(', ')', '+', '-', '*', '/']" :key="token" type="button" class="constructionDialog__miniBtn formulaBuilder__tokenBtn" @click="appendBaseFormulaToken(token === '(' || token === ')' ? 'paren' : 'operator', token)">
+              {{ token }}
+            </button>
+          </div>
+          <div class="formulaBuilder__picker">
+            <select class="constructionDialog__input" @change="($event) => { if ($event.target.value) { appendBaseFormulaToken('parameter', $event.target.value); $event.target.value = ''; } }">
+              <option value="">افزودن پارامتر</option>
+              <option v-for="item in baseFormulaBuilderAvailableParams" :key="item.value" :value="item.value">{{ item.label }}</option>
+            </select>
+          </div>
+          <div class="formulaBuilder__numberBox">
+            <input
+              :value="baseFormulaBuilderNumberInput"
+              class="constructionDialog__input constructionDialog__input--mono"
+              type="text"
+              inputmode="decimal"
+              placeholder="عدد ثابت، اعشاری یا منفی"
+              @input="baseFormulaBuilderNumberInput = normalizeBaseFormulaNumberInput($event.target.value)"
+            />
+            <button type="button" class="constructionDialog__textBtn" :disabled="!isFormulaNumberToken(baseFormulaBuilderNumberInput)" @click="addBaseFormulaBuilderNumber">افزودن عدد</button>
+          </div>
+          <div class="formulaBuilder__actions">
+            <button type="button" class="constructionDialog__textBtn" :disabled="!baseFormulaBuilderTokens.length" @click="removeLastBaseFormulaToken">حذف آخرین</button>
+            <button type="button" class="constructionDialog__textBtn" :disabled="!baseFormulaBuilderTokens.length && !baseFormulaBuilderDraft.formula" @click="clearBaseFormulaTokens">پاک‌سازی</button>
+          </div>
+        </div>
+
+        <div v-if="baseFormulaBuilderTokens.length" class="formulaBuilder__tokens">
+          <span v-for="(token, index) in baseFormulaBuilderTokens" :key="`${token.value}-${index}`" class="formulaBuilder__token">
+            {{ token.value }}
+          </span>
+        </div>
+        <div v-if="baseFormulaBuilderSyncWarning" class="formulaBuilder__warning">{{ baseFormulaBuilderSyncWarning }}</div>
+        <div class="formulaBuilder__preview">{{ baseFormulaBuilderDraft.formula || "فرمول هنوز ساخته نشده است." }}</div>
+        <textarea
+          v-model="baseFormulaBuilderDraft.formula"
+          class="constructionDialog__input constructionDialog__input--mono constructionDialog__textarea formulaBuilder__textarea"
+          rows="4"
+          readonly
+        ></textarea>
+        <div v-if="baseFormulaBuilderValidationErrors.length" class="formulaBuilder__errors">
+          <div v-for="error in baseFormulaBuilderValidationErrors" :key="error" class="formulaBuilder__error">{{ error }}</div>
+        </div>
+      </div>
+
+      <div class="appDialog__actions">
+        <button type="button" class="menuItem" @click="closeBaseFormulaBuilder">انصراف</button>
+        <button type="button" class="menuItem" :disabled="isBaseFormulaBuilderApplyDisabled" @click="applyBaseFormulaBuilder">اعمال</button>
       </div>
     </div>
   </div>
