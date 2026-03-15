@@ -1547,8 +1547,8 @@ textarea {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: min(980px, calc(100vw - 40px));
-  height: min(680px, calc(100vh - 40px));
+  width: min(1180px, calc(100vw - 28px));
+  height: min(820px, calc(100vh - 28px));
   display: flex;
   flex-direction: column;
   background:
@@ -1772,10 +1772,14 @@ textarea {
   background: rgba(255, 255, 255, 0.58);
 }
 .constructionDialog__summaryValue {
+  font-family: Vazirmatn, sans-serif;
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 700;
   color: var(--text);
   line-height: 1;
+  letter-spacing: 0;
+  font-variant-numeric: normal;
+  font-feature-settings: "ss01" 1;
 }
 .constructionDialog__summaryLabel {
   margin-top: 3px;
@@ -1821,8 +1825,10 @@ textarea {
   min-height: 220px;
 }
 .constructionDialog__table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
+  table-layout: auto;
 }
 .constructionDialog__table th,
 .constructionDialog__table td {
@@ -1830,10 +1836,47 @@ textarea {
   border-bottom: 1px solid rgba(52, 20, 31, 0.08);
   text-align: center;
   vertical-align: middle;
+  min-width: 86px;
+  max-width: 220px;
 }
 .constructionDialog__table th + th,
 .constructionDialog__table td + td {
   border-inline-start: 1px solid rgba(148, 156, 166, 0.18);
+}
+.constructionDialog__col--id {
+  min-width: 58px !important;
+  width: 58px;
+  max-width: 64px !important;
+}
+.constructionDialog__col--uiOrder {
+  min-width: 78px !important;
+  width: 78px;
+  max-width: 86px !important;
+}
+.constructionDialog__col--actions {
+  min-width: 74px !important;
+  width: 74px;
+  max-width: 88px !important;
+}
+.constructionDialog__col--owner {
+  min-width: 92px !important;
+  max-width: 118px !important;
+}
+.constructionDialog__col--scope {
+  min-width: 110px !important;
+  max-width: 144px !important;
+}
+.constructionDialog__col--icon {
+  min-width: 170px !important;
+  max-width: 220px !important;
+}
+.constructionDialog__col--code {
+  min-width: 140px !important;
+  max-width: 240px !important;
+}
+.constructionDialog__col--title {
+  min-width: 130px !important;
+  max-width: 220px !important;
 }
 .constructionDialog__table th {
   position: sticky;
@@ -1851,7 +1894,8 @@ textarea {
 }
 .constructionDialog__input {
   width: 100%;
-  min-width: 110px;
+  min-width: 0;
+  max-width: 100%;
   padding: 7px 9px;
   border: 1px solid rgba(52, 20, 31, 0.12);
   border-radius: 10px;
@@ -1865,12 +1909,17 @@ textarea {
   text-align: center;
   font-family: Vazirmatn, sans-serif;
 }
+.constructionDialog__col--id .constructionDialog__input,
+.constructionDialog__col--uiOrder .constructionDialog__input {
+  padding-inline: 4px;
+}
 .constructionDialog__pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 34px;
   padding: 5px 9px;
+  max-width: 100%;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.7);
   border: 1px solid rgba(52, 20, 31, 0.1);

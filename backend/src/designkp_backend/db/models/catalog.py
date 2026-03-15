@@ -32,3 +32,25 @@ class PartKind(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixi
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     admin: Mapped["Admin | None"] = relationship(back_populates="part_kinds")
+
+
+class ParamGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "param_groups"
+
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    param_group_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    param_group_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    org_param_group_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    param_group_icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    admin: Mapped["Admin | None"] = relationship(back_populates="param_groups")

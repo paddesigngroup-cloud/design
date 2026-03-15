@@ -12,7 +12,7 @@ from designkp_backend.db.base import Base
 from designkp_backend.db.mixins import SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 if TYPE_CHECKING:
-    from .catalog import PartKind
+    from .catalog import ParamGroup, PartKind
 
 
 class SuperAdmin(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -39,6 +39,9 @@ class Admin(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
         foreign_keys="Order.admin_id",
     )
     part_kinds: Mapped[list["PartKind"]] = relationship(
+        back_populates="admin",
+    )
+    param_groups: Mapped[list["ParamGroup"]] = relationship(
         back_populates="admin",
     )
 

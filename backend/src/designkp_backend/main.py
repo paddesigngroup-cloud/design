@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from designkp_backend.api.routers.param_groups import router as param_groups_router
 from designkp_backend.api.routers.part_kinds import router as part_kinds_router
 from designkp_backend.db.models import import_model_modules
 
@@ -29,3 +30,4 @@ def health() -> dict[str, str]:
 
 
 app.include_router(part_kinds_router, prefix="/api")
+app.include_router(param_groups_router, prefix="/api")

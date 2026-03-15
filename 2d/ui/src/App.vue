@@ -158,15 +158,18 @@ const currentAdminId = ref(CURRENT_ADMIN_ID);
 const constructionWizardOpen = ref(false);
 const constructionStep = ref("part_kinds");
 const editablePartKinds = ref(PART_KINDS_CATALOG.map((item) => ({ ...item })));
+const editableParamGroups = ref([]);
 const constructionLoading = ref(false);
 const constructionSavingIds = ref([]);
 const constructionDeletingIds = ref([]);
 const constructionDeletedPartKindIds = ref([]);
+const constructionDeletedParamGroupIds = ref([]);
 const constructionImportInputEl = ref(null);
 const constructionImportPreviewRows = ref([]);
 const constructionImportFileName = ref("");
 const constructionTables = [
   { id: "part_kinds", title: "انواع قطعات", status: "active" },
+  { id: "param_groups", title: "گروه پارامترها", status: "active" },
   { id: "part_sizes", title: "ابعاد پایه", status: "planned" },
   { id: "joinery_rules", title: "قواعد اتصال", status: "planned" },
   { id: "hardware_sets", title: "ست یراق", status: "planned" },
@@ -189,9 +192,23 @@ const adminPartKindsCount = computed(() => constructionPartKinds.value.filter((i
 const constructionHasPendingChanges = computed(
   () =>
     constructionDeletedPartKindIds.value.length > 0 ||
-    editablePartKinds.value.some((item) => !!item.__isNew || !!item.__dirty)
+    constructionDeletedParamGroupIds.value.length > 0 ||
+    editablePartKinds.value.some((item) => !!item.__isNew || !!item.__dirty) ||
+    editableParamGroups.value.some((item) => !!item.__isNew || !!item.__dirty)
 );
 const constructionImportPreviewCount = computed(() => constructionImportPreviewRows.value.length);
+const constructionParamGroups = computed(() =>
+  editableParamGroups.value
+    .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
+    .slice()
+    .sort((a, b) => {
+      const orderDelta = (Number(a.ui_order) || 0) - (Number(b.ui_order) || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return (Number(a.param_group_id) || 0) - (Number(b.param_group_id) || 0);
+    })
+);
+const systemParamGroupsCount = computed(() => constructionParamGroups.value.filter((item) => item.admin_id === null).length);
+const adminParamGroupsCount = computed(() => constructionParamGroups.value.filter((item) => item.admin_id === currentAdminId.value).length);
 
 function openConstructionWizard() {
   constructionWizardOpen.value = true;
@@ -200,7 +217,9 @@ function openConstructionWizard() {
   openMenuPanel.value = null;
   openMode.value = "menu";
   loadConstructionPartKinds();
+  loadConstructionParamGroups();
   constructionDeletedPartKindIds.value = [];
+  constructionDeletedParamGroupIds.value = [];
 }
 
 function addConstructionPartKind() {
@@ -259,6 +278,52 @@ function toggleConstructionPartKindScope(item) {
   item.admin_id = item.admin_id === null ? currentAdminId.value : null;
   item.is_system = item.admin_id === null;
   if (!item.__isNew) item.__dirty = true;
+}
+
+function normalizeParamGroupPayload(item) {
+  return {
+    admin_id: item.admin_id,
+    param_group_id: Number(item.param_group_id),
+    param_group_code: String(item.param_group_code || "").trim(),
+    org_param_group_title: String(item.org_param_group_title || "").trim(),
+    param_group_icon_path: String(item.param_group_icon_path || "").trim() || null,
+    ui_order: Number.isFinite(Number(item.ui_order)) ? Number(item.ui_order) : 0,
+    sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.param_group_id),
+    is_system: !!item.is_system,
+  };
+}
+
+function markConstructionParamGroupDirty(item) {
+  if (!item || item.__isNew) return;
+  item.__dirty = true;
+}
+
+function toggleConstructionParamGroupScope(item) {
+  item.admin_id = item.admin_id === null ? currentAdminId.value : null;
+  item.is_system = item.admin_id === null;
+  if (!item.__isNew) item.__dirty = true;
+}
+
+function validateConstructionParamGroups() {
+  for (const item of editableParamGroups.value) {
+    const paramGroupId = Number(item.param_group_id);
+    const code = String(item.param_group_code || "").trim();
+    const title = String(item.org_param_group_title || "").trim();
+    if (!Number.isInteger(paramGroupId) || paramGroupId < 1) {
+      showAlert("برای همه گروه‌های پارامتر شناسه معتبر و بزرگ‌تر از صفر وارد کنید.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!code || !title) {
+      showAlert("کد و عنوان گروه پارامتر نباید خالی باشند.", { title: "اعتبارسنجی" });
+      return false;
+    }
+  }
+  const ids = editableParamGroups.value.map((item) => Number(item.param_group_id));
+  if (new Set(ids).size !== ids.length) {
+    showAlert("شناسه گروه پارامتر باید یکتا باشد.", { title: "اعتبارسنجی" });
+    return false;
+  }
+  return true;
 }
 
 function validateConstructionPartKinds() {
@@ -488,6 +553,18 @@ async function loadConstructionPartKinds() {
   }
 }
 
+async function loadConstructionParamGroups() {
+  try {
+    const url = `/api/param-groups?admin_id=${encodeURIComponent(currentAdminId.value)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("load-failed");
+    editableParamGroups.value = (await res.json()).map(withConstructionDraftState);
+    constructionDeletedParamGroupIds.value = [];
+  } catch (_) {
+    showAlert("خواندن جدول گروه پارامترها از دیتابیس انجام نشد.", { title: "خطا" });
+  }
+}
+
 async function createConstructionPartKind() {
   const nextId = editablePartKinds.value.reduce((max, item) => Math.max(max, Number(item.part_kind_id) || 0), 0) + 1;
   editablePartKinds.value = [
@@ -500,6 +577,28 @@ async function createConstructionPartKind() {
       org_part_kind_title: `نوع قطعه ${nextId}`,
       code: `custom_part_${nextId}`,
       title: `نوع قطعه ${nextId}`,
+      sort_order: nextId,
+      is_system: false,
+      __isNew: true,
+      __dirty: false,
+    },
+  ];
+}
+
+function addConstructionParamGroup() {
+  const nextId = editableParamGroups.value.reduce((max, item) => Math.max(max, Number(item.param_group_id) || 0), 0) + 1;
+  editableParamGroups.value = [
+    ...editableParamGroups.value,
+    {
+      id: `draft-param-group-${Date.now()}-${nextId}`,
+      admin_id: currentAdminId.value,
+      param_group_id: nextId,
+      param_group_code: `param_group_${nextId}`,
+      org_param_group_title: `گروه پارامتر ${toPersianDigits(nextId)}`,
+      param_group_icon_path: "",
+      ui_order: nextId - 1,
+      code: `param_group_${nextId}`,
+      title: `گروه پارامتر ${toPersianDigits(nextId)}`,
       sort_order: nextId,
       is_system: false,
       __isNew: true,
@@ -568,6 +667,52 @@ async function saveConstructionPartKinds(options = {}) {
   }
 }
 
+async function saveConstructionParamGroups() {
+  if (!(constructionDeletedParamGroupIds.value.length > 0 || editableParamGroups.value.some((item) => !!item.__isNew || !!item.__dirty))) {
+    showAlert("تغییری برای ذخیره وجود ندارد.", { title: "ذخیره تغییرات" });
+    return;
+  }
+  if (!validateConstructionParamGroups()) return;
+  const ok = await showConfirm("تغییرات جدول گروه پارامترها در دیتابیس ذخیره شود؟", {
+    title: "ذخیره تغییرات",
+    confirmText: "ذخیره",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  const draftIds = editableParamGroups.value.filter((item) => item.__isNew).map((item) => String(item.id));
+  const dirtyIds = editableParamGroups.value.filter((item) => !item.__isNew && item.__dirty).map((item) => String(item.id));
+  constructionSavingIds.value = [...new Set([...draftIds, ...dirtyIds])];
+  try {
+    for (const id of constructionDeletedParamGroupIds.value) {
+      const res = await fetch(`/api/param-groups/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("delete-failed");
+    }
+    for (const item of editableParamGroups.value.filter((row) => row.__isNew)) {
+      const res = await fetch("/api/param-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizeParamGroupPayload(item)),
+      });
+      if (!res.ok) throw new Error("create-failed");
+    }
+    for (const item of editableParamGroups.value.filter((row) => !row.__isNew && row.__dirty)) {
+      const res = await fetch(`/api/param-groups/${encodeURIComponent(String(item.id))}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizeParamGroupPayload(item)),
+      });
+      if (!res.ok) throw new Error("save-failed");
+    }
+    await loadConstructionParamGroups();
+    showAlert("تغییرات جدول گروه پارامترها با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
+  } catch (_) {
+    showAlert("ذخیره تغییرات جدول گروه پارامترها در دیتابیس انجام نشد.", { title: "خطا" });
+    await loadConstructionParamGroups();
+  } finally {
+    constructionSavingIds.value = [];
+  }
+}
+
 async function applyConstructionImportPreview() {
   if (!constructionImportPreviewRows.value.length) return;
   const ok = await showConfirm("پیش‌نمایش فایل اکسل روی جدول انواع قطعات اعمال شود؟", {
@@ -604,6 +749,28 @@ async function deleteConstructionPartKind(id) {
     }
   } catch (_) {
     showAlert("حذف نوع قطعه از جدول انجام نشد.", { title: "خطا" });
+  } finally {
+    constructionDeletingIds.value = constructionDeletingIds.value.filter((value) => value !== String(id));
+  }
+}
+
+async function deleteConstructionParamGroup(id) {
+  const item = editableParamGroups.value.find((row) => String(row.id) === String(id));
+  if (!item) return;
+  const ok = await showConfirm(`گروه پارامتر «${item.org_param_group_title || item.title || "بدون عنوان"}» حذف شود؟`, {
+    title: "حذف گروه پارامتر",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  constructionDeletingIds.value = [...constructionDeletingIds.value, String(id)];
+  try {
+    editableParamGroups.value = editableParamGroups.value.filter((row) => String(row.id) !== String(id));
+    if (!item.__isNew) {
+      constructionDeletedParamGroupIds.value = [...new Set([...constructionDeletedParamGroupIds.value, String(id)])];
+    }
+  } catch (_) {
+    showAlert("حذف گروه پارامتر از جدول انجام نشد.", { title: "خطا" });
   } finally {
     constructionDeletingIds.value = constructionDeletingIds.value.filter((value) => value !== String(id));
   }
@@ -2517,7 +2684,7 @@ onBeforeUnmount(() => {
             :class="{ 'is-disabled': !constructionHasPendingChanges || constructionSavingIds.length > 0 }"
             :disabled="!constructionHasPendingChanges || constructionSavingIds.length > 0"
             title="ذخیره تغییرات"
-            @click="saveConstructionPartKinds"
+            @click="constructionStep === 'part_kinds' ? saveConstructionPartKinds() : constructionStep === 'param_groups' ? saveConstructionParamGroups() : null"
           >
             <img src="/icons/construction-save.svg" alt="ذخیره" />
           </button>
@@ -2525,6 +2692,7 @@ onBeforeUnmount(() => {
             type="button"
             class="constructionDialog__headIconBtn"
             title="دانلود اکسل"
+            :disabled="constructionStep !== 'part_kinds'"
             @click="downloadConstructionExcelTemplate"
           >
             <img src="/icons/construction-download.svg" alt="دانلود" />
@@ -2533,6 +2701,7 @@ onBeforeUnmount(() => {
             type="button"
             class="constructionDialog__headIconBtn"
             title="آپلود اکسل"
+            :disabled="constructionStep !== 'part_kinds'"
             @click="triggerConstructionImport"
           >
             <img src="/icons/construction-upload.svg" alt="آپلود" />
@@ -2609,18 +2778,18 @@ onBeforeUnmount(() => {
                 <table class="constructionDialog__table constructionDialog__table--preview">
                   <thead>
                     <tr>
-                      <th>شناسه</th>
-                      <th>کد</th>
-                      <th>عنوان</th>
-                      <th>نوع مالک</th>
+                      <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
+                      <th class="constructionDialog__col constructionDialog__col--code">کد</th>
+                      <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
+                      <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr v-for="row in constructionImportPreviewRows" :key="`${row.lineNo}-${row.part_kind_id}`">
-                      <td>{{ row.part_kind_id }}</td>
-                      <td>{{ row.part_kind_code }}</td>
-                      <td>{{ row.org_part_kind_title }}</td>
-                      <td>{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--id">{{ row.part_kind_id }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--code">{{ row.part_kind_code }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--title">{{ row.org_part_kind_title }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -2646,17 +2815,17 @@ onBeforeUnmount(() => {
               <table class="constructionDialog__table">
                 <thead>
                   <tr>
-                    <th>شناسه</th>
-                    <th>کد</th>
-                    <th>عنوان</th>
-                    <th>مالک</th>
-                    <th>نوع رکورد</th>
-                    <th>عملیات</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
+                    <th class="constructionDialog__col constructionDialog__col--code">کد</th>
+                    <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
+                    <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
+                    <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="item in constructionPartKinds" :key="item.id">
-                    <td>
+                    <td class="constructionDialog__col constructionDialog__col--id">
                       <input
                         v-model.number="item.part_kind_id"
                         class="constructionDialog__input"
@@ -2666,7 +2835,7 @@ onBeforeUnmount(() => {
                         @input="markConstructionPartKindDirty(item)"
                       />
                     </td>
-                    <td>
+                    <td class="constructionDialog__col constructionDialog__col--code">
                       <input
                         v-model="item.part_kind_code"
                         class="constructionDialog__input constructionDialog__input--mono"
@@ -2674,7 +2843,7 @@ onBeforeUnmount(() => {
                         @input="markConstructionPartKindDirty(item)"
                       />
                     </td>
-                    <td>
+                    <td class="constructionDialog__col constructionDialog__col--title">
                       <input
                         v-model="item.org_part_kind_title"
                         class="constructionDialog__input"
@@ -2682,12 +2851,12 @@ onBeforeUnmount(() => {
                         @input="markConstructionPartKindDirty(item)"
                       />
                     </td>
-                    <td>
+                    <td class="constructionDialog__col constructionDialog__col--owner">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">
                         {{ item.admin_id || "SYSTEM" }}
                       </span>
                     </td>
-                    <td>
+                    <td class="constructionDialog__col constructionDialog__col--scope">
                       <button
                         type="button"
                         class="constructionDialog__scopeBtn"
@@ -2697,7 +2866,7 @@ onBeforeUnmount(() => {
                         {{ item.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین" }}
                       </button>
                     </td>
-                    <td>
+                    <td class="constructionDialog__col constructionDialog__col--actions">
                       <div class="constructionDialog__actionsCell">
                         <span v-if="constructionDeletingIds.includes(String(item.id))" class="constructionDialog__saving">در حال حذف</span>
                         <span v-else-if="constructionSavingIds.includes(String(item.id))" class="constructionDialog__saving">در حال ذخیره</span>
@@ -2712,6 +2881,88 @@ onBeforeUnmount(() => {
             </div>
             <div class="constructionDialog__sheetHint">
               خروجی و ورودی اکسل این جدول به‌صورت CSV سازگار با Excel است. ابتدا فایل را دانلود کنید، در Excel ویرایش کنید، سپس دوباره همان فایل را آپلود و پیش‌نمایش را تایید کنید.
+            </div>
+          </template>
+
+          <template v-else-if="constructionStep === 'param_groups'">
+            <div class="constructionDialog__toolbar">
+              <div class="constructionDialog__toolbarMain">
+                <div class="constructionDialog__sectionTitle">جدول گروه پارامترها</div>
+                <div class="constructionDialog__sectionHint">
+                  هر ادمین می‌تواند گروه‌های پارامتر خودش را تعریف و ترتیب نمایش آن‌ها را برای تمام کاربران زیرمجموعه‌اش کنترل کند.
+                </div>
+              </div>
+              <div class="constructionDialog__toolbarActions">
+                <button type="button" class="constructionDialog__textBtn" @click="addConstructionParamGroup">افزودن گروه پارامتر</button>
+              </div>
+            </div>
+
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionParamGroups.length) }}</span>
+                <span class="constructionDialog__summaryLabel">کل</span>
+              </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(systemParamGroupsCount) }}</span>
+                <span class="constructionDialog__summaryLabel">پیش‌فرض</span>
+              </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(adminParamGroupsCount) }}</span>
+                <span class="constructionDialog__summaryLabel">اختصاصی</span>
+              </div>
+            </div>
+
+            <div class="constructionDialog__tableWrap">
+              <table class="constructionDialog__table">
+                <thead>
+                  <tr>
+                    <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
+                    <th class="constructionDialog__col constructionDialog__col--code">کد</th>
+                    <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
+                    <th class="constructionDialog__col constructionDialog__col--uiOrder">ترتیب UI</th>
+                    <th class="constructionDialog__col constructionDialog__col--icon">آیکون</th>
+                    <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
+                    <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in constructionParamGroups" :key="item.id">
+                    <td class="constructionDialog__col constructionDialog__col--id">
+                      <input v-model.number="item.param_group_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionParamGroupDirty(item)" />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--code">
+                      <input v-model="item.param_group_code" class="constructionDialog__input constructionDialog__input--mono" type="text" @input="markConstructionParamGroupDirty(item)" />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--title">
+                      <input v-model="item.org_param_group_title" class="constructionDialog__input" type="text" @input="markConstructionParamGroupDirty(item)" />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--uiOrder">
+                      <input v-model.number="item.ui_order" class="constructionDialog__input" type="number" min="0" step="1" @input="markConstructionParamGroupDirty(item)" />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--icon">
+                      <input v-model="item.param_group_icon_path" class="constructionDialog__input constructionDialog__input--mono" type="text" placeholder="/icons/..." @input="markConstructionParamGroupDirty(item)" />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--owner">
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.admin_id || "SYSTEM" }}</span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--scope">
+                      <button type="button" class="constructionDialog__scopeBtn" :class="item.admin_id === null ? 'is-system' : 'is-admin'" @click="toggleConstructionParamGroupScope(item)">
+                        {{ item.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین" }}
+                      </button>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--actions">
+                      <div class="constructionDialog__actionsCell">
+                        <span v-if="constructionDeletingIds.includes(String(item.id))" class="constructionDialog__saving">در حال حذف</span>
+                        <span v-else-if="constructionSavingIds.includes(String(item.id))" class="constructionDialog__saving">در حال ذخیره</span>
+                        <span v-else-if="item.__isNew" class="constructionDialog__saving">جدید</span>
+                        <span v-else-if="item.__dirty" class="constructionDialog__saving">ذخیره نشده</span>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionParamGroup(item.id)">×</button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </template>
 

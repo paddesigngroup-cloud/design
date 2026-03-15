@@ -88,6 +88,54 @@ Current seeded system records:
 - `toe_kick`
 - `frame`
 
+## 6. `param_groups`
+
+Purpose:
+Stores the parameter-group definitions used to organize parameter sections in the software UI, such as attributes, thicknesses, floor properties, door properties, and similar grouped settings.
+
+Current business role:
+- Lets each `admin` define and control their own parameter-group structure.
+- Supports both system-defined groups and future admin-specific custom groups.
+- Controls how grouped parameter sections are presented and ordered in the UI for all users under that admin.
+
+Chosen structure logic:
+- The old spreadsheet columns were normalized into the project naming pattern.
+- Business fields chosen for this table:
+  - `admin_id`
+  - `param_group_id`
+  - `param_group_code`
+  - `org_param_group_title`
+  - `param_group_icon_path`
+  - `ui_order`
+- Internal compatibility fields kept in line with other catalog tables:
+  - `code`
+  - `title`
+  - `sort_order`
+  - `is_system`
+- `admin_id = NULL` means a global system group.
+- `admin_id != NULL` means the group belongs to a specific admin and can override the software structure for all users under that admin.
+
+Mapping from the old spreadsheet:
+- `param_group_ux` -> `ui_order`
+- `param_group_name` -> `param_group_code`
+- `param_group_webp` -> `param_group_icon_path`
+- `param_group_info` -> `org_param_group_title`
+
+Current seeded system records:
+- `attributes`
+- `thicknesses`
+- `floor_properties`
+- `roof_properties`
+- `left_side_properties`
+- `right_side_properties`
+- `door_properties`
+- `back_properties`
+- `panel_properties`
+- `gap_properties`
+- `counter_properties`
+- `stretcher_properties`
+- `toe_kick_properties`
+
 ## Notes
 
 - This document is intentionally limited to table names and table responsibilities.
