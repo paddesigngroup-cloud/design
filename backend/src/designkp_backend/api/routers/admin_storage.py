@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.catalog import Param, ParamGroup, PartKind
+from designkp_backend.db.models.catalog import BaseFormula, Param, ParamGroup, PartKind
 from designkp_backend.services.admin_access import require_admin
 from designkp_backend.services.admin_storage import (
     csv_bytes,
@@ -47,6 +47,15 @@ def _param_headers() -> list[str]:
         "param_title_fa",
         "param_group_id",
         "ui_order",
+        "admin_mode",
+    ]
+
+
+def _base_formula_headers() -> list[str]:
+    return [
+        "fo_id",
+        "param_formula",
+        "formula",
         "admin_mode",
     ]
 
@@ -114,6 +123,25 @@ async def _param_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[list[o
     ]
 
 
+async def _base_formula_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[list[object]]:
+    rows = (
+        await session.scalars(
+            select(BaseFormula)
+            .where(or_(BaseFormula.admin_id.is_(None), BaseFormula.admin_id == admin_id))
+            .order_by(BaseFormula.sort_order.asc(), BaseFormula.fo_id.asc())
+        )
+    ).all()
+    return [
+        [
+            row.fo_id,
+            row.param_formula,
+            row.formula,
+            "system" if row.admin_id is None else "admin",
+        ]
+        for row in rows
+    ]
+
+
 @router.get("/{admin_id}/tables/part-kinds/export")
 async def export_part_kinds(admin_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
     await require_admin(session, admin_id)
@@ -150,6 +178,19 @@ async def export_params(admin_id: uuid.UUID, session: AsyncSession = Depends(get
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="params_excel_template.csv"'},
+    )
+
+
+@router.get("/{admin_id}/tables/base-formulas/export")
+async def export_base_formulas(admin_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
+    await require_admin(session, admin_id)
+    headers = _base_formula_headers()
+    rows = await _base_formula_rows(session, admin_id)
+    write_table_snapshot(admin_id, "base_formulas", headers, rows)
+    return Response(
+        content=csv_bytes(headers, rows),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="base_formulas_excel_template.csv"'},
     )
 
 

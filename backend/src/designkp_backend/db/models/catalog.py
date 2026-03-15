@@ -82,3 +82,23 @@ class Param(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
     admin: Mapped["Admin | None"] = relationship(back_populates="params")
     part_kind: Mapped["PartKind"] = relationship(back_populates="params")
     param_group: Mapped["ParamGroup"] = relationship(back_populates="params")
+
+
+class BaseFormula(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "base_formulas"
+
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    fo_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    param_formula: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    formula: Mapped[str] = mapped_column(String(2048), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    admin: Mapped["Admin | None"] = relationship(back_populates="base_formulas")

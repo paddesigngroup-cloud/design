@@ -181,6 +181,50 @@ Current seeded system records:
 - Floor, roof, left-side, right-side, back, panel, gap, counter, and stretcher parameter sets
 - Door-specific parameter set
 
+## 8. `base_formulas`
+
+Purpose:
+Stores the base formula definitions used by the software engine to calculate construction logic from the parameter set, with each formula represented as an expression string and a stable formula code.
+
+Current business role:
+- Lets each `admin` own and manage the formula set that drives calculations for all users under that admin.
+- Supports both system-defined formulas and future admin-specific formula overrides.
+- Acts as the next layer after `params`, because formula expressions are written based on the parameter codes already defined in the system.
+- Keeps the database structure consistent with the ownership model already used in `part_kinds`, `param_groups`, and `params`.
+
+Chosen structure logic:
+- The spreadsheet-style formula list should be normalized into the same naming pattern as the other catalog tables.
+- Business fields chosen for this table:
+  - `admin_id`
+  - `fo_id`
+  - `param_formula`
+  - `formula`
+- Recommended internal compatibility fields, kept aligned with the other software-structure tables:
+  - `code`
+  - `title`
+  - `sort_order`
+  - `is_system`
+- `admin_id` means the owner `admin` account whose software structure uses this base formula set.
+- `admin_id = NULL` means the formula is a global system formula.
+- `admin_id != NULL` means the formula belongs to a specific admin and can override the software formula structure for all users under that admin.
+- `param_formula` should remain the stable formula code such as `f1`, `f2`, `f3`.
+- `formula` stores the real executable expression string.
+
+Relationship decision:
+- Even if the old Excel file contains `super_admin_id`, this table should not be modeled under `super_admins`.
+- This table must be owned by `admins`, because the formula set is described as being created per admin from that admin's parameter structure.
+- Therefore the correct relationship field for the database schema is `admin_id`, not `super_admin_id`.
+
+Mapping from the old spreadsheet:
+- `super_admin_id` -> `admin_id`
+- `fo_id` -> `fo_id`
+- `param_formula` -> `param_formula`
+- `formula` -> `formula`
+
+Current seeded system records:
+- Formula codes such as `f1` through the current seeded formula range from the spreadsheet
+- Each record stores one base formula expression built from the parameter codes already defined in `params`
+
 ## Notes
 
 - This document is intentionally limited to table names and table responsibilities.

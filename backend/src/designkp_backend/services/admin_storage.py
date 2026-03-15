@@ -16,6 +16,7 @@ TABLE_FILE_NAMES = {
     "part_kinds": "part_kinds.csv",
     "param_groups": "param_groups.csv",
     "params": "params.csv",
+    "base_formulas": "base_formulas.csv",
     "orders": "orders.csv",
 }
 

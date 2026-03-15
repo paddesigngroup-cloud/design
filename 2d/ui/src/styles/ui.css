@@ -1904,10 +1904,22 @@ textarea {
   font-size: 12px;
   text-align: center;
 }
+.constructionDialog__input.is-duplicate {
+  color: #c53b3b;
+}
+.constructionDialog__input.is-unique {
+  color: #1f8f4d;
+}
 .constructionDialog__input--mono {
   direction: ltr;
   text-align: center;
   font-family: Vazirmatn, sans-serif;
+}
+.constructionDialog__textarea {
+  min-height: 56px;
+  resize: vertical;
+  line-height: 1.7;
+  text-align: left;
 }
 .constructionDialog__iconCell {
   display: flex;
@@ -1974,6 +1986,9 @@ textarea {
 .constructionDialog__col--uiOrder .constructionDialog__input {
   padding-inline: 4px;
 }
+.constructionDialog__col--formula {
+  min-width: 360px;
+}
 .constructionDialog__pill {
   display: inline-flex;
   align-items: center;
@@ -2030,6 +2045,17 @@ textarea {
   font-size: 11px;
   font-weight: 700;
   color: var(--muted);
+}
+.constructionDialog__duplicateState {
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.constructionDialog__duplicateState.is-good {
+  color: #1f8f4d;
+}
+.constructionDialog__duplicateState.is-bad {
+  color: #c53b3b;
 }
 .constructionDialog__sheetHint {
   color: var(--muted);

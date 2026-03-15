@@ -160,12 +160,14 @@ const constructionStep = ref("part_kinds");
 const editablePartKinds = ref(PART_KINDS_CATALOG.map((item) => ({ ...item })));
 const editableParamGroups = ref([]);
 const editableParams = ref([]);
+const editableBaseFormulas = ref([]);
 const constructionLoading = ref(false);
 const constructionSavingIds = ref([]);
 const constructionDeletingIds = ref([]);
 const constructionDeletedPartKindIds = ref([]);
 const constructionDeletedParamGroupIds = ref([]);
 const constructionDeletedParamIds = ref([]);
+const constructionDeletedBaseFormulaIds = ref([]);
 const constructionImportInputEl = ref(null);
 const paramGroupIconInputEl = ref(null);
 const constructionImportPreviewRows = ref([]);
@@ -177,6 +179,7 @@ const constructionTables = [
   { id: "part_kinds", title: "انواع قطعات", status: "active" },
   { id: "param_groups", title: "گروه پارامترها", status: "active" },
   { id: "params", title: "پارامترها", status: "active" },
+  { id: "base_formulas", title: "فرمول های پایه", status: "active" },
   { id: "joinery_rules", title: "قواعد اتصال", status: "planned" },
   { id: "hardware_sets", title: "ست یراق", status: "planned" },
 ];
@@ -195,14 +198,17 @@ const constructionPartKinds = computed(() =>
 );
 const systemPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => item.admin_id === null).length);
 const adminPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => item.admin_id === currentAdminId.value).length);
+const constructionPartKindDuplicateState = computed(() => buildDuplicateState(editablePartKinds.value, ["part_kind_id", "part_kind_code"]));
 const constructionHasPendingChanges = computed(
   () =>
     constructionDeletedPartKindIds.value.length > 0 ||
     constructionDeletedParamGroupIds.value.length > 0 ||
     constructionDeletedParamIds.value.length > 0 ||
+    constructionDeletedBaseFormulaIds.value.length > 0 ||
     editablePartKinds.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editableParamGroups.value.some((item) => !!item.__isNew || !!item.__dirty) ||
-    editableParams.value.some((item) => !!item.__isNew || !!item.__dirty)
+    editableParams.value.some((item) => !!item.__isNew || !!item.__dirty) ||
+    editableBaseFormulas.value.some((item) => !!item.__isNew || !!item.__dirty)
 );
 const constructionImportPreviewCount = computed(() => constructionImportPreviewRows.value.length);
 const constructionParamGroups = computed(() =>
@@ -229,6 +235,21 @@ const constructionParams = computed(() =>
 );
 const systemParamsCount = computed(() => constructionParams.value.filter((item) => item.admin_id === null).length);
 const adminParamsCount = computed(() => constructionParams.value.filter((item) => item.admin_id === currentAdminId.value).length);
+const constructionBaseFormulas = computed(() =>
+  editableBaseFormulas.value
+    .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
+    .slice()
+    .sort((a, b) => {
+      const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return (Number(a.fo_id) || 0) - (Number(b.fo_id) || 0);
+    })
+);
+const systemBaseFormulasCount = computed(() => constructionBaseFormulas.value.filter((item) => item.admin_id === null).length);
+const adminBaseFormulasCount = computed(() => constructionBaseFormulas.value.filter((item) => item.admin_id === currentAdminId.value).length);
+const constructionParamGroupDuplicateState = computed(() => buildDuplicateState(editableParamGroups.value, ["param_group_id", "param_group_code"]));
+const constructionParamDuplicateState = computed(() => buildDuplicateState(editableParams.value, ["param_id", "param_code"]));
+const constructionBaseFormulaDuplicateState = computed(() => buildDuplicateState(editableBaseFormulas.value, ["fo_id", "param_formula"]));
 
 function openConstructionWizard() {
   constructionWizardOpen.value = true;
@@ -239,9 +260,11 @@ function openConstructionWizard() {
   loadConstructionPartKinds();
   loadConstructionParamGroups();
   loadConstructionParams();
+  loadConstructionBaseFormulas();
   constructionDeletedPartKindIds.value = [];
   constructionDeletedParamGroupIds.value = [];
   constructionDeletedParamIds.value = [];
+  constructionDeletedBaseFormulaIds.value = [];
 }
 
 function addConstructionPartKind() {
@@ -264,6 +287,7 @@ async function closeConstructionWizard() {
     await loadConstructionPartKinds();
     await loadConstructionParamGroups();
     await loadConstructionParams();
+    await loadConstructionBaseFormulas();
   }
   constructionWizardOpen.value = false;
   if (activeMenu.value === "construction") activeMenu.value = null;
@@ -346,6 +370,80 @@ function buildPartKindDraft(item, overrides = {}) {
   };
 }
 
+function normalizeDuplicateValue(field, value) {
+  if (field.endsWith("_id")) {
+    const numericValue = Number(value);
+    return Number.isInteger(numericValue) && numericValue > 0 ? String(numericValue) : "";
+  }
+  return String(value || "").trim().toLowerCase();
+}
+
+function buildDuplicateState(items, fields) {
+  const counts = Object.fromEntries(fields.map((field) => [field, new Map()]));
+  for (const item of items) {
+    for (const field of fields) {
+      const normalized = normalizeDuplicateValue(field, item?.[field]);
+      if (!normalized) continue;
+      counts[field].set(normalized, (counts[field].get(normalized) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+function hasDuplicateValue(item, field, state) {
+  const normalized = normalizeDuplicateValue(field, item?.[field]);
+  if (!normalized) return false;
+  return (state?.[field]?.get(normalized) || 0) > 1;
+}
+
+function getDuplicateInputTone(item, field, state) {
+  const normalized = normalizeDuplicateValue(field, item?.[field]);
+  if (!normalized) return null;
+  return hasDuplicateValue(item, field, state) ? "duplicate" : "unique";
+}
+
+function getConstructionParamGroupDuplicateMessage(item) {
+  const duplicateState = constructionParamGroupDuplicateState.value;
+  if (!Number.isInteger(Number(item?.param_group_id)) || Number(item.param_group_id) < 1) {
+    return { tone: "bad", text: "شناسه نامعتبر است" };
+  }
+  if (!String(item?.param_group_code || "").trim()) {
+    return { tone: "bad", text: "کد خالی است" };
+  }
+  if (hasDuplicateValue(item, "param_group_id", duplicateState) || hasDuplicateValue(item, "param_group_code", duplicateState)) {
+    return { tone: "bad", text: "تکراری است" };
+  }
+  return { tone: "good", text: "تکراری نیست" };
+}
+
+function getConstructionParamDuplicateMessage(item) {
+  const duplicateState = constructionParamDuplicateState.value;
+  if (!Number.isInteger(Number(item?.param_id)) || Number(item.param_id) < 1) {
+    return { tone: "bad", text: "شناسه نامعتبر است" };
+  }
+  if (!String(item?.param_code || "").trim()) {
+    return { tone: "bad", text: "کد خالی است" };
+  }
+  if (hasDuplicateValue(item, "param_id", duplicateState) || hasDuplicateValue(item, "param_code", duplicateState)) {
+    return { tone: "bad", text: "تکراری است" };
+  }
+  return { tone: "good", text: "تکراری نیست" };
+}
+
+function getConstructionBaseFormulaDuplicateMessage(item) {
+  const duplicateState = constructionBaseFormulaDuplicateState.value;
+  if (!Number.isInteger(Number(item?.fo_id)) || Number(item.fo_id) < 1) {
+    return { tone: "bad", text: "شناسه نامعتبر است" };
+  }
+  if (!String(item?.param_formula || "").trim()) {
+    return { tone: "bad", text: "کد خالی است" };
+  }
+  if (hasDuplicateValue(item, "fo_id", duplicateState) || hasDuplicateValue(item, "param_formula", duplicateState)) {
+    return { tone: "bad", text: "تکراری است" };
+  }
+  return { tone: "good", text: "تکراری نیست" };
+}
+
 function withConstructionDraftState(item) {
   return buildPartKindDraft(item, { __isNew: false, __dirty: false });
 }
@@ -404,6 +502,11 @@ function validateConstructionParamGroups() {
     showAlert("شناسه گروه پارامتر باید یکتا باشد.", { title: "اعتبارسنجی" });
     return false;
   }
+  const codes = editableParamGroups.value.map((item) => String(item.param_group_code || "").trim().toLowerCase());
+  if (new Set(codes).size !== codes.length) {
+    showAlert("کد گروه پارامتر باید یکتا باشد.", { title: "اعتبارسنجی" });
+    return false;
+  }
   return true;
 }
 
@@ -422,12 +525,34 @@ function normalizeParamPayload(item) {
   };
 }
 
+function normalizeBaseFormulaPayload(item) {
+  return {
+    admin_id: item.admin_id,
+    fo_id: Number(item.fo_id),
+    param_formula: String(item.param_formula || "").trim(),
+    formula: String(item.formula || "").trim(),
+    sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.fo_id),
+    is_system: !!item.is_system,
+  };
+}
+
 function markConstructionParamDirty(item) {
   if (!item || item.__isNew) return;
   item.__dirty = true;
 }
 
+function markConstructionBaseFormulaDirty(item) {
+  if (!item || item.__isNew) return;
+  item.__dirty = true;
+}
+
 function toggleConstructionParamScope(item) {
+  item.admin_id = item.admin_id === null ? currentAdminId.value : null;
+  item.is_system = item.admin_id === null;
+  if (!item.__isNew) item.__dirty = true;
+}
+
+function toggleConstructionBaseFormulaScope(item) {
   item.admin_id = item.admin_id === null ? currentAdminId.value : null;
   item.is_system = item.admin_id === null;
   if (!item.__isNew) item.__dirty = true;
@@ -461,6 +586,38 @@ function validateConstructionParams() {
   const ids = editableParams.value.map((item) => Number(item.param_id));
   if (new Set(ids).size !== ids.length) {
     showAlert("شناسه پارامتر باید یکتا باشد.", { title: "اعتبارسنجی" });
+    return false;
+  }
+  const codes = editableParams.value.map((item) => String(item.param_code || "").trim().toLowerCase());
+  if (new Set(codes).size !== codes.length) {
+    showAlert("کد پارامتر باید یکتا باشد.", { title: "اعتبارسنجی" });
+    return false;
+  }
+  return true;
+}
+
+function validateConstructionBaseFormulas() {
+  for (const item of editableBaseFormulas.value) {
+    const foId = Number(item.fo_id);
+    const paramFormula = String(item.param_formula || "").trim();
+    const formula = String(item.formula || "").trim();
+    if (!Number.isInteger(foId) || foId < 1) {
+      showAlert("برای همه فرمول‌های پایه شناسه معتبر و بزرگ‌تر از صفر وارد کنید.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!paramFormula || !formula) {
+      showAlert("کد فرمول و عبارت فرمول نباید خالی باشند.", { title: "اعتبارسنجی" });
+      return false;
+    }
+  }
+  const ids = editableBaseFormulas.value.map((item) => Number(item.fo_id));
+  if (new Set(ids).size !== ids.length) {
+    showAlert("شناسه فرمول پایه باید یکتا باشد.", { title: "اعتبارسنجی" });
+    return false;
+  }
+  const codes = editableBaseFormulas.value.map((item) => String(item.param_formula || "").trim().toLowerCase());
+  if (new Set(codes).size !== codes.length) {
+    showAlert("کد فرمول پایه باید یکتا باشد.", { title: "اعتبارسنجی" });
     return false;
   }
   return true;
@@ -498,6 +655,9 @@ function validateConstructionPartKinds() {
 }
 
 function getConstructionCsvHeaders() {
+  if (constructionStep.value === "base_formulas") {
+    return ["fo_id", "param_formula", "formula", "admin_mode"];
+  }
   if (constructionStep.value === "params") {
     return ["param_id", "part_kind_id", "param_code", "param_title_en", "param_title_fa", "param_group_id", "ui_order", "admin_mode"];
   }
@@ -508,6 +668,15 @@ function getConstructionCsvHeaders() {
 }
 
 function getConstructionCsvRows(items = null) {
+  if (constructionStep.value === "base_formulas") {
+    const rows = items || constructionBaseFormulas.value;
+    return rows.map((item) => [
+      Number(item.fo_id) || "",
+      String(item.param_formula || "").trim(),
+      String(item.formula || "").trim(),
+      item.admin_id === null ? "system" : "admin",
+    ]);
+  }
   if (constructionStep.value === "params") {
     const rows = items || constructionParams.value;
     return rows.map((item) => [
@@ -542,17 +711,22 @@ function getConstructionCsvRows(items = null) {
 }
 
 function getConstructionImportFileName() {
+  if (constructionStep.value === "base_formulas") return "base_formulas_excel_template.csv";
   if (constructionStep.value === "params") return "params_excel_template.csv";
   if (constructionStep.value === "param_groups") return "param_groups_excel_template.csv";
   return "part_kinds_excel_template.csv";
 }
 
 function getConstructionImportTitle() {
+  if (constructionStep.value === "base_formulas") return "جدول فرمول‌های پایه";
   if (constructionStep.value === "params") return "جدول پارامترها";
   return constructionStep.value === "param_groups" ? "جدول گروه پارامترها" : "جدول انواع قطعات";
 }
 
 function getConstructionImportErrorText() {
+  if (constructionStep.value === "base_formulas") {
+    return "خواندن فایل اکسل فرمول‌های پایه انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
+  }
   if (constructionStep.value === "params") {
     return "خواندن فایل اکسل پارامترها انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
   }
@@ -629,11 +803,13 @@ function clearConstructionImportPreview() {
 }
 
 async function downloadConstructionExcelTemplate() {
-  const path = constructionStep.value === "params"
-    ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/params/export`
-    : constructionStep.value === "param_groups"
-      ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/param-groups/export`
-      : `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/part-kinds/export`;
+  const path = constructionStep.value === "base_formulas"
+    ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/base-formulas/export`
+    : constructionStep.value === "params"
+      ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/params/export`
+      : constructionStep.value === "param_groups"
+        ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/param-groups/export`
+        : `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/part-kinds/export`;
   try {
     const response = await fetch(path);
     if (!response.ok) throw new Error("download-failed");
@@ -667,7 +843,21 @@ async function onConstructionImportFileChange(event) {
       throw new Error("invalid-headers");
     }
     let previewRows = [];
-    if (constructionStep.value === "params") {
+    if (constructionStep.value === "base_formulas") {
+      previewRows = rows.slice(1).map((row, index) => {
+        const foId = Number(row[0]);
+        const paramFormula = String(row[1] || "").trim();
+        const formula = String(row[2] || "").trim();
+        const adminMode = String(row[3] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        return {
+          lineNo: index + 2,
+          fo_id: foId,
+          param_formula: paramFormula,
+          formula,
+          admin_mode: adminMode,
+        };
+      });
+    } else if (constructionStep.value === "params") {
       previewRows = rows.slice(1).map((row, index) => {
         const paramId = Number(row[0]);
         const partKindId = Number(row[1]);
@@ -723,7 +913,15 @@ async function onConstructionImportFileChange(event) {
       });
     }
     if (!previewRows.length) throw new Error("empty-file");
-    const invalidRow = constructionStep.value === "params"
+    const invalidRow = constructionStep.value === "base_formulas"
+      ? previewRows.find(
+          (row) =>
+            !Number.isInteger(row.fo_id) ||
+            row.fo_id < 1 ||
+            !row.param_formula ||
+            !row.formula
+        )
+      : constructionStep.value === "params"
       ? previewRows.find(
           (row) =>
             !Number.isInteger(row.param_id) ||
@@ -907,6 +1105,48 @@ function buildImportedConstructionParamDrafts(rows) {
   return { nextRows, deletedIds };
 }
 
+function buildImportedConstructionBaseFormulaDrafts(rows) {
+  const existingById = new Map(editableBaseFormulas.value.map((item) => [Number(item.fo_id), item]));
+  const nextRows = rows.map((row, index) => {
+    const existing = existingById.get(Number(row.fo_id));
+    const adminId = row.admin_mode === "system" ? null : currentAdminId.value;
+    const nextPayload = {
+      admin_id: adminId,
+      fo_id: Number(row.fo_id),
+      param_formula: String(row.param_formula || "").trim(),
+      formula: String(row.formula || "").trim(),
+      code: String(row.param_formula || "").trim(),
+      title: String(row.param_formula || "").trim(),
+      sort_order: index + 1,
+      is_system: adminId === null,
+    };
+    if (!existing) {
+      return buildPartKindDraft(nextPayload, {
+        id: `draft-base-formula-${Date.now()}-${index}`,
+        __isNew: true,
+        __dirty: false,
+      });
+    }
+    const changed =
+      existing.admin_id !== nextPayload.admin_id ||
+      Number(existing.fo_id) !== nextPayload.fo_id ||
+      String(existing.param_formula || "").trim() !== nextPayload.param_formula ||
+      String(existing.formula || "").trim() !== nextPayload.formula ||
+      Number(existing.sort_order) !== nextPayload.sort_order ||
+      !!existing.is_system !== nextPayload.is_system;
+    return buildPartKindDraft(existing, {
+      ...nextPayload,
+      __isNew: false,
+      __dirty: changed,
+    });
+  });
+  const importedExistingIds = new Set(nextRows.filter((item) => !item.__isNew).map((item) => String(item.id)));
+  const deletedIds = editableBaseFormulas.value
+    .filter((item) => !item.__isNew && !importedExistingIds.has(String(item.id)))
+    .map((item) => String(item.id));
+  return { nextRows, deletedIds };
+}
+
 async function loadConstructionPartKinds() {
   constructionLoading.value = true;
   try {
@@ -948,6 +1188,18 @@ async function loadConstructionParams() {
     constructionDeletedParamIds.value = [];
   } catch (_) {
     showAlert("خواندن جدول پارامترها از دیتابیس انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function loadConstructionBaseFormulas() {
+  try {
+    const url = `/api/base-formulas?admin_id=${encodeURIComponent(currentAdminId.value)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("load-failed");
+    editableBaseFormulas.value = (await res.json()).map(withConstructionDraftState);
+    constructionDeletedBaseFormulaIds.value = [];
+  } catch (_) {
+    showAlert("خواندن جدول فرمول‌های پایه از دیتابیس انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -1015,6 +1267,36 @@ function addConstructionParam() {
       __dirty: false,
     },
   ];
+}
+
+function addConstructionBaseFormula() {
+  const nextId = editableBaseFormulas.value.reduce((max, item) => Math.max(max, Number(item.fo_id) || 0), 0) + 1;
+  editableBaseFormulas.value = [
+    ...editableBaseFormulas.value,
+    {
+      id: `draft-base-formula-row-${Date.now()}-${nextId}`,
+      admin_id: currentAdminId.value,
+      fo_id: nextId,
+      param_formula: `f${nextId}`,
+      formula: "(u_f_o)",
+      code: `f${nextId}`,
+      title: `f${nextId}`,
+      sort_order: nextId,
+      is_system: false,
+      __isNew: true,
+      __dirty: false,
+    },
+  ];
+}
+
+async function readApiErrorMessage(response, fallbackMessage) {
+  try {
+    const payload = await response.json();
+    if (typeof payload?.detail === "string" && payload.detail.trim()) return payload.detail.trim();
+  } catch (_) {
+    // ignore parsing errors and use fallback below
+  }
+  return fallbackMessage;
 }
 
 async function saveConstructionPartKinds(options = {}) {
@@ -1177,6 +1459,56 @@ async function saveConstructionParams(options = {}) {
   }
 }
 
+async function saveConstructionBaseFormulas(options = {}) {
+  if (!(constructionDeletedBaseFormulaIds.value.length > 0 || editableBaseFormulas.value.some((item) => !!item.__isNew || !!item.__dirty))) {
+    showAlert("تغییری برای ذخیره وجود ندارد.", { title: "ذخیره تغییرات" });
+    return;
+  }
+  if (!validateConstructionBaseFormulas()) return;
+  if (!options.skipConfirm) {
+    const ok = await showConfirm("تغییرات جدول فرمول‌های پایه در دیتابیس ذخیره شود؟", {
+      title: "ذخیره تغییرات",
+      confirmText: "ذخیره",
+      cancelText: "انصراف",
+    });
+    if (!ok) return;
+  }
+  const draftIds = editableBaseFormulas.value.filter((item) => item.__isNew).map((item) => String(item.id));
+  const dirtyIds = editableBaseFormulas.value.filter((item) => !item.__isNew && item.__dirty).map((item) => String(item.id));
+  constructionSavingIds.value = [...new Set([...draftIds, ...dirtyIds])];
+  try {
+    for (const id of constructionDeletedBaseFormulaIds.value) {
+      const res = await fetch(`/api/base-formulas/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "delete-failed"));
+    }
+    for (const item of editableBaseFormulas.value.filter((row) => row.__isNew)) {
+      const res = await fetch("/api/base-formulas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizeBaseFormulaPayload(item)),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "create-failed"));
+    }
+    for (const item of editableBaseFormulas.value.filter((row) => !row.__isNew && row.__dirty)) {
+      const res = await fetch(`/api/base-formulas/${encodeURIComponent(String(item.id))}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizeBaseFormulaPayload(item)),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "save-failed"));
+    }
+    await loadConstructionBaseFormulas();
+    showAlert(options.successMessage || "تغییرات جدول فرمول‌های پایه با موفقیت ذخیره شد.", {
+      title: options.successTitle || "ذخیره تغییرات",
+    });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره تغییرات جدول فرمول‌های پایه در دیتابیس انجام نشد.", { title: "خطا" });
+    await loadConstructionBaseFormulas();
+  } finally {
+    constructionSavingIds.value = [];
+  }
+}
+
 async function applyConstructionImportPreview() {
   if (!constructionImportPreviewRows.value.length) return;
   const ok = await showConfirm(`پیش‌نمایش فایل اکسل روی ${getConstructionImportTitle()} اعمال شود؟`, {
@@ -1207,6 +1539,18 @@ async function applyConstructionImportPreview() {
       skipConfirm: true,
       successTitle: "آپلود فایل",
       successMessage: "فایل اکسل گروه پارامترها با موفقیت روی جدول اعمال شد.",
+    });
+    return;
+  }
+  if (constructionImportPreviewKind.value === "base_formulas") {
+    const { nextRows, deletedIds } = buildImportedConstructionBaseFormulaDrafts(constructionImportPreviewRows.value);
+    editableBaseFormulas.value = nextRows;
+    constructionDeletedBaseFormulaIds.value = deletedIds;
+    clearConstructionImportPreview();
+    await saveConstructionBaseFormulas({
+      skipConfirm: true,
+      successTitle: "آپلود فایل",
+      successMessage: "فایل اکسل فرمول‌های پایه با موفقیت روی جدول اعمال شد.",
     });
     return;
   }
@@ -1283,6 +1627,28 @@ async function deleteConstructionParam(id) {
     }
   } catch (_) {
     showAlert("حذف پارامتر از جدول انجام نشد.", { title: "خطا" });
+  } finally {
+    constructionDeletingIds.value = constructionDeletingIds.value.filter((value) => value !== String(id));
+  }
+}
+
+async function deleteConstructionBaseFormula(id) {
+  const item = editableBaseFormulas.value.find((row) => String(row.id) === String(id));
+  if (!item) return;
+  const ok = await showConfirm(`فرمول پایه «${item.param_formula || item.title || "بدون عنوان"}» حذف شود؟`, {
+    title: "حذف فرمول پایه",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  constructionDeletingIds.value = [...constructionDeletingIds.value, String(id)];
+  try {
+    editableBaseFormulas.value = editableBaseFormulas.value.filter((row) => String(row.id) !== String(id));
+    if (!item.__isNew) {
+      constructionDeletedBaseFormulaIds.value = [...new Set([...constructionDeletedBaseFormulaIds.value, String(id)])];
+    }
+  } catch (_) {
+    showAlert("حذف فرمول پایه از جدول انجام نشد.", { title: "خطا" });
   } finally {
     constructionDeletingIds.value = constructionDeletingIds.value.filter((value) => value !== String(id));
   }
@@ -3234,7 +3600,7 @@ onBeforeUnmount(() => {
             :class="{ 'is-disabled': !constructionHasPendingChanges || constructionSavingIds.length > 0 }"
             :disabled="!constructionHasPendingChanges || constructionSavingIds.length > 0"
             title="ذخیره تغییرات"
-            @click="constructionStep === 'part_kinds' ? saveConstructionPartKinds() : constructionStep === 'param_groups' ? saveConstructionParamGroups() : constructionStep === 'params' ? saveConstructionParams() : null"
+            @click="constructionStep === 'part_kinds' ? saveConstructionPartKinds() : constructionStep === 'param_groups' ? saveConstructionParamGroups() : constructionStep === 'params' ? saveConstructionParams() : constructionStep === 'base_formulas' ? saveConstructionBaseFormulas() : null"
           >
             <img src="/icons/construction-save.svg" alt="ذخیره" />
           </button>
@@ -3242,7 +3608,7 @@ onBeforeUnmount(() => {
             type="button"
             class="constructionDialog__headIconBtn"
             title="دانلود اکسل"
-            :disabled="!['part_kinds', 'param_groups', 'params'].includes(constructionStep)"
+            :disabled="!['part_kinds', 'param_groups', 'params', 'base_formulas'].includes(constructionStep)"
             @click="downloadConstructionExcelTemplate"
           >
             <img src="/icons/construction-download.svg" alt="دانلود" />
@@ -3251,7 +3617,7 @@ onBeforeUnmount(() => {
             type="button"
             class="constructionDialog__headIconBtn"
             title="آپلود اکسل"
-            :disabled="!['part_kinds', 'param_groups', 'params'].includes(constructionStep)"
+            :disabled="!['part_kinds', 'param_groups', 'params', 'base_formulas'].includes(constructionStep)"
             @click="triggerConstructionImport"
           >
             <img src="/icons/construction-upload.svg" alt="آپلود" />
@@ -3388,7 +3754,11 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--code">
                       <input
                         v-model="item.part_kind_code"
-                        class="constructionDialog__input constructionDialog__input--mono"
+                        :class="[
+                          'constructionDialog__input',
+                          'constructionDialog__input--mono',
+                          `is-${getDuplicateInputTone(item, 'part_kind_code', constructionPartKindDuplicateState)}`
+                        ]"
                         type="text"
                         @input="markConstructionPartKindDirty(item)"
                       />
@@ -3534,7 +3904,16 @@ onBeforeUnmount(() => {
                       <input v-model.number="item.param_group_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionParamGroupDirty(item)" />
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--code">
-                      <input v-model="item.param_group_code" class="constructionDialog__input constructionDialog__input--mono" type="text" @input="markConstructionParamGroupDirty(item)" />
+                      <input
+                        v-model="item.param_group_code"
+                        :class="[
+                          'constructionDialog__input',
+                          'constructionDialog__input--mono',
+                          `is-${getDuplicateInputTone(item, 'param_group_code', constructionParamGroupDuplicateState)}`
+                        ]"
+                        type="text"
+                        @input="markConstructionParamGroupDirty(item)"
+                      />
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--title">
                       <input v-model="item.org_param_group_title" class="constructionDialog__input" type="text" @input="markConstructionParamGroupDirty(item)" />
@@ -3571,6 +3950,12 @@ onBeforeUnmount(() => {
                         <span v-else-if="constructionSavingIds.includes(String(item.id))" class="constructionDialog__saving">در حال ذخیره</span>
                         <span v-else-if="item.__isNew" class="constructionDialog__saving">جدید</span>
                         <span v-else-if="item.__dirty" class="constructionDialog__saving">ذخیره نشده</span>
+                        <span
+                          class="constructionDialog__duplicateState"
+                          :class="`is-${getConstructionParamGroupDuplicateMessage(item).tone}`"
+                        >
+                          {{ getConstructionParamGroupDuplicateMessage(item).text }}
+                        </span>
                         <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionParamGroup(item.id)">×</button>
                       </div>
                     </td>
@@ -3692,7 +4077,16 @@ onBeforeUnmount(() => {
                       <input v-model.number="item.part_kind_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionParamDirty(item)" />
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--code">
-                      <input v-model="item.param_code" class="constructionDialog__input constructionDialog__input--mono" type="text" @input="markConstructionParamDirty(item)" />
+                      <input
+                        v-model="item.param_code"
+                        :class="[
+                          'constructionDialog__input',
+                          'constructionDialog__input--mono',
+                          `is-${getDuplicateInputTone(item, 'param_code', constructionParamDuplicateState)}`
+                        ]"
+                        type="text"
+                        @input="markConstructionParamDirty(item)"
+                      />
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--title">
                       <input v-model="item.param_title_en" class="constructionDialog__input constructionDialog__input--mono" type="text" @input="markConstructionParamDirty(item)" />
@@ -3720,6 +4114,12 @@ onBeforeUnmount(() => {
                         <span v-else-if="constructionSavingIds.includes(String(item.id))" class="constructionDialog__saving">در حال ذخیره</span>
                         <span v-else-if="item.__isNew" class="constructionDialog__saving">جدید</span>
                         <span v-else-if="item.__dirty" class="constructionDialog__saving">ذخیره نشده</span>
+                        <span
+                          class="constructionDialog__duplicateState"
+                          :class="`is-${getConstructionParamDuplicateMessage(item).tone}`"
+                        >
+                          {{ getConstructionParamDuplicateMessage(item).text }}
+                        </span>
                         <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionParam(item.id)">×</button>
                       </div>
                     </td>
@@ -3729,6 +4129,146 @@ onBeforeUnmount(() => {
             </div>
             <div class="constructionDialog__sheetHint">
               خروجی و ورودی اکسل این جدول به‌صورت CSV سازگار با Excel است. ابتدا فایل را دانلود کنید، در Excel ویرایش کنید، سپس دوباره همان فایل را آپلود و پیش‌نمایش را تایید کنید.
+            </div>
+          </template>
+
+          <template v-else-if="constructionStep === 'base_formulas'">
+            <input
+              ref="constructionImportInputEl"
+              class="constructionDialog__fileInput"
+              type="file"
+              accept=".csv"
+              @change="onConstructionImportFileChange"
+            />
+            <div class="constructionDialog__toolbar">
+              <div class="constructionDialog__toolbarMain">
+                <div class="constructionDialog__sectionTitle">جدول فرمول‌های پایه</div>
+                <div class="constructionDialog__sectionHint">
+                  هر ادمین می‌تواند فرمول‌های پایه را بر اساس کد پارامترهای همان ساختار نگه‌داری و در صورت نیاز بازنویسی کند.
+                </div>
+              </div>
+              <div class="constructionDialog__toolbarActions">
+                <button type="button" class="constructionDialog__textBtn" @click="addConstructionBaseFormula">افزودن فرمول پایه</button>
+              </div>
+            </div>
+
+            <div v-if="constructionImportPreviewCount && constructionImportPreviewKind === 'base_formulas'" class="constructionDialog__importPreview">
+              <div class="constructionDialog__importHead">
+                <div>
+                  <div class="constructionDialog__sectionTitle">پیش‌نمایش فایل اکسل</div>
+                  <div class="constructionDialog__sectionHint">
+                    فایل {{ constructionImportFileName }} خوانده شد. قبل از بروزرسانی، جدول واردشده را بررسی و سپس تایید کنید.
+                  </div>
+                </div>
+                <div class="constructionDialog__toolbarActions">
+                  <button type="button" class="constructionDialog__textBtn" @click="clearConstructionImportPreview">لغو</button>
+                  <button type="button" class="constructionDialog__textBtn is-primary" @click="applyConstructionImportPreview">
+                    تایید بروزرسانی
+                  </button>
+                </div>
+              </div>
+              <div class="constructionDialog__previewMeta">
+                <span>{{ toPersianDigits(constructionImportPreviewCount) }} ردیف</span>
+                <span>فایل CSV قابل ویرایش در Excel</span>
+              </div>
+              <div class="constructionDialog__previewTableWrap">
+                <table class="constructionDialog__table constructionDialog__table--preview">
+                  <thead>
+                    <tr>
+                      <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
+                      <th class="constructionDialog__col constructionDialog__col--code">کد فرمول</th>
+                      <th class="constructionDialog__col constructionDialog__col--title">فرمول</th>
+                      <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in constructionImportPreviewRows" :key="`${row.lineNo}-${row.fo_id}`">
+                      <td class="constructionDialog__col constructionDialog__col--id">{{ row.fo_id }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--code">{{ row.param_formula }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--title constructionDialog__col--formula">{{ row.formula }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionBaseFormulas.length) }}</span>
+                <span class="constructionDialog__summaryLabel">کل</span>
+              </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(systemBaseFormulasCount) }}</span>
+                <span class="constructionDialog__summaryLabel">پیش‌فرض</span>
+              </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(adminBaseFormulasCount) }}</span>
+                <span class="constructionDialog__summaryLabel">اختصاصی</span>
+              </div>
+            </div>
+
+            <div class="constructionDialog__tableWrap">
+              <table class="constructionDialog__table">
+                <thead>
+                  <tr>
+                    <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
+                    <th class="constructionDialog__col constructionDialog__col--code">کد فرمول</th>
+                    <th class="constructionDialog__col constructionDialog__col--title">فرمول</th>
+                    <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
+                    <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in constructionBaseFormulas" :key="item.id">
+                    <td class="constructionDialog__col constructionDialog__col--id">
+                      <input v-model.number="item.fo_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionBaseFormulaDirty(item)" />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--code">
+                      <input
+                        v-model="item.param_formula"
+                        :class="[
+                          'constructionDialog__input',
+                          'constructionDialog__input--mono',
+                          `is-${getDuplicateInputTone(item, 'param_formula', constructionBaseFormulaDuplicateState)}`
+                        ]"
+                        type="text"
+                        @input="markConstructionBaseFormulaDirty(item)"
+                      />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--title constructionDialog__col--formula">
+                      <textarea v-model="item.formula" class="constructionDialog__input constructionDialog__input--mono constructionDialog__textarea" rows="2" @input="markConstructionBaseFormulaDirty(item)"></textarea>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--owner">
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.admin_id || "SYSTEM" }}</span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--scope">
+                      <button type="button" class="constructionDialog__scopeBtn" :class="item.admin_id === null ? 'is-system' : 'is-admin'" @click="toggleConstructionBaseFormulaScope(item)">
+                        {{ item.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین" }}
+                      </button>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--actions">
+                      <div class="constructionDialog__actionsCell">
+                        <span v-if="constructionDeletingIds.includes(String(item.id))" class="constructionDialog__saving">در حال حذف</span>
+                        <span v-else-if="constructionSavingIds.includes(String(item.id))" class="constructionDialog__saving">در حال ذخیره</span>
+                        <span v-else-if="item.__isNew" class="constructionDialog__saving">جدید</span>
+                        <span v-else-if="item.__dirty" class="constructionDialog__saving">ذخیره نشده</span>
+                        <span
+                          class="constructionDialog__duplicateState"
+                          :class="`is-${getConstructionBaseFormulaDuplicateMessage(item).tone}`"
+                        >
+                          {{ getConstructionBaseFormulaDuplicateMessage(item).text }}
+                        </span>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionBaseFormula(item.id)">×</button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="constructionDialog__sheetHint">
+              فرمول‌ها باید فقط از کد پارامترهای معتبر همان ساختار استفاده کنند. اگر در عبارت فرمول کد ناشناخته‌ای وجود داشته باشد، ذخیره‌سازی از سمت سرور رد می‌شود.
             </div>
           </template>
 
