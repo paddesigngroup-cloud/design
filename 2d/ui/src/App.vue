@@ -165,8 +165,11 @@ const constructionDeletingIds = ref([]);
 const constructionDeletedPartKindIds = ref([]);
 const constructionDeletedParamGroupIds = ref([]);
 const constructionImportInputEl = ref(null);
+const paramGroupIconInputEl = ref(null);
 const constructionImportPreviewRows = ref([]);
 const constructionImportFileName = ref("");
+const constructionImportPreviewKind = ref(null);
+const activeParamGroupIconRowId = ref(null);
 const constructionTables = [
   { id: "part_kinds", title: "انواع قطعات", status: "active" },
   { id: "param_groups", title: "گروه پارامترها", status: "active" },
@@ -258,6 +261,22 @@ function toPersianDigits(value) {
   return String(value ?? "").replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
 }
 
+function normalizeIconFileName(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  return text.split("?")[0].split("/").pop() || "";
+}
+
+function hasParamGroupIcon(item) {
+  return !!normalizeIconFileName(item?.param_group_icon_path);
+}
+
+function getParamGroupIconTooltip(item) {
+  const fileName = normalizeIconFileName(item?.param_group_icon_path);
+  if (!fileName) return "آیکون خالی است. برای آپلود کلیک کنید.";
+  return `آیکون بارگذاری شده: ${fileName}`;
+}
+
 function buildPartKindDraft(item, overrides = {}) {
   return {
     ...item,
@@ -286,7 +305,7 @@ function normalizeParamGroupPayload(item) {
     param_group_id: Number(item.param_group_id),
     param_group_code: String(item.param_group_code || "").trim(),
     org_param_group_title: String(item.org_param_group_title || "").trim(),
-    param_group_icon_path: String(item.param_group_icon_path || "").trim() || null,
+    param_group_icon_path: normalizeIconFileName(item.param_group_icon_path) || null,
     ui_order: Number.isFinite(Number(item.ui_order)) ? Number(item.ui_order) : 0,
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.param_group_id),
     is_system: !!item.is_system,
@@ -358,16 +377,46 @@ function validateConstructionPartKinds() {
 }
 
 function getConstructionCsvHeaders() {
+  if (constructionStep.value === "param_groups") {
+    return ["param_group_id", "param_group_code", "org_param_group_title", "param_group_icon_path", "ui_order", "admin_mode"];
+  }
   return ["part_kind_id", "part_kind_code", "org_part_kind_title", "admin_mode"];
 }
 
-function getConstructionCsvRows(items = constructionPartKinds.value) {
-  return items.map((item) => [
+function getConstructionCsvRows(items = null) {
+  if (constructionStep.value === "param_groups") {
+    const rows = items || constructionParamGroups.value;
+      return rows.map((item) => [
+        Number(item.param_group_id) || "",
+        String(item.param_group_code || "").trim(),
+        String(item.org_param_group_title || "").trim(),
+        normalizeIconFileName(item.param_group_icon_path),
+        Number(item.ui_order) || 0,
+        item.admin_id === null ? "system" : "admin",
+      ]);
+  }
+  const rows = items || constructionPartKinds.value;
+  return rows.map((item) => [
     Number(item.part_kind_id) || "",
     String(item.part_kind_code || "").trim(),
     String(item.org_part_kind_title || "").trim(),
     item.admin_id === null ? "system" : "admin",
   ]);
+}
+
+function getConstructionImportFileName() {
+  if (constructionStep.value === "param_groups") return "param_groups_excel_template.csv";
+  return "part_kinds_excel_template.csv";
+}
+
+function getConstructionImportTitle() {
+  return constructionStep.value === "param_groups" ? "جدول گروه پارامترها" : "جدول انواع قطعات";
+}
+
+function getConstructionImportErrorText() {
+  return constructionStep.value === "param_groups"
+    ? "خواندن فایل اکسل گروه پارامترها انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید."
+    : "خواندن فایل اکسل انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
 }
 
 function escapeCsvCell(value) {
@@ -433,19 +482,15 @@ function triggerConstructionImport() {
 function clearConstructionImportPreview() {
   constructionImportPreviewRows.value = [];
   constructionImportFileName.value = "";
+  constructionImportPreviewKind.value = null;
   if (constructionImportInputEl.value) constructionImportInputEl.value.value = "";
 }
 
 function downloadConstructionExcelTemplate() {
-  const csv = buildCsvText(getConstructionCsvHeaders(), getConstructionCsvRows());
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = "part_kinds_excel_template.csv";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(link.href);
+  const path = constructionStep.value === "param_groups"
+    ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/param-groups/export`
+    : `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/part-kinds/export`;
+  window.open(path, "_blank", "noopener");
 }
 
 async function onConstructionImportFileChange(event) {
@@ -460,35 +505,66 @@ async function onConstructionImportFileChange(event) {
     if (expected.some((header, index) => headers[index] !== header)) {
       throw new Error("invalid-headers");
     }
-    const previewRows = rows.slice(1).map((row, index) => {
-      const partKindId = Number(row[0]);
-      const partKindCode = String(row[1] || "").trim();
-      const orgPartKindTitle = String(row[2] || "").trim();
-      const adminMode = String(row[3] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
-      return {
-        lineNo: index + 2,
-        part_kind_id: partKindId,
-        part_kind_code: partKindCode,
-        org_part_kind_title: orgPartKindTitle,
-        admin_mode: adminMode,
-      };
-    });
+    let previewRows = [];
+    if (constructionStep.value === "param_groups") {
+      previewRows = rows.slice(1).map((row, index) => {
+        const paramGroupId = Number(row[0]);
+        const paramGroupCode = String(row[1] || "").trim();
+        const orgTitle = String(row[2] || "").trim();
+        const iconPath = String(row[3] || "").trim();
+        const uiOrder = Number(row[4]);
+        const adminMode = String(row[5] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        return {
+          lineNo: index + 2,
+          param_group_id: paramGroupId,
+          param_group_code: paramGroupCode,
+          org_param_group_title: orgTitle,
+          param_group_icon_path: normalizeIconFileName(iconPath),
+          ui_order: uiOrder,
+          admin_mode: adminMode,
+        };
+      });
+    } else {
+      previewRows = rows.slice(1).map((row, index) => {
+        const partKindId = Number(row[0]);
+        const partKindCode = String(row[1] || "").trim();
+        const orgPartKindTitle = String(row[2] || "").trim();
+        const adminMode = String(row[3] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        return {
+          lineNo: index + 2,
+          part_kind_id: partKindId,
+          part_kind_code: partKindCode,
+          org_part_kind_title: orgPartKindTitle,
+          admin_mode: adminMode,
+        };
+      });
+    }
     if (!previewRows.length) throw new Error("empty-file");
-    const invalidRow = previewRows.find(
-      (row) =>
-        !Number.isInteger(row.part_kind_id) ||
-        row.part_kind_id < 1 ||
-        !row.part_kind_code ||
-        !row.org_part_kind_title
-    );
+    const invalidRow = constructionStep.value === "param_groups"
+      ? previewRows.find(
+          (row) =>
+            !Number.isInteger(row.param_group_id) ||
+            row.param_group_id < 1 ||
+            !row.param_group_code ||
+            !row.org_param_group_title ||
+            !Number.isFinite(row.ui_order)
+        )
+      : previewRows.find(
+          (row) =>
+            !Number.isInteger(row.part_kind_id) ||
+            row.part_kind_id < 1 ||
+            !row.part_kind_code ||
+            !row.org_part_kind_title
+        );
     if (invalidRow) {
       throw new Error(`invalid-row-${invalidRow.lineNo}`);
     }
     constructionImportPreviewRows.value = previewRows;
     constructionImportFileName.value = file.name;
+    constructionImportPreviewKind.value = constructionStep.value;
   } catch (error) {
     clearConstructionImportPreview();
-    showAlert("خواندن فایل اکسل انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.", { title: "آپلود فایل" });
+    showAlert(getConstructionImportErrorText(), { title: "آپلود فایل" });
   }
 }
 
@@ -538,6 +614,52 @@ function buildImportedConstructionDrafts(rows) {
   return { nextRows, deletedIds };
 }
 
+function buildImportedConstructionParamGroupDrafts(rows) {
+  const existingById = new Map(editableParamGroups.value.map((item) => [Number(item.param_group_id), item]));
+  const nextRows = rows.map((row, index) => {
+    const existing = existingById.get(Number(row.param_group_id));
+    const adminId = row.admin_mode === "system" ? null : currentAdminId.value;
+    const nextPayload = {
+      admin_id: adminId,
+      param_group_id: Number(row.param_group_id),
+      param_group_code: String(row.param_group_code || "").trim(),
+      org_param_group_title: String(row.org_param_group_title || "").trim(),
+      param_group_icon_path: normalizeIconFileName(row.param_group_icon_path) || null,
+      ui_order: Number(row.ui_order),
+      code: String(row.param_group_code || "").trim(),
+      title: String(row.org_param_group_title || "").trim(),
+      sort_order: index + 1,
+      is_system: adminId === null,
+    };
+    if (!existing) {
+      return buildPartKindDraft(nextPayload, {
+        id: `draft-param-import-${Date.now()}-${index}`,
+        __isNew: true,
+        __dirty: false,
+      });
+    }
+    const changed =
+      existing.admin_id !== nextPayload.admin_id ||
+      Number(existing.param_group_id) !== nextPayload.param_group_id ||
+      String(existing.param_group_code || "").trim() !== nextPayload.param_group_code ||
+      String(existing.org_param_group_title || "").trim() !== nextPayload.org_param_group_title ||
+      normalizeIconFileName(existing.param_group_icon_path) !== normalizeIconFileName(nextPayload.param_group_icon_path) ||
+      Number(existing.ui_order) !== nextPayload.ui_order ||
+      Number(existing.sort_order) !== nextPayload.sort_order ||
+      !!existing.is_system !== nextPayload.is_system;
+    return buildPartKindDraft(existing, {
+      ...nextPayload,
+      __isNew: false,
+      __dirty: changed,
+    });
+  });
+  const importedExistingIds = new Set(nextRows.filter((item) => !item.__isNew).map((item) => String(item.id)));
+  const deletedIds = editableParamGroups.value
+    .filter((item) => !item.__isNew && !importedExistingIds.has(String(item.id)))
+    .map((item) => String(item.id));
+  return { nextRows, deletedIds };
+}
+
 async function loadConstructionPartKinds() {
   constructionLoading.value = true;
   try {
@@ -558,7 +680,12 @@ async function loadConstructionParamGroups() {
     const url = `/api/param-groups?admin_id=${encodeURIComponent(currentAdminId.value)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error("load-failed");
-    editableParamGroups.value = (await res.json()).map(withConstructionDraftState);
+    editableParamGroups.value = (await res.json()).map((item) =>
+      withConstructionDraftState({
+        ...item,
+        param_group_icon_path: normalizeIconFileName(item.param_group_icon_path),
+      })
+    );
     constructionDeletedParamGroupIds.value = [];
   } catch (_) {
     showAlert("خواندن جدول گروه پارامترها از دیتابیس انجام نشد.", { title: "خطا" });
@@ -667,18 +794,20 @@ async function saveConstructionPartKinds(options = {}) {
   }
 }
 
-async function saveConstructionParamGroups() {
+async function saveConstructionParamGroups(options = {}) {
   if (!(constructionDeletedParamGroupIds.value.length > 0 || editableParamGroups.value.some((item) => !!item.__isNew || !!item.__dirty))) {
     showAlert("تغییری برای ذخیره وجود ندارد.", { title: "ذخیره تغییرات" });
     return;
   }
   if (!validateConstructionParamGroups()) return;
-  const ok = await showConfirm("تغییرات جدول گروه پارامترها در دیتابیس ذخیره شود؟", {
-    title: "ذخیره تغییرات",
-    confirmText: "ذخیره",
-    cancelText: "انصراف",
-  });
-  if (!ok) return;
+  if (!options.skipConfirm) {
+    const ok = await showConfirm("تغییرات جدول گروه پارامترها در دیتابیس ذخیره شود؟", {
+      title: "ذخیره تغییرات",
+      confirmText: "ذخیره",
+      cancelText: "انصراف",
+    });
+    if (!ok) return;
+  }
   const draftIds = editableParamGroups.value.filter((item) => item.__isNew).map((item) => String(item.id));
   const dirtyIds = editableParamGroups.value.filter((item) => !item.__isNew && item.__dirty).map((item) => String(item.id));
   constructionSavingIds.value = [...new Set([...draftIds, ...dirtyIds])];
@@ -704,7 +833,9 @@ async function saveConstructionParamGroups() {
       if (!res.ok) throw new Error("save-failed");
     }
     await loadConstructionParamGroups();
-    showAlert("تغییرات جدول گروه پارامترها با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
+    showAlert(options.successMessage || "تغییرات جدول گروه پارامترها با موفقیت ذخیره شد.", {
+      title: options.successTitle || "ذخیره تغییرات",
+    });
   } catch (_) {
     showAlert("ذخیره تغییرات جدول گروه پارامترها در دیتابیس انجام نشد.", { title: "خطا" });
     await loadConstructionParamGroups();
@@ -715,12 +846,24 @@ async function saveConstructionParamGroups() {
 
 async function applyConstructionImportPreview() {
   if (!constructionImportPreviewRows.value.length) return;
-  const ok = await showConfirm("پیش‌نمایش فایل اکسل روی جدول انواع قطعات اعمال شود؟", {
+  const ok = await showConfirm(`پیش‌نمایش فایل اکسل روی ${getConstructionImportTitle()} اعمال شود؟`, {
     title: "تایید بروزرسانی",
     confirmText: "اعمال",
     cancelText: "انصراف",
   });
   if (!ok) return;
+  if (constructionImportPreviewKind.value === "param_groups") {
+    const { nextRows, deletedIds } = buildImportedConstructionParamGroupDrafts(constructionImportPreviewRows.value);
+    editableParamGroups.value = nextRows;
+    constructionDeletedParamGroupIds.value = deletedIds;
+    clearConstructionImportPreview();
+    await saveConstructionParamGroups({
+      skipConfirm: true,
+      successTitle: "آپلود فایل",
+      successMessage: "فایل اکسل گروه پارامترها با موفقیت روی جدول اعمال شد.",
+    });
+    return;
+  }
   const { nextRows, deletedIds } = buildImportedConstructionDrafts(constructionImportPreviewRows.value);
   editablePartKinds.value = nextRows;
   constructionDeletedPartKindIds.value = deletedIds;
@@ -773,6 +916,37 @@ async function deleteConstructionParamGroup(id) {
     showAlert("حذف گروه پارامتر از جدول انجام نشد.", { title: "خطا" });
   } finally {
     constructionDeletingIds.value = constructionDeletingIds.value.filter((value) => value !== String(id));
+  }
+}
+
+function triggerParamGroupIconUpload(item) {
+  activeParamGroupIconRowId.value = String(item.id);
+  paramGroupIconInputEl.value?.click?.();
+}
+
+async function onParamGroupIconFileChange(event) {
+  const file = event?.target?.files?.[0];
+  const rowId = activeParamGroupIconRowId.value;
+  if (!file || !rowId) return;
+  const item = editableParamGroups.value.find((row) => String(row.id) === rowId);
+  if (!item) return;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const slugHint = encodeURIComponent(String(item.param_group_code || `param-group-${item.param_group_id || "new"}`));
+    const res = await fetch(`/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/param-group-icons?slug_hint=${slugHint}`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) throw new Error("upload-failed");
+    const payload = await res.json();
+    item.param_group_icon_path = normalizeIconFileName(payload.file_name || payload.icon_path);
+    if (!item.__isNew) item.__dirty = true;
+  } catch (_) {
+    showAlert("آپلود آیکون انجام نشد. فقط فایل تصویری معتبر با اندازه استاندارد قابل قبول است.", { title: "آیکون گروه پارامتر" });
+  } finally {
+    activeParamGroupIconRowId.value = null;
+    if (paramGroupIconInputEl.value) paramGroupIconInputEl.value.value = "";
   }
 }
 
@@ -2692,7 +2866,7 @@ onBeforeUnmount(() => {
             type="button"
             class="constructionDialog__headIconBtn"
             title="دانلود اکسل"
-            :disabled="constructionStep !== 'part_kinds'"
+            :disabled="!['part_kinds', 'param_groups'].includes(constructionStep)"
             @click="downloadConstructionExcelTemplate"
           >
             <img src="/icons/construction-download.svg" alt="دانلود" />
@@ -2701,7 +2875,7 @@ onBeforeUnmount(() => {
             type="button"
             class="constructionDialog__headIconBtn"
             title="آپلود اکسل"
-            :disabled="constructionStep !== 'part_kinds'"
+            :disabled="!['part_kinds', 'param_groups'].includes(constructionStep)"
             @click="triggerConstructionImport"
           >
             <img src="/icons/construction-upload.svg" alt="آپلود" />
@@ -2755,7 +2929,7 @@ onBeforeUnmount(() => {
 
             <div v-if="constructionLoading" class="constructionDialog__loading">در حال خواندن داده‌های جدول از دیتابیس...</div>
 
-            <div v-if="constructionImportPreviewCount" class="constructionDialog__importPreview">
+            <div v-if="constructionImportPreviewCount && constructionImportPreviewKind === 'part_kinds'" class="constructionDialog__importPreview">
               <div class="constructionDialog__importHead">
                 <div>
                   <div class="constructionDialog__sectionTitle">پیش‌نمایش فایل اکسل</div>
@@ -2885,6 +3059,13 @@ onBeforeUnmount(() => {
           </template>
 
           <template v-else-if="constructionStep === 'param_groups'">
+            <input
+              ref="paramGroupIconInputEl"
+              class="constructionDialog__fileInput"
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp"
+              @change="onParamGroupIconFileChange"
+            />
             <div class="constructionDialog__toolbar">
               <div class="constructionDialog__toolbarMain">
                 <div class="constructionDialog__sectionTitle">جدول گروه پارامترها</div>
@@ -2894,6 +3075,51 @@ onBeforeUnmount(() => {
               </div>
               <div class="constructionDialog__toolbarActions">
                 <button type="button" class="constructionDialog__textBtn" @click="addConstructionParamGroup">افزودن گروه پارامتر</button>
+              </div>
+            </div>
+
+            <div v-if="constructionImportPreviewCount && constructionImportPreviewKind === 'param_groups'" class="constructionDialog__importPreview">
+              <div class="constructionDialog__importHead">
+                <div>
+                  <div class="constructionDialog__sectionTitle">پیش‌نمایش فایل اکسل</div>
+                  <div class="constructionDialog__sectionHint">
+                    فایل {{ constructionImportFileName }} خوانده شد. قبل از بروزرسانی، جدول واردشده را بررسی و سپس تایید کنید.
+                  </div>
+                </div>
+                <div class="constructionDialog__toolbarActions">
+                  <button type="button" class="constructionDialog__textBtn" @click="clearConstructionImportPreview">لغو</button>
+                  <button type="button" class="constructionDialog__textBtn is-primary" @click="applyConstructionImportPreview">
+                    تایید بروزرسانی
+                  </button>
+                </div>
+              </div>
+              <div class="constructionDialog__previewMeta">
+                <span>{{ toPersianDigits(constructionImportPreviewCount) }} ردیف</span>
+                <span>فایل CSV قابل ویرایش در Excel</span>
+              </div>
+              <div class="constructionDialog__previewTableWrap">
+                <table class="constructionDialog__table constructionDialog__table--preview">
+                  <thead>
+                    <tr>
+                      <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
+                      <th class="constructionDialog__col constructionDialog__col--code">کد</th>
+                      <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
+                      <th class="constructionDialog__col constructionDialog__col--icon">آیکون</th>
+                      <th class="constructionDialog__col constructionDialog__col--uiOrder">ترتیب UI</th>
+                      <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in constructionImportPreviewRows" :key="`${row.lineNo}-${row.param_group_id}`">
+                      <td class="constructionDialog__col constructionDialog__col--id">{{ row.param_group_id }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--code">{{ row.param_group_code }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--title">{{ row.org_param_group_title }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--icon">{{ row.param_group_icon_path || "-" }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--uiOrder">{{ row.ui_order }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
 
@@ -2941,7 +3167,17 @@ onBeforeUnmount(() => {
                       <input v-model.number="item.ui_order" class="constructionDialog__input" type="number" min="0" step="1" @input="markConstructionParamGroupDirty(item)" />
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--icon">
-                      <input v-model="item.param_group_icon_path" class="constructionDialog__input constructionDialog__input--mono" type="text" placeholder="/icons/..." @input="markConstructionParamGroupDirty(item)" />
+                      <div class="constructionDialog__iconCell">
+                        <button
+                          type="button"
+                          class="constructionDialog__miniBtn constructionDialog__iconUploadBtn"
+                          :class="hasParamGroupIcon(item) ? 'is-filled' : 'is-empty'"
+                          :title="getParamGroupIconTooltip(item)"
+                          @click="triggerParamGroupIconUpload(item)"
+                        >
+                          ↑
+                        </button>
+                      </div>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--owner">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.admin_id || "SYSTEM" }}</span>
@@ -2963,6 +3199,9 @@ onBeforeUnmount(() => {
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div class="constructionDialog__sheetHint">
+              خروجی و ورودی اکسل این جدول به‌صورت CSV سازگار با Excel است. ابتدا فایل را دانلود کنید، در Excel ویرایش کنید، سپس دوباره همان فایل را آپلود و پیش‌نمایش را تایید کنید.
             </div>
           </template>
 

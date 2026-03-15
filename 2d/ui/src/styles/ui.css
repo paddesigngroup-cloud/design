@@ -1867,8 +1867,8 @@ textarea {
   max-width: 144px !important;
 }
 .constructionDialog__col--icon {
-  min-width: 170px !important;
-  max-width: 220px !important;
+  min-width: 64px !important;
+  max-width: 84px !important;
 }
 .constructionDialog__col--code {
   min-width: 140px !important;
@@ -1908,6 +1908,44 @@ textarea {
   direction: ltr;
   text-align: center;
   font-family: Vazirmatn, sans-serif;
+}
+.constructionDialog__iconCell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.constructionDialog__miniBtn {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(52, 20, 31, 0.12);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+.constructionDialog__miniBtn:hover {
+  background: rgba(243, 222, 230, 0.88);
+}
+.constructionDialog__iconUploadBtn.is-empty {
+  background: rgba(212, 239, 223, 0.92);
+  border-color: rgba(69, 140, 88, 0.26);
+  color: #2e6b41;
+}
+.constructionDialog__iconUploadBtn.is-empty:hover {
+  background: rgba(196, 231, 209, 0.98);
+}
+.constructionDialog__iconUploadBtn.is-filled {
+  background: rgba(255, 243, 185, 0.96);
+  border-color: rgba(187, 144, 25, 0.28);
+  color: #8a6200;
+}
+.constructionDialog__iconUploadBtn.is-filled:hover {
+  background: rgba(255, 235, 152, 0.98);
 }
 .constructionDialog__col--id .constructionDialog__input,
 .constructionDialog__col--uiOrder .constructionDialog__input {

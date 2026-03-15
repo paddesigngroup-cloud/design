@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import ParamGroup
+from designkp_backend.services.admin_access import require_admin_if_present
+from designkp_backend.services.admin_storage import normalize_icon_file_name
 
 router = APIRouter(prefix="/param-groups", tags=["param_groups"])
 
@@ -52,7 +54,9 @@ class ParamGroupUpdate(BaseModel):
 
 
 def _to_response(item: ParamGroup) -> ParamGroupItem:
-    return ParamGroupItem.model_validate(item)
+    payload = ParamGroupItem.model_validate(item).model_dump()
+    payload["param_group_icon_path"] = normalize_icon_file_name(payload["param_group_icon_path"])
+    return ParamGroupItem.model_validate(payload)
 
 
 async def _next_param_group_id(session: AsyncSession) -> int:
@@ -65,6 +69,7 @@ async def list_param_groups(
     admin_id: uuid.UUID | None = Query(default=None),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[ParamGroupItem]:
+    await require_admin_if_present(session, admin_id)
     stmt = (
         select(ParamGroup)
         .where(or_(ParamGroup.admin_id.is_(None), ParamGroup.admin_id == admin_id))
@@ -76,6 +81,7 @@ async def list_param_groups(
 
 @router.post("", response_model=ParamGroupItem, status_code=status.HTTP_201_CREATED)
 async def create_param_group(payload: ParamGroupCreate, session: AsyncSession = Depends(get_db_session)) -> ParamGroupItem:
+    await require_admin_if_present(session, payload.admin_id)
     next_id = payload.param_group_id or await _next_param_group_id(session)
     ui_order = payload.ui_order if payload.ui_order is not None else next_id - 1
     sort_order = payload.sort_order if payload.sort_order is not None else next_id
@@ -84,7 +90,7 @@ async def create_param_group(payload: ParamGroupCreate, session: AsyncSession = 
         param_group_id=next_id,
         param_group_code=payload.param_group_code.strip(),
         org_param_group_title=payload.org_param_group_title.strip(),
-        param_group_icon_path=(payload.param_group_icon_path or "").strip() or None,
+        param_group_icon_path=normalize_icon_file_name(payload.param_group_icon_path),
         ui_order=ui_order,
         code=payload.param_group_code.strip(),
         title=payload.org_param_group_title.strip(),
@@ -106,12 +112,13 @@ async def update_param_group(
     item = await session.get(ParamGroup, param_group_uuid)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Param group not found.")
+    await require_admin_if_present(session, payload.admin_id)
 
     item.admin_id = payload.admin_id
     item.param_group_id = payload.param_group_id
     item.param_group_code = payload.param_group_code.strip()
     item.org_param_group_title = payload.org_param_group_title.strip()
-    item.param_group_icon_path = (payload.param_group_icon_path or "").strip() or None
+    item.param_group_icon_path = normalize_icon_file_name(payload.param_group_icon_path)
     item.ui_order = payload.ui_order
     item.code = payload.param_group_code.strip()
     item.title = payload.org_param_group_title.strip()

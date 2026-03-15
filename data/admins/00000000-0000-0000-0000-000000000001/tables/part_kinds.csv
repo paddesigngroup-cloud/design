@@ -1,0 +1,10 @@
+﻿part_kind_id,part_kind_code,org_part_kind_title,admin_mode
+1,unit,یونیت,system
+2,stretcher,تیرک,system
+3,shelve,طبقه,system
+4,drawer,کشو,system
+5,partition,جداکننده,system
+6,door,درب,system
+7,face_panel,پنل نما,system
+8,toe_kick,پاخور,system
+9,frame,فریم,system

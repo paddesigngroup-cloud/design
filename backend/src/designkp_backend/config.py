@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     db_max_overflow: int = Field(default=40, alias="DB_MAX_OVERFLOW")
     db_pool_timeout: int = Field(default=30, alias="DB_POOL_TIMEOUT")
     db_pool_recycle: int = Field(default=1800, alias="DB_POOL_RECYCLE")
+    admin_storage_root: str = Field(default=str(PROJECT_ROOT / "data" / "admins"), alias="ADMIN_STORAGE_ROOT")
+    max_icon_upload_bytes: int = Field(default=5 * 1024 * 1024, alias="MAX_ICON_UPLOAD_BYTES")
+    param_group_icon_size_px: int = Field(default=300, alias="PARAM_GROUP_ICON_SIZE_PX")
 
     @property
     def sqlalchemy_database_url(self) -> str:
@@ -49,6 +52,10 @@ class Settings(BaseSettings):
     @property
     def alembic_database_url_normalized(self) -> str:
         return normalize_postgres_url(self.alembic_database_url_override or self.database_url)
+
+    @property
+    def admin_storage_root_path(self) -> Path:
+        return Path(self.admin_storage_root).resolve()
 
 
 @lru_cache(maxsize=1)

@@ -80,7 +80,7 @@ Chosen structure logic:
 Current seeded system records:
 - `unit`
 - `stretcher`
-- `shelf`
+- `shelve`
 - `drawer`
 - `partition`
 - `door`

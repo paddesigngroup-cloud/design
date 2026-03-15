@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import PartKind
+from designkp_backend.services.admin_access import require_admin_if_present
 
 router = APIRouter(prefix="/part-kinds", tags=["part_kinds"])
 
@@ -59,6 +60,7 @@ async def list_part_kinds(
     admin_id: uuid.UUID | None = Query(default=None),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[PartKindItem]:
+    await require_admin_if_present(session, admin_id)
     stmt = (
         select(PartKind)
         .where(or_(PartKind.admin_id.is_(None), PartKind.admin_id == admin_id))
@@ -70,6 +72,7 @@ async def list_part_kinds(
 
 @router.post("", response_model=PartKindItem, status_code=status.HTTP_201_CREATED)
 async def create_part_kind(payload: PartKindCreate, session: AsyncSession = Depends(get_db_session)) -> PartKindItem:
+    await require_admin_if_present(session, payload.admin_id)
     next_id = payload.part_kind_id or await _next_part_kind_id(session)
     item = PartKind(
         admin_id=payload.admin_id,
@@ -96,6 +99,7 @@ async def update_part_kind(
     item = await session.get(PartKind, part_kind_uuid)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part kind not found.")
+    await require_admin_if_present(session, payload.admin_id)
 
     item.admin_id = payload.admin_id
     item.part_kind_id = payload.part_kind_id
