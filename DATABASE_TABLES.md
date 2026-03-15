@@ -136,6 +136,51 @@ Current seeded system records:
 - `stretcher_properties`
 - `toe_kick_properties`
 
+## 7. `params`
+
+Purpose:
+Stores the actual parameter definitions used by each part kind, such as width, depth, height, thickness values, roof/floor/side settings, stretcher settings, door settings, panel settings, and counter settings.
+
+Current business role:
+- Lets each `admin` define and control their own parameter list per part kind.
+- Connects each parameter to a real `part_kind` and a real `param_group`.
+- Controls the parameter title, code, group placement, and UI display order.
+- Supports both system-defined parameters and future admin-specific custom parameters.
+
+Chosen structure logic:
+- Spreadsheet-style naming was normalized into the project naming pattern.
+- Business fields chosen for this table:
+  - `admin_id`
+  - `param_id`
+  - `part_kind_id`
+  - `param_code`
+  - `param_title_en`
+  - `param_title_fa`
+  - `param_group_id`
+  - `ui_order`
+- Internal compatibility fields kept in line with other catalog tables:
+  - `code`
+  - `title`
+  - `sort_order`
+  - `is_system`
+- `admin_id = NULL` means a global system parameter.
+- `admin_id != NULL` means the parameter belongs to a specific admin and can override the software structure for all users under that admin.
+- `part_kind_id` links the parameter to a row in `part_kinds`.
+- `param_group_id` links the parameter to a row in `param_groups`.
+
+Mapping from the old spreadsheet:
+- `admin_user_id` -> `admin_id`
+- `id` -> `param_id`
+- `param` -> `param_code`
+- `param_group_ux` -> mapped to real `param_group_id`
+- `param_turn_ux` -> `ui_order`
+
+Current seeded system records:
+- Base `unit` parameters such as `width`, `depth`, `height`, `unit_floor_offset`
+- Thickness parameters such as `unit_thickness`, `back_thickness`, `door_thickness`, `frame_thickness`, `panel_thickness`, `counter_thickness`
+- Floor, roof, left-side, right-side, back, panel, gap, counter, and stretcher parameter sets
+- Door-specific parameter set
+
 ## Notes
 
 - This document is intentionally limited to table names and table responsibilities.

@@ -1,10 +1,10 @@
 ﻿param_group_id,param_group_code,org_param_group_title,param_group_icon_path,ui_order,admin_mode
 1,attributes,ویژگی ها,,0,system
 2,thicknesses,ضخامت ها,,1,system
-3,floor properties,تنظیمات کف,,2,system
-4,roof properties,تنظیمات تاق,,3,system
-5,left side properties,تنظیمات بدنه چپ,,4,system
-6,right side properties,تنظیمات بدنه راست,,5,system
+3,floor properties,تنظیمات کف,floor-properties-a67c1a2013dd.webp,2,system
+4,roof properties,تنظیمات تاق,roof-properties-feba40ba0721.webp,3,system
+5,left side properties,تنظیمات بدنه چپ,left-side-properties-3187db2c44d0.webp,4,system
+6,right side properties,تنظیمات بدنه راست,right-side-properties-f48dc7dc6569.webp,5,system
 7,door properties,تنظیمات درب,,6,system
 8,back properties,تنظیمات پشت,,7,system
 9,panel properties,تنظیمات نما,,8,system

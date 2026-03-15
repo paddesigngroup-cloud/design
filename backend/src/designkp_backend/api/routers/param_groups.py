@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import ParamGroup
 from designkp_backend.services.admin_access import require_admin_if_present
-from designkp_backend.services.admin_storage import normalize_icon_file_name
+from designkp_backend.services.admin_storage import delete_final_icon, finalize_param_group_icon, normalize_icon_file_name
 
 router = APIRouter(prefix="/param-groups", tags=["param_groups"])
 
@@ -82,15 +82,17 @@ async def list_param_groups(
 @router.post("", response_model=ParamGroupItem, status_code=status.HTTP_201_CREATED)
 async def create_param_group(payload: ParamGroupCreate, session: AsyncSession = Depends(get_db_session)) -> ParamGroupItem:
     await require_admin_if_present(session, payload.admin_id)
+    normalized_admin_id = payload.admin_id
     next_id = payload.param_group_id or await _next_param_group_id(session)
     ui_order = payload.ui_order if payload.ui_order is not None else next_id - 1
     sort_order = payload.sort_order if payload.sort_order is not None else next_id
+    final_icon_file_name = finalize_param_group_icon(normalized_admin_id, payload.param_group_icon_path) if normalized_admin_id else normalize_icon_file_name(payload.param_group_icon_path)
     item = ParamGroup(
-        admin_id=payload.admin_id,
+        admin_id=normalized_admin_id,
         param_group_id=next_id,
         param_group_code=payload.param_group_code.strip(),
         org_param_group_title=payload.org_param_group_title.strip(),
-        param_group_icon_path=normalize_icon_file_name(payload.param_group_icon_path),
+        param_group_icon_path=final_icon_file_name,
         ui_order=ui_order,
         code=payload.param_group_code.strip(),
         title=payload.org_param_group_title.strip(),
@@ -113,12 +115,23 @@ async def update_param_group(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Param group not found.")
     await require_admin_if_present(session, payload.admin_id)
+    previous_admin_id = item.admin_id
+    previous_icon_file_name = item.param_group_icon_path
+    next_admin_id = payload.admin_id
+    if next_admin_id:
+        next_icon_file_name = finalize_param_group_icon(next_admin_id, payload.param_group_icon_path, previous_file_name=previous_icon_file_name if previous_admin_id == next_admin_id else None)
+        if previous_admin_id and previous_admin_id != next_admin_id and previous_icon_file_name:
+            delete_final_icon(previous_admin_id, previous_icon_file_name)
+    else:
+        next_icon_file_name = normalize_icon_file_name(payload.param_group_icon_path)
+        if previous_admin_id and previous_icon_file_name:
+            delete_final_icon(previous_admin_id, previous_icon_file_name)
 
-    item.admin_id = payload.admin_id
+    item.admin_id = next_admin_id
     item.param_group_id = payload.param_group_id
     item.param_group_code = payload.param_group_code.strip()
     item.org_param_group_title = payload.org_param_group_title.strip()
-    item.param_group_icon_path = normalize_icon_file_name(payload.param_group_icon_path)
+    item.param_group_icon_path = next_icon_file_name
     item.ui_order = payload.ui_order
     item.code = payload.param_group_code.strip()
     item.title = payload.org_param_group_title.strip()
@@ -135,6 +148,8 @@ async def delete_param_group(param_group_uuid: uuid.UUID, session: AsyncSession 
     item = await session.get(ParamGroup, param_group_uuid)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Param group not found.")
+    if item.admin_id and item.param_group_icon_path:
+        delete_final_icon(item.admin_id, item.param_group_icon_path)
 
     await session.delete(item)
     await session.commit()

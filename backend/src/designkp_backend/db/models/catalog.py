@@ -32,6 +32,7 @@ class PartKind(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixi
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     admin: Mapped["Admin | None"] = relationship(back_populates="part_kinds")
+    params: Mapped[list["Param"]] = relationship(back_populates="part_kind")
 
 
 class ParamGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -54,3 +55,30 @@ class ParamGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMi
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     admin: Mapped["Admin | None"] = relationship(back_populates="param_groups")
+    params: Mapped[list["Param"]] = relationship(back_populates="param_group")
+
+
+class Param(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "params"
+
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    param_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    part_kind_id: Mapped[int] = mapped_column(ForeignKey("part_kinds.part_kind_id", ondelete="RESTRICT"), nullable=False, index=True)
+    param_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    param_title_en: Mapped[str] = mapped_column(String(255), nullable=False)
+    param_title_fa: Mapped[str] = mapped_column(String(255), nullable=False)
+    param_group_id: Mapped[int] = mapped_column(ForeignKey("param_groups.param_group_id", ondelete="RESTRICT"), nullable=False, index=True)
+    ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    admin: Mapped["Admin | None"] = relationship(back_populates="params")
+    part_kind: Mapped["PartKind"] = relationship(back_populates="params")
+    param_group: Mapped["ParamGroup"] = relationship(back_populates="params")

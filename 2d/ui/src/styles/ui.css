@@ -1928,6 +1928,10 @@ textarea {
   line-height: 1;
   transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
 }
+.constructionDialog__miniBtn:disabled {
+  cursor: wait;
+  opacity: 0.92;
+}
 .constructionDialog__miniBtn:hover {
   background: rgba(243, 222, 230, 0.88);
 }
@@ -1946,6 +1950,25 @@ textarea {
 }
 .constructionDialog__iconUploadBtn.is-filled:hover {
   background: rgba(255, 235, 152, 0.98);
+}
+.constructionDialog__iconUploadBtn.is-loading {
+  background: rgba(238, 238, 238, 0.98);
+  border-color: rgba(52, 20, 31, 0.16);
+  color: rgba(52, 20, 31, 0.66);
+}
+.constructionDialog__spinner {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: constructionDialogSpin 0.75s linear infinite;
+}
+@keyframes constructionDialogSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .constructionDialog__col--id .constructionDialog__input,
 .constructionDialog__col--uiOrder .constructionDialog__input {
