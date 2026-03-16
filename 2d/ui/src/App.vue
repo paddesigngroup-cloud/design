@@ -6553,7 +6553,6 @@ onBeforeUnmount(() => {
                         <span class="constructionDialog__defaultsBtnValue">{{ getSubCategoryDefaultsSummary(item).text }}</span>
                         <span class="constructionDialog__defaultsBtnLabel">
                           <span class="constructionDialog__defaultsBtnIcon" aria-hidden="true">💡</span>
-                          <span>ویرایش پیش‌فرض‌ها</span>
                         </span>
                       </button>
                     </td>
