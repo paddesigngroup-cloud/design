@@ -6,6 +6,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from designkp_backend.db.models.catalog import Param, SubCategory, SubCategoryParamDefault
+from designkp_backend.services.admin_storage import normalize_icon_file_name
 
 
 def normalize_default_value(value: object) -> str | None:
@@ -48,7 +49,18 @@ async def sync_defaults_for_sub_categories(session: AsyncSession, items: list[Su
                     sub_category_id=item.id,
                     param_id=param.param_id,
                     default_value=None,
+                    display_title=param.param_title_fa.strip(),
+                    description_text=None,
+                    icon_path=None,
+                    input_mode="value",
                 )
             )
             existing_pairs.add(pair)
+    for row in existing_rows:
+        if not row.display_title:
+            param = next((item for item in params_by_scope.get(next((sub.admin_id for sub in items if sub.id == row.sub_category_id), None), []) if item.param_id == row.param_id), None)
+            if param:
+                row.display_title = param.param_title_fa.strip()
+        row.icon_path = normalize_icon_file_name(row.icon_path)
+        row.input_mode = row.input_mode if row.input_mode in {"value", "binary"} else "value"
     await session.flush()

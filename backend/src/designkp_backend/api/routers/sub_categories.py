@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import Category, Param, SubCategory, SubCategoryParamDefault, Template
 from designkp_backend.services.admin_access import require_admin_if_present
+from designkp_backend.services.admin_storage import finalize_param_group_icon, normalize_icon_file_name
 from designkp_backend.services.sub_category_defaults import get_params_for_scope, normalize_default_value, sync_defaults_for_sub_categories
 
 router = APIRouter(prefix="/sub-categories", tags=["sub_categories"])
@@ -27,8 +28,16 @@ class SubCategoryItem(BaseModel):
     sort_order: int
     is_system: bool
     param_defaults: dict[str, str | None]
+    param_overrides: dict[str, "SubCategoryParamOverrideItem"]
 
     model_config = {"from_attributes": True}
+
+
+class SubCategoryParamOverrideItem(BaseModel):
+    display_title: str | None = None
+    description_text: str | None = None
+    icon_path: str | None = None
+    input_mode: str = "value"
 
 
 class SubCategoryCreate(BaseModel):
@@ -40,6 +49,7 @@ class SubCategoryCreate(BaseModel):
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
     param_defaults: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    param_overrides: dict[str, "SubCategoryParamOverridePayload"] = Field(default_factory=dict)
 
 
 class SubCategoryUpdate(BaseModel):
@@ -51,6 +61,14 @@ class SubCategoryUpdate(BaseModel):
     sort_order: int = Field(ge=0)
     is_system: bool
     param_defaults: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    param_overrides: dict[str, "SubCategoryParamOverridePayload"] = Field(default_factory=dict)
+
+
+class SubCategoryParamOverridePayload(BaseModel):
+    display_title: str | None = Field(default=None, max_length=255)
+    description_text: str | None = Field(default=None, max_length=4000)
+    icon_path: str | None = Field(default=None, max_length=255)
+    input_mode: str = Field(default="value", pattern="^(value|binary)$")
 
 
 def _sub_category_code(sub_cat_id: int) -> str:
@@ -101,6 +119,7 @@ async def _apply_param_defaults(
     session: AsyncSession,
     item: SubCategory,
     param_defaults: dict[str, str | int | float | bool | None],
+    param_overrides: dict[str, SubCategoryParamOverridePayload],
 ) -> None:
     await sync_defaults_for_sub_categories(session, [item])
     params_by_code = await _allowed_params_by_code(session, item.admin_id)
@@ -116,6 +135,21 @@ async def _apply_param_defaults(
         if not param:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown param code for this sub-category scope: {param_code}")
         defaults_by_param_id[param.param_id].default_value = normalize_default_value(raw_value)
+    for param_code, override in param_overrides.items():
+        param = params_by_code.get(param_code)
+        if not param:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown param code for this sub-category scope: {param_code}")
+        row = defaults_by_param_id[param.param_id]
+        next_icon = normalize_icon_file_name(override.icon_path)
+        if item.admin_id:
+            next_icon = finalize_param_group_icon(item.admin_id, next_icon, previous_file_name=row.icon_path)
+        row.display_title = (override.display_title or "").strip() or param.param_title_fa.strip()
+        row.description_text = (override.description_text or "").strip() or None
+        row.icon_path = next_icon
+        row.input_mode = override.input_mode if override.input_mode in {"value", "binary"} else "value"
+        if row.input_mode == "binary":
+            normalized_value = normalize_default_value(param_defaults.get(param_code))
+            row.default_value = normalized_value if normalized_value in {"0", "1"} else "0"
 
 
 async def _serialize_items(session: AsyncSession, items: list[SubCategory], admin_id: uuid.UUID | None) -> list[SubCategoryItem]:
@@ -131,10 +165,17 @@ async def _serialize_items(session: AsyncSession, items: list[SubCategory], admi
             )
         ).all()
     defaults_map: dict[uuid.UUID, dict[str, str | None]] = {item.id: {} for item in items}
+    overrides_map: dict[uuid.UUID, dict[str, SubCategoryParamOverrideItem]] = {item.id: {} for item in items}
     for row in defaults:
         code = code_by_param_id.get(row.param_id)
         if code:
             defaults_map.setdefault(row.sub_category_id, {})[code] = row.default_value
+            overrides_map.setdefault(row.sub_category_id, {})[code] = SubCategoryParamOverrideItem(
+                display_title=row.display_title,
+                description_text=row.description_text,
+                icon_path=normalize_icon_file_name(row.icon_path),
+                input_mode=row.input_mode if row.input_mode in {"value", "binary"} else "value",
+            )
     return [
         SubCategoryItem(
             id=item.id,
@@ -148,6 +189,7 @@ async def _serialize_items(session: AsyncSession, items: list[SubCategory], admi
             sort_order=item.sort_order,
             is_system=item.is_system,
             param_defaults=defaults_map.get(item.id, {}),
+            param_overrides=overrides_map.get(item.id, {}),
         )
         for item in items
     ]
@@ -189,7 +231,7 @@ async def create_sub_category(payload: SubCategoryCreate, session: AsyncSession 
     )
     session.add(item)
     await session.flush()
-    await _apply_param_defaults(session, item, payload.param_defaults)
+    await _apply_param_defaults(session, item, payload.param_defaults, payload.param_overrides)
     await session.commit()
     await session.refresh(item)
     return (await _serialize_items(session, [item], payload.admin_id))[0]
@@ -217,7 +259,7 @@ async def update_sub_category(
     item.title = title
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
-    await _apply_param_defaults(session, item, payload.param_defaults)
+    await _apply_param_defaults(session, item, payload.param_defaults, payload.param_overrides)
     await session.commit()
     await session.refresh(item)
     return (await _serialize_items(session, [item], payload.admin_id))[0]

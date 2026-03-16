@@ -219,6 +219,10 @@ class SubCategoryParamDefault(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMix
         index=True,
     )
     default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    display_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    input_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="value", server_default="value")
 
     sub_category: Mapped["SubCategory"] = relationship(back_populates="param_defaults")
     param: Mapped["Param"] = relationship(back_populates="sub_category_defaults")

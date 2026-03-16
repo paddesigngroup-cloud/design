@@ -1940,9 +1940,17 @@ textarea {
   color: var(--text);
 }
 .constructionDialog__defaultsBtnLabel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   font-size: 10px;
   font-weight: 700;
   color: #7a2f49;
+}
+.constructionDialog__defaultsBtnIcon {
+  font-size: 12px;
+  line-height: 1;
 }
 .constructionDialog__table th {
   position: sticky;
@@ -2239,6 +2247,37 @@ textarea {
   width: min(920px, calc(100vw - 28px));
   max-height: calc(100vh - 28px);
   overflow: auto;
+  font-family: Vazirmatn, sans-serif;
+}
+.appDialog__card--subDefaults,
+.appDialog__card--subDefaults button,
+.appDialog__card--subDefaults input,
+.appDialog__card--subDefaults textarea,
+.appDialog__card--subDefaults select,
+.appDialog__card--subDefaults span,
+.appDialog__card--subDefaults div,
+.appDialog__card--subDefaults label {
+  font-family: Vazirmatn, sans-serif !important;
+}
+.subCategoryDefaults__panelTitle,
+.subCategoryDefaults__groupTitle,
+.subCategoryDefaults__titleInput,
+.subCategoryDefaults__titleInput::placeholder,
+.subCategoryDefaults__valueLabel,
+.subCategoryDefaults__modeBtn,
+.subCategoryDefaults__binaryBtn {
+  font-family: Vazirmatn, sans-serif !important;
+}
+.subCategoryDefaults__panelTitle,
+.subCategoryDefaults__groupTitle {
+  font-weight: 700 !important;
+}
+.subCategoryDefaults__titleInput,
+.subCategoryDefaults__titleInput::placeholder,
+.subCategoryDefaults__valueLabel,
+.subCategoryDefaults__modeBtn,
+.subCategoryDefaults__binaryBtn {
+  font-weight: 500 !important;
 }
 .appDialog__title {
   font-family: Vazirmatn, sans-serif !important;
@@ -2425,7 +2464,7 @@ textarea {
 }
 .subCategoryDefaults__panelTitle {
   font-size: 20px;
-  font-weight: 900;
+  font-weight: 700;
   color: #4b1e2f;
 }
 .subCategoryDefaults__panelCaption {
@@ -2511,7 +2550,7 @@ textarea {
 }
 .subCategoryDefaults__groupTitle {
   font-size: 15px;
-  font-weight: 900;
+  font-weight: 700;
   color: #4b1e2f;
 }
 .subCategoryDefaults__groupCaption {
@@ -2531,17 +2570,77 @@ textarea {
 .subCategoryDefaults__node {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px;
+  gap: 5px;
+  padding: 9px;
   border: 1px solid rgba(52, 20, 31, 0.08);
-  border-radius: 14px;
-  background: rgba(246, 247, 249, 0.94);
+  border-radius: 11px;
+  background: rgba(250, 250, 252, 0.96);
+  min-width: 0;
+  box-shadow: 0 4px 12px rgba(64, 27, 41, 0.035);
+  font-family: Vazirmatn, sans-serif;
+}
+.subCategoryDefaults__nodeLayout {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+}
+.subCategoryDefaults__nodeMedia {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+.subCategoryDefaults__nodeIconBox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(118, 45, 71, 0.16), rgba(118, 45, 71, 0.06));
+  border: 1px solid rgba(118, 45, 71, 0.12);
+  overflow: hidden;
+}
+.subCategoryDefaults__nodeIconBox.is-empty {
+  background: linear-gradient(145deg, rgba(232, 236, 240, 0.9), rgba(246, 247, 249, 1));
+}
+.subCategoryDefaults__nodeIcon {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+.subCategoryDefaults__nodeIconFallback {
+  font-size: 18px;
+  font-weight: 900;
+  color: #5e2037;
+  font-family: Vazirmatn, sans-serif;
+}
+.subCategoryDefaults__iconBtn {
+  width: 100%;
+  min-height: 28px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-family: Vazirmatn, sans-serif;
+}
+.subCategoryDefaults__nodeBody {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
   min-width: 0;
 }
 .subCategoryDefaults__nodeHead {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
+.subCategoryDefaults__titleInput {
+  font-weight: 500;
+  min-height: 34px;
+  padding-block: 6px;
+  font-family: Vazirmatn, sans-serif;
 }
 .subCategoryDefaults__label {
   font-size: 12px;
@@ -2551,12 +2650,90 @@ textarea {
 .subCategoryDefaults__code {
   direction: ltr;
   text-align: left;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   color: var(--muted);
+  white-space: nowrap;
+  font-family: Vazirmatn, sans-serif;
 }
 .subCategoryDefaults__input {
   background: rgba(255, 255, 255, 0.9);
+  min-height: 34px;
+  padding-block: 6px;
+  font-family: Vazirmatn, sans-serif;
+}
+.subCategoryDefaults__textarea {
+  min-height: 42px;
+  padding: 7px 10px;
+  resize: vertical;
+  line-height: 1.6;
+  font-family: Vazirmatn, sans-serif;
+}
+.subCategoryDefaults__valueRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.9fr) 188px;
+  gap: 8px;
+  align-items: end;
+}
+.subCategoryDefaults__nameWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.subCategoryDefaults__valueWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.subCategoryDefaults__modeWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.subCategoryDefaults__valueControl {
+  min-width: 0;
+}
+.subCategoryDefaults__valueLabel {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+  font-family: Vazirmatn, sans-serif;
+}
+.subCategoryDefaults__modeSwitch,
+.subCategoryDefaults__binaryToggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+.subCategoryDefaults__modeBtn,
+.subCategoryDefaults__binaryBtn {
+  min-height: 34px;
+  border: 1px solid rgba(118, 45, 71, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.8);
+  color: #6a4250;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: Vazirmatn, sans-serif;
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+.subCategoryDefaults__modeBtn.is-active,
+.subCategoryDefaults__binaryBtn.is-active {
+  background: rgba(118, 45, 71, 0.12);
+  border-color: rgba(118, 45, 71, 0.28);
+  color: #4b1e2f;
+}
+.subCategoryDefaults__panelTitle,
+.subCategoryDefaults__panelCaption,
+.subCategoryDefaults__groupTitle,
+.subCategoryDefaults__groupCaption,
+.subCategoryDefaults__selectorList button,
+.subCategoryDefaults__node input,
+.subCategoryDefaults__node textarea,
+.subCategoryDefaults__node span,
+.subCategoryDefaults__node button {
+  font-family: Vazirmatn, sans-serif;
 }
 @media (max-width: 900px) {
   .formulaBuilder__meta {
@@ -2583,5 +2760,18 @@ textarea {
   .subCategoryDefaults__selectorList,
   .subCategoryDefaults__branch {
     overflow: visible;
+  }
+  .subCategoryDefaults__nodeLayout {
+    grid-template-columns: 1fr;
+  }
+  .subCategoryDefaults__nodeMedia {
+    align-items: flex-start;
+  }
+  .subCategoryDefaults__valueRow {
+    grid-template-columns: 1fr;
+  }
+  .subCategoryDefaults__nodeHead {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
