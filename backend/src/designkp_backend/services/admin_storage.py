@@ -20,6 +20,7 @@ TABLE_FILE_NAMES = {
     "part_formulas": "part_formulas.csv",
     "templates": "templates.csv",
     "categories": "categories.csv",
+    "sub_categories": "sub_categories.csv",
     "orders": "orders.csv",
 }
 

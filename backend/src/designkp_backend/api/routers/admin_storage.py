@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.catalog import BaseFormula, Category, Param, ParamGroup, PartFormula, PartKind, Template
+from designkp_backend.db.models.catalog import BaseFormula, Category, Param, ParamGroup, PartFormula, PartKind, SubCategory, SubCategoryParamDefault, Template
 from designkp_backend.services.admin_access import require_admin
 from designkp_backend.services.admin_storage import (
     csv_bytes,
@@ -19,6 +19,7 @@ from designkp_backend.services.admin_storage import (
     save_param_group_icon,
     write_table_snapshot,
 )
+from designkp_backend.services.sub_category_defaults import get_params_for_scope, sync_defaults_for_sub_categories
 
 router = APIRouter(prefix="/admin-storage", tags=["admin_storage"])
 
@@ -92,6 +93,18 @@ def _category_headers() -> list[str]:
         "temp_id",
         "cat_id",
         "cat_title",
+        "admin_mode",
+    ]
+
+
+async def _sub_category_headers(session: AsyncSession, admin_id: uuid.UUID) -> list[str]:
+    params = await get_params_for_scope(session, admin_id)
+    return [
+        "temp_id",
+        "cat_id",
+        "sub_cat_id",
+        "sub_cat_title",
+        *[item.param_code for item in params],
         "admin_mode",
     ]
 
@@ -244,6 +257,43 @@ async def _category_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[lis
     ]
 
 
+async def _sub_category_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[list[object]]:
+    items = (
+        await session.scalars(
+            select(SubCategory)
+            .where(or_(SubCategory.admin_id.is_(None), SubCategory.admin_id == admin_id))
+            .order_by(SubCategory.sort_order.asc(), SubCategory.sub_cat_id.asc())
+        )
+    ).all()
+    await sync_defaults_for_sub_categories(session, items)
+    params = await get_params_for_scope(session, admin_id)
+    code_by_param_id = {item.param_id: item.param_code for item in params}
+    sub_category_ids = [item.id for item in items]
+    defaults = []
+    if sub_category_ids:
+        defaults = (
+            await session.scalars(
+                select(SubCategoryParamDefault).where(SubCategoryParamDefault.sub_category_id.in_(sub_category_ids))
+            )
+        ).all()
+    defaults_map: dict[uuid.UUID, dict[str, object]] = {item.id: {} for item in items}
+    for row in defaults:
+        code = code_by_param_id.get(row.param_id)
+        if code:
+            defaults_map.setdefault(row.sub_category_id, {})[code] = row.default_value or ""
+    return [
+        [
+            row.temp_id,
+            row.cat_id,
+            row.sub_cat_id,
+            row.sub_cat_title,
+            *[defaults_map.get(row.id, {}).get(param.param_code, "") for param in params],
+            "system" if row.admin_id is None else "admin",
+        ]
+        for row in items
+    ]
+
+
 @router.get("/{admin_id}/tables/part-kinds/export")
 async def export_part_kinds(admin_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
     await require_admin(session, admin_id)
@@ -332,6 +382,19 @@ async def export_categories(admin_id: uuid.UUID, session: AsyncSession = Depends
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="categories_excel_template.csv"'},
+    )
+
+
+@router.get("/{admin_id}/tables/sub-categories/export")
+async def export_sub_categories(admin_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
+    await require_admin(session, admin_id)
+    headers = await _sub_category_headers(session, admin_id)
+    rows = await _sub_category_rows(session, admin_id)
+    write_table_snapshot(admin_id, "sub_categories", headers, rows)
+    return Response(
+        content=csv_bytes(headers, rows),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="sub_categories_excel_template.csv"'},
     )
 
 

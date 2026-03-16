@@ -368,6 +368,55 @@ Current seeded system records:
 - `1 / 2 / هوایی`
 - `1 / 3 / ایستاده`
 
+## 12. `sub_categories`
+
+Purpose:
+Stores the sub-category models under each `category`, such as concrete layout variants that an `admin` wants to offer for a selected category.
+
+Current business role:
+- Lets each `admin` define how many models exist under each category.
+- Creates the next hierarchy level after `categories`.
+- Works together with the sub-category default-values table so every sub-category can carry default parameter values.
+
+Chosen structure logic:
+- The Excel sample contains fixed columns `temp_id`, `cat_id`, `sub_cat_id`, `sub_cat`, plus many dynamic columns whose names match `params.param_code`.
+- Because parameter columns are dynamic and must grow automatically whenever a new parameter is defined, the implementation is internally normalized:
+  - `sub_categories`
+  - `sub_category_param_defaults`
+- In API/UI, this still behaves like one logical editable table.
+- Business fields chosen for the master table:
+  - `admin_id`
+  - `temp_id`
+  - `cat_id`
+  - `sub_cat_id`
+  - `sub_cat_title`
+- Internal compatibility fields kept aligned with the other software-structure tables:
+  - `code`
+  - `title`
+  - `sort_order`
+  - `is_system`
+
+Relationship decision:
+- This table belongs to `admins` for ownership, to `templates` for top-level placement, and to `categories` for direct hierarchy.
+- A sub-category cannot exist without a valid `category`.
+- The related `sub_category_param_defaults` rows link each sub-category to every matching `param`.
+
+Default-values behavior:
+- Every time the software reads or creates sub-category rows, it ensures the matching parameter-default rows exist.
+- This means any newly defined `param` can automatically appear in the logical sub-category table without adding real database columns.
+- `default_value` is stored per `(sub_category, param)` pair.
+
+Mapping from the spreadsheet:
+- `admin_user_id` -> `admin_id`
+- `temp_id` -> `temp_id`
+- `cat_id` -> `cat_id`
+- `sub_cat_id` -> `sub_cat_id`
+- `sub_cat` -> `sub_cat_title`
+- every remaining parameter-code column -> `sub_category_param_defaults.default_value`
+
+Current seeded system records:
+- `temp_id=1 / cat_id=1 / sub_cat_id=1 / کاربردی`
+
 ## Notes
 
 - This document is intentionally limited to table names and table responsibilities.

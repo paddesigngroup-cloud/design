@@ -172,8 +172,13 @@ const editableCategories = ref([]);
 const editablePartKinds = ref(PART_KINDS_CATALOG.map((item) => ({ ...item })));
 const editableParamGroups = ref([]);
 const editableParams = ref([]);
+const editableSubCategories = ref([]);
 const editableBaseFormulas = ref([]);
 const editablePartFormulas = ref([]);
+const subCategoryDefaultsEditorOpen = ref(false);
+const subCategoryDefaultsEditorRowId = ref(null);
+const subCategoryDefaultsEditorDraft = ref({});
+const subCategoryDefaultsActiveGroupId = ref("");
 const baseFormulaBuilderOpen = ref(false);
 const baseFormulaBuilderMode = ref("create");
 const baseFormulaBuilderEntity = ref("base_formulas");
@@ -191,6 +196,7 @@ const constructionDeletedCategoryIds = ref([]);
 const constructionDeletedPartKindIds = ref([]);
 const constructionDeletedParamGroupIds = ref([]);
 const constructionDeletedParamIds = ref([]);
+const constructionDeletedSubCategoryIds = ref([]);
 const constructionDeletedBaseFormulaIds = ref([]);
 const constructionDeletedPartFormulaIds = ref([]);
 const constructionImportInputEl = ref(null);
@@ -206,6 +212,7 @@ const constructionTables = [
   { id: "part_kinds", title: "انواع قطعات", status: "active" },
   { id: "param_groups", title: "گروه پارامترها", status: "active" },
   { id: "params", title: "پارامترها", status: "active" },
+  { id: "sub_categories", title: "ساب‌کت‌ها", status: "active" },
   { id: "base_formulas", title: "فرمول های پایه", status: "active" },
   { id: "part_formulas", title: "فرمول های قطعات", status: "active" },
 ];
@@ -235,6 +242,19 @@ const constructionCategories = computed(() =>
 const systemCategoriesCount = computed(() => constructionCategories.value.filter((item) => item.admin_id === null).length);
 const adminCategoriesCount = computed(() => constructionCategories.value.filter((item) => item.admin_id === currentAdminId.value).length);
 const constructionCategoryDuplicateState = computed(() => buildDuplicateState(editableCategories.value, ["cat_id"]));
+const constructionSubCategories = computed(() =>
+  editableSubCategories.value
+    .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
+    .slice()
+    .sort((a, b) => {
+      const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return (Number(a.sub_cat_id) || 0) - (Number(b.sub_cat_id) || 0);
+    })
+);
+const systemSubCategoriesCount = computed(() => constructionSubCategories.value.filter((item) => item.admin_id === null).length);
+const adminSubCategoriesCount = computed(() => constructionSubCategories.value.filter((item) => item.admin_id === currentAdminId.value).length);
+const constructionSubCategoryDuplicateState = computed(() => buildDuplicateState(editableSubCategories.value, ["sub_cat_id"]));
 const constructionPartKinds = computed(() =>
   editablePartKinds.value
     .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
@@ -258,6 +278,7 @@ const constructionHasPendingChanges = computed(
     constructionDeletedCategoryIds.value.length > 0 ||
     constructionDeletedParamGroupIds.value.length > 0 ||
     constructionDeletedParamIds.value.length > 0 ||
+    constructionDeletedSubCategoryIds.value.length > 0 ||
     constructionDeletedBaseFormulaIds.value.length > 0 ||
     constructionDeletedPartFormulaIds.value.length > 0 ||
     editableTemplates.value.some((item) => !!item.__isNew || !!item.__dirty) ||
@@ -265,6 +286,7 @@ const constructionHasPendingChanges = computed(
     editablePartKinds.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editableParamGroups.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editableParams.value.some((item) => !!item.__isNew || !!item.__dirty) ||
+    editableSubCategories.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editableBaseFormulas.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editablePartFormulas.value.some((item) => !!item.__isNew || !!item.__dirty)
 );
@@ -322,6 +344,96 @@ const constructionTemplateOptions = computed(() =>
     value: Number(item.temp_id),
     label: `${toPersianDigits(item.temp_id)} - ${String(item.temp_title || "").trim()}`,
   }))
+);
+const constructionSubCategoryParamColumns = computed(() =>
+  constructionParams.value.map((item) => ({
+    key: String(item.param_code || "").trim(),
+    label: String(item.param_title_fa || item.title || item.param_code || "").trim(),
+  })).filter((item) => item.key)
+);
+const constructionSubCategoryParamTree = computed(() => {
+  const groupsById = new Map(
+    constructionParamGroups.value.map((group) => [
+      String(group.param_group_id),
+      {
+        id: String(group.param_group_id),
+        title: String(group.org_param_group_title || group.title || group.param_group_code || `گروه ${group.param_group_id}` || "").trim(),
+        iconFileName: normalizeIconFileName(group.param_group_icon_path),
+        iconUrl: normalizeIconFileName(group.param_group_icon_path)
+          ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/icons/${encodeURIComponent(normalizeIconFileName(group.param_group_icon_path))}`
+          : "",
+        order: Number.isFinite(Number(group.ui_order)) ? Number(group.ui_order) : Number(group.param_group_id) || 0,
+        items: [],
+      },
+    ])
+  );
+  const ungroupedKey = "__ungrouped__";
+  for (const param of constructionParams.value) {
+    const key = String(param.param_code || "").trim();
+    if (!key) continue;
+    const groupId = String(param.param_group_id ?? "").trim();
+    if (groupId && !groupsById.has(groupId)) {
+      groupsById.set(groupId, {
+        id: groupId,
+        title: `گروه ${toPersianDigits(groupId)}`,
+        iconFileName: "",
+        iconUrl: "",
+        order: Number(groupId) || Number.MAX_SAFE_INTEGER - 1,
+        items: [],
+      });
+    }
+    if (!groupId && !groupsById.has(ungroupedKey)) {
+      groupsById.set(ungroupedKey, {
+        id: ungroupedKey,
+        title: "بدون گروه",
+        iconFileName: "",
+        iconUrl: "",
+        order: Number.MAX_SAFE_INTEGER,
+        items: [],
+      });
+    }
+    const target = groupsById.get(groupId || ungroupedKey);
+    if (!target) continue;
+    target.items.push({
+      key,
+      label: String(param.param_title_fa || param.title || key).trim(),
+      code: key,
+      order: Number.isFinite(Number(param.ui_order))
+        ? Number(param.ui_order)
+        : Number.isFinite(Number(param.sort_order))
+          ? Number(param.sort_order)
+          : Number(param.param_id) || 0,
+      id: Number(param.param_id) || 0,
+    });
+  }
+  return Array.from(groupsById.values())
+    .map((group) => ({
+      ...group,
+      items: group.items
+        .slice()
+        .sort((a, b) => {
+          const orderDelta = a.order - b.order;
+          if (orderDelta !== 0) return orderDelta;
+          return a.id - b.id;
+        }),
+    }))
+    .filter((group) => group.items.length)
+    .sort((a, b) => {
+      const orderDelta = a.order - b.order;
+      if (orderDelta !== 0) return orderDelta;
+      return a.title.localeCompare(b.title, "fa");
+    });
+});
+const activeSubCategoryDefaultsRow = computed(() =>
+  editableSubCategories.value.find((item) => String(item.id) === String(subCategoryDefaultsEditorRowId.value)) || null
+);
+const activeSubCategoryDefaultsGroup = computed(() =>
+  constructionSubCategoryParamTree.value.find((group) => String(group.id) === String(subCategoryDefaultsActiveGroupId.value))
+  || constructionSubCategoryParamTree.value[0]
+  || null
+);
+const activeSubCategoryDefaultsCount = computed(() =>
+  Object.values(subCategoryDefaultsEditorDraft.value || {}).filter((value) => String(value || "").trim()).length
 );
 const formulaBuilderAvailableParams = computed(() =>
   editableParams.value
@@ -420,6 +532,7 @@ function openConstructionWizard() {
   loadConstructionPartKinds();
   loadConstructionParamGroups();
   loadConstructionParams();
+  loadConstructionSubCategories();
   loadConstructionBaseFormulas();
   loadConstructionPartFormulas();
   constructionDeletedTemplateIds.value = [];
@@ -427,6 +540,7 @@ function openConstructionWizard() {
   constructionDeletedPartKindIds.value = [];
   constructionDeletedParamGroupIds.value = [];
   constructionDeletedParamIds.value = [];
+  constructionDeletedSubCategoryIds.value = [];
   constructionDeletedBaseFormulaIds.value = [];
   constructionDeletedPartFormulaIds.value = [];
 }
@@ -450,9 +564,11 @@ async function closeConstructionWizard() {
     await cleanupStagedParamGroupUploads();
     await loadConstructionTemplates();
     await loadConstructionCategories();
+    await loadConstructionSubCategories();
     await loadConstructionPartKinds();
     await loadConstructionParamGroups();
     await loadConstructionParams();
+    await loadConstructionSubCategories();
     await loadConstructionBaseFormulas();
     await loadConstructionPartFormulas();
   }
@@ -478,6 +594,24 @@ function normalizeCategoryPayload(item) {
     cat_title: String(item.cat_title || "").trim(),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.cat_id),
     is_system: !!item.is_system,
+  };
+}
+
+function normalizeSubCategoryPayload(item) {
+  return {
+    admin_id: item.admin_id,
+    temp_id: Number(item.temp_id),
+    cat_id: Number(item.cat_id),
+    sub_cat_id: Number(item.sub_cat_id),
+    sub_cat_title: String(item.sub_cat_title || "").trim(),
+    sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.sub_cat_id),
+    is_system: !!item.is_system,
+    param_defaults: Object.fromEntries(
+      constructionSubCategoryParamColumns.value.map((column) => [
+        column.key,
+        String(item.param_defaults?.[column.key] ?? "").trim(),
+      ])
+    ),
   };
 }
 
@@ -635,6 +769,31 @@ function getConstructionCategoryDuplicateMessage(item) {
     String(row?.cat_title || "").trim().toLowerCase() === String(item?.cat_title || "").trim().toLowerCase()
   )).length;
   if (hasDuplicateValue(item, "cat_id", duplicateState) || duplicateTitleCount > 1) {
+    return { tone: "bad", text: "تکراری است" };
+  }
+  return { tone: "good", text: "تکراری نیست" };
+}
+
+function getConstructionSubCategoryDuplicateMessage(item) {
+  const duplicateState = constructionSubCategoryDuplicateState.value;
+  if (!Number.isInteger(Number(item?.temp_id)) || Number(item.temp_id) < 1) {
+    return { tone: "bad", text: "تمپلیت نامعتبر است" };
+  }
+  if (!Number.isInteger(Number(item?.cat_id)) || Number(item.cat_id) < 1) {
+    return { tone: "bad", text: "دسته نامعتبر است" };
+  }
+  if (!Number.isInteger(Number(item?.sub_cat_id)) || Number(item.sub_cat_id) < 1) {
+    return { tone: "bad", text: "شناسه نامعتبر است" };
+  }
+  if (!String(item?.sub_cat_title || "").trim()) {
+    return { tone: "bad", text: "عنوان خالی است" };
+  }
+  const duplicateTitleCount = editableSubCategories.value.filter((row) => (
+    Number(row?.cat_id) === Number(item?.cat_id) &&
+    String(row?.admin_id || "system") === String(item?.admin_id || "system") &&
+    String(row?.sub_cat_title || "").trim().toLowerCase() === String(item?.sub_cat_title || "").trim().toLowerCase()
+  )).length;
+  if (hasDuplicateValue(item, "sub_cat_id", duplicateState) || duplicateTitleCount > 1) {
     return { tone: "bad", text: "تکراری است" };
   }
   return { tone: "good", text: "تکراری نیست" };
@@ -1216,6 +1375,11 @@ function markConstructionCategoryDirty(item) {
   item.__dirty = true;
 }
 
+function markConstructionSubCategoryDirty(item) {
+  if (!item || item.__isNew) return;
+  item.__dirty = true;
+}
+
 function markConstructionBaseFormulaDirty(item) {
   if (!item || item.__isNew) return;
   item.__dirty = true;
@@ -1245,6 +1409,12 @@ function toggleConstructionTemplateScope(item) {
 }
 
 function toggleConstructionCategoryScope(item) {
+  item.admin_id = item.admin_id === null ? currentAdminId.value : null;
+  item.is_system = item.admin_id === null;
+  if (!item.__isNew) item.__dirty = true;
+}
+
+function toggleConstructionSubCategoryScope(item) {
   item.admin_id = item.admin_id === null ? currentAdminId.value : null;
   item.is_system = item.admin_id === null;
   if (!item.__isNew) item.__dirty = true;
@@ -1303,6 +1473,128 @@ function validateConstructionCategories() {
   const scopedTitles = editableCategories.value.map((item) => `${Number(item.temp_id)}::${String(item.admin_id || "system")}::${String(item.cat_title || "").trim().toLowerCase()}`);
   if (new Set(scopedTitles).size !== scopedTitles.length) {
     showAlert("عنوان دسته در هر تمپلیت و محدوده مالک باید یکتا باشد.", { title: "اعتبارسنجی" });
+    return false;
+  }
+  return true;
+}
+
+function getConstructionCategoryOptions(tempId) {
+  return constructionCategories.value
+    .filter((item) => Number(item.temp_id) === Number(tempId))
+    .map((item) => ({
+      value: Number(item.cat_id),
+      label: `${toPersianDigits(item.cat_id)} - ${String(item.cat_title || "").trim()}`,
+    }));
+}
+
+function ensureSubCategoryParamDefaults(item) {
+  if (!item.param_defaults || typeof item.param_defaults !== "object") {
+    item.param_defaults = {};
+  }
+  for (const column of constructionSubCategoryParamColumns.value) {
+    if (!(column.key in item.param_defaults)) {
+      item.param_defaults[column.key] = "";
+    }
+  }
+  return item;
+}
+
+function getSubCategoryDefaultsSummary(item) {
+  const total = constructionSubCategoryParamColumns.value.length;
+  const filled = Object.values(item?.param_defaults || {}).filter((value) => String(value || "").trim()).length;
+  return {
+    filled,
+    total,
+    text: total ? `${toPersianDigits(filled)} / ${toPersianDigits(total)}` : "بدون پارامتر",
+  };
+}
+
+function openSubCategoryDefaultsEditor(item) {
+  ensureSubCategoryParamDefaults(item);
+  subCategoryDefaultsEditorRowId.value = item.id;
+  subCategoryDefaultsEditorDraft.value = Object.fromEntries(
+    constructionSubCategoryParamColumns.value.map((column) => [
+      column.key,
+      String(item.param_defaults?.[column.key] ?? ""),
+    ])
+  );
+  subCategoryDefaultsActiveGroupId.value = constructionSubCategoryParamTree.value[0]?.id || "";
+  subCategoryDefaultsEditorOpen.value = true;
+}
+
+function selectSubCategoryDefaultsGroup(groupId) {
+  subCategoryDefaultsActiveGroupId.value = String(groupId || "");
+}
+
+async function closeSubCategoryDefaultsEditor() {
+  const row = activeSubCategoryDefaultsRow.value;
+  const original = row?.param_defaults || {};
+  const changed = constructionSubCategoryParamColumns.value.some(
+    (column) => String(original[column.key] ?? "").trim() !== String(subCategoryDefaultsEditorDraft.value?.[column.key] ?? "").trim()
+  );
+  if (changed) {
+    const ok = await showConfirm("تغییرات پیش‌فرض‌ها اعمال نشده‌اند. پنجره بسته شود؟", {
+      title: "بستن پیش‌فرض‌ها",
+      confirmText: "بستن",
+      cancelText: "بازگشت",
+    });
+    if (!ok) return;
+  }
+  subCategoryDefaultsEditorOpen.value = false;
+  subCategoryDefaultsEditorRowId.value = null;
+  subCategoryDefaultsEditorDraft.value = {};
+  subCategoryDefaultsActiveGroupId.value = "";
+}
+
+function applySubCategoryDefaultsEditor() {
+  const row = activeSubCategoryDefaultsRow.value;
+  if (!row) return;
+  ensureSubCategoryParamDefaults(row);
+  for (const column of constructionSubCategoryParamColumns.value) {
+    row.param_defaults[column.key] = String(subCategoryDefaultsEditorDraft.value?.[column.key] ?? "").trim();
+  }
+  markConstructionSubCategoryDirty(row);
+  subCategoryDefaultsEditorOpen.value = false;
+  subCategoryDefaultsEditorRowId.value = null;
+  subCategoryDefaultsEditorDraft.value = {};
+  subCategoryDefaultsActiveGroupId.value = "";
+}
+
+function validateConstructionSubCategories() {
+  const templateIds = new Set(constructionTemplates.value.map((item) => Number(item.temp_id)).filter((value) => Number.isInteger(value) && value > 0));
+  const categoryPairs = new Set(
+    constructionCategories.value.map((item) => `${Number(item.temp_id)}::${Number(item.cat_id)}`)
+  );
+  for (const item of editableSubCategories.value) {
+    const tempId = Number(item.temp_id);
+    const catId = Number(item.cat_id);
+    const subCatId = Number(item.sub_cat_id);
+    const title = String(item.sub_cat_title || "").trim();
+    if (!Number.isInteger(tempId) || tempId < 1 || !templateIds.has(tempId)) {
+      showAlert("برای همه ساب‌کت‌ها یک تمپلیت معتبر انتخاب کنید.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!Number.isInteger(catId) || catId < 1 || !categoryPairs.has(`${tempId}::${catId}`)) {
+      showAlert("برای همه ساب‌کت‌ها یک دسته معتبر انتخاب کنید.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!Number.isInteger(subCatId) || subCatId < 1) {
+      showAlert("برای همه ساب‌کت‌ها شناسه معتبر و بزرگ‌تر از صفر وارد کنید.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!title) {
+      showAlert("عنوان ساب‌کت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+  }
+  const ids = editableSubCategories.value.map((item) => Number(item.sub_cat_id));
+  if (new Set(ids).size !== ids.length) {
+    showAlert("شناسه ساب‌کت باید یکتا باشد.", { title: "اعتبارسنجی" });
+    return false;
+  }
+  const scopedTitles = editableSubCategories.value.map((item) => `${Number(item.cat_id)}::${String(item.admin_id || "system")}::${String(item.sub_cat_title || "").trim().toLowerCase()}`);
+  if (new Set(scopedTitles).size !== scopedTitles.length) {
+    showAlert("عنوان ساب‌کت در هر دسته و محدوده مالک باید یکتا باشد.", { title: "اعتبارسنجی" });
     return false;
   }
   return true;
@@ -1436,6 +1728,9 @@ function getConstructionCsvHeaders() {
   if (constructionStep.value === "categories") {
     return ["temp_id", "cat_id", "cat_title", "admin_mode"];
   }
+  if (constructionStep.value === "sub_categories") {
+    return ["temp_id", "cat_id", "sub_cat_id", "sub_cat_title", ...constructionSubCategoryParamColumns.value.map((item) => item.key), "admin_mode"];
+  }
   if (constructionStep.value === "part_formulas") {
     return ["part_formula_id", "part_kind_id", "part_sub_kind_id", "part_code", "part_title", ...PART_FORMULA_FIELDS.map((item) => item.key), "admin_mode"];
   }
@@ -1466,6 +1761,17 @@ function getConstructionCsvRows(items = null) {
       Number(item.temp_id) || "",
       Number(item.cat_id) || "",
       String(item.cat_title || "").trim(),
+      item.admin_id === null ? "system" : "admin",
+    ]);
+  }
+  if (constructionStep.value === "sub_categories") {
+    const rows = items || constructionSubCategories.value;
+    return rows.map((item) => [
+      Number(item.temp_id) || "",
+      Number(item.cat_id) || "",
+      Number(item.sub_cat_id) || "",
+      String(item.sub_cat_title || "").trim(),
+      ...constructionSubCategoryParamColumns.value.map((column) => String(item.param_defaults?.[column.key] ?? "").trim()),
       item.admin_id === null ? "system" : "admin",
     ]);
   }
@@ -1526,6 +1832,7 @@ function getConstructionCsvRows(items = null) {
 function getConstructionImportFileName() {
   if (constructionStep.value === "templates") return "templates_excel_template.csv";
   if (constructionStep.value === "categories") return "categories_excel_template.csv";
+  if (constructionStep.value === "sub_categories") return "sub_categories_excel_template.csv";
   if (constructionStep.value === "part_formulas") return "part_formulas_excel_template.csv";
   if (constructionStep.value === "base_formulas") return "base_formulas_excel_template.csv";
   if (constructionStep.value === "params") return "params_excel_template.csv";
@@ -1536,6 +1843,7 @@ function getConstructionImportFileName() {
 function getConstructionImportTitle() {
   if (constructionStep.value === "templates") return "جدول تمپلیت‌ها";
   if (constructionStep.value === "categories") return "جدول دسته‌بندی‌ها";
+  if (constructionStep.value === "sub_categories") return "جدول ساب‌کت‌ها";
   if (constructionStep.value === "part_formulas") return "جدول فرمول‌های قطعات";
   if (constructionStep.value === "base_formulas") return "جدول فرمول‌های پایه";
   if (constructionStep.value === "params") return "جدول پارامترها";
@@ -1548,6 +1856,9 @@ function getConstructionImportErrorText() {
   }
   if (constructionStep.value === "categories") {
     return "خواندن فایل اکسل دسته‌بندی‌ها انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
+  }
+  if (constructionStep.value === "sub_categories") {
+    return "خواندن فایل اکسل ساب‌کت‌ها انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
   }
   if (constructionStep.value === "part_formulas") {
     return "خواندن فایل اکسل فرمول‌های قطعات انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
@@ -1635,6 +1946,8 @@ async function downloadConstructionExcelTemplate() {
     ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/templates/export`
     : constructionStep.value === "categories"
     ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/categories/export`
+    : constructionStep.value === "sub_categories"
+    ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/sub-categories/export`
     : constructionStep.value === "part_formulas"
     ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/part-formulas/export`
     : constructionStep.value === "base_formulas"
@@ -1701,6 +2014,23 @@ async function onConstructionImportFileChange(event) {
           cat_id: catId,
           cat_title: catTitle,
           admin_mode: adminMode,
+        };
+      });
+    } else if (constructionStep.value === "sub_categories") {
+      const adminModeIndex = 4 + constructionSubCategoryParamColumns.value.length;
+      previewRows = rows.slice(1).map((row, index) => {
+        const paramDefaults = {};
+        constructionSubCategoryParamColumns.value.forEach((column, paramIndex) => {
+          paramDefaults[column.key] = String(row[4 + paramIndex] || "").trim();
+        });
+        return {
+          lineNo: index + 2,
+          temp_id: Number(row[0]),
+          cat_id: Number(row[1]),
+          sub_cat_id: Number(row[2]),
+          sub_cat_title: String(row[3] || "").trim(),
+          param_defaults: paramDefaults,
+          admin_mode: String(row[adminModeIndex] || "admin").trim().toLowerCase() === "system" ? "system" : "admin",
         };
       });
     } else if (constructionStep.value === "part_formulas") {
@@ -1810,6 +2140,17 @@ async function onConstructionImportFileChange(event) {
             !Number.isInteger(row.cat_id) ||
             row.cat_id < 1 ||
             !row.cat_title
+        )
+      : constructionStep.value === "sub_categories"
+      ? previewRows.find(
+          (row) =>
+            !Number.isInteger(row.temp_id) ||
+            row.temp_id < 1 ||
+            !Number.isInteger(row.cat_id) ||
+            row.cat_id < 1 ||
+            !Number.isInteger(row.sub_cat_id) ||
+            row.sub_cat_id < 1 ||
+            !row.sub_cat_title
         )
       : constructionStep.value === "part_formulas"
       ? previewRows.find(
@@ -2191,6 +2532,53 @@ function buildImportedConstructionCategoryDrafts(rows) {
   return { nextRows, deletedIds };
 }
 
+function buildImportedConstructionSubCategoryDrafts(rows) {
+  const existingById = new Map(editableSubCategories.value.map((item) => [Number(item.sub_cat_id), item]));
+  const nextRows = rows.map((row, index) => {
+    const existing = existingById.get(Number(row.sub_cat_id));
+    const adminId = row.admin_mode === "system" ? null : currentAdminId.value;
+    const nextPayload = {
+      admin_id: adminId,
+      temp_id: Number(row.temp_id),
+      cat_id: Number(row.cat_id),
+      sub_cat_id: Number(row.sub_cat_id),
+      sub_cat_title: String(row.sub_cat_title || "").trim(),
+      code: `sub_category_${Number(row.sub_cat_id)}`,
+      title: String(row.sub_cat_title || "").trim(),
+      sort_order: index + 1,
+      is_system: adminId === null,
+      param_defaults: { ...(row.param_defaults || {}) },
+    };
+    if (!existing) {
+      return ensureSubCategoryParamDefaults(buildPartKindDraft(nextPayload, {
+        id: `draft-sub-category-${Date.now()}-${index}`,
+        __isNew: true,
+        __dirty: false,
+      }));
+    }
+    const existingDefaults = existing.param_defaults || {};
+    const changed =
+      existing.admin_id !== nextPayload.admin_id ||
+      Number(existing.temp_id) !== nextPayload.temp_id ||
+      Number(existing.cat_id) !== nextPayload.cat_id ||
+      Number(existing.sub_cat_id) !== nextPayload.sub_cat_id ||
+      String(existing.sub_cat_title || "").trim() !== nextPayload.sub_cat_title ||
+      Number(existing.sort_order) !== nextPayload.sort_order ||
+      !!existing.is_system !== nextPayload.is_system ||
+      constructionSubCategoryParamColumns.value.some((column) => String(existingDefaults[column.key] ?? "").trim() !== String(nextPayload.param_defaults[column.key] ?? "").trim());
+    return ensureSubCategoryParamDefaults(buildPartKindDraft(existing, {
+      ...nextPayload,
+      __isNew: false,
+      __dirty: changed,
+    }));
+  });
+  const importedExistingIds = new Set(nextRows.filter((item) => !item.__isNew).map((item) => String(item.id)));
+  const deletedIds = editableSubCategories.value
+    .filter((item) => !item.__isNew && !importedExistingIds.has(String(item.id)))
+    .map((item) => String(item.id));
+  return { nextRows, deletedIds };
+}
+
 async function loadConstructionTemplates() {
   constructionLoading.value = true;
   try {
@@ -2262,6 +2650,18 @@ async function loadConstructionParams() {
   }
 }
 
+async function loadConstructionSubCategories() {
+  try {
+    const url = `/api/sub-categories?admin_id=${encodeURIComponent(currentAdminId.value)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("load-failed");
+    editableSubCategories.value = (await res.json()).map((item) => ensureSubCategoryParamDefaults(withConstructionDraftState(item)));
+    constructionDeletedSubCategoryIds.value = [];
+  } catch (_) {
+    showAlert("خواندن جدول ساب‌کت‌ها از دیتابیس انجام نشد.", { title: "خطا" });
+  }
+}
+
 async function loadConstructionBaseFormulas() {
   try {
     const url = `/api/base-formulas?admin_id=${encodeURIComponent(currentAdminId.value)}`;
@@ -2323,6 +2723,29 @@ function addConstructionCategory() {
       __isNew: true,
       __dirty: false,
     },
+  ];
+}
+
+function addConstructionSubCategory() {
+  const nextId = editableSubCategories.value.reduce((max, item) => Math.max(max, Number(item.sub_cat_id) || 0), 0) + 1;
+  const fallbackCategory = constructionCategories.value[0];
+  editableSubCategories.value = [
+    ...editableSubCategories.value,
+    ensureSubCategoryParamDefaults({
+      id: `draft-sub-category-row-${Date.now()}-${nextId}`,
+      admin_id: currentAdminId.value,
+      temp_id: Number(fallbackCategory?.temp_id) || 1,
+      cat_id: Number(fallbackCategory?.cat_id) || 1,
+      sub_cat_id: nextId,
+      sub_cat_title: `ساب‌کت ${toPersianDigits(nextId)}`,
+      code: `sub_category_${nextId}`,
+      title: `ساب‌کت ${toPersianDigits(nextId)}`,
+      sort_order: nextId,
+      is_system: false,
+      param_defaults: {},
+      __isNew: true,
+      __dirty: false,
+    }),
   ];
 }
 
@@ -2520,6 +2943,7 @@ async function saveConstructionTemplates(options = {}) {
     showAlert("ذخیره تغییرات جدول تمپلیت‌ها در دیتابیس انجام نشد.", { title: "خطا" });
     await loadConstructionTemplates();
     await loadConstructionCategories();
+    await loadConstructionSubCategories();
   } finally {
     constructionSavingIds.value = [];
   }
@@ -2564,12 +2988,64 @@ async function saveConstructionCategories(options = {}) {
       if (!res.ok) throw new Error("save-failed");
     }
     await loadConstructionCategories();
+    await loadConstructionSubCategories();
     showAlert(options.successMessage || "تغییرات جدول دسته‌بندی‌ها با موفقیت ذخیره شد.", {
       title: options.successTitle || "ذخیره تغییرات",
     });
   } catch (_) {
     showAlert("ذخیره تغییرات جدول دسته‌بندی‌ها در دیتابیس انجام نشد.", { title: "خطا" });
     await loadConstructionCategories();
+    await loadConstructionSubCategories();
+  } finally {
+    constructionSavingIds.value = [];
+  }
+}
+
+async function saveConstructionSubCategories(options = {}) {
+  if (!(constructionDeletedSubCategoryIds.value.length > 0 || editableSubCategories.value.some((item) => !!item.__isNew || !!item.__dirty))) {
+    showAlert("تغییری برای ذخیره وجود ندارد.", { title: "ذخیره تغییرات" });
+    return;
+  }
+  if (!validateConstructionSubCategories()) return;
+  if (!options.skipConfirm) {
+    const ok = await showConfirm("تغییرات جدول ساب‌کت‌ها در دیتابیس ذخیره شود؟", {
+      title: "ذخیره تغییرات",
+      confirmText: "ذخیره",
+      cancelText: "انصراف",
+    });
+    if (!ok) return;
+  }
+  const draftIds = editableSubCategories.value.filter((item) => item.__isNew).map((item) => String(item.id));
+  const dirtyIds = editableSubCategories.value.filter((item) => !item.__isNew && item.__dirty).map((item) => String(item.id));
+  constructionSavingIds.value = [...new Set([...draftIds, ...dirtyIds])];
+  try {
+    for (const id of constructionDeletedSubCategoryIds.value) {
+      const res = await fetch(`/api/sub-categories/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("delete-failed");
+    }
+    for (const item of editableSubCategories.value.filter((row) => row.__isNew)) {
+      const res = await fetch("/api/sub-categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizeSubCategoryPayload(item)),
+      });
+      if (!res.ok) throw new Error("create-failed");
+    }
+    for (const item of editableSubCategories.value.filter((row) => !row.__isNew && row.__dirty)) {
+      const res = await fetch(`/api/sub-categories/${encodeURIComponent(String(item.id))}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizeSubCategoryPayload(item)),
+      });
+      if (!res.ok) throw new Error("save-failed");
+    }
+    await loadConstructionSubCategories();
+    showAlert(options.successMessage || "تغییرات جدول ساب‌کت‌ها با موفقیت ذخیره شد.", {
+      title: options.successTitle || "ذخیره تغییرات",
+    });
+  } catch (_) {
+    showAlert("ذخیره تغییرات جدول ساب‌کت‌ها در دیتابیس انجام نشد.", { title: "خطا" });
+    await loadConstructionSubCategories();
   } finally {
     constructionSavingIds.value = [];
   }
@@ -2664,12 +3140,14 @@ async function saveConstructionParams(options = {}) {
       if (!res.ok) throw new Error("save-failed");
     }
     await loadConstructionParams();
+    await loadConstructionSubCategories();
     showAlert(options.successMessage || "تغییرات جدول پارامترها با موفقیت ذخیره شد.", {
       title: options.successTitle || "ذخیره تغییرات",
     });
   } catch (_) {
     showAlert("ذخیره تغییرات جدول پارامترها در دیتابیس انجام نشد.", { title: "خطا" });
     await loadConstructionParams();
+    await loadConstructionSubCategories();
   } finally {
     constructionSavingIds.value = [];
   }
@@ -2819,6 +3297,18 @@ async function applyConstructionImportPreview() {
     });
     return;
   }
+  if (constructionImportPreviewKind.value === "sub_categories") {
+    const { nextRows, deletedIds } = buildImportedConstructionSubCategoryDrafts(constructionImportPreviewRows.value);
+    editableSubCategories.value = nextRows;
+    constructionDeletedSubCategoryIds.value = deletedIds;
+    clearConstructionImportPreview();
+    await saveConstructionSubCategories({
+      skipConfirm: true,
+      successTitle: "آپلود فایل",
+      successMessage: "فایل اکسل ساب‌کت‌ها با موفقیت روی جدول اعمال شد.",
+    });
+    return;
+  }
   if (constructionImportPreviewKind.value === "param_groups") {
     await cleanupStagedParamGroupUploads();
     const { nextRows, deletedIds } = buildImportedConstructionParamGroupDrafts(constructionImportPreviewRows.value);
@@ -2906,6 +3396,28 @@ async function deleteConstructionCategory(id) {
     }
   } catch (_) {
     showAlert("حذف دسته از جدول انجام نشد.", { title: "خطا" });
+  } finally {
+    constructionDeletingIds.value = constructionDeletingIds.value.filter((value) => value !== String(id));
+  }
+}
+
+async function deleteConstructionSubCategory(id) {
+  const item = editableSubCategories.value.find((row) => String(row.id) === String(id));
+  if (!item) return;
+  const ok = await showConfirm(`ساب‌کت «${item.sub_cat_title || item.title || "بدون عنوان"}» حذف شود؟`, {
+    title: "حذف ساب‌کت",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  constructionDeletingIds.value = [...constructionDeletingIds.value, String(id)];
+  try {
+    editableSubCategories.value = editableSubCategories.value.filter((row) => String(row.id) !== String(id));
+    if (!item.__isNew) {
+      constructionDeletedSubCategoryIds.value = [...new Set([...constructionDeletedSubCategoryIds.value, String(id)])];
+    }
+  } catch (_) {
+    showAlert("حذف ساب‌کت از جدول انجام نشد.", { title: "خطا" });
   } finally {
     constructionDeletingIds.value = constructionDeletingIds.value.filter((value) => value !== String(id));
   }
@@ -4968,7 +5480,7 @@ onBeforeUnmount(() => {
             :class="{ 'is-disabled': !constructionHasPendingChanges || constructionSavingIds.length > 0 }"
             :disabled="!constructionHasPendingChanges || constructionSavingIds.length > 0"
             title="ذخیره تغییرات"
-            @click="constructionStep === 'templates' ? saveConstructionTemplates() : constructionStep === 'categories' ? saveConstructionCategories() : constructionStep === 'part_kinds' ? saveConstructionPartKinds() : constructionStep === 'param_groups' ? saveConstructionParamGroups() : constructionStep === 'params' ? saveConstructionParams() : constructionStep === 'base_formulas' ? saveConstructionBaseFormulas() : constructionStep === 'part_formulas' ? saveConstructionPartFormulas() : null"
+            @click="constructionStep === 'templates' ? saveConstructionTemplates() : constructionStep === 'categories' ? saveConstructionCategories() : constructionStep === 'sub_categories' ? saveConstructionSubCategories() : constructionStep === 'part_kinds' ? saveConstructionPartKinds() : constructionStep === 'param_groups' ? saveConstructionParamGroups() : constructionStep === 'params' ? saveConstructionParams() : constructionStep === 'base_formulas' ? saveConstructionBaseFormulas() : constructionStep === 'part_formulas' ? saveConstructionPartFormulas() : null"
           >
             <img src="/icons/construction-save.svg" alt="ذخیره" />
           </button>
@@ -4976,7 +5488,7 @@ onBeforeUnmount(() => {
             type="button"
             class="constructionDialog__headIconBtn"
             title="دانلود اکسل"
-            :disabled="!['templates', 'categories', 'part_kinds', 'param_groups', 'params', 'base_formulas', 'part_formulas'].includes(constructionStep)"
+            :disabled="!['templates', 'categories', 'sub_categories', 'part_kinds', 'param_groups', 'params', 'base_formulas', 'part_formulas'].includes(constructionStep)"
             @click="downloadConstructionExcelTemplate"
           >
             <img src="/icons/construction-download.svg" alt="دانلود" />
@@ -4985,7 +5497,7 @@ onBeforeUnmount(() => {
             type="button"
             class="constructionDialog__headIconBtn"
             title="آپلود اکسل"
-            :disabled="!['templates', 'categories', 'part_kinds', 'param_groups', 'params', 'base_formulas', 'part_formulas'].includes(constructionStep)"
+            :disabled="!['templates', 'categories', 'sub_categories', 'part_kinds', 'param_groups', 'params', 'base_formulas', 'part_formulas'].includes(constructionStep)"
             @click="triggerConstructionImport"
           >
             <img src="/icons/construction-upload.svg" alt="آپلود" />
@@ -5762,6 +6274,164 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
+          <template v-else-if="constructionStep === 'sub_categories'">
+            <input
+              ref="constructionImportInputEl"
+              class="constructionDialog__fileInput"
+              type="file"
+              accept=".csv"
+              @change="onConstructionImportFileChange"
+            />
+            <div class="constructionDialog__toolbar">
+              <div class="constructionDialog__toolbarMain">
+                <div class="constructionDialog__sectionTitle">جدول ساب‌کت‌ها</div>
+                <div class="constructionDialog__sectionHint">
+                  هر ساب‌کت زیرمجموعه یک دسته است و پیش‌فرض همه پارامترهای همین ساختار را روی خودش نگه می‌دارد.
+                </div>
+              </div>
+              <div class="constructionDialog__toolbarActions">
+                <button type="button" class="constructionDialog__textBtn" @click="addConstructionSubCategory">افزودن ساب‌کت</button>
+              </div>
+            </div>
+
+            <div v-if="constructionLoading" class="constructionDialog__loading">در حال خواندن داده‌های جدول از دیتابیس...</div>
+
+            <div v-if="constructionImportPreviewCount && constructionImportPreviewKind === 'sub_categories'" class="constructionDialog__importPreview">
+              <div class="constructionDialog__importHead">
+                <div>
+                  <div class="constructionDialog__sectionTitle">پیش‌نمایش فایل اکسل</div>
+                  <div class="constructionDialog__sectionHint">
+                    فایل {{ constructionImportFileName }} خوانده شد. قبل از بروزرسانی، جدول واردشده را بررسی و سپس تایید کنید.
+                  </div>
+                </div>
+                <div class="constructionDialog__toolbarActions">
+                  <button type="button" class="constructionDialog__textBtn" @click="clearConstructionImportPreview">لغو</button>
+                  <button type="button" class="constructionDialog__textBtn is-primary" @click="applyConstructionImportPreview">
+                    تایید بروزرسانی
+                  </button>
+                </div>
+              </div>
+              <div class="constructionDialog__previewMeta">
+                <span>{{ constructionImportPreviewCount }} ردیف</span>
+                <span>فایل CSV قابل ویرایش در Excel</span>
+              </div>
+              <div class="constructionDialog__previewTableWrap">
+                <table class="constructionDialog__table constructionDialog__table--preview">
+                  <thead>
+                    <tr>
+                      <th class="constructionDialog__col constructionDialog__col--id">تمپلیت</th>
+                      <th class="constructionDialog__col constructionDialog__col--id">دسته</th>
+                      <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
+                      <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
+                      <th class="constructionDialog__col constructionDialog__col--title">پارامترهای مقداردهی‌شده</th>
+                      <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in constructionImportPreviewRows" :key="`${row.lineNo}-${row.sub_cat_id}`">
+                      <td class="constructionDialog__col constructionDialog__col--id">{{ row.temp_id }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--id">{{ row.cat_id }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--id">{{ row.sub_cat_id }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--title">{{ row.sub_cat_title }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--title">
+                        {{ Object.values(row.param_defaults || {}).filter((value) => String(value || "").trim()).length }}
+                      </td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionSubCategories.length) }}</span>
+                <span class="constructionDialog__summaryLabel">کل</span>
+              </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(systemSubCategoriesCount) }}</span>
+                <span class="constructionDialog__summaryLabel">پیش‌فرض</span>
+              </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(adminSubCategoriesCount) }}</span>
+                <span class="constructionDialog__summaryLabel">اختصاصی</span>
+              </div>
+            </div>
+
+            <div class="constructionDialog__tableWrap">
+              <table class="constructionDialog__table">
+                <thead>
+                  <tr>
+                    <th class="constructionDialog__col constructionDialog__col--id">تمپلیت</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">دسته</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
+                    <th class="constructionDialog__col constructionDialog__col--title">عنوان ساب‌کت</th>
+                    <th class="constructionDialog__col constructionDialog__col--defaults">پیش‌فرض‌ها</th>
+                    <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
+                    <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in constructionSubCategories" :key="item.id">
+                    <td class="constructionDialog__col constructionDialog__col--id">
+                      <select
+                        v-model.number="item.temp_id"
+                        class="constructionDialog__input"
+                        @change="item.cat_id = Number(getConstructionCategoryOptions(item.temp_id)[0]?.value) || item.cat_id; markConstructionSubCategoryDirty(item)"
+                      >
+                        <option v-for="template in constructionTemplateOptions" :key="template.value" :value="template.value">{{ template.label }}</option>
+                      </select>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--id">
+                      <select v-model.number="item.cat_id" class="constructionDialog__input" @change="markConstructionSubCategoryDirty(item)">
+                        <option v-for="category in getConstructionCategoryOptions(item.temp_id)" :key="category.value" :value="category.value">{{ category.label }}</option>
+                      </select>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--id">
+                      <input v-model.number="item.sub_cat_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionSubCategoryDirty(item)" />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--title">
+                      <input v-model="item.sub_cat_title" class="constructionDialog__input" type="text" @input="markConstructionSubCategoryDirty(item)" />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--defaults">
+                      <button type="button" class="constructionDialog__defaultsBtn" @click="openSubCategoryDefaultsEditor(item)">
+                        <span class="constructionDialog__defaultsBtnValue">{{ getSubCategoryDefaultsSummary(item).text }}</span>
+                        <span class="constructionDialog__defaultsBtnLabel">ویرایش پیش‌فرض‌ها</span>
+                      </button>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--owner">
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.admin_id || "SYSTEM" }}</span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--scope">
+                      <button type="button" class="constructionDialog__scopeBtn" :class="item.admin_id === null ? 'is-system' : 'is-admin'" @click="toggleConstructionSubCategoryScope(item)">
+                        {{ item.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین" }}
+                      </button>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--actions">
+                      <div class="constructionDialog__actionsCell">
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionSubCategory(item.id)">×</button>
+                        <span v-if="constructionDeletingIds.includes(String(item.id))" class="constructionDialog__saving constructionDialog__saving--compact">در حال حذف</span>
+                        <span v-else-if="constructionSavingIds.includes(String(item.id))" class="constructionDialog__saving constructionDialog__saving--compact">در حال ذخیره</span>
+                        <span v-else-if="item.__isNew" class="constructionDialog__saving constructionDialog__saving--compact">جدید</span>
+                        <span v-else-if="item.__dirty" class="constructionDialog__saving constructionDialog__saving--compact">ذخیره نشده</span>
+                        <span
+                          class="constructionDialog__duplicateState constructionDialog__duplicateState--compact"
+                          :class="`is-${getConstructionSubCategoryDuplicateMessage(item).tone}`"
+                        >
+                          {{ getConstructionSubCategoryDuplicateMessage(item).text }}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="constructionDialog__sheetHint">
+              این جدول برای هر دسته، مدل‌های زیرمجموعه و مقدار پیش‌فرض همه پارامترها را نگه می‌دارد. هر پارامتر جدید بعد از بارگذاری دوباره این مرحله به‌صورت خودکار در ستون‌ها ظاهر می‌شود.
+            </div>
+          </template>
+
           <template v-else-if="constructionStep === 'base_formulas'">
             <input
               ref="constructionImportInputEl"
@@ -6196,6 +6866,75 @@ onBeforeUnmount(() => {
       <div class="appDialog__actions">
         <button type="button" class="menuItem" @click="closeBaseFormulaBuilder">انصراف</button>
         <button type="button" class="menuItem" :disabled="isBaseFormulaBuilderApplyDisabled" @click="applyBaseFormulaBuilder">اعمال</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="subCategoryDefaultsEditorOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeSubCategoryDefaultsEditor"></div>
+    <div class="appDialog__card appDialog__card--subDefaults" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">پیش‌فرض‌های ساب‌کت</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeSubCategoryDefaultsEditor">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        {{ activeSubCategoryDefaultsRow?.sub_cat_title || "ساب‌کت" }} -
+        {{ activeSubCategoryDefaultsRow ? `${toPersianDigits(activeSubCategoryDefaultsRow.temp_id)} / ${toPersianDigits(activeSubCategoryDefaultsRow.cat_id)} / ${toPersianDigits(activeSubCategoryDefaultsRow.sub_cat_id)}` : "" }}
+      </div>
+      <div class="subCategoryDefaults__summary">
+        <span class="constructionDialog__pill">مقداردهی‌شده: {{ toPersianDigits(activeSubCategoryDefaultsCount) }}</span>
+        <span class="constructionDialog__pill">کل پارامترها: {{ toPersianDigits(constructionSubCategoryParamColumns.length) }}</span>
+      </div>
+      <div class="subCategoryDefaults__tree">
+        <div class="subCategoryDefaults__panel subCategoryDefaults__panel--groups">
+          <div class="subCategoryDefaults__selectorList">
+            <button
+              v-for="group in constructionSubCategoryParamTree"
+              :key="group.id"
+              type="button"
+              class="subCategoryDefaults__groupHead"
+              :class="{ 'is-active': String(activeSubCategoryDefaultsGroup?.id || '') === String(group.id) }"
+              @click="selectSubCategoryDefaultsGroup(group.id)"
+            >
+              <div class="subCategoryDefaults__groupMeta">
+                <div class="subCategoryDefaults__groupTitle">{{ group.title }}</div>
+                <div class="subCategoryDefaults__groupCaption">
+                  {{ toPersianDigits(group.items.length) }} پارامتر
+                </div>
+              </div>
+              <div class="subCategoryDefaults__groupBadge" :class="{ 'is-empty': !group.iconUrl }">
+                <img v-if="group.iconUrl" :src="group.iconUrl" :alt="group.title" class="subCategoryDefaults__groupIcon" />
+                <span v-else class="subCategoryDefaults__groupFallback">{{ toPersianDigits(group.items.length) }}</span>
+              </div>
+              <span class="subCategoryDefaults__groupChevron" aria-hidden="true">‹</span>
+            </button>
+          </div>
+        </div>
+        <div class="subCategoryDefaults__panel subCategoryDefaults__panel--params">
+          <div v-if="activeSubCategoryDefaultsGroup" class="subCategoryDefaults__panelHead">
+            <div class="subCategoryDefaults__panelTitle">{{ activeSubCategoryDefaultsGroup.title }}</div>
+            <div class="subCategoryDefaults__panelCaption">
+              {{ toPersianDigits(activeSubCategoryDefaultsGroup.items.length) }} پارامتر در این گروه
+            </div>
+          </div>
+          <div v-if="activeSubCategoryDefaultsGroup" class="subCategoryDefaults__branch">
+            <label v-for="column in activeSubCategoryDefaultsGroup.items" :key="column.key" class="subCategoryDefaults__node">
+              <div class="subCategoryDefaults__nodeHead">
+                <span class="subCategoryDefaults__label">{{ column.label || column.key }}</span>
+                <span class="subCategoryDefaults__code">{{ column.key }}</span>
+              </div>
+              <input
+                v-model="subCategoryDefaultsEditorDraft[column.key]"
+                class="constructionDialog__input constructionDialog__input--mono subCategoryDefaults__input"
+                type="text"
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closeSubCategoryDefaultsEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="applySubCategoryDefaultsEditor">اعمال</button>
       </div>
     </div>
   </div>

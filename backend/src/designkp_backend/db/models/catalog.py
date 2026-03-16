@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -82,6 +82,7 @@ class Param(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
     admin: Mapped["Admin | None"] = relationship(back_populates="params")
     part_kind: Mapped["PartKind"] = relationship(back_populates="params")
     param_group: Mapped["ParamGroup"] = relationship(back_populates="params")
+    sub_category_defaults: Mapped[list["SubCategoryParamDefault"]] = relationship(back_populates="param")
 
 
 class BaseFormula(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -174,3 +175,50 @@ class Category(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixi
 
     admin: Mapped["Admin | None"] = relationship(back_populates="categories")
     template: Mapped["Template"] = relationship(back_populates="categories")
+    sub_categories: Mapped[list["SubCategory"]] = relationship(back_populates="category")
+
+
+class SubCategory(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "sub_categories"
+
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    temp_id: Mapped[int] = mapped_column(ForeignKey("templates.temp_id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False, index=True)
+    cat_id: Mapped[int] = mapped_column(ForeignKey("categories.cat_id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False, index=True)
+    sub_cat_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    sub_cat_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    admin: Mapped["Admin | None"] = relationship(back_populates="sub_categories")
+    category: Mapped["Category"] = relationship(back_populates="sub_categories")
+    param_defaults: Mapped[list["SubCategoryParamDefault"]] = relationship(
+        back_populates="sub_category",
+        cascade="all, delete-orphan",
+    )
+
+
+class SubCategoryParamDefault(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "sub_category_param_defaults"
+
+    sub_category_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sub_categories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    param_id: Mapped[int] = mapped_column(
+        ForeignKey("params.param_id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    sub_category: Mapped["SubCategory"] = relationship(back_populates="param_defaults")
+    param: Mapped["Param"] = relationship(back_populates="sub_category_defaults")
