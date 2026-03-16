@@ -102,3 +102,75 @@ class BaseFormula(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionM
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     admin: Mapped["Admin | None"] = relationship(back_populates="base_formulas")
+
+
+class PartFormula(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "part_formulas"
+
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    part_formula_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    part_kind_id: Mapped[int] = mapped_column(ForeignKey("part_kinds.part_kind_id", ondelete="RESTRICT"), nullable=False, index=True)
+    part_sub_kind_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    part_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    part_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    formula_l: Mapped[str] = mapped_column(String(2048), nullable=False)
+    formula_w: Mapped[str] = mapped_column(String(2048), nullable=False)
+    formula_width: Mapped[str] = mapped_column(String(2048), nullable=False)
+    formula_depth: Mapped[str] = mapped_column(String(2048), nullable=False)
+    formula_height: Mapped[str] = mapped_column(String(2048), nullable=False)
+    formula_cx: Mapped[str] = mapped_column(String(2048), nullable=False)
+    formula_cy: Mapped[str] = mapped_column(String(2048), nullable=False)
+    formula_cz: Mapped[str] = mapped_column(String(2048), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    admin: Mapped["Admin | None"] = relationship(back_populates="part_formulas")
+    part_kind: Mapped["PartKind"] = relationship()
+
+
+class Template(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "templates"
+
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    temp_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    temp_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    admin: Mapped["Admin | None"] = relationship(back_populates="templates")
+    categories: Mapped[list["Category"]] = relationship(back_populates="template")
+
+
+class Category(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "categories"
+
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    temp_id: Mapped[int] = mapped_column(ForeignKey("templates.temp_id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False, index=True)
+    cat_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    cat_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    admin: Mapped["Admin | None"] = relationship(back_populates="categories")
+    template: Mapped["Template"] = relationship(back_populates="categories")

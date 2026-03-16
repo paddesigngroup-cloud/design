@@ -6,13 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from designkp_backend.api.formula_validation import validate_formula_structure
 from designkp_backend.api.routers import base_formulas as router
 from designkp_backend.api.routers.base_formulas import (
     BaseFormulaCreate,
     BaseFormulaUpdate,
     create_base_formula,
     update_base_formula,
-    validate_formula_structure,
 )
 
 
@@ -69,17 +69,17 @@ def test_create_base_formula_rejects_unknown_param(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
 
-    async def fake_known_codes(session, admin_id):
-        return {"w", "u_th", "b_th"}
+    async def fake_validate_expression_identifiers(session, admin_id, expression, **kwargs):
+        raise router.HTTPException(status_code=400, detail="Unknown codes in formula: unknown")
 
-    monkeypatch.setattr(router, "_known_param_codes", fake_known_codes)
+    monkeypatch.setattr(router, "validate_expression_identifiers", fake_validate_expression_identifiers)
     payload = BaseFormulaCreate(admin_id=None, fo_id=5, param_formula="f5", formula="(unknown*2)", sort_order=5, is_system=True)
 
     with pytest.raises(Exception) as exc_info:
         asyncio.run(create_base_formula(payload, FakeSession()))
 
     assert getattr(exc_info.value, "status_code", None) == 400
-    assert "Unknown param codes in formula" in str(getattr(exc_info.value, "detail", ""))
+    assert "Unknown codes in formula" in str(getattr(exc_info.value, "detail", ""))
 
 
 def test_create_base_formula_rejects_unbalanced_parentheses(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -88,10 +88,6 @@ def test_create_base_formula_rejects_unbalanced_parentheses(monkeypatch: pytest.
 
     monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
 
-    async def fake_known_codes(session, admin_id):
-        return {"w"}
-
-    monkeypatch.setattr(router, "_known_param_codes", fake_known_codes)
     payload = BaseFormulaCreate(admin_id=None, fo_id=2, param_formula="f2", formula="(w*2", sort_order=2, is_system=True)
 
     with pytest.raises(Exception) as exc_info:
@@ -107,10 +103,10 @@ def test_create_base_formula_accepts_valid_payload(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
 
-    async def fake_known_codes(session, admin_id):
-        return {"w", "b_th"}
+    async def fake_validate_expression_identifiers(session, admin_id, expression, **kwargs):
+        return None
 
-    monkeypatch.setattr(router, "_known_param_codes", fake_known_codes)
+    monkeypatch.setattr(router, "validate_expression_identifiers", fake_validate_expression_identifiers)
     session = FakeSession()
     payload = BaseFormulaCreate(admin_id=None, fo_id=8, param_formula="f8", formula="(w*2)+(b_th)", sort_order=8, is_system=True)
 
@@ -127,10 +123,10 @@ def test_update_base_formula_rejects_unknown_param(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
 
-    async def fake_known_codes(session, admin_id):
-        return {"w"}
+    async def fake_validate_expression_identifiers(session, admin_id, expression, **kwargs):
+        raise router.HTTPException(status_code=400, detail="Unknown codes in formula: missing")
 
-    monkeypatch.setattr(router, "_known_param_codes", fake_known_codes)
+    monkeypatch.setattr(router, "validate_expression_identifiers", fake_validate_expression_identifiers)
     existing = SimpleNamespace(
         id=uuid.uuid4(),
         admin_id=None,
@@ -148,4 +144,4 @@ def test_update_base_formula_rejects_unknown_param(monkeypatch: pytest.MonkeyPat
         asyncio.run(update_base_formula(existing.id, payload, FakeSession(existing)))
 
     assert getattr(exc_info.value, "status_code", None) == 400
-    assert "Unknown param codes in formula" in str(getattr(exc_info.value, "detail", ""))
+    assert "Unknown codes in formula" in str(getattr(exc_info.value, "detail", ""))

@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.catalog import BaseFormula, Param, ParamGroup, PartKind
+from designkp_backend.db.models.catalog import BaseFormula, Category, Param, ParamGroup, PartFormula, PartKind, Template
 from designkp_backend.services.admin_access import require_admin
 from designkp_backend.services.admin_storage import (
     csv_bytes,
@@ -56,6 +56,42 @@ def _base_formula_headers() -> list[str]:
         "fo_id",
         "param_formula",
         "formula",
+        "admin_mode",
+    ]
+
+
+def _part_formula_headers() -> list[str]:
+    return [
+        "part_formula_id",
+        "part_kind_id",
+        "part_sub_kind_id",
+        "part_code",
+        "part_title",
+        "formula_l",
+        "formula_w",
+        "formula_width",
+        "formula_depth",
+        "formula_height",
+        "formula_cx",
+        "formula_cy",
+        "formula_cz",
+        "admin_mode",
+    ]
+
+
+def _template_headers() -> list[str]:
+    return [
+        "temp_id",
+        "temp_title",
+        "admin_mode",
+    ]
+
+
+def _category_headers() -> list[str]:
+    return [
+        "temp_id",
+        "cat_id",
+        "cat_title",
         "admin_mode",
     ]
 
@@ -142,6 +178,72 @@ async def _base_formula_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
     ]
 
 
+async def _part_formula_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[list[object]]:
+    rows = (
+        await session.scalars(
+            select(PartFormula)
+            .where(or_(PartFormula.admin_id.is_(None), PartFormula.admin_id == admin_id))
+            .order_by(PartFormula.sort_order.asc(), PartFormula.part_formula_id.asc())
+        )
+    ).all()
+    return [
+        [
+            row.part_formula_id,
+            row.part_kind_id,
+            row.part_sub_kind_id,
+            row.part_code,
+            row.part_title,
+            row.formula_l,
+            row.formula_w,
+            row.formula_width,
+            row.formula_depth,
+            row.formula_height,
+            row.formula_cx,
+            row.formula_cy,
+            row.formula_cz,
+            "system" if row.admin_id is None else "admin",
+        ]
+        for row in rows
+    ]
+
+
+async def _template_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[list[object]]:
+    rows = (
+        await session.scalars(
+            select(Template)
+            .where(or_(Template.admin_id.is_(None), Template.admin_id == admin_id))
+            .order_by(Template.sort_order.asc(), Template.temp_id.asc())
+        )
+    ).all()
+    return [
+        [
+            row.temp_id,
+            row.temp_title,
+            "system" if row.admin_id is None else "admin",
+        ]
+        for row in rows
+    ]
+
+
+async def _category_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[list[object]]:
+    rows = (
+        await session.scalars(
+            select(Category)
+            .where(or_(Category.admin_id.is_(None), Category.admin_id == admin_id))
+            .order_by(Category.sort_order.asc(), Category.cat_id.asc())
+        )
+    ).all()
+    return [
+        [
+            row.temp_id,
+            row.cat_id,
+            row.cat_title,
+            "system" if row.admin_id is None else "admin",
+        ]
+        for row in rows
+    ]
+
+
 @router.get("/{admin_id}/tables/part-kinds/export")
 async def export_part_kinds(admin_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
     await require_admin(session, admin_id)
@@ -191,6 +293,45 @@ async def export_base_formulas(admin_id: uuid.UUID, session: AsyncSession = Depe
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="base_formulas_excel_template.csv"'},
+    )
+
+
+@router.get("/{admin_id}/tables/part-formulas/export")
+async def export_part_formulas(admin_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
+    await require_admin(session, admin_id)
+    headers = _part_formula_headers()
+    rows = await _part_formula_rows(session, admin_id)
+    write_table_snapshot(admin_id, "part_formulas", headers, rows)
+    return Response(
+        content=csv_bytes(headers, rows),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="part_formulas_excel_template.csv"'},
+    )
+
+
+@router.get("/{admin_id}/tables/templates/export")
+async def export_templates(admin_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
+    await require_admin(session, admin_id)
+    headers = _template_headers()
+    rows = await _template_rows(session, admin_id)
+    write_table_snapshot(admin_id, "templates", headers, rows)
+    return Response(
+        content=csv_bytes(headers, rows),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="templates_excel_template.csv"'},
+    )
+
+
+@router.get("/{admin_id}/tables/categories/export")
+async def export_categories(admin_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
+    await require_admin(session, admin_id)
+    headers = _category_headers()
+    rows = await _category_rows(session, admin_id)
+    write_table_snapshot(admin_id, "categories", headers, rows)
+    return Response(
+        content=csv_bytes(headers, rows),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="categories_excel_template.csv"'},
     )
 
 

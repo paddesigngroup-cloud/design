@@ -1836,47 +1836,50 @@ textarea {
   border-bottom: 1px solid rgba(52, 20, 31, 0.08);
   text-align: center;
   vertical-align: middle;
-  min-width: 86px;
-  max-width: 220px;
+  min-width: 0;
+  max-width: none;
 }
 .constructionDialog__table th + th,
 .constructionDialog__table td + td {
   border-inline-start: 1px solid rgba(148, 156, 166, 0.18);
 }
 .constructionDialog__col--id {
-  min-width: 58px !important;
-  width: 58px;
-  max-width: 64px !important;
+  min-width: 46px !important;
+  width: 46px;
+  max-width: 54px !important;
 }
 .constructionDialog__col--uiOrder {
-  min-width: 78px !important;
-  width: 78px;
-  max-width: 86px !important;
+  min-width: 58px !important;
+  width: 58px;
+  max-width: 66px !important;
 }
 .constructionDialog__col--actions {
-  min-width: 74px !important;
-  width: 74px;
-  max-width: 88px !important;
+  min-width: 52px !important;
+  width: 52px;
+  max-width: 60px !important;
 }
 .constructionDialog__col--owner {
-  min-width: 92px !important;
-  max-width: 118px !important;
+  min-width: 70px !important;
+  width: 70px;
+  max-width: 82px !important;
 }
 .constructionDialog__col--scope {
-  min-width: 110px !important;
-  max-width: 144px !important;
+  min-width: 72px !important;
+  width: 72px;
+  max-width: 86px !important;
 }
 .constructionDialog__col--icon {
-  min-width: 64px !important;
-  max-width: 84px !important;
+  min-width: 46px !important;
+  width: 46px;
+  max-width: 54px !important;
 }
 .constructionDialog__col--code {
-  min-width: 140px !important;
-  max-width: 240px !important;
+  min-width: 132px !important;
+  width: max-content;
 }
 .constructionDialog__col--title {
-  min-width: 130px !important;
-  max-width: 220px !important;
+  min-width: 150px !important;
+  width: max-content;
 }
 .constructionDialog__col--formulaCode {
   min-width: 0 !important;
@@ -1962,6 +1965,10 @@ textarea {
   max-width: none;
   margin-inline: auto;
 }
+.constructionDialog__col--code .constructionDialog__input,
+.constructionDialog__col--title .constructionDialog__input {
+  min-width: max-content;
+}
 .constructionDialog__iconCell {
   display: flex;
   align-items: center;
@@ -2031,8 +2038,8 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 34px;
-  padding: 5px 9px;
+  min-height: 26px;
+  padding: 3px 7px;
   max-width: 100%;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.7);
@@ -2041,20 +2048,20 @@ textarea {
 .constructionDialog__pill--mono {
   direction: ltr;
   text-align: left;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
   font-family: Vazirmatn, sans-serif;
 }
 .constructionDialog__scopeBtn {
   font-family: Vazirmatn, sans-serif !important;
-  min-height: 34px;
-  padding: 6px 9px;
+  min-height: 26px;
+  padding: 4px 6px;
   border-radius: 10px;
   border: 0;
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
   cursor: pointer;
-  line-height: 1.4;
+  line-height: 1.2;
 }
 .constructionDialog__scopeBtn.is-system {
   color: #29543c;
@@ -2065,13 +2072,13 @@ textarea {
   background: rgba(223, 170, 188, 0.42);
 }
 .constructionDialog__iconBtn {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border: 1px solid rgba(175, 34, 69, 0.16);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.82);
   color: #8b1839;
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
 }
@@ -2080,7 +2087,7 @@ textarea {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 3px;
 }
 .constructionDialog__saving {
   font-family: Vazirmatn, sans-serif !important;
@@ -2095,16 +2102,18 @@ textarea {
 }
 .constructionDialog__duplicateState {
   font-family: Vazirmatn, sans-serif !important;
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.15;
+  text-align: center;
 }
 .constructionDialog__duplicateState--compact {
-  font-size: 9px;
+  font-size: 8px;
   line-height: 1.15;
   text-align: center;
   white-space: normal;
-  max-width: 48px;
+  max-width: 42px;
 }
 .constructionDialog__duplicateState.is-good {
   color: #1f8f4d;
@@ -2246,6 +2255,9 @@ textarea {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
+.formulaBuilder__meta--part {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
 .formulaBuilder__field {
   display: flex;
   flex-direction: column;
@@ -2343,6 +2355,9 @@ textarea {
 }
 @media (max-width: 900px) {
   .formulaBuilder__meta {
+    grid-template-columns: 1fr;
+  }
+  .formulaBuilder__meta--part {
     grid-template-columns: 1fr;
   }
   .formulaBuilder__numberBox {

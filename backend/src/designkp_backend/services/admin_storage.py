@@ -17,6 +17,9 @@ TABLE_FILE_NAMES = {
     "param_groups": "param_groups.csv",
     "params": "params.csv",
     "base_formulas": "base_formulas.csv",
+    "part_formulas": "part_formulas.csv",
+    "templates": "templates.csv",
+    "categories": "categories.csv",
     "orders": "orders.csv",
 }
 

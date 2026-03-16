@@ -225,6 +225,149 @@ Current seeded system records:
 - Formula codes such as `f1` through the current seeded formula range from the spreadsheet
 - Each record stores one base formula expression built from the parameter codes already defined in `params`
 
+## 9. `part_formulas`
+
+Purpose:
+Stores the part-generation formulas used by the software to create real cabinet pieces from `params` and `base_formulas`, with each row representing one buildable part definition inside a parent `part_kind`.
+
+Current business role:
+- Lets each `admin` define how a cabinet structure turns into actual generated parts such as floor, roof, left side, right side, back, and stretcher variants.
+- Supports both system-defined part formulas and future admin-specific overrides.
+- Sits after `base_formulas`, because these expressions can use both raw parameter codes and base formula codes such as `f1`, `f2`, and similar helper formulas.
+- Stores not only the size formulas of each generated part, but also the center-position formulas needed for placing that part in the engine.
+
+Chosen structure logic:
+- This sheet was modeled as a dedicated table rather than being merged into `part_kinds`, because one `part_kind` can generate multiple sub-parts.
+- Business fields chosen for this table:
+  - `admin_id`
+  - `part_formula_id`
+  - `part_kind_id`
+  - `part_sub_kind_id`
+  - `part_code`
+  - `part_title`
+  - `formula_l`
+  - `formula_w`
+  - `formula_width`
+  - `formula_depth`
+  - `formula_height`
+  - `formula_cx`
+  - `formula_cy`
+  - `formula_cz`
+- Internal compatibility fields kept aligned with the other software-structure tables:
+  - `code`
+  - `title`
+  - `sort_order`
+  - `is_system`
+- `admin_id = NULL` means a global system part-formula row.
+- `admin_id != NULL` means the row belongs to a specific admin and can override the default generated-part structure for that admin.
+- `part_kind_id` links each row to a parent row in `part_kinds`.
+- `part_sub_kind_id` is the stable sub-type number inside that `part_kind`.
+- Formula columns can use both parameter codes from `params` and base formula codes from `base_formulas`.
+
+Mapping from the old spreadsheet:
+- `pi_id` -> `part_formula_id`
+- `part_kind_id` -> `part_kind_id`
+- `part_sub_kind_id` -> `part_sub_kind_id`
+- `part_code` -> `part_code`
+- `part_title` -> `part_title`
+- `l` -> `formula_l`
+- `w` -> `formula_w`
+- `width` -> `formula_width`
+- `depth` -> `formula_depth`
+- `height` -> `formula_height`
+- `cx` -> `formula_cx`
+- `cy` -> `formula_cy`
+- `cz` -> `formula_cz`
+
+Current seeded system records:
+- `unit` sub-parts such as `floor`, `roof`, `le_side`, `ri_side`, and `back`
+- `stretcher` sub-parts such as top front/back horizontal stretchers and top/bottom back vertical stretchers
+- Each seeded row stores full formula expressions for size and placement axes
+
+## 10. `templates`
+
+Purpose:
+Stores the high-level furniture template definitions that an `admin` wants to make available in the software, such as cabinet, closet, and similar top-level design families.
+
+Current business role:
+- Lets each `admin` decide which main design templates exist in their workspace.
+- Acts as the parent catalog for future higher-level structure, so later order/design data can point to a chosen template family before going into detailed parts and formulas.
+- Supports both system-defined templates and future admin-specific templates.
+
+Chosen structure logic:
+- The provided Excel sample only contains the meaningful columns `temp_id` and `temp_title`.
+- The other visible spreadsheet columns were intentionally ignored because they do not carry stable business data for the database schema.
+- Business fields chosen for this table:
+  - `admin_id`
+  - `temp_id`
+  - `temp_title`
+- Internal compatibility fields kept aligned with the other software-structure tables:
+  - `code`
+  - `title`
+  - `sort_order`
+  - `is_system`
+- `admin_id = NULL` means a global system template.
+- `admin_id != NULL` means the template belongs to one specific `admin` and is available for all users under that admin.
+- `temp_id` is the stable numeric template identifier from the spreadsheet.
+- `temp_title` stores the user-facing Persian template title such as `کابینت`.
+- Because the source sheet has no explicit code column, internal `code` is generated from `temp_id` in the format `template_{temp_id}`.
+
+Relationship decision:
+- This table belongs directly to `admins`, not to `users` and not to `super_admins`.
+- The user described it as the set of design families that each customer admin wants to define, so `admin_id` is the correct ownership field.
+
+Mapping from the spreadsheet:
+- `temp_id` -> `temp_id`
+- `temp_title` -> `temp_title`
+- ignored columns -> not carried into the database schema
+
+Current seeded system records:
+- `1 / کابینت`
+
+## 11. `categories`
+
+Purpose:
+Stores the category list that sits under each `template`, such as floor-standing, wall-mounted, or tall-unit groups that an `admin` wants to expose inside that template family.
+
+Current business role:
+- Lets each `admin` organize the next level under a selected `template`.
+- Creates a direct hierarchy of `template -> category`.
+- Supports both system-defined categories and future admin-specific category overrides.
+
+Chosen structure logic:
+- The provided Excel sample contains the meaningful columns `temp_id`, `cat_id`, and `cat_title`.
+- `admin_user_id` from the sheet is normalized into `admin_id` to stay consistent with the rest of the schema.
+- Business fields chosen for this table:
+  - `admin_id`
+  - `temp_id`
+  - `cat_id`
+  - `cat_title`
+- Internal compatibility fields kept aligned with the other software-structure tables:
+  - `code`
+  - `title`
+  - `sort_order`
+  - `is_system`
+- `admin_id = NULL` means a global system category.
+- `admin_id != NULL` means the category belongs to one specific `admin`.
+- `temp_id` links each category to one real row in `templates`.
+- Because the source sheet has no explicit code column, internal `code` is generated from `cat_id` in the format `category_{cat_id}`.
+
+Relationship decision:
+- This table belongs to `admins` for ownership and to `templates` for hierarchy.
+- A category cannot exist without a valid `template`.
+- Admin-scoped categories should only point to system templates or templates owned by the same admin.
+
+Mapping from the spreadsheet:
+- `admin_user_id` -> `admin_id`
+- `temp_id` -> `temp_id`
+- `cat_id` -> `cat_id`
+- `cat_title` -> `cat_title`
+
+Current seeded system records:
+- `1 / 1 / زمینی`
+- `1 / 2 / هوایی`
+- `1 / 3 / ایستاده`
+
 ## Notes
 
 - This document is intentionally limited to table names and table responsibilities.
