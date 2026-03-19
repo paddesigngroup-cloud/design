@@ -8,3 +8,4 @@
 7,2,2,top_bac_h_stre,تیرک افقی عقب بالا,w-f30,w_st,w-f30,w_st,u_th,((w-f30)/2)+f31,d-f32-((w_st)/2),h-f33-((u_th)/2),system
 8,2,3,top_bac_v_stre,تیرک عمودی عقب بالا,w-f34,w_st,w-f34,u_th,w_st,((w-f34)/2)+f35,d-f36-((u_th)/2),h-f37-((w_st)/2),system
 9,2,4,bot_bac_v_stre,تیرک عمودی عقب پایین,w-f38,w_st,w-f38,u_th,w_st,((w-f38)/2)+f39,d-f40-((u_th)/2),((w_st)/2)+f41,system
+10,3,1,moving_shelve,طبقه متحرک,w-f42,d-f44,w-f42,d-f44,u_th,((w-f42)/2)+f43,((d-f44)/2)+f45,m_s_cz,system

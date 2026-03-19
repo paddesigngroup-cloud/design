@@ -48,6 +48,7 @@ let axesHelper = null;
 const DEFAULT_WALL_HEIGHT_M = 2.8;
 const DEFAULT_MITER_LIMIT = 10;
 const PLACEHOLDER_BOX_SPECS_MM = [
+  // یونیت کابینت چپ
   { width: 800, depth: 550, height: 16, cx: 400, cy: 325, cz: 146 },
   { width: 16, depth: 550, height: 704, cx: 8, cy: 325, cz: 506 },
   { width: 16, depth: 550, height: 704, cx: 792, cy: 325, cz: 506 },
@@ -56,6 +57,26 @@ const PLACEHOLDER_BOX_SPECS_MM = [
   { width: 768, depth: 80, height: 16, cx: 400, cy: 541, cz: 850 },
   { width: 768, depth: 16, height: 80, cx: 400, cy: 592, cz: 818 },
   { width: 768, depth: 16, height: 80, cx: 400, cy: 592, cz: 194 },
+  { width: 768, depth: 531, height: 16, cx: 400, cy: 315.5, cz: 498 },
+  { width: 398, depth: 16, height: 718, cx: 200, cy: 42, cz: 498 },
+  { width: 398, depth: 16, height: 718, cx: 600, cy: 42, cz: 498 },
+  { width: 1600, depth: 600, height: 32, cx: 800, cy: 300, cz: 874 },
+  // یونیت کابینت راست
+  { width: 800, depth: 550, height: 16, cx: 1200, cy: 325, cz: 146 },
+  { width: 16, depth: 550, height: 704, cx: 808, cy: 325, cz: 506 },
+  { width: 16, depth: 550, height: 704, cx: 1592, cy: 325, cz: 506 },
+  { width: 782, depth: 3, height: 711, cx: 1200, cy: 582.5, cz: 502.5 },
+  { width: 768, depth: 80, height: 16, cx: 1200, cy: 90, cz: 850 },
+  { width: 768, depth: 80, height: 16, cx: 1200, cy: 541, cz: 850 },
+  { width: 768, depth: 16, height: 80, cx: 1200, cy: 592, cz: 818 },
+  { width: 768, depth: 16, height: 80, cx: 1200, cy: 592, cz: 194 },
+  { width: 768, depth: 531, height: 16, cx: 1200, cy: 315.5, cz: 498 },
+  { width: 398, depth: 16, height: 718, cx: 1000, cy: 42, cz: 498 },
+  { width: 398, depth: 16, height: 718, cx: 1400, cy: 42, cz: 498 },
+  // صفحه کابینت
+  { width: 1600, depth: 600, height: 32, cx: 800, cy: 300, cz: 874 },
+  // پاخور
+  { width: 1600, depth: 16, height: 138, cx: 800, cy: 58, cz: 69 },
 ];
 const attrsSnapshot = computed(() => props.walls2d?.metrics || props.walls2d || {});
 const selectedEntityType = computed(

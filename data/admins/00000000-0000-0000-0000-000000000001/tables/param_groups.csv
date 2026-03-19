@@ -1,14 +1,15 @@
 ﻿param_group_id,param_group_code,org_param_group_title,param_group_icon_path,ui_order,admin_mode
-1,attributes,ویژگی ها,attributes-2c1094fb50bb.webp,0,system
-2,thicknesses,ضخامت ها,thicknesses-19c6f949396e.webp,1,system
-3,floor properties,تنظیمات کف,floor-properties-429d03fc6613.webp,2,system
-4,roof properties,تنظیمات تاق,roof-properties-feba40ba0721.webp,3,system
+1,attributes,صفات,attributes-2c1094fb50bb.webp,0,system
+2,thicknesses,تنظیمات ضخامت,thicknesses-19c6f949396e.webp,1,system
+3,floor properties,تنظیمات کف,staged-floor-properties-011973d354d2.webp,2,system
+4,roof properties,تنظیمات تاق,staged-roof-properties-ac8d949ff090.webp,3,system
 5,left side properties,تنظیمات بدنه چپ,left-side-properties-3187db2c44d0.webp,4,system
 6,right side properties,تنظیمات بدنه راست,right-side-properties-f48dc7dc6569.webp,5,system
 7,door properties,تنظیمات درب,door-properties-767330f806b3.webp,6,system
 8,back properties,تنظیمات پشت,back-properties-0f51bf870da2.webp,7,system
-9,panel properties,تنظیمات نما,panel-properties-ee589acb4fd1.webp,8,system
+9,panel properties,تنظیمات پنل نما,panel-properties-ee589acb4fd1.webp,8,system
 10,gap properties,تنظیمات گپ,gap-properties-b3e9ccdc4b2c.webp,9,system
 11,counter properties,تنظیمات صفحه,counter-properties-bea86392ade8.webp,10,system
-12,stretcher properties,تنضیمات تیرک,stretcher-properties-f8a4048605d8.webp,11,system
+12,stretcher properties,تنظیمات تیرک,stretcher-properties-f8a4048605d8.webp,11,system
 13,toe kick properties,تنظیمات پاخور,toe-kick-properties-d5ad214e7515.webp,12,system
+14,shelve properties,تنظیمات طبقه,,13,system
