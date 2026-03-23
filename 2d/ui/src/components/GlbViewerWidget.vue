@@ -60,7 +60,6 @@ const PLACEHOLDER_BOX_SPECS_MM = [
   { width: 768, depth: 531, height: 16, cx: 400, cy: 315.5, cz: 498 },
   { width: 398, depth: 16, height: 718, cx: 200, cy: 42, cz: 498 },
   { width: 398, depth: 16, height: 718, cx: 600, cy: 42, cz: 498 },
-  { width: 1600, depth: 600, height: 32, cx: 800, cy: 300, cz: 874 },
   // یونیت کابینت راست
   { width: 800, depth: 550, height: 16, cx: 1200, cy: 325, cz: 146 },
   { width: 16, depth: 550, height: 704, cx: 808, cy: 325, cz: 506 },
@@ -76,7 +75,7 @@ const PLACEHOLDER_BOX_SPECS_MM = [
   // صفحه کابینت
   { width: 1600, depth: 600, height: 32, cx: 800, cy: 300, cz: 874 },
   // پاخور
-  { width: 1600, depth: 16, height: 138, cx: 800, cy: 58, cz: 69 },
+  // { width: 1600, depth: 16, height: 138, cx: 800, cy: 58, cz: 69 },
 ];
 const attrsSnapshot = computed(() => props.walls2d?.metrics || props.walls2d || {});
 const selectedEntityType = computed(
