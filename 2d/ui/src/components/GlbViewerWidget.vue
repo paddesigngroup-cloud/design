@@ -75,7 +75,7 @@ const PLACEHOLDER_BOX_SPECS_MM = [
   // صفحه کابینت
   { width: 1600, depth: 600, height: 32, cx: 800, cy: 300, cz: 874 },
   // پاخور
-  // { width: 1600, depth: 16, height: 138, cx: 800, cy: 58, cz: 69 },
+  { width: 1600, depth: 16, height: 138, cx: 800, cy: 58, cz: 69 },
 ];
 const attrsSnapshot = computed(() => props.walls2d?.metrics || props.walls2d || {});
 const selectedEntityType = computed(
