@@ -110,6 +110,8 @@ async def _sub_category_headers(session: AsyncSession, admin_id: uuid.UUID) -> l
             f"{item.param_code}__input_mode",
             f"{item.param_code}__binary_off_label",
             f"{item.param_code}__binary_on_label",
+            f"{item.param_code}__binary_off_icon_path",
+            f"{item.param_code}__binary_on_icon_path",
         ])
     return [
         "temp_id",
@@ -300,6 +302,8 @@ async def _sub_category_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
                 "input_mode": row.input_mode if row.input_mode in {"value", "binary"} else "value",
                 "binary_off_label": (row.binary_off_label or "0").strip() or "0",
                 "binary_on_label": (row.binary_on_label or "1").strip() or "1",
+                "binary_off_icon_path": normalize_icon_file_name(row.binary_off_icon_path) or "",
+                "binary_on_icon_path": normalize_icon_file_name(row.binary_on_icon_path) or "",
             }
     return [
         [
@@ -318,6 +322,8 @@ async def _sub_category_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
                     defaults_map.get(row.id, {}).get(param.param_code, {}).get("input_mode", "value"),
                     defaults_map.get(row.id, {}).get(param.param_code, {}).get("binary_off_label", "0"),
                     defaults_map.get(row.id, {}).get(param.param_code, {}).get("binary_on_label", "1"),
+                    defaults_map.get(row.id, {}).get(param.param_code, {}).get("binary_off_icon_path", ""),
+                    defaults_map.get(row.id, {}).get(param.param_code, {}).get("binary_on_icon_path", ""),
                 )
             ],
             "system" if row.admin_id is None else "admin",

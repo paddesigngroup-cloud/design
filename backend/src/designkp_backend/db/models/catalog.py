@@ -225,6 +225,8 @@ class SubCategoryParamDefault(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMix
     input_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="value", server_default="value")
     binary_off_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     binary_on_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    binary_off_icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    binary_on_icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     sub_category: Mapped["SubCategory"] = relationship(back_populates="param_defaults")
     param: Mapped["Param"] = relationship(back_populates="sub_category_defaults")

@@ -40,6 +40,8 @@ class SubCategoryParamOverrideItem(BaseModel):
     input_mode: str = "value"
     binary_off_label: str | None = None
     binary_on_label: str | None = None
+    binary_off_icon_path: str | None = None
+    binary_on_icon_path: str | None = None
 
 
 class SubCategoryCreate(BaseModel):
@@ -73,6 +75,8 @@ class SubCategoryParamOverridePayload(BaseModel):
     input_mode: str = Field(default="value", pattern="^(value|binary)$")
     binary_off_label: str | None = Field(default=None, max_length=255)
     binary_on_label: str | None = Field(default=None, max_length=255)
+    binary_off_icon_path: str | None = Field(default=None, max_length=255)
+    binary_on_icon_path: str | None = Field(default=None, max_length=255)
 
 
 def _sub_category_code(sub_cat_id: int) -> str:
@@ -145,14 +149,28 @@ async def _apply_param_defaults(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown param code for this sub-category scope: {param_code}")
         row = defaults_by_param_id[param.param_id]
         next_icon = normalize_icon_file_name(override.icon_path)
+        next_binary_off_icon = normalize_icon_file_name(override.binary_off_icon_path)
+        next_binary_on_icon = normalize_icon_file_name(override.binary_on_icon_path)
         if item.admin_id:
             next_icon = finalize_param_group_icon(item.admin_id, next_icon, previous_file_name=row.icon_path)
+            next_binary_off_icon = finalize_param_group_icon(
+                item.admin_id,
+                next_binary_off_icon,
+                previous_file_name=row.binary_off_icon_path,
+            )
+            next_binary_on_icon = finalize_param_group_icon(
+                item.admin_id,
+                next_binary_on_icon,
+                previous_file_name=row.binary_on_icon_path,
+            )
         row.display_title = (override.display_title or "").strip() or param.param_title_fa.strip()
         row.description_text = (override.description_text or "").strip() or None
         row.icon_path = next_icon
         row.input_mode = override.input_mode if override.input_mode in {"value", "binary"} else "value"
         row.binary_off_label = (override.binary_off_label or "").strip() or "0"
         row.binary_on_label = (override.binary_on_label or "").strip() or "1"
+        row.binary_off_icon_path = next_binary_off_icon
+        row.binary_on_icon_path = next_binary_on_icon
         if row.input_mode == "binary":
             normalized_value = normalize_default_value(param_defaults.get(param_code))
             row.default_value = normalized_value if normalized_value in {"0", "1"} else "0"
@@ -177,9 +195,15 @@ async def _serialize_items(session: AsyncSession, items: list[SubCategory], admi
         code = code_by_param_id.get(row.param_id)
         if code:
             icon_path = normalize_icon_file_name(row.icon_path)
+            binary_off_icon_path = normalize_icon_file_name(row.binary_off_icon_path)
+            binary_on_icon_path = normalize_icon_file_name(row.binary_on_icon_path)
             row_admin_id = admin_id_by_sub_category_id.get(row.sub_category_id)
             if row_admin_id and icon_path and not admin_icon_exists(row_admin_id, icon_path):
                 icon_path = None
+            if row_admin_id and binary_off_icon_path and not admin_icon_exists(row_admin_id, binary_off_icon_path):
+                binary_off_icon_path = None
+            if row_admin_id and binary_on_icon_path and not admin_icon_exists(row_admin_id, binary_on_icon_path):
+                binary_on_icon_path = None
             defaults_map.setdefault(row.sub_category_id, {})[code] = row.default_value
             overrides_map.setdefault(row.sub_category_id, {})[code] = SubCategoryParamOverrideItem(
                 display_title=row.display_title,
@@ -188,6 +212,8 @@ async def _serialize_items(session: AsyncSession, items: list[SubCategory], admi
                 input_mode=row.input_mode if row.input_mode in {"value", "binary"} else "value",
                 binary_off_label=(row.binary_off_label or "0").strip() or "0",
                 binary_on_label=(row.binary_on_label or "1").strip() or "1",
+                binary_off_icon_path=binary_off_icon_path,
+                binary_on_icon_path=binary_on_icon_path,
             )
     return [
         SubCategoryItem(

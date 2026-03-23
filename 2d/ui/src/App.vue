@@ -183,7 +183,12 @@ const subCategoryDefaultIconPreviewUrls = ref({});
 const subCategoryDefaultsActiveGroupId = ref("");
 const subCategoryDefaultIconInputEl = ref(null);
 const subCategoryDefaultIconTargetCode = ref("");
-const subCategoryDefaultIconUploadingCode = ref("");
+const subCategoryDefaultIconTargetField = ref("icon_path");
+const subCategoryDefaultIconUploadingKey = ref("");
+const subCategoryUserPreviewOpen = ref(false);
+const subCategoryUserPreviewRowId = ref(null);
+const subCategoryUserPreviewValues = ref({});
+const subCategoryUserPreviewActiveGroupId = ref("");
 const baseFormulaBuilderOpen = ref(false);
 const baseFormulaBuilderMode = ref("create");
 const baseFormulaBuilderEntity = ref("base_formulas");
@@ -448,6 +453,41 @@ const activeSubCategoryDefaultsGroup = computed(() =>
 const activeSubCategoryDefaultsCount = computed(() =>
   Object.values(subCategoryDefaultsEditorDraft.value || {}).filter((value) => String(value || "").trim()).length
 );
+const activeSubCategoryUserPreviewRow = computed(() =>
+  editableSubCategories.value.find((item) => String(item.id) === String(subCategoryUserPreviewRowId.value)) || null
+);
+const activeSubCategoryUserPreviewGroups = computed(() => {
+  const row = activeSubCategoryUserPreviewRow.value;
+  if (!row) return [];
+  ensureSubCategoryParamDefaults(row);
+  return constructionSubCategoryParamTree.value
+    .map((group) => ({
+      ...group,
+      items: group.items.map((column) => {
+        const override = row.param_overrides?.[column.key] || {};
+        const displayTitle = String(override.display_title || column.label || column.key).trim() || column.key;
+        const descriptionText = String(override.description_text || "").trim();
+        const inputMode = override.input_mode === "binary" ? "binary" : "value";
+        return {
+          ...column,
+          displayTitle,
+          descriptionText,
+          iconUrl: getSubCategoryDefaultIconUrl(override.icon_path),
+          inputMode,
+          binaryOffLabel: String(override.binary_off_label || "").trim() || "0",
+          binaryOnLabel: String(override.binary_on_label || "").trim() || "1",
+          binaryOffIconUrl: getSubCategoryDefaultIconUrl(override.binary_off_icon_path),
+          binaryOnIconUrl: getSubCategoryDefaultIconUrl(override.binary_on_icon_path),
+        };
+      }),
+    }))
+    .filter((group) => group.items.length > 0);
+});
+const activeSubCategoryUserPreviewGroup = computed(() =>
+  activeSubCategoryUserPreviewGroups.value.find((group) => String(group.id) === String(subCategoryUserPreviewActiveGroupId.value))
+  || activeSubCategoryUserPreviewGroups.value[0]
+  || null
+);
 const formulaBuilderAvailableParams = computed(() =>
   editableParams.value
     .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
@@ -636,6 +676,8 @@ function normalizeSubCategoryPayload(item) {
           input_mode: override.input_mode === "binary" ? "binary" : "value",
           binary_off_label: String(override.binary_off_label || "").trim() || "0",
           binary_on_label: String(override.binary_on_label || "").trim() || "1",
+          binary_off_icon_path: normalizeIconFileName(override.binary_off_icon_path) || null,
+          binary_on_icon_path: normalizeIconFileName(override.binary_on_icon_path) || null,
         }];
       })
     ),
@@ -697,8 +739,15 @@ function getSubCategoryDefaultIconUrl(fileName) {
   return `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/icons/${encodeURIComponent(normalized)}`;
 }
 
-function getSubCategoryDefaultPreviewUrl(paramCode, fileName) {
+function getSubCategoryDefaultIconKey(paramCode, field = "icon_path") {
   const key = String(paramCode || "").trim();
+  const normalizedField = String(field || "icon_path").trim() || "icon_path";
+  if (!key) return "";
+  return `${key}::${normalizedField}`;
+}
+
+function getSubCategoryDefaultPreviewUrl(paramCode, fileName, field = "icon_path") {
+  const key = getSubCategoryDefaultIconKey(paramCode, field);
   const previewUrl = String(subCategoryDefaultIconPreviewUrls.value?.[key] || "").trim();
   if (previewUrl) return previewUrl;
   return getSubCategoryDefaultIconUrl(fileName);
@@ -711,8 +760,8 @@ function handleSubCategoryDefaultIconError(event) {
   imgEl.src = DEFAULT_SUB_CATEGORY_PARAM_ICON;
 }
 
-function revokeSubCategoryDefaultIconPreview(paramCode) {
-  const key = String(paramCode || "").trim();
+function revokeSubCategoryDefaultIconPreview(paramCode, field = "icon_path") {
+  const key = getSubCategoryDefaultIconKey(paramCode, field);
   if (!key) return;
   const previewUrl = String(subCategoryDefaultIconPreviewUrls.value?.[key] || "").trim();
   if (previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
@@ -726,19 +775,20 @@ function clearSubCategoryDefaultIconPreviews() {
   subCategoryDefaultIconPreviewUrls.value = {};
 }
 
-function isUploadingSubCategoryDefaultIcon(paramCode) {
-  return String(subCategoryDefaultIconUploadingCode.value || "") === String(paramCode || "");
+function isUploadingSubCategoryDefaultIcon(paramCode, field = "icon_path") {
+  return String(subCategoryDefaultIconUploadingKey.value || "") === getSubCategoryDefaultIconKey(paramCode, field);
 }
 
-function triggerSubCategoryDefaultIconUpload(paramCode) {
-  if (!paramCode || isUploadingSubCategoryDefaultIcon(paramCode)) return;
+function triggerSubCategoryDefaultIconUpload(paramCode, field = "icon_path") {
+  if (!paramCode || isUploadingSubCategoryDefaultIcon(paramCode, field)) return;
   subCategoryDefaultIconTargetCode.value = String(paramCode);
+  subCategoryDefaultIconTargetField.value = String(field || "icon_path").trim() || "icon_path";
   subCategoryDefaultIconInputEl.value?.click?.();
 }
 
-function getSubCategoryDefaultIconTooltip(paramCode) {
-  if (isUploadingSubCategoryDefaultIcon(paramCode)) return "در حال آپلود آیکون...";
-  const fileName = normalizeIconFileName(subCategoryDefaultsEditorOverridesDraft.value?.[paramCode]?.icon_path);
+function getSubCategoryDefaultIconTooltip(paramCode, field = "icon_path") {
+  if (isUploadingSubCategoryDefaultIcon(paramCode, field)) return "در حال آپلود آیکون...";
+  const fileName = normalizeIconFileName(subCategoryDefaultsEditorOverridesDraft.value?.[paramCode]?.[field]);
   if (!fileName) return "آیکون خالی است. برای آپلود کلیک کنید.";
   return `آیکون بارگذاری شده: ${fileName}`;
 }
@@ -746,15 +796,17 @@ function getSubCategoryDefaultIconTooltip(paramCode) {
 async function onSubCategoryDefaultIconFileChange(event) {
   const file = event?.target?.files?.[0];
   const paramCode = String(subCategoryDefaultIconTargetCode.value || "").trim();
-  if (!file || !paramCode) return;
-  const previousIconFileName = normalizeIconFileName(subCategoryDefaultsEditorOverridesDraft.value?.[paramCode]?.icon_path);
-  subCategoryDefaultIconUploadingCode.value = paramCode;
-  revokeSubCategoryDefaultIconPreview(paramCode);
-  subCategoryDefaultIconPreviewUrls.value[paramCode] = URL.createObjectURL(file);
+  const field = String(subCategoryDefaultIconTargetField.value || "icon_path").trim() || "icon_path";
+  const uploadKey = getSubCategoryDefaultIconKey(paramCode, field);
+  if (!file || !paramCode || !uploadKey) return;
+  const previousIconFileName = normalizeIconFileName(subCategoryDefaultsEditorOverridesDraft.value?.[paramCode]?.[field]);
+  subCategoryDefaultIconUploadingKey.value = uploadKey;
+  revokeSubCategoryDefaultIconPreview(paramCode, field);
+  subCategoryDefaultIconPreviewUrls.value[uploadKey] = URL.createObjectURL(file);
   try {
     const formData = new FormData();
     formData.append("file", file);
-    const slugHint = encodeURIComponent(`subcat-param-${paramCode}`);
+    const slugHint = encodeURIComponent(`subcat-${field.replaceAll("_path", "").replaceAll("_", "-")}-${paramCode}`);
     const res = await fetch(`/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/param-group-icons?slug_hint=${slugHint}`, {
       method: "POST",
       body: formData,
@@ -769,18 +821,21 @@ async function onSubCategoryDefaultIconFileChange(event) {
         input_mode: "value",
         binary_off_label: "0",
         binary_on_label: "1",
+        binary_off_icon_path: "",
+        binary_on_icon_path: "",
       };
     }
     if (isStagedParamGroupIcon(previousIconFileName)) {
       await discardStagedParamGroupIcon(previousIconFileName);
     }
-    subCategoryDefaultsEditorOverridesDraft.value[paramCode].icon_path = normalizeIconFileName(payload.file_name || payload.icon_path) || "";
+    subCategoryDefaultsEditorOverridesDraft.value[paramCode][field] = normalizeIconFileName(payload.file_name || payload.icon_path) || "";
   } catch (_) {
-    revokeSubCategoryDefaultIconPreview(paramCode);
+    revokeSubCategoryDefaultIconPreview(paramCode, field);
     showAlert("آپلود آیکون پارامتر انجام نشد.", { title: "آیکون پارامتر" });
   } finally {
-    subCategoryDefaultIconUploadingCode.value = "";
+    subCategoryDefaultIconUploadingKey.value = "";
     subCategoryDefaultIconTargetCode.value = "";
+    subCategoryDefaultIconTargetField.value = "icon_path";
     if (subCategoryDefaultIconInputEl.value) subCategoryDefaultIconInputEl.value.value = "";
   }
 }
@@ -808,9 +863,17 @@ async function cleanupStagedParamGroupUploads() {
         [
           ...editableParamGroups.value.map((item) => normalizeIconFileName(item?.param_group_icon_path)),
           ...editableSubCategories.value.flatMap((item) =>
-            Object.values(item?.param_overrides || {}).map((override) => normalizeIconFileName(override?.icon_path))
+            Object.values(item?.param_overrides || {}).flatMap((override) => [
+              normalizeIconFileName(override?.icon_path),
+              normalizeIconFileName(override?.binary_off_icon_path),
+              normalizeIconFileName(override?.binary_on_icon_path),
+            ])
           ),
-          ...Object.values(subCategoryDefaultsEditorOverridesDraft.value || {}).map((override) => normalizeIconFileName(override?.icon_path)),
+          ...Object.values(subCategoryDefaultsEditorOverridesDraft.value || {}).flatMap((override) => [
+            normalizeIconFileName(override?.icon_path),
+            normalizeIconFileName(override?.binary_off_icon_path),
+            normalizeIconFileName(override?.binary_on_icon_path),
+          ]),
         ].filter((value) => isStagedParamGroupIcon(value))
       ),
     ];
@@ -1642,6 +1705,8 @@ function ensureSubCategoryParamDefaults(item) {
         input_mode: "value",
         binary_off_label: "0",
         binary_on_label: "1",
+        binary_off_icon_path: "",
+        binary_on_icon_path: "",
       };
       continue;
     }
@@ -1652,6 +1717,8 @@ function ensureSubCategoryParamDefaults(item) {
       input_mode: item.param_overrides[column.key].input_mode === "binary" ? "binary" : "value",
       binary_off_label: String(item.param_overrides[column.key].binary_off_label || "").trim() || "0",
       binary_on_label: String(item.param_overrides[column.key].binary_on_label || "").trim() || "1",
+      binary_off_icon_path: normalizeIconFileName(item.param_overrides[column.key].binary_off_icon_path) || "",
+      binary_on_icon_path: normalizeIconFileName(item.param_overrides[column.key].binary_on_icon_path) || "",
     };
   }
   return item;
@@ -1688,6 +1755,8 @@ function openSubCategoryDefaultsEditor(item) {
         input_mode: override.input_mode === "binary" ? "binary" : "value",
         binary_off_label: String(override.binary_off_label || "").trim() || "0",
         binary_on_label: String(override.binary_on_label || "").trim() || "1",
+        binary_off_icon_path: normalizeIconFileName(override.binary_off_icon_path) || "",
+        binary_on_icon_path: normalizeIconFileName(override.binary_on_icon_path) || "",
       }];
     })
   );
@@ -1712,6 +1781,9 @@ async function closeSubCategoryDefaultsEditor() {
         || String(prevOverride.display_title || "").trim() !== String(nextOverride.display_title || "").trim()
         || String(prevOverride.description_text || "").trim() !== String(nextOverride.description_text || "").trim()
         || String(normalizeIconFileName(prevOverride.icon_path) || "").trim() !== String(normalizeIconFileName(nextOverride.icon_path) || "").trim()
+        || String(prevOverride.input_mode || "value") !== String(nextOverride.input_mode || "value")
+        || String(normalizeIconFileName(prevOverride.binary_off_icon_path) || "").trim() !== String(normalizeIconFileName(nextOverride.binary_off_icon_path) || "").trim()
+        || String(normalizeIconFileName(prevOverride.binary_on_icon_path) || "").trim() !== String(normalizeIconFileName(nextOverride.binary_on_icon_path) || "").trim()
         || String(prevOverride.binary_off_label || "0").trim() !== String(nextOverride.binary_off_label || "0").trim()
         || String(prevOverride.binary_on_label || "1").trim() !== String(nextOverride.binary_on_label || "1").trim()
         || !String(nextOverride.display_title || "").trim()
@@ -1749,6 +1821,8 @@ async function applySubCategoryDefaultsEditor() {
       input_mode: nextOverride.input_mode === "binary" ? "binary" : "value",
       binary_off_label: String(nextOverride.binary_off_label || "").trim() || "0",
       binary_on_label: String(nextOverride.binary_on_label || "").trim() || "1",
+      binary_off_icon_path: normalizeIconFileName(nextOverride.binary_off_icon_path) || "",
+      binary_on_icon_path: normalizeIconFileName(nextOverride.binary_on_icon_path) || "",
     };
     if (row.param_overrides[column.key].input_mode === "binary") {
       const current = String(row.param_defaults[column.key] ?? "").trim();
@@ -1762,6 +1836,84 @@ async function applySubCategoryDefaultsEditor() {
   subCategoryDefaultsEditorDraft.value = {};
   subCategoryDefaultsEditorOverridesDraft.value = {};
   subCategoryDefaultsActiveGroupId.value = "";
+}
+
+function openSubCategoryUserPreview(item) {
+  ensureSubCategoryParamDefaults(item);
+  subCategoryUserPreviewRowId.value = item.id;
+  subCategoryUserPreviewValues.value = Object.fromEntries(
+    constructionSubCategoryParamColumns.value.map((column) => {
+      const override = item.param_overrides?.[column.key] || {};
+      const value = String(item.param_defaults?.[column.key] ?? "").trim();
+      return [
+        column.key,
+        override.input_mode === "binary"
+          ? (value === "1" ? "1" : "0")
+          : value,
+      ];
+    })
+  );
+  subCategoryUserPreviewActiveGroupId.value = constructionSubCategoryParamTree.value[0]?.id || "";
+  subCategoryUserPreviewOpen.value = true;
+}
+
+function hasSubCategoryUserPreviewChanges() {
+  const row = activeSubCategoryUserPreviewRow.value;
+  if (!row) return false;
+  return constructionSubCategoryParamColumns.value.some((column) => {
+    const override = row.param_overrides?.[column.key] || {};
+    const nextValue = String(subCategoryUserPreviewValues.value?.[column.key] ?? "").trim();
+    const prevValue = String(row.param_defaults?.[column.key] ?? "").trim();
+    if (override.input_mode === "binary") {
+      return (nextValue === "1" ? "1" : "0") !== (prevValue === "1" ? "1" : "0");
+    }
+    return nextValue !== prevValue;
+  });
+}
+
+async function closeSubCategoryUserPreview() {
+  if (hasSubCategoryUserPreviewChanges()) {
+    const ok = await showConfirm("تغییرات پیش‌فرض‌ها اعمال نشده‌اند. پنجره بسته شود؟", {
+      title: "بستن پیش‌فرض‌ها",
+      confirmText: "بستن",
+      cancelText: "بازگشت",
+    });
+    if (!ok) return;
+  }
+  subCategoryUserPreviewOpen.value = false;
+  subCategoryUserPreviewRowId.value = null;
+  subCategoryUserPreviewValues.value = {};
+  subCategoryUserPreviewActiveGroupId.value = "";
+}
+
+function applySubCategoryUserPreview() {
+  const row = activeSubCategoryUserPreviewRow.value;
+  if (!row) return;
+  ensureSubCategoryParamDefaults(row);
+  for (const column of constructionSubCategoryParamColumns.value) {
+    const override = row.param_overrides?.[column.key] || {};
+    const nextValue = String(subCategoryUserPreviewValues.value?.[column.key] ?? "").trim();
+    row.param_defaults[column.key] = override.input_mode === "binary"
+      ? (nextValue === "1" ? "1" : "0")
+      : nextValue;
+  }
+  markConstructionSubCategoryDirty(row);
+  subCategoryUserPreviewOpen.value = false;
+  subCategoryUserPreviewRowId.value = null;
+  subCategoryUserPreviewValues.value = {};
+  subCategoryUserPreviewActiveGroupId.value = "";
+}
+
+function setSubCategoryUserPreviewBinaryValue(paramCode, value) {
+  if (!paramCode) return;
+  subCategoryUserPreviewValues.value = {
+    ...subCategoryUserPreviewValues.value,
+    [paramCode]: String(value) === "1" ? "1" : "0",
+  };
+}
+
+function selectSubCategoryUserPreviewGroup(groupId) {
+  subCategoryUserPreviewActiveGroupId.value = String(groupId || "");
 }
 
 function setSubCategoryDefaultInputMode(paramCode, mode) {
@@ -1964,6 +2116,8 @@ function getConstructionCsvHeaders() {
         `${item.key}__input_mode`,
         `${item.key}__binary_off_label`,
         `${item.key}__binary_on_label`,
+        `${item.key}__binary_off_icon_path`,
+        `${item.key}__binary_on_icon_path`,
       ]),
       "admin_mode",
     ];
@@ -2018,6 +2172,8 @@ function getConstructionCsvRows(items = null) {
           override.input_mode === "binary" ? "binary" : "value",
           String(override.binary_off_label || "").trim() || "0",
           String(override.binary_on_label || "").trim() || "1",
+          normalizeIconFileName(override.binary_off_icon_path) || "",
+          normalizeIconFileName(override.binary_on_icon_path) || "",
         ];
       }),
       item.admin_id === null ? "system" : "admin",
@@ -2265,7 +2421,7 @@ async function onConstructionImportFileChange(event) {
         };
       });
     } else if (constructionStep.value === "sub_categories") {
-      const perParamColumnCount = 7;
+      const perParamColumnCount = 9;
       const adminModeIndex = 4 + (constructionSubCategoryParamColumns.value.length * perParamColumnCount);
       previewRows = rows.slice(1).map((row, index) => {
         const paramDefaults = {};
@@ -2280,6 +2436,8 @@ async function onConstructionImportFileChange(event) {
             input_mode: String(row[offset + 4] || "").trim().toLowerCase() === "binary" ? "binary" : "value",
             binary_off_label: String(row[offset + 5] || "").trim() || "0",
             binary_on_label: String(row[offset + 6] || "").trim() || "1",
+            binary_off_icon_path: normalizeIconFileName(row[offset + 7]) || "",
+            binary_on_icon_path: normalizeIconFileName(row[offset + 8]) || "",
           };
         });
         return {
@@ -2836,7 +2994,9 @@ function buildImportedConstructionSubCategoryDrafts(rows) {
           || String(normalizeIconFileName(prevOverride.icon_path) || "") !== String(normalizeIconFileName(nextOverride.icon_path) || "")
           || String(prevOverride.input_mode || "value") !== String(nextOverride.input_mode || "value")
           || String(prevOverride.binary_off_label || "0").trim() !== String(nextOverride.binary_off_label || "0").trim()
-          || String(prevOverride.binary_on_label || "1").trim() !== String(nextOverride.binary_on_label || "1").trim();
+          || String(prevOverride.binary_on_label || "1").trim() !== String(nextOverride.binary_on_label || "1").trim()
+          || String(normalizeIconFileName(prevOverride.binary_off_icon_path) || "") !== String(normalizeIconFileName(nextOverride.binary_off_icon_path) || "")
+          || String(normalizeIconFileName(prevOverride.binary_on_icon_path) || "") !== String(normalizeIconFileName(nextOverride.binary_on_icon_path) || "");
       });
     return ensureSubCategoryParamDefaults(buildPartKindDraft(existing, {
       ...nextPayload,
@@ -6668,12 +6828,17 @@ onBeforeUnmount(() => {
                       <input v-model="item.sub_cat_title" class="constructionDialog__input" type="text" @input="markConstructionSubCategoryDirty(item)" />
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--defaults">
-                      <button type="button" class="constructionDialog__defaultsBtn" @click="openSubCategoryDefaultsEditor(item)">
-                        <span class="constructionDialog__defaultsBtnValue">{{ getSubCategoryDefaultsSummary(item).text }}</span>
-                        <span class="constructionDialog__defaultsBtnLabel">
-                          <span class="constructionDialog__defaultsBtnIcon" aria-hidden="true">💡</span>
-                        </span>
-                      </button>
+                      <div class="constructionDialog__defaultsActions">
+                        <button type="button" class="constructionDialog__defaultsBtn" :title="'تنظیمات پارامترهای ساب‌کت'" @click="openSubCategoryDefaultsEditor(item)">
+                          <span class="constructionDialog__defaultsBtnValue">{{ getSubCategoryDefaultsSummary(item).text }}</span>
+                          <span class="constructionDialog__defaultsBtnLabel">
+                            <span class="constructionDialog__defaultsBtnIcon" aria-hidden="true">💡</span>
+                          </span>
+                        </button>
+                        <button type="button" class="constructionDialog__defaultsPreviewBtn" @click="openSubCategoryUserPreview(item)">
+                          پیش‌فرض
+                        </button>
+                      </div>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--owner">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.admin_id || "SYSTEM" }}</span>
@@ -7156,12 +7321,15 @@ onBeforeUnmount(() => {
         @change="onSubCategoryDefaultIconFileChange"
       />
       <div class="formulaBuilder__head">
-        <div class="constructionDialog__sectionTitle formulaBuilder__title">پیش‌فرض‌های ساب‌کت</div>
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">تنظیمات ساب‌کت</div>
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeSubCategoryDefaultsEditor">×</button>
       </div>
       <div class="constructionDialog__sectionHint">
         {{ activeSubCategoryDefaultsRow?.sub_cat_title || "ساب‌کت" }} -
         {{ activeSubCategoryDefaultsRow ? `${toPersianDigits(activeSubCategoryDefaultsRow.temp_id)} / ${toPersianDigits(activeSubCategoryDefaultsRow.cat_id)} / ${toPersianDigits(activeSubCategoryDefaultsRow.sub_cat_id)}` : "" }}
+      </div>
+      <div class="constructionDialog__sectionHint">
+        در این بخش نام، توضیح، آیکون و نوع هر پارامتر را تعیین می‌کنید. تغییر مقدار پیش‌فرض از پنجره پیش‌فرض سریع انجام می‌شود و همان‌جا روی همین تنظیمات اعمال می‌گردد.
       </div>
       <div class="subCategoryDefaults__summary">
         <span class="constructionDialog__pill">مقداردهی‌شده: {{ toPersianDigits(activeSubCategoryDefaultsCount) }}</span>
@@ -7209,29 +7377,37 @@ onBeforeUnmount(() => {
           <div v-if="activeSubCategoryDefaultsGroup" class="subCategoryDefaults__branch">
             <div v-for="column in activeSubCategoryDefaultsGroup.items" :key="column.key" class="subCategoryDefaults__node">
               <div class="subCategoryDefaults__nodeLayout">
-                <div class="subCategoryDefaults__nodeMedia">
-                  <button
-                    type="button"
-                    class="subCategoryDefaults__nodeIconBox subCategoryDefaults__iconTrigger"
-                    :class="[subCategoryDefaultsEditorOverridesDraft[column.key]?.icon_path ? 'is-filled' : 'is-empty', isUploadingSubCategoryDefaultIcon(column.key) ? 'is-loading' : '']"
-                    :title="getSubCategoryDefaultIconTooltip(column.key)"
-                    :disabled="isUploadingSubCategoryDefaultIcon(column.key)"
-                    @click.prevent="triggerSubCategoryDefaultIconUpload(column.key)"
-                  >
-                    <span v-if="isUploadingSubCategoryDefaultIcon(column.key)" class="constructionDialog__spinner"></span>
-                    <img
-                      v-else
-                      :key="getSubCategoryDefaultPreviewUrl(column.key, subCategoryDefaultsEditorOverridesDraft[column.key]?.icon_path)"
-                      :src="getSubCategoryDefaultPreviewUrl(column.key, subCategoryDefaultsEditorOverridesDraft[column.key]?.icon_path)"
-                      :alt="subCategoryDefaultsEditorOverridesDraft[column.key]?.display_title || column.label || column.key"
-                      class="subCategoryDefaults__nodeIcon"
-                      @error="handleSubCategoryDefaultIconError"
-                    />
-                  </button>
-                </div>
                 <div class="subCategoryDefaults__nodeBody">
                   <div class="subCategoryDefaults__nodeHead">
-                    <span class="subCategoryDefaults__code">{{ column.key }}</span>
+                    <div class="subCategoryDefaults__nodeIdentity">
+                      <span class="subCategoryDefaults__code">{{ column.key }}</span>
+                      <input
+                        v-model="subCategoryDefaultsEditorOverridesDraft[column.key].display_title"
+                        class="constructionDialog__input subCategoryDefaults__titleInput"
+                        type="text"
+                        :placeholder="column.label || column.key"
+                      />
+                    </div>
+                    <div class="subCategoryDefaults__nodeMedia">
+                      <button
+                        type="button"
+                        class="subCategoryDefaults__nodeIconBox subCategoryDefaults__iconTrigger"
+                        :class="[subCategoryDefaultsEditorOverridesDraft[column.key]?.icon_path ? 'is-filled' : 'is-empty', isUploadingSubCategoryDefaultIcon(column.key, 'icon_path') ? 'is-loading' : '']"
+                        :title="getSubCategoryDefaultIconTooltip(column.key, 'icon_path')"
+                        :disabled="isUploadingSubCategoryDefaultIcon(column.key, 'icon_path')"
+                        @click.prevent="triggerSubCategoryDefaultIconUpload(column.key, 'icon_path')"
+                      >
+                        <span v-if="isUploadingSubCategoryDefaultIcon(column.key, 'icon_path')" class="constructionDialog__spinner"></span>
+                        <img
+                          v-else
+                          :key="getSubCategoryDefaultPreviewUrl(column.key, subCategoryDefaultsEditorOverridesDraft[column.key]?.icon_path, 'icon_path')"
+                          :src="getSubCategoryDefaultPreviewUrl(column.key, subCategoryDefaultsEditorOverridesDraft[column.key]?.icon_path, 'icon_path')"
+                          :alt="subCategoryDefaultsEditorOverridesDraft[column.key]?.display_title || column.label || column.key"
+                          class="subCategoryDefaults__nodeIcon"
+                          @error="handleSubCategoryDefaultIconError"
+                        />
+                      </button>
+                    </div>
                   </div>
                   <textarea
                     v-model="subCategoryDefaultsEditorOverridesDraft[column.key].description_text"
@@ -7239,15 +7415,27 @@ onBeforeUnmount(() => {
                     rows="1"
                     placeholder="توضیح این پارامتر را برای همین ساب‌کت بنویسید"
                   ></textarea>
-                  <div class="subCategoryDefaults__valueRow">
-                    <div class="subCategoryDefaults__nameWrap">
-                      <span class="subCategoryDefaults__valueLabel">نام نمایشی</span>
-                      <input
-                        v-model="subCategoryDefaultsEditorOverridesDraft[column.key].display_title"
-                        class="constructionDialog__input subCategoryDefaults__titleInput"
-                        type="text"
-                        :placeholder="column.label || column.key"
-                      />
+                  <div class="subCategoryDefaults__settingsRow">
+                    <div class="subCategoryDefaults__modeWrap">
+                      <span class="subCategoryDefaults__valueLabel">نوع</span>
+                      <div class="subCategoryDefaults__modeSwitch">
+                        <button
+                          type="button"
+                          class="subCategoryDefaults__modeBtn"
+                          :class="{ 'is-active': subCategoryDefaultsEditorOverridesDraft[column.key].input_mode === 'value' }"
+                          @click.prevent="setSubCategoryDefaultInputMode(column.key, 'value')"
+                        >
+                          مقداری
+                        </button>
+                        <button
+                          type="button"
+                          class="subCategoryDefaults__modeBtn"
+                          :class="{ 'is-active': subCategoryDefaultsEditorOverridesDraft[column.key].input_mode === 'binary' }"
+                          @click.prevent="setSubCategoryDefaultInputMode(column.key, 'binary')"
+                        >
+                          دو گزینه‌ای
+                        </button>
+                      </div>
                     </div>
                     <div class="subCategoryDefaults__valueWrap">
                       <span class="subCategoryDefaults__valueLabel">مقدار پیش‌فرض</span>
@@ -7276,41 +7464,81 @@ onBeforeUnmount(() => {
                             ۱
                           </button>
                         </div>
-                        <div v-if="subCategoryDefaultsEditorOverridesDraft[column.key].input_mode === 'binary'" class="subCategoryDefaults__binaryLabels">
-                          <input
-                            v-model="subCategoryDefaultsEditorOverridesDraft[column.key].binary_off_label"
-                            class="constructionDialog__input subCategoryDefaults__binaryLabelInput"
-                            type="text"
-                            placeholder="عنوان گزینه ۰"
-                          />
-                          <input
-                            v-model="subCategoryDefaultsEditorOverridesDraft[column.key].binary_on_label"
-                            class="constructionDialog__input subCategoryDefaults__binaryLabelInput"
-                            type="text"
-                            placeholder="عنوان گزینه ۱"
-                          />
-                        </div>
                       </div>
                     </div>
-                    <div class="subCategoryDefaults__modeWrap">
-                      <span class="subCategoryDefaults__valueLabel">نوع</span>
-                      <div class="subCategoryDefaults__modeSwitch">
-                        <button
-                          type="button"
-                          class="subCategoryDefaults__modeBtn"
-                          :class="{ 'is-active': subCategoryDefaultsEditorOverridesDraft[column.key].input_mode === 'value' }"
-                          @click.prevent="setSubCategoryDefaultInputMode(column.key, 'value')"
-                        >
-                          مقداری
-                        </button>
-                        <button
-                          type="button"
-                          class="subCategoryDefaults__modeBtn"
-                          :class="{ 'is-active': subCategoryDefaultsEditorOverridesDraft[column.key].input_mode === 'binary' }"
-                          @click.prevent="setSubCategoryDefaultInputMode(column.key, 'binary')"
-                        >
-                          دو گزینه‌ای
-                        </button>
+                  </div>
+                  <div v-if="subCategoryDefaultsEditorOverridesDraft[column.key].input_mode === 'binary'" class="subCategoryDefaults__binarySection">
+                    <div class="subCategoryDefaults__binarySectionTitle">گزینه‌های انتخابی کاربر</div>
+                    <div class="subCategoryDefaults__binaryLabels">
+                      <div class="subCategoryDefaults__binaryOptionCard">
+                        <div class="subCategoryDefaults__binaryOptionHead">
+                          <span class="subCategoryDefaults__binaryOptionValue">گزینه 0</span>
+                          <span class="subCategoryDefaults__binaryOptionCaption">متن و آیکون نمایش برای کاربر</span>
+                        </div>
+                        <div class="subCategoryDefaults__binaryOptionBody">
+                          <button
+                            type="button"
+                            class="subCategoryDefaults__nodeIconBox subCategoryDefaults__nodeIconBox--binary subCategoryDefaults__iconTrigger"
+                            :class="[subCategoryDefaultsEditorOverridesDraft[column.key]?.binary_off_icon_path ? 'is-filled' : 'is-empty', isUploadingSubCategoryDefaultIcon(column.key, 'binary_off_icon_path') ? 'is-loading' : '']"
+                            :title="getSubCategoryDefaultIconTooltip(column.key, 'binary_off_icon_path')"
+                            :disabled="isUploadingSubCategoryDefaultIcon(column.key, 'binary_off_icon_path')"
+                            @click.prevent="triggerSubCategoryDefaultIconUpload(column.key, 'binary_off_icon_path')"
+                          >
+                            <span v-if="isUploadingSubCategoryDefaultIcon(column.key, 'binary_off_icon_path')" class="constructionDialog__spinner"></span>
+                            <img
+                              v-else
+                              :key="getSubCategoryDefaultPreviewUrl(column.key, subCategoryDefaultsEditorOverridesDraft[column.key]?.binary_off_icon_path, 'binary_off_icon_path')"
+                              :src="getSubCategoryDefaultPreviewUrl(column.key, subCategoryDefaultsEditorOverridesDraft[column.key]?.binary_off_icon_path, 'binary_off_icon_path')"
+                              :alt="subCategoryDefaultsEditorOverridesDraft[column.key]?.binary_off_label || '0'"
+                              class="subCategoryDefaults__nodeIcon subCategoryDefaults__nodeIcon--binary"
+                              @error="handleSubCategoryDefaultIconError"
+                            />
+                          </button>
+                          <div class="subCategoryDefaults__binaryTextWrap">
+                            <span class="subCategoryDefaults__binaryInputLabel">متن گزینه 0</span>
+                            <input
+                              v-model="subCategoryDefaultsEditorOverridesDraft[column.key].binary_off_label"
+                              class="constructionDialog__input subCategoryDefaults__binaryLabelInput"
+                              type="text"
+                              placeholder="متن نمایشی گزینه 0"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div class="subCategoryDefaults__binaryOptionCard">
+                        <div class="subCategoryDefaults__binaryOptionHead">
+                          <span class="subCategoryDefaults__binaryOptionValue">گزینه 1</span>
+                          <span class="subCategoryDefaults__binaryOptionCaption">متن و آیکون نمایش برای کاربر</span>
+                        </div>
+                        <div class="subCategoryDefaults__binaryOptionBody">
+                          <button
+                            type="button"
+                            class="subCategoryDefaults__nodeIconBox subCategoryDefaults__nodeIconBox--binary subCategoryDefaults__iconTrigger"
+                            :class="[subCategoryDefaultsEditorOverridesDraft[column.key]?.binary_on_icon_path ? 'is-filled' : 'is-empty', isUploadingSubCategoryDefaultIcon(column.key, 'binary_on_icon_path') ? 'is-loading' : '']"
+                            :title="getSubCategoryDefaultIconTooltip(column.key, 'binary_on_icon_path')"
+                            :disabled="isUploadingSubCategoryDefaultIcon(column.key, 'binary_on_icon_path')"
+                            @click.prevent="triggerSubCategoryDefaultIconUpload(column.key, 'binary_on_icon_path')"
+                          >
+                            <span v-if="isUploadingSubCategoryDefaultIcon(column.key, 'binary_on_icon_path')" class="constructionDialog__spinner"></span>
+                            <img
+                              v-else
+                              :key="getSubCategoryDefaultPreviewUrl(column.key, subCategoryDefaultsEditorOverridesDraft[column.key]?.binary_on_icon_path, 'binary_on_icon_path')"
+                              :src="getSubCategoryDefaultPreviewUrl(column.key, subCategoryDefaultsEditorOverridesDraft[column.key]?.binary_on_icon_path, 'binary_on_icon_path')"
+                              :alt="subCategoryDefaultsEditorOverridesDraft[column.key]?.binary_on_label || '1'"
+                              class="subCategoryDefaults__nodeIcon subCategoryDefaults__nodeIcon--binary"
+                              @error="handleSubCategoryDefaultIconError"
+                            />
+                          </button>
+                          <div class="subCategoryDefaults__binaryTextWrap">
+                            <span class="subCategoryDefaults__binaryInputLabel">متن گزینه 1</span>
+                            <input
+                              v-model="subCategoryDefaultsEditorOverridesDraft[column.key].binary_on_label"
+                              class="constructionDialog__input subCategoryDefaults__binaryLabelInput"
+                              type="text"
+                              placeholder="متن نمایشی گزینه 1"
+                            />
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -7323,6 +7551,120 @@ onBeforeUnmount(() => {
       <div class="appDialog__actions">
         <button type="button" class="constructionDialog__textBtn" @click="closeSubCategoryDefaultsEditor">انصراف</button>
         <button type="button" class="constructionDialog__textBtn is-primary" @click="applySubCategoryDefaultsEditor">اعمال</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="subCategoryUserPreviewOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeSubCategoryUserPreview"></div>
+    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
+      <div class="subCategoryPreview__header">
+        <div>
+          <div class="subCategoryPreview__title">پیش‌فرض‌های ساب‌کت</div>
+          <div class="subCategoryPreview__caption">
+            {{ activeSubCategoryUserPreviewRow?.sub_cat_title || "ساب‌کت" }}
+            <span v-if="activeSubCategoryUserPreviewRow">
+              {{ `${toPersianDigits(activeSubCategoryUserPreviewRow.temp_id)} / ${toPersianDigits(activeSubCategoryUserPreviewRow.cat_id)} / ${toPersianDigits(activeSubCategoryUserPreviewRow.sub_cat_id)}` }}
+            </span>
+          </div>
+        </div>
+        <button type="button" class="constructionDialog__textBtn" @click="closeSubCategoryUserPreview">بستن</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        این بخش دسترسی سریع ادمین برای تغییر مقدار پیش‌فرض پارامترها است. هر تغییری که اینجا اعمال شود، مستقیم در تنظیمات همین ساب‌کت نیز دیده می‌شود.
+      </div>
+      <div class="subCategoryPreview__body">
+        <div class="subCategoryPreview__tree">
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--groups">
+            <div class="subCategoryPreview__selectorList">
+              <button
+                v-for="group in activeSubCategoryUserPreviewGroups"
+                :key="group.id"
+                type="button"
+                class="subCategoryPreview__groupHead"
+                :class="{ 'is-active': String(activeSubCategoryUserPreviewGroup?.id || '') === String(group.id) }"
+                @click="selectSubCategoryUserPreviewGroup(group.id)"
+              >
+                <div class="subCategoryPreview__groupMeta">
+                  <div class="subCategoryPreview__groupTitle">{{ group.title }}</div>
+                  <div class="subCategoryPreview__groupCaption">{{ toPersianDigits(group.items.length) }} پارامتر</div>
+                </div>
+                <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !group.iconUrl }">
+                  <img
+                    v-if="group.iconUrl"
+                    :key="group.iconUrl"
+                    :src="group.iconUrl"
+                    :alt="group.title"
+                    class="subCategoryPreview__groupIcon"
+                    @error="handleSubCategoryDefaultIconError"
+                  />
+                  <span v-else class="subCategoryPreview__groupFallback">{{ toPersianDigits(group.items.length) }}</span>
+                </div>
+                <span class="subCategoryPreview__groupChevron" aria-hidden="true">‹</span>
+              </button>
+            </div>
+          </div>
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
+            <div v-if="activeSubCategoryUserPreviewGroup" class="subCategoryPreview__panelHead">
+              <div class="subCategoryPreview__panelTitle">{{ activeSubCategoryUserPreviewGroup.title }}</div>
+              <div class="subCategoryPreview__panelCaption">{{ toPersianDigits(activeSubCategoryUserPreviewGroup.items.length) }} پارامتر در این گروه</div>
+            </div>
+            <div v-if="activeSubCategoryUserPreviewGroup" class="subCategoryPreview__params">
+              <article v-for="column in activeSubCategoryUserPreviewGroup.items" :key="column.key" class="subCategoryPreview__paramCard">
+              <template v-if="column.inputMode === 'binary'">
+                <div class="subCategoryPreview__paramMeta">
+                  <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                  <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                </div>
+                <div class="subCategoryPreview__binaryChoices">
+                  <button
+                    type="button"
+                    class="subCategoryPreview__binaryChoice"
+                    :class="{ 'is-active': String(subCategoryUserPreviewValues[column.key] ?? '0') !== '1' }"
+                    @click="setSubCategoryUserPreviewBinaryValue(column.key, '0')"
+                  >
+                    <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                    <span class="subCategoryPreview__binaryLabel">{{ column.binaryOffLabel }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="subCategoryPreview__binaryChoice"
+                    :class="{ 'is-active': String(subCategoryUserPreviewValues[column.key] ?? '0') === '1' }"
+                    @click="setSubCategoryUserPreviewBinaryValue(column.key, '1')"
+                  >
+                    <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                    <span class="subCategoryPreview__binaryLabel">{{ column.binaryOnLabel }}</span>
+                  </button>
+                </div>
+              </template>
+              <template v-else>
+                <div class="subCategoryPreview__valueHead">
+                  <div class="subCategoryPreview__valueIconBox">
+                    <img :src="column.iconUrl" :alt="column.displayTitle" class="subCategoryPreview__valueIcon" @error="handleSubCategoryDefaultIconError" />
+                  </div>
+                  <div class="subCategoryPreview__paramMeta">
+                    <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                    <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                  </div>
+                </div>
+                <input
+                  v-model="subCategoryUserPreviewValues[column.key]"
+                  class="constructionDialog__input subCategoryPreview__valueInput"
+                  type="number"
+                  inputmode="numeric"
+                  min="0"
+                  :placeholder="column.displayTitle"
+                />
+                <div class="subCategoryPreview__valueUnit">میلی‌متر</div>
+              </template>
+              </article>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closeSubCategoryUserPreview">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="applySubCategoryUserPreview">اعمال</button>
       </div>
     </div>
   </div>
