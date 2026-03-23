@@ -179,6 +179,7 @@ const subCategoryDefaultsEditorOpen = ref(false);
 const subCategoryDefaultsEditorRowId = ref(null);
 const subCategoryDefaultsEditorDraft = ref({});
 const subCategoryDefaultsEditorOverridesDraft = ref({});
+const subCategoryDefaultIconPreviewUrls = ref({});
 const subCategoryDefaultsActiveGroupId = ref("");
 const subCategoryDefaultIconInputEl = ref(null);
 const subCategoryDefaultIconTargetCode = ref("");
@@ -633,6 +634,8 @@ function normalizeSubCategoryPayload(item) {
           description_text: String(override.description_text || "").trim(),
           icon_path: normalizeIconFileName(override.icon_path) || null,
           input_mode: override.input_mode === "binary" ? "binary" : "value",
+          binary_off_label: String(override.binary_off_label || "").trim() || "0",
+          binary_on_label: String(override.binary_on_label || "").trim() || "1",
         }];
       })
     ),
@@ -660,6 +663,16 @@ function normalizeIconFileName(value) {
   return text.split("?")[0].split("/").pop() || "";
 }
 
+const DEFAULT_SUB_CATEGORY_PARAM_ICON = `data:image/svg+xml;utf8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+    <rect width="64" height="64" rx="18" fill="#fff4cc"/>
+    <path d="M32 12c-9.39 0-17 7.61-17 17 0 6.34 3.49 11.87 8.66 14.79 1.56.88 2.34 2.15 2.34 3.81V49h12v-1.4c0-1.66.78-2.93 2.34-3.81C45.51 40.87 49 35.34 49 29c0-9.39-7.61-17-17-17Z" fill="#ffcf33"/>
+    <path d="M26 53h12a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4Z" fill="#4a4a4a"/>
+    <rect x="25" y="49" width="14" height="4" rx="2" fill="#6b6b6b"/>
+    <path d="M32 8v5M14 29H9m46 0h-5M18.22 15.22l3.54 3.54m20.48-3.54-3.54 3.54" stroke="#e1a800" stroke-width="3" stroke-linecap="round"/>
+  </svg>`
+)}`;
+
 function hasParamGroupIcon(item) {
   return !!normalizeIconFileName(item?.param_group_icon_path);
 }
@@ -680,8 +693,37 @@ function isUploadingParamGroupIcon(item) {
 
 function getSubCategoryDefaultIconUrl(fileName) {
   const normalized = normalizeIconFileName(fileName);
-  if (!normalized) return "";
+  if (!normalized) return DEFAULT_SUB_CATEGORY_PARAM_ICON;
   return `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/icons/${encodeURIComponent(normalized)}`;
+}
+
+function getSubCategoryDefaultPreviewUrl(paramCode, fileName) {
+  const key = String(paramCode || "").trim();
+  const previewUrl = String(subCategoryDefaultIconPreviewUrls.value?.[key] || "").trim();
+  if (previewUrl) return previewUrl;
+  return getSubCategoryDefaultIconUrl(fileName);
+}
+
+function handleSubCategoryDefaultIconError(event) {
+  const imgEl = event?.target;
+  if (!imgEl || imgEl.dataset?.fallbackApplied === "1") return;
+  imgEl.dataset.fallbackApplied = "1";
+  imgEl.src = DEFAULT_SUB_CATEGORY_PARAM_ICON;
+}
+
+function revokeSubCategoryDefaultIconPreview(paramCode) {
+  const key = String(paramCode || "").trim();
+  if (!key) return;
+  const previewUrl = String(subCategoryDefaultIconPreviewUrls.value?.[key] || "").trim();
+  if (previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
+  delete subCategoryDefaultIconPreviewUrls.value[key];
+}
+
+function clearSubCategoryDefaultIconPreviews() {
+  for (const key of Object.keys(subCategoryDefaultIconPreviewUrls.value || {})) {
+    revokeSubCategoryDefaultIconPreview(key);
+  }
+  subCategoryDefaultIconPreviewUrls.value = {};
 }
 
 function isUploadingSubCategoryDefaultIcon(paramCode) {
@@ -694,11 +736,21 @@ function triggerSubCategoryDefaultIconUpload(paramCode) {
   subCategoryDefaultIconInputEl.value?.click?.();
 }
 
+function getSubCategoryDefaultIconTooltip(paramCode) {
+  if (isUploadingSubCategoryDefaultIcon(paramCode)) return "در حال آپلود آیکون...";
+  const fileName = normalizeIconFileName(subCategoryDefaultsEditorOverridesDraft.value?.[paramCode]?.icon_path);
+  if (!fileName) return "آیکون خالی است. برای آپلود کلیک کنید.";
+  return `آیکون بارگذاری شده: ${fileName}`;
+}
+
 async function onSubCategoryDefaultIconFileChange(event) {
   const file = event?.target?.files?.[0];
   const paramCode = String(subCategoryDefaultIconTargetCode.value || "").trim();
   if (!file || !paramCode) return;
+  const previousIconFileName = normalizeIconFileName(subCategoryDefaultsEditorOverridesDraft.value?.[paramCode]?.icon_path);
   subCategoryDefaultIconUploadingCode.value = paramCode;
+  revokeSubCategoryDefaultIconPreview(paramCode);
+  subCategoryDefaultIconPreviewUrls.value[paramCode] = URL.createObjectURL(file);
   try {
     const formData = new FormData();
     formData.append("file", file);
@@ -714,10 +766,17 @@ async function onSubCategoryDefaultIconFileChange(event) {
         display_title: constructionSubCategoryParamMetaByCode.value[paramCode]?.label || paramCode,
         description_text: "",
         icon_path: "",
+        input_mode: "value",
+        binary_off_label: "0",
+        binary_on_label: "1",
       };
+    }
+    if (isStagedParamGroupIcon(previousIconFileName)) {
+      await discardStagedParamGroupIcon(previousIconFileName);
     }
     subCategoryDefaultsEditorOverridesDraft.value[paramCode].icon_path = normalizeIconFileName(payload.file_name || payload.icon_path) || "";
   } catch (_) {
+    revokeSubCategoryDefaultIconPreview(paramCode);
     showAlert("آپلود آیکون پارامتر انجام نشد.", { title: "آیکون پارامتر" });
   } finally {
     subCategoryDefaultIconUploadingCode.value = "";
@@ -746,9 +805,13 @@ async function cleanupStagedParamGroupUploads() {
   } catch (_) {
     const stagedFileNames = [
       ...new Set(
-        editableParamGroups.value
-          .map((item) => normalizeIconFileName(item?.param_group_icon_path))
-          .filter((value) => isStagedParamGroupIcon(value))
+        [
+          ...editableParamGroups.value.map((item) => normalizeIconFileName(item?.param_group_icon_path)),
+          ...editableSubCategories.value.flatMap((item) =>
+            Object.values(item?.param_overrides || {}).map((override) => normalizeIconFileName(override?.icon_path))
+          ),
+          ...Object.values(subCategoryDefaultsEditorOverridesDraft.value || {}).map((override) => normalizeIconFileName(override?.icon_path)),
+        ].filter((value) => isStagedParamGroupIcon(value))
       ),
     ];
     for (const fileName of stagedFileNames) {
@@ -1577,6 +1640,8 @@ function ensureSubCategoryParamDefaults(item) {
         description_text: "",
         icon_path: "",
         input_mode: "value",
+        binary_off_label: "0",
+        binary_on_label: "1",
       };
       continue;
     }
@@ -1585,6 +1650,8 @@ function ensureSubCategoryParamDefaults(item) {
       description_text: String(item.param_overrides[column.key].description_text || "").trim(),
       icon_path: normalizeIconFileName(item.param_overrides[column.key].icon_path) || "",
       input_mode: item.param_overrides[column.key].input_mode === "binary" ? "binary" : "value",
+      binary_off_label: String(item.param_overrides[column.key].binary_off_label || "").trim() || "0",
+      binary_on_label: String(item.param_overrides[column.key].binary_on_label || "").trim() || "1",
     };
   }
   return item;
@@ -1602,6 +1669,7 @@ function getSubCategoryDefaultsSummary(item) {
 
 function openSubCategoryDefaultsEditor(item) {
   ensureSubCategoryParamDefaults(item);
+  clearSubCategoryDefaultIconPreviews();
   subCategoryDefaultsEditorRowId.value = item.id;
   subCategoryDefaultsEditorDraft.value = Object.fromEntries(
     constructionSubCategoryParamColumns.value.map((column) => [
@@ -1618,6 +1686,8 @@ function openSubCategoryDefaultsEditor(item) {
         description_text: String(override.description_text || "").trim(),
         icon_path: normalizeIconFileName(override.icon_path) || "",
         input_mode: override.input_mode === "binary" ? "binary" : "value",
+        binary_off_label: String(override.binary_off_label || "").trim() || "0",
+        binary_on_label: String(override.binary_on_label || "").trim() || "1",
       }];
     })
   );
@@ -1642,6 +1712,8 @@ async function closeSubCategoryDefaultsEditor() {
         || String(prevOverride.display_title || "").trim() !== String(nextOverride.display_title || "").trim()
         || String(prevOverride.description_text || "").trim() !== String(nextOverride.description_text || "").trim()
         || String(normalizeIconFileName(prevOverride.icon_path) || "").trim() !== String(normalizeIconFileName(nextOverride.icon_path) || "").trim()
+        || String(prevOverride.binary_off_label || "0").trim() !== String(nextOverride.binary_off_label || "0").trim()
+        || String(prevOverride.binary_on_label || "1").trim() !== String(nextOverride.binary_on_label || "1").trim()
         || !String(nextOverride.display_title || "").trim()
         || String(nextOverride.display_title || "").trim() === "";
     }
@@ -1658,10 +1730,11 @@ async function closeSubCategoryDefaultsEditor() {
   subCategoryDefaultsEditorRowId.value = null;
   subCategoryDefaultsEditorDraft.value = {};
   subCategoryDefaultsEditorOverridesDraft.value = {};
+  clearSubCategoryDefaultIconPreviews();
   subCategoryDefaultsActiveGroupId.value = "";
 }
 
-function applySubCategoryDefaultsEditor() {
+async function applySubCategoryDefaultsEditor() {
   const row = activeSubCategoryDefaultsRow.value;
   if (!row) return;
   ensureSubCategoryParamDefaults(row);
@@ -1674,6 +1747,8 @@ function applySubCategoryDefaultsEditor() {
       description_text: String(nextOverride.description_text || "").trim(),
       icon_path: normalizeIconFileName(nextOverride.icon_path) || "",
       input_mode: nextOverride.input_mode === "binary" ? "binary" : "value",
+      binary_off_label: String(nextOverride.binary_off_label || "").trim() || "0",
+      binary_on_label: String(nextOverride.binary_on_label || "").trim() || "1",
     };
     if (row.param_overrides[column.key].input_mode === "binary") {
       const current = String(row.param_defaults[column.key] ?? "").trim();
@@ -1681,6 +1756,7 @@ function applySubCategoryDefaultsEditor() {
     }
   }
   markConstructionSubCategoryDirty(row);
+  clearSubCategoryDefaultIconPreviews();
   subCategoryDefaultsEditorOpen.value = false;
   subCategoryDefaultsEditorRowId.value = null;
   subCategoryDefaultsEditorDraft.value = {};
@@ -1692,6 +1768,8 @@ function setSubCategoryDefaultInputMode(paramCode, mode) {
   const key = String(paramCode || "").trim();
   if (!key || !subCategoryDefaultsEditorOverridesDraft.value[key]) return;
   subCategoryDefaultsEditorOverridesDraft.value[key].input_mode = mode === "binary" ? "binary" : "value";
+  subCategoryDefaultsEditorOverridesDraft.value[key].binary_off_label = String(subCategoryDefaultsEditorOverridesDraft.value[key].binary_off_label || "").trim() || "0";
+  subCategoryDefaultsEditorOverridesDraft.value[key].binary_on_label = String(subCategoryDefaultsEditorOverridesDraft.value[key].binary_on_label || "").trim() || "1";
   if (subCategoryDefaultsEditorOverridesDraft.value[key].input_mode === "binary") {
     const current = String(subCategoryDefaultsEditorDraft.value?.[key] ?? "").trim();
     subCategoryDefaultsEditorDraft.value[key] = current === "1" ? "1" : "0";
@@ -1873,7 +1951,22 @@ function getConstructionCsvHeaders() {
     return ["temp_id", "cat_id", "cat_title", "admin_mode"];
   }
   if (constructionStep.value === "sub_categories") {
-    return ["temp_id", "cat_id", "sub_cat_id", "sub_cat_title", ...constructionSubCategoryParamColumns.value.map((item) => item.key), "admin_mode"];
+    return [
+      "temp_id",
+      "cat_id",
+      "sub_cat_id",
+      "sub_cat_title",
+      ...constructionSubCategoryParamColumns.value.flatMap((item) => [
+        item.key,
+        `${item.key}__display_title`,
+        `${item.key}__description_text`,
+        `${item.key}__icon_path`,
+        `${item.key}__input_mode`,
+        `${item.key}__binary_off_label`,
+        `${item.key}__binary_on_label`,
+      ]),
+      "admin_mode",
+    ];
   }
   if (constructionStep.value === "part_formulas") {
     return ["part_formula_id", "part_kind_id", "part_sub_kind_id", "part_code", "part_title", ...PART_FORMULA_FIELDS.map((item) => item.key), "admin_mode"];
@@ -1915,7 +2008,18 @@ function getConstructionCsvRows(items = null) {
       Number(item.cat_id) || "",
       Number(item.sub_cat_id) || "",
       String(item.sub_cat_title || "").trim(),
-      ...constructionSubCategoryParamColumns.value.map((column) => String(item.param_defaults?.[column.key] ?? "").trim()),
+      ...constructionSubCategoryParamColumns.value.flatMap((column) => {
+        const override = item.param_overrides?.[column.key] || {};
+        return [
+          String(item.param_defaults?.[column.key] ?? "").trim(),
+          String(override.display_title || "").trim(),
+          String(override.description_text || "").trim(),
+          normalizeIconFileName(override.icon_path) || "",
+          override.input_mode === "binary" ? "binary" : "value",
+          String(override.binary_off_label || "").trim() || "0",
+          String(override.binary_on_label || "").trim() || "1",
+        ];
+      }),
       item.admin_id === null ? "system" : "admin",
     ]);
   }
@@ -2161,11 +2265,22 @@ async function onConstructionImportFileChange(event) {
         };
       });
     } else if (constructionStep.value === "sub_categories") {
-      const adminModeIndex = 4 + constructionSubCategoryParamColumns.value.length;
+      const perParamColumnCount = 7;
+      const adminModeIndex = 4 + (constructionSubCategoryParamColumns.value.length * perParamColumnCount);
       previewRows = rows.slice(1).map((row, index) => {
         const paramDefaults = {};
+        const paramOverrides = {};
         constructionSubCategoryParamColumns.value.forEach((column, paramIndex) => {
-          paramDefaults[column.key] = String(row[4 + paramIndex] || "").trim();
+          const offset = 4 + (paramIndex * perParamColumnCount);
+          paramDefaults[column.key] = String(row[offset] || "").trim();
+          paramOverrides[column.key] = {
+            display_title: String(row[offset + 1] || "").trim(),
+            description_text: String(row[offset + 2] || "").trim(),
+            icon_path: normalizeIconFileName(row[offset + 3]) || "",
+            input_mode: String(row[offset + 4] || "").trim().toLowerCase() === "binary" ? "binary" : "value",
+            binary_off_label: String(row[offset + 5] || "").trim() || "0",
+            binary_on_label: String(row[offset + 6] || "").trim() || "1",
+          };
         });
         return {
           lineNo: index + 2,
@@ -2174,6 +2289,7 @@ async function onConstructionImportFileChange(event) {
           sub_cat_id: Number(row[2]),
           sub_cat_title: String(row[3] || "").trim(),
           param_defaults: paramDefaults,
+          param_overrides: paramOverrides,
           admin_mode: String(row[adminModeIndex] || "admin").trim().toLowerCase() === "system" ? "system" : "admin",
         };
       });
@@ -2692,7 +2808,7 @@ function buildImportedConstructionSubCategoryDrafts(rows) {
       sort_order: index + 1,
       is_system: adminId === null,
       param_defaults: { ...(row.param_defaults || {}) },
-      param_overrides: existing?.param_overrides ? { ...(existing.param_overrides || {}) } : {},
+      param_overrides: row.param_overrides ? { ...(row.param_overrides || {}) } : existing?.param_overrides ? { ...(existing.param_overrides || {}) } : {},
     };
     if (!existing) {
       return ensureSubCategoryParamDefaults(buildPartKindDraft(nextPayload, {
@@ -2717,7 +2833,10 @@ function buildImportedConstructionSubCategoryDrafts(rows) {
         return String(existingDefaults[column.key] ?? "").trim() !== String(nextPayload.param_defaults[column.key] ?? "").trim()
           || String(prevOverride.display_title || "").trim() !== String(nextOverride.display_title || "").trim()
           || String(prevOverride.description_text || "").trim() !== String(nextOverride.description_text || "").trim()
-          || String(normalizeIconFileName(prevOverride.icon_path) || "") !== String(normalizeIconFileName(nextOverride.icon_path) || "");
+          || String(normalizeIconFileName(prevOverride.icon_path) || "") !== String(normalizeIconFileName(nextOverride.icon_path) || "")
+          || String(prevOverride.input_mode || "value") !== String(nextOverride.input_mode || "value")
+          || String(prevOverride.binary_off_label || "0").trim() !== String(nextOverride.binary_off_label || "0").trim()
+          || String(prevOverride.binary_on_label || "1").trim() !== String(nextOverride.binary_on_label || "1").trim();
       });
     return ensureSubCategoryParamDefaults(buildPartKindDraft(existing, {
       ...nextPayload,
@@ -7066,7 +7185,14 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="subCategoryDefaults__groupBadge" :class="{ 'is-empty': !group.iconUrl }">
-                <img v-if="group.iconUrl" :src="group.iconUrl" :alt="group.title" class="subCategoryDefaults__groupIcon" />
+                <img
+                  v-if="group.iconUrl"
+                  :key="group.iconUrl"
+                  :src="group.iconUrl"
+                  :alt="group.title"
+                  class="subCategoryDefaults__groupIcon"
+                  @error="handleSubCategoryDefaultIconError"
+                />
                 <span v-else class="subCategoryDefaults__groupFallback">{{ toPersianDigits(group.items.length) }}</span>
               </div>
               <span class="subCategoryDefaults__groupChevron" aria-hidden="true">‹</span>
@@ -7081,25 +7207,26 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div v-if="activeSubCategoryDefaultsGroup" class="subCategoryDefaults__branch">
-            <label v-for="column in activeSubCategoryDefaultsGroup.items" :key="column.key" class="subCategoryDefaults__node">
+            <div v-for="column in activeSubCategoryDefaultsGroup.items" :key="column.key" class="subCategoryDefaults__node">
               <div class="subCategoryDefaults__nodeLayout">
                 <div class="subCategoryDefaults__nodeMedia">
-                  <div class="subCategoryDefaults__nodeIconBox" :class="{ 'is-empty': !subCategoryDefaultsEditorOverridesDraft[column.key]?.icon_path }">
-                    <img
-                      v-if="subCategoryDefaultsEditorOverridesDraft[column.key]?.icon_path"
-                      :src="getSubCategoryDefaultIconUrl(subCategoryDefaultsEditorOverridesDraft[column.key]?.icon_path)"
-                      :alt="subCategoryDefaultsEditorOverridesDraft[column.key]?.display_title || column.label || column.key"
-                      class="subCategoryDefaults__nodeIcon"
-                    />
-                    <span v-else class="subCategoryDefaults__nodeIconFallback">{{ (subCategoryDefaultsEditorOverridesDraft[column.key]?.display_title || column.label || column.key || "?").slice(0, 1) }}</span>
-                  </div>
                   <button
                     type="button"
-                    class="constructionDialog__miniBtn subCategoryDefaults__iconBtn"
+                    class="subCategoryDefaults__nodeIconBox subCategoryDefaults__iconTrigger"
+                    :class="[subCategoryDefaultsEditorOverridesDraft[column.key]?.icon_path ? 'is-filled' : 'is-empty', isUploadingSubCategoryDefaultIcon(column.key) ? 'is-loading' : '']"
+                    :title="getSubCategoryDefaultIconTooltip(column.key)"
                     :disabled="isUploadingSubCategoryDefaultIcon(column.key)"
                     @click.prevent="triggerSubCategoryDefaultIconUpload(column.key)"
                   >
-                    {{ isUploadingSubCategoryDefaultIcon(column.key) ? "..." : "آیکون" }}
+                    <span v-if="isUploadingSubCategoryDefaultIcon(column.key)" class="constructionDialog__spinner"></span>
+                    <img
+                      v-else
+                      :key="getSubCategoryDefaultPreviewUrl(column.key, subCategoryDefaultsEditorOverridesDraft[column.key]?.icon_path)"
+                      :src="getSubCategoryDefaultPreviewUrl(column.key, subCategoryDefaultsEditorOverridesDraft[column.key]?.icon_path)"
+                      :alt="subCategoryDefaultsEditorOverridesDraft[column.key]?.display_title || column.label || column.key"
+                      class="subCategoryDefaults__nodeIcon"
+                      @error="handleSubCategoryDefaultIconError"
+                    />
                   </button>
                 </div>
                 <div class="subCategoryDefaults__nodeBody">
@@ -7149,6 +7276,20 @@ onBeforeUnmount(() => {
                             ۱
                           </button>
                         </div>
+                        <div v-if="subCategoryDefaultsEditorOverridesDraft[column.key].input_mode === 'binary'" class="subCategoryDefaults__binaryLabels">
+                          <input
+                            v-model="subCategoryDefaultsEditorOverridesDraft[column.key].binary_off_label"
+                            class="constructionDialog__input subCategoryDefaults__binaryLabelInput"
+                            type="text"
+                            placeholder="عنوان گزینه ۰"
+                          />
+                          <input
+                            v-model="subCategoryDefaultsEditorOverridesDraft[column.key].binary_on_label"
+                            class="constructionDialog__input subCategoryDefaults__binaryLabelInput"
+                            type="text"
+                            placeholder="عنوان گزینه ۱"
+                          />
+                        </div>
                       </div>
                     </div>
                     <div class="subCategoryDefaults__modeWrap">
@@ -7175,7 +7316,7 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </div>
-            </label>
+            </div>
           </div>
         </div>
       </div>

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import io
-import shutil
 import secrets
 import uuid
 from pathlib import Path
@@ -39,7 +38,6 @@ def ensure_admin_storage(admin_id: uuid.UUID) -> dict[str, Path]:
         "tables": root / "tables",
         "icons": root / "icons",
         "orders": root / "orders",
-        "uploads": root / "uploads",
     }
     for path in paths.values():
         path.mkdir(parents=True, exist_ok=True)
@@ -84,6 +82,13 @@ def is_staged_icon_file_name(value: str | None) -> bool:
     return bool(file_name and file_name.startswith(STAGED_ICON_PREFIX))
 
 
+def _icon_target_path(admin_id: uuid.UUID, file_name: str | None) -> Path | None:
+    safe_name = normalize_icon_file_name(file_name)
+    if not safe_name:
+        return None
+    return ensure_admin_storage(admin_id)["icons"] / safe_name
+
+
 def _validate_and_normalize_icon(raw: bytes):
     try:
         from PIL import Image, ImageOps
@@ -123,8 +128,10 @@ async def save_param_group_icon(admin_id: uuid.UUID, file: UploadFile, *, slug_h
 
     paths = ensure_admin_storage(admin_id)
     file_name = f"{STAGED_ICON_PREFIX}{_safe_slug(slug_hint)}-{secrets.token_hex(6)}.webp"
-    target = paths["uploads"] / file_name
+    target = paths["icons"] / file_name
     normalized.save(target, format="WEBP", quality=92, method=6)
+    final_target = paths["icons"] / file_name[len(STAGED_ICON_PREFIX) :]
+    normalized.save(final_target, format="WEBP", quality=92, method=6)
     return file_name, target
 
 
@@ -132,16 +139,16 @@ def discard_staged_icon(admin_id: uuid.UUID, file_name: str | None) -> None:
     normalized = normalize_icon_file_name(file_name)
     if not normalized or not is_staged_icon_file_name(normalized):
         return
-    target = ensure_admin_storage(admin_id)["uploads"] / normalized
-    if target.exists() and target.parent == ensure_admin_storage(admin_id)["uploads"]:
+    target = ensure_admin_storage(admin_id)["icons"] / normalized
+    if target.exists() and target.parent == ensure_admin_storage(admin_id)["icons"]:
         target.unlink(missing_ok=True)
 
 
 def discard_all_staged_icons(admin_id: uuid.UUID) -> int:
-    uploads_dir = ensure_admin_storage(admin_id)["uploads"]
+    icons_dir = ensure_admin_storage(admin_id)["icons"]
     removed = 0
-    for path in uploads_dir.glob(f"{STAGED_ICON_PREFIX}*"):
-        if path.is_file() and path.parent == uploads_dir:
+    for path in icons_dir.glob(f"{STAGED_ICON_PREFIX}*"):
+        if path.is_file() and path.parent == icons_dir:
             path.unlink(missing_ok=True)
             removed += 1
     return removed
@@ -166,16 +173,20 @@ def finalize_param_group_icon(admin_id: uuid.UUID, file_name: str | None, *, pre
 
     if is_staged_icon_file_name(normalized):
         paths = ensure_admin_storage(admin_id)
-        source = paths["uploads"] / normalized
-        if not source.exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Uploaded icon draft not found.")
+        source = paths["icons"] / normalized
         final_name = normalized[len(STAGED_ICON_PREFIX) :]
         target = paths["icons"] / final_name
+        if not source.exists():
+            fallback_target = paths["icons"] / final_name
+            if fallback_target.exists() and fallback_target.parent == paths["icons"]:
+                if previous_normalized and previous_normalized != final_name:
+                    delete_final_icon(admin_id, previous_normalized)
+                return final_name
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Uploaded icon draft not found.")
         if previous_normalized and previous_normalized != final_name:
             delete_final_icon(admin_id, previous_normalized)
-        if target.exists():
-            target.unlink()
-        shutil.move(str(source), str(target))
+        if source.exists():
+            source.unlink(missing_ok=True)
         return final_name
 
     if previous_normalized and previous_normalized != normalized:
@@ -186,6 +197,23 @@ def finalize_param_group_icon(admin_id: uuid.UUID, file_name: str | None, *, pre
 def resolve_admin_icon_path(admin_id: uuid.UUID, file_name: str) -> Path:
     safe_name = Path(file_name).name
     target = ensure_admin_storage(admin_id)["icons"] / safe_name
+    if not target.exists() and safe_name.startswith(STAGED_ICON_PREFIX):
+        fallback_target = ensure_admin_storage(admin_id)["icons"] / safe_name[len(STAGED_ICON_PREFIX) :]
+        if fallback_target.exists() and fallback_target.parent == ensure_admin_storage(admin_id)["icons"]:
+            return fallback_target
     if not target.exists() or target.parent != ensure_admin_storage(admin_id)["icons"]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Icon file not found.")
     return target
+
+
+def admin_icon_exists(admin_id: uuid.UUID, file_name: str | None) -> bool:
+    target = _icon_target_path(admin_id, file_name)
+    if target is None:
+        return False
+    if target.exists() and target.parent == ensure_admin_storage(admin_id)["icons"]:
+        return True
+    safe_name = normalize_icon_file_name(file_name)
+    if safe_name and safe_name.startswith(STAGED_ICON_PREFIX):
+        fallback_target = _icon_target_path(admin_id, safe_name[len(STAGED_ICON_PREFIX) :])
+        return bool(fallback_target and fallback_target.exists() and fallback_target.parent == ensure_admin_storage(admin_id)["icons"])
+    return False

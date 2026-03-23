@@ -53,6 +53,8 @@ async def sync_defaults_for_sub_categories(session: AsyncSession, items: list[Su
                     description_text=None,
                     icon_path=None,
                     input_mode="value",
+                    binary_off_label="0",
+                    binary_on_label="1",
                 )
             )
             existing_pairs.add(pair)
@@ -63,4 +65,6 @@ async def sync_defaults_for_sub_categories(session: AsyncSession, items: list[Su
                 row.display_title = param.param_title_fa.strip()
         row.icon_path = normalize_icon_file_name(row.icon_path)
         row.input_mode = row.input_mode if row.input_mode in {"value", "binary"} else "value"
+        row.binary_off_label = str(row.binary_off_label or "0").strip() or "0"
+        row.binary_on_label = str(row.binary_on_label or "1").strip() or "1"
     await session.flush()

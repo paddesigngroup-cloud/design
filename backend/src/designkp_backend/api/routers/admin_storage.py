@@ -11,6 +11,7 @@ from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import BaseFormula, Category, Param, ParamGroup, PartFormula, PartKind, SubCategory, SubCategoryParamDefault, Template
 from designkp_backend.services.admin_access import require_admin
 from designkp_backend.services.admin_storage import (
+    finalize_param_group_icon,
     csv_bytes,
     discard_all_staged_icons,
     discard_staged_icon,
@@ -99,12 +100,23 @@ def _category_headers() -> list[str]:
 
 async def _sub_category_headers(session: AsyncSession, admin_id: uuid.UUID) -> list[str]:
     params = await get_params_for_scope(session, admin_id)
+    param_headers: list[str] = []
+    for item in params:
+        param_headers.extend([
+            item.param_code,
+            f"{item.param_code}__display_title",
+            f"{item.param_code}__description_text",
+            f"{item.param_code}__icon_path",
+            f"{item.param_code}__input_mode",
+            f"{item.param_code}__binary_off_label",
+            f"{item.param_code}__binary_on_label",
+        ])
     return [
         "temp_id",
         "cat_id",
         "sub_cat_id",
         "sub_cat_title",
-        *[item.param_code for item in params],
+        *param_headers,
         "admin_mode",
     ]
 
@@ -280,14 +292,34 @@ async def _sub_category_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
     for row in defaults:
         code = code_by_param_id.get(row.param_id)
         if code:
-            defaults_map.setdefault(row.sub_category_id, {})[code] = row.default_value or ""
+            defaults_map.setdefault(row.sub_category_id, {})[code] = {
+                "default_value": row.default_value or "",
+                "display_title": row.display_title or "",
+                "description_text": row.description_text or "",
+                "icon_path": normalize_icon_file_name(row.icon_path) or "",
+                "input_mode": row.input_mode if row.input_mode in {"value", "binary"} else "value",
+                "binary_off_label": (row.binary_off_label or "0").strip() or "0",
+                "binary_on_label": (row.binary_on_label or "1").strip() or "1",
+            }
     return [
         [
             row.temp_id,
             row.cat_id,
             row.sub_cat_id,
             row.sub_cat_title,
-            *[defaults_map.get(row.id, {}).get(param.param_code, "") for param in params],
+            *[
+                value
+                for param in params
+                for value in (
+                    defaults_map.get(row.id, {}).get(param.param_code, {}).get("default_value", ""),
+                    defaults_map.get(row.id, {}).get(param.param_code, {}).get("display_title", ""),
+                    defaults_map.get(row.id, {}).get(param.param_code, {}).get("description_text", ""),
+                    defaults_map.get(row.id, {}).get(param.param_code, {}).get("icon_path", ""),
+                    defaults_map.get(row.id, {}).get(param.param_code, {}).get("input_mode", "value"),
+                    defaults_map.get(row.id, {}).get(param.param_code, {}).get("binary_off_label", "0"),
+                    defaults_map.get(row.id, {}).get(param.param_code, {}).get("binary_on_label", "1"),
+                )
+            ],
             "system" if row.admin_id is None else "admin",
         ]
         for row in items
@@ -412,6 +444,19 @@ async def upload_param_group_icon(
         "file_name": disk_path.name,
     }
 
+@router.post("/{admin_id}/param-group-icons/finalize")
+async def finalize_uploaded_param_group_icon(
+    admin_id: uuid.UUID,
+    file_name: str = Query(..., min_length=1, max_length=255),
+    previous_file_name: str | None = Query(default=None, max_length=255),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, str | None]:
+    await require_admin(session, admin_id)
+    final_name = finalize_param_group_icon(admin_id, file_name, previous_file_name=previous_file_name)
+    return {
+        "icon_path": final_name,
+        "file_name": final_name,
+    }
 
 @router.delete("/{admin_id}/param-group-icons/{file_name}", status_code=204)
 async def discard_param_group_icon(admin_id: uuid.UUID, file_name: str, session: AsyncSession = Depends(get_db_session)) -> Response:

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import Category, Param, SubCategory, SubCategoryParamDefault, Template
 from designkp_backend.services.admin_access import require_admin_if_present
-from designkp_backend.services.admin_storage import finalize_param_group_icon, normalize_icon_file_name
+from designkp_backend.services.admin_storage import admin_icon_exists, finalize_param_group_icon, normalize_icon_file_name
 from designkp_backend.services.sub_category_defaults import get_params_for_scope, normalize_default_value, sync_defaults_for_sub_categories
 
 router = APIRouter(prefix="/sub-categories", tags=["sub_categories"])
@@ -38,6 +38,8 @@ class SubCategoryParamOverrideItem(BaseModel):
     description_text: str | None = None
     icon_path: str | None = None
     input_mode: str = "value"
+    binary_off_label: str | None = None
+    binary_on_label: str | None = None
 
 
 class SubCategoryCreate(BaseModel):
@@ -69,6 +71,8 @@ class SubCategoryParamOverridePayload(BaseModel):
     description_text: str | None = Field(default=None, max_length=4000)
     icon_path: str | None = Field(default=None, max_length=255)
     input_mode: str = Field(default="value", pattern="^(value|binary)$")
+    binary_off_label: str | None = Field(default=None, max_length=255)
+    binary_on_label: str | None = Field(default=None, max_length=255)
 
 
 def _sub_category_code(sub_cat_id: int) -> str:
@@ -147,6 +151,8 @@ async def _apply_param_defaults(
         row.description_text = (override.description_text or "").strip() or None
         row.icon_path = next_icon
         row.input_mode = override.input_mode if override.input_mode in {"value", "binary"} else "value"
+        row.binary_off_label = (override.binary_off_label or "").strip() or "0"
+        row.binary_on_label = (override.binary_on_label or "").strip() or "1"
         if row.input_mode == "binary":
             normalized_value = normalize_default_value(param_defaults.get(param_code))
             row.default_value = normalized_value if normalized_value in {"0", "1"} else "0"
@@ -156,6 +162,7 @@ async def _serialize_items(session: AsyncSession, items: list[SubCategory], admi
     await sync_defaults_for_sub_categories(session, items)
     params = await get_params_for_scope(session, admin_id)
     code_by_param_id = {item.param_id: item.param_code for item in params}
+    admin_id_by_sub_category_id = {item.id: item.admin_id for item in items}
     sub_category_ids = [item.id for item in items]
     defaults = []
     if sub_category_ids:
@@ -169,12 +176,18 @@ async def _serialize_items(session: AsyncSession, items: list[SubCategory], admi
     for row in defaults:
         code = code_by_param_id.get(row.param_id)
         if code:
+            icon_path = normalize_icon_file_name(row.icon_path)
+            row_admin_id = admin_id_by_sub_category_id.get(row.sub_category_id)
+            if row_admin_id and icon_path and not admin_icon_exists(row_admin_id, icon_path):
+                icon_path = None
             defaults_map.setdefault(row.sub_category_id, {})[code] = row.default_value
             overrides_map.setdefault(row.sub_category_id, {})[code] = SubCategoryParamOverrideItem(
                 display_title=row.display_title,
                 description_text=row.description_text,
-                icon_path=normalize_icon_file_name(row.icon_path),
+                icon_path=icon_path,
                 input_mode=row.input_mode if row.input_mode in {"value", "binary"} else "value",
+                binary_off_label=(row.binary_off_label or "0").strip() or "0",
+                binary_on_label=(row.binary_on_label or "1").strip() or "1",
             )
     return [
         SubCategoryItem(
