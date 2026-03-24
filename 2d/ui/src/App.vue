@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { editorRef, model2dTransformRef, editorViewportRef } from "./editor/editor_store.js";
+import { editorRef, model2dTransformRef, editorViewportRef, passiveModelSelectionHandlerRef } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
 import { useDialogService } from "./dialog_service.js";
 import { WALL_READY_PRESETS, buildPresetLines, getPresetIconWalls } from "./features/wall_preset_drag.js";
@@ -2168,7 +2168,10 @@ function activateOrderDesignFromStage(orderDesignId) {
   if (String(activeCabinetDesignId.value || "") === key) return;
   stageCabinetPlaceholderBoxes.value = target.viewer_boxes.map(normalizeCabinetBox);
   restoreActiveOrderDesignToEditor(target, getOrderDesignPlacement(target.id));
+  saveActiveOrderDrawing().catch(() => {});
 }
+
+passiveModelSelectionHandlerRef.value = activateOrderDesignFromStage;
 
 function clearStageOrderDesignPlacement({ persist = true } = {}) {
   const hadStageDesign =
@@ -5500,12 +5503,8 @@ const stageOrderDesignInstances = computed(() =>
     })
     .filter(Boolean)
 );
-const passiveStageOrderDesignOverlays = computed(() => {
-  const zoom = Number(editorViewportState.value?.zoom);
-  const offsetX = Number(editorViewportState.value?.offsetX);
-  const offsetY = Number(editorViewportState.value?.offsetY);
-  if (!Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(offsetX) || !Number.isFinite(offsetY)) return [];
-  return orderDesignPlacements.value
+const passiveStageOrderDesignModels = computed(() =>
+  orderDesignPlacements.value
     .filter((placement) => String(placement.orderDesignId) !== String(activeCabinetDesignId.value || ""))
     .map((placement) => {
       const item = orderDesignCatalog.value.find((row) => String(row.id) === String(placement.orderDesignId));
@@ -5515,21 +5514,12 @@ const passiveStageOrderDesignOverlays = computed(() => {
       if (!worldOutline.length || !worldLines.length) return null;
       return {
         id: placement.orderDesignId,
-        lines: worldLines.map((line, index) => ({
-          id: `${placement.orderDesignId}-line-${index}`,
-          x1: Number(line.ax) * zoom + offsetX,
-          y1: -Number(line.ay) * zoom + offsetY,
-          x2: Number(line.bx) * zoom + offsetX,
-          y2: -Number(line.by) * zoom + offsetY,
-        })),
-        points: worldOutline.map((point) => ({
-          x: Number(point.x) * zoom + offsetX,
-          y: -Number(point.y) * zoom + offsetY,
-        })),
+        lines: worldLines,
+        outline: worldOutline,
       };
     })
-    .filter((item) => item && item.points.length >= 3 && item.lines.length >= 1);
-});
+    .filter((item) => item && item.outline.length >= 3 && item.lines.length >= 1)
+);
 const isOrderDraftEditMode = computed(() => orderDraftMode.value === "edit");
 const orderEntryPreviewNumber = computed(() => {
   if (isOrderDraftEditMode.value && activeOrder.value?.order_number) {
@@ -6139,6 +6129,17 @@ watch(
     });
   },
   { deep: true }
+);
+
+watch(
+  () => ({
+    editorReady: !!editorRef.value,
+    models: passiveStageOrderDesignModels.value,
+  }),
+  ({ models }) => {
+    editorRef.value?.setPassiveModels?.(models);
+  },
+  { deep: true, immediate: true }
 );
 
 function setMenu(menuId) {
@@ -6803,6 +6804,8 @@ onBeforeUnmount(() => {
     try { cancelAnimationFrame(window.__designkpDrawLockRaf); } catch (_) {}
     delete window.__designkpDrawLockRaf;
   }
+  passiveModelSelectionHandlerRef.value = null;
+  editorRef.value?.setPassiveModels?.([]);
 });
 </script>
 
@@ -7311,33 +7314,6 @@ onBeforeUnmount(() => {
               </g>
             </svg>
           </div>
-
-          <svg
-            v-if="showStageOverlays && passiveStageOrderDesignOverlays.length"
-            class="stageOrderOverlay"
-            aria-hidden="true"
-          >
-            <g
-              v-for="overlay in passiveStageOrderDesignOverlays"
-              :key="overlay.id"
-              class="stageOrderOverlay__group"
-              @pointerdown.stop="activateOrderDesignFromStage(overlay.id)"
-            >
-              <line
-                v-for="line in overlay.lines"
-                :key="line.id"
-                class="stageOrderOverlay__line"
-                :x1="line.x1"
-                :y1="line.y1"
-                :x2="line.x2"
-                :y2="line.y2"
-              />
-              <polygon
-                class="stageOrderOverlay__shape"
-                :points="overlay.points.map((point) => `${point.x},${point.y}`).join(' ')"
-              />
-            </g>
-          </svg>
 
           <GlbViewerWidget
             v-if="showStageOverlays"

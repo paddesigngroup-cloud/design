@@ -9,3 +9,6 @@ export const model2dTransformRef = shallowRef({ x: 0, y: 0, rotRad: 0 });
 // Latest 2D viewport state used by stage overlays that must track pan/zoom live.
 export const editorViewportRef = shallowRef({ zoom: 1, offsetX: 0, offsetY: 0 });
 
+// Handler used by the 2D engine when a passive saved design is clicked in canvas space.
+export const passiveModelSelectionHandlerRef = shallowRef(null);
+

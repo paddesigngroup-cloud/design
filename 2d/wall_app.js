@@ -68,7 +68,7 @@ function installGlobalErrorHooksOnce() {
   });
 }
 
-export function createWallApp({ canvas, container, onModel2dTransformChange, onViewportChange } = {}) {
+export function createWallApp({ canvas, container, onModel2dTransformChange, onViewportChange, onPassiveModelSelect } = {}) {
   installGlobalErrorHooksOnce();
 
   // Boot flag (used by standalone index.html to detect module load failures)
@@ -94,6 +94,7 @@ export function createWallApp({ canvas, container, onModel2dTransformChange, onV
     hoverHiddenId = null;
     hoverDimId = null;
     hoverObjectAxis = null;
+    hoverPassiveModelId = null;
     hoverModelOutline = false;
   }
 
@@ -2339,6 +2340,8 @@ const model2d = {
   offsetYmm: 0,
   rotationRad: 0,
 };
+let passiveModels = [];
+let hoverPassiveModelId = null;
 let hoverModelOutline = false;
 let selectedModelOutline = false;
 let uiCursorMode = null; // null | "wall" | "hidden" | "dim" | "beam" | "clicker"
@@ -2514,6 +2517,39 @@ function clearModel2dLines(recordUndo = true) {
   undo.runAction(() => {
     _clearModel2dLines();
   });
+}
+
+function setPassiveModels(models = []) {
+  passiveModels = (Array.isArray(models) ? models : [])
+    .map((model) => {
+      const id = String(model?.id || "").trim();
+      const outline = Array.isArray(model?.outline)
+        ? model.outline
+            .filter((pt) => pt && isFinite(pt.x) && isFinite(pt.y))
+            .map((pt) => ({ x: +pt.x, y: +pt.y }))
+        : [];
+      const lines = Array.isArray(model?.lines)
+        ? model.lines
+            .filter((l) => l && isFinite(l.ax) && isFinite(l.ay) && isFinite(l.bx) && isFinite(l.by))
+            .map((l) => ({ ax: +l.ax, ay: +l.ay, bx: +l.bx, by: +l.by }))
+        : [];
+      if (!id || outline.length < 3 || lines.length < 1) return null;
+      return {
+        id,
+        lines,
+        outline,
+        color: typeof model.color === "string" ? model.color : model2d.color,
+        outlineColor: typeof model.outlineColor === "string" ? model.outlineColor : model2d.outlineColor,
+        outlineHoverColor: typeof model.outlineHoverColor === "string" ? model.outlineHoverColor : model2d.outlineSelectedColor,
+        lineWidthPx: Number.isFinite(Number(model.lineWidthPx)) ? Number(model.lineWidthPx) : model2d.lineWidthPx,
+        dash: Array.isArray(model.dash) ? model.dash.slice(0, 2).map((n) => +n) : (model2d.dash || []).slice(),
+        alpha: Number.isFinite(Number(model.alpha)) ? Number(model.alpha) : model2d.alpha,
+      };
+    })
+    .filter(Boolean);
+  if (!passiveModels.some((model) => String(model.id) === String(hoverPassiveModelId || ""))) {
+    hoverPassiveModelId = null;
+  }
 }
 
 function placeWallPresetAtClient(lines, clientX, clientY, recordUndo = true) {
@@ -4687,6 +4723,60 @@ function drawModel2dOverlay() {
   }
 }
 
+function drawPassiveModelOverlays() {
+  if (!Array.isArray(passiveModels) || !passiveModels.length) return;
+  for (const model of passiveModels) {
+    if (!Array.isArray(model?.lines) || !Array.isArray(model?.outline) || model.outline.length < 3) continue;
+    const isHover = String(hoverPassiveModelId || "") === String(model.id || "");
+
+    ctx.save();
+    ctx.setLineDash(model.dash || model2d.dash || []);
+    ctx.lineWidth = model.lineWidthPx || model2d.lineWidthPx || 1;
+    ctx.strokeStyle = model.color || model2d.color || "#7a8792";
+    ctx.globalAlpha = typeof model.alpha === "number" ? model.alpha : (typeof model2d.alpha === "number" ? model2d.alpha : 0.55);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    for (const l of model.lines) {
+      const a = worldToScreen(l.ax, l.ay);
+      const b = worldToScreen(l.bx, l.by);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    const pts = model.outline;
+    const col = isHover
+      ? (model.outlineHoverColor || model2d.outlineSelectedColor)
+      : (model.outlineColor || model2d.outlineColor);
+
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.lineWidth = isHover ? 5 : 3;
+    ctx.strokeStyle = col;
+    ctx.globalAlpha = isHover ? 0.58 : 0.4;
+    ctx.shadowColor = col;
+    ctx.shadowBlur = isHover ? 12 : 0;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    const p0 = worldToScreen(pts[0].x, pts[0].y);
+    ctx.beginPath();
+    ctx.moveTo(p0.x, p0.y);
+    for (let i = 1; i < pts.length; i++) {
+      const p = worldToScreen(pts[i].x, pts[i].y);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = isHover ? 2.6 : 2;
+    ctx.strokeStyle = col;
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 function hitTestModelOutline(screenX, screenY) {
   if (!model2d.outline || model2d.outline.length < 3) return false;
   const pts = model2d.outline;
@@ -5587,6 +5677,7 @@ function drawToolCursor() {
 
   const isHoverAny =
     !!hoverObjectAxis || !!axisDrag.active ||
+    !!hoverPassiveModelId ||
     !!hoverModelOutline ||
     !!hoverWallId || !!hoverHiddenId || !!hoverDimId ||
     !!selectedWallId || !!selectedHiddenId || !!selectedDimId || !!selectedModelOutline ||
@@ -5966,6 +6057,7 @@ function loop() {
   try {
     emitViewportChange();
     drawGrid();
+    drawPassiveModelOverlays();
     drawModel2dOverlay();
     drawHiddenWalls({
       ctx,
@@ -6519,6 +6611,16 @@ function collectSnapCandidatesWorld(x, y, tolMm) {
 
   if (!modelDrag.active && Array.isArray(model2d.outline) && model2d.outline.length >= 2) {
     const pts = model2d.outline;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      consider("corner", a.x, a.y);
+      considerSeg(a.x, a.y, b.x, b.y);
+    }
+  }
+  for (const model of passiveModels) {
+    if (!Array.isArray(model?.outline) || model.outline.length < 2) continue;
+    const pts = model.outline;
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i];
       const b = pts[(i + 1) % pts.length];
@@ -7337,6 +7439,10 @@ function onMouseDown(e) {
   }
 
   // 3) Object hit (hovered) => select and STOP
+  if (hoverPassiveModelId) {
+    if (typeof onPassiveModelSelect === "function") onPassiveModelSelect(hoverPassiveModelId);
+    return;
+  }
   if (hoverModelOutline) {
     if (isRemoveSelectModifier) {
       removeModelSelection();
@@ -8095,12 +8201,15 @@ function onWindowMouseMove(e) {
 
   if (!isDrawing && inside) {
     updateHover(ox, oy);
+    hoverPassiveModelId = hitTestPassiveModel(ox, oy);
     // Hover should activate anywhere inside the model outline, not only on edges.
-    hoverModelOutline = hitTestModelFill(ox, oy) || hitTestModelOutline(ox, oy);
+    hoverModelOutline = !hoverPassiveModelId && (hitTestModelFill(ox, oy) || hitTestModelOutline(ox, oy));
   } else if (isDrawing) {
     hoverWallId = null; hoverHiddenId = null; hoverDimId = null;
+    hoverPassiveModelId = null;
     hoverModelOutline = false;
   } else {
+    hoverPassiveModelId = null;
     hoverModelOutline = false;
   }
 }
@@ -8747,6 +8856,28 @@ function getState() {
   };
 }
 
+function hitTestPassiveModel(screenX, screenY) {
+  if (!Array.isArray(passiveModels) || !passiveModels.length) return null;
+  for (let idx = passiveModels.length - 1; idx >= 0; idx--) {
+    const model = passiveModels[idx];
+    const pts = Array.isArray(model?.outline) ? model.outline : [];
+    if (pts.length < 3) continue;
+    if (pointInPolygonScreen(screenX, screenY, pts.map((p) => worldToScreen(p.x, p.y)))) {
+      return model.id;
+    }
+    let prev = worldToScreen(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) {
+      const cur = worldToScreen(pts[i].x, pts[i].y);
+      if (pointToSegmentDistancePx(screenX, screenY, prev.x, prev.y, cur.x, cur.y) <= 7) return model.id;
+      prev = cur;
+    }
+    const first = worldToScreen(pts[0].x, pts[0].y);
+    const last = worldToScreen(pts[pts.length - 1].x, pts[pts.length - 1].y);
+    if (pointToSegmentDistancePx(screenX, screenY, last.x, last.y, first.x, first.y) <= 7) return model.id;
+  }
+  return null;
+}
+
 function restoreSnapshot(snap) {
   if (!snap || typeof snap !== "object") return false;
   restoreGraph(graph, snap.graphSnap || { _nid: 1, _wid: 1, nodes: [], walls: [] });
@@ -8767,6 +8898,7 @@ function restoreSnapshot(snap) {
   selectedDimId = null;
   hoverDimId = null;
   selectedDimIds = [];
+  hoverPassiveModelId = null;
   selectedModelOutline = false;
   hoverModelOutline = false;
   moveCommand.mode = "idle";
@@ -9482,6 +9614,7 @@ return {
   setSnapOn,
   setInputEnabled,
   setModel2dLines,
+  setPassiveModels,
   clearModel2dLines,
   addRectModel2dPreset,
   placeModel2dPresetAtClient,
