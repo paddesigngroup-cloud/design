@@ -34,6 +34,14 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  previewOnly: {
+    type: Boolean,
+    default: false,
+  },
+  previewActive: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords"]);
@@ -56,6 +64,7 @@ let wallsRoot = null;
 let placeholderBoxesRoot = null;
 
 let axesHelper = null;
+const PREVIEW_VIEW_DIR = new THREE.Vector3(1, 0.78, 1.18);
 
 const DEFAULT_WALL_HEIGHT_M = 2.8;
 const DEFAULT_MITER_LIMIT = 10;
@@ -617,9 +626,9 @@ function rebuildPlaceholderBoxes() {
   const root = new THREE.Group();
   root.name = "placeholder-boxes";
 
-  const specs = Array.isArray(props.placeholderBoxes) && props.placeholderBoxes.length
+  const specs = Array.isArray(props.placeholderBoxes)
     ? props.placeholderBoxes
-    : PLACEHOLDER_BOX_SPECS_MM;
+    : (props.embedded ? PLACEHOLDER_BOX_SPECS_MM : []);
 
   for (const spec of specs) {
     const widthM = Math.max(0.001, Number(spec.width) * 0.001);
@@ -667,6 +676,7 @@ function rebuildPlaceholderBoxes() {
   if (!root.children.length) return;
   placeholderBoxesRoot = root;
   scene.add(root);
+  applyModel2dTransformTo3d(props.model2dTransform);
 
   try {
     const lines = projectModelTo2DLines(root);
@@ -816,7 +826,7 @@ function fitCameraToBounds(bounds, viewDir = null) {
   camera.up.set(0, 1, 0);
   if (Math.abs(dir.y) > 0.9) camera.up.set(0, 0, -1);
 
-  camera.position.copy(center).addScaledVector(dir, distance * 1.5);
+  camera.position.copy(center).addScaledVector(dir, distance * (props.previewOnly ? 1.72 : 1.5));
   controls.target.copy(center);
   camera.near = Math.max(distance / 500, 0.01);
   camera.far = Math.max(distance * 50, 100);
@@ -953,19 +963,24 @@ async function loadGlb(url) {
 }
 
 function applyModel2dTransformTo3d(transform) {
-  if (!modelRoot || !modelBasePosition) return;
-
   const xMm = Number.isFinite(transform?.x) ? transform.x : 0;
   const yMm = Number.isFinite(transform?.y) ? transform.y : 0;
   const rotRad = Number.isFinite(transform?.rotRad) ? transform.rotRad : 0;
   const mPerMm = 0.001;
 
-  modelRoot.position.set(
-    modelBasePosition.x + xMm * mPerMm,
-    modelBasePosition.y,
-    modelBasePosition.z - yMm * mPerMm
-  );
-  modelRoot.rotation.y = modelBaseRotationY + rotRad;
+  if (modelRoot && modelBasePosition) {
+    modelRoot.position.set(
+      modelBasePosition.x + xMm * mPerMm,
+      modelBasePosition.y,
+      modelBasePosition.z - yMm * mPerMm
+    );
+    modelRoot.rotation.y = modelBaseRotationY + rotRad;
+  }
+
+  if (placeholderBoxesRoot) {
+    placeholderBoxesRoot.position.set(xMm * mPerMm, 0, -yMm * mPerMm);
+    placeholderBoxesRoot.rotation.y = rotRad;
+  }
 }
 
 watch(
@@ -1077,6 +1092,7 @@ onMounted(async () => {
   axesHelper = createPlanAlignedAxesHelper(1);
   applyAxesHelperColors();
   scene.add(axesHelper);
+  if (props.previewOnly && axesHelper) axesHelper.visible = false;
 
   camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
   camera.position.set(2.2, 1.6, 2.2);
@@ -1088,6 +1104,12 @@ onMounted(async () => {
   controls.zoomSpeed = 0.9;
   controls.panSpeed = 0.7;
   controls.screenSpacePanning = true;
+  if (props.previewOnly) {
+    controls.autoRotate = !!props.previewActive;
+    controls.autoRotateSpeed = 2.2;
+    controls.enablePan = false;
+    controls.enableZoom = false;
+  }
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x334155, 1.0);
   scene.add(hemi);
@@ -1124,7 +1146,7 @@ onMounted(async () => {
   // } catch (_) {
   //   // ignore
   // }
-  fitCameraToAll();
+  fitCameraToAll(props.previewOnly ? PREVIEW_VIEW_DIR : null);
 
   baseSize = getWidgetSizePx();
 
@@ -1192,18 +1214,29 @@ onBeforeUnmount(() => {
   axesHelper = null;
 });
 
+watch(
+  () => props.previewActive,
+  (active) => {
+    if (!controls || !props.previewOnly) return;
+    controls.autoRotate = !!active;
+    if (!active) fitCameraToAll(PREVIEW_VIEW_DIR);
+  },
+  { immediate: true }
+);
+
 </script>
 
 <template>
   <div ref="widgetEl" class="glbWidget" :class="{ 'is-max': isMax, 'is-embedded': embedded }" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
-    <div class="glbWidget__head" dir="rtl">
+    <div v-if="!previewOnly" class="glbWidget__head" dir="rtl">
       <div class="glbWidget__headBtns">
         <button type="button" class="glbWidget__btn" title="کوچک" @click="goSmall">–</button>
         <button type="button" class="glbWidget__btn" title="بزرگ" @click="goMax">□</button>
       </div>
-      <div ref="hostEl" class="glbWidget__host">
-        <canvas ref="canvasEl" class="glbWidget__canvas"></canvas>
-
+    </div>
+    <div ref="hostEl" class="glbWidget__host">
+      <canvas ref="canvasEl" class="glbWidget__canvas"></canvas>
+      <template v-if="!previewOnly">
         <div class="glbWidget__view" @mouseenter.stop @mouseleave.stop>
           <button type="button" class="glbWidget__viewBtn" title="نما" @click="toggleViewMenu">
             <img class="glbWidget__viewIcon" src="/icons/viewpoint.png" alt="" />
@@ -1248,7 +1281,7 @@ onBeforeUnmount(() => {
           />
           <span class="glbWidget__opacityValue">100</span>
         </div>
-      </div>
+      </template>
     </div>
   </div>
 

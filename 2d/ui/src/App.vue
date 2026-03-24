@@ -144,7 +144,7 @@ const designMenuTools = [
 ];
 
 const wallPresets = WALL_READY_PRESETS;
-const presetDrag = ref({ active: false, type: null, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false });
+const presetDrag = ref({ active: false, type: null, preset: null, design: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false, leftPanel: false });
 const PRESET_PREVIEW_MIN_DRAG_PX = 12;
 const snapMenuItems = [
   { id: "corner", title: "گوشه", icon: "/icons/corner_point.png" },
@@ -155,6 +155,12 @@ const snapMenuItems = [
   { id: "ortho", title: "راستا (راست کلیک)", icon: "/icons/ortho_line.png" },
 ];
 const currentAdminId = ref(CURRENT_ADMIN_ID);
+const cabinetDesignCatalog = ref([]);
+const cabinetDesignCatalogLoading = ref(false);
+const cabinetDesignCatalogLoadedForAdmin = ref("");
+const stageCabinetPlaceholderBoxes = ref([]);
+const activeCabinetDesignId = ref(null);
+const hoveredCabinetDesignId = ref(null);
 const constructionWizardOpen = ref(false);
 const constructionStep = ref("templates");
 const PART_FORMULA_FIELDS = [
@@ -273,9 +279,10 @@ const constructionSubCategories = computed(() =>
 );
 const constructionSubCategoryDesigns = computed(() =>
   editableSubCategoryDesigns.value
-    .filter((item) => item.admin_id === currentAdminId.value)
+    .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
     .slice()
     .sort((a, b) => {
+      if (!!a.is_system !== !!b.is_system) return a.is_system ? -1 : 1;
       const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
       if (orderDelta !== 0) return orderDelta;
       return (Number(a.design_id) || 0) - (Number(b.design_id) || 0);
@@ -1507,6 +1514,32 @@ function withConstructionDraftState(item) {
   return buildPartKindDraft(item, { __isNew: false, __dirty: false });
 }
 
+function getConstructionOwnerBadge(item) {
+  if (item?.admin_id === null || item?.is_system) {
+    return { text: "سیستم", tone: "system" };
+  }
+  return { text: "ادمین اختصاصی", tone: "admin" };
+}
+
+function getConstructionSubCategoryByDesign(item) {
+  if (!item) return null;
+  return constructionSubCategories.value.find((row) =>
+    String(row.id) === String(item.sub_category_id)
+    || Number(row.sub_cat_id) === Number(item.sub_cat_id)
+  ) || null;
+}
+
+function getConstructionSubCategoryTitleByDesign(item) {
+  const subCategory = getConstructionSubCategoryByDesign(item);
+  return String(
+    subCategory?.sub_cat_title
+    || subCategory?.title
+    || item?.sub_cat_title
+    || item?.title
+    || ""
+  ).trim();
+}
+
 function syncSubCategoryDesignDraftSubCategoryFields(item) {
   if (!item) return item;
   const subCategory = editableSubCategories.value.find((row) => String(row.id) === String(item.sub_category_id));
@@ -1523,7 +1556,7 @@ function buildNewSubCategoryDesignDraft() {
   const fallbackSubCategory = constructionSubCategories.value[0] || null;
   return syncSubCategoryDesignDraftSubCategoryFields({
     id: null,
-    admin_id: currentAdminId.value,
+    admin_id: null,
     sub_category_id: fallbackSubCategory?.id || "",
     temp_id: Number(fallbackSubCategory?.temp_id) || 0,
     cat_id: Number(fallbackSubCategory?.cat_id) || 0,
@@ -1532,7 +1565,7 @@ function buildNewSubCategoryDesignDraft() {
     design_id: nextId,
     design_title: `طرح ${toPersianDigits(nextId)}`,
     sort_order: nextId,
-    is_system: false,
+    is_system: true,
     parts: [],
   });
 }
@@ -1587,10 +1620,163 @@ async function loadConstructionSubCategoryDesigns() {
     const url = `/api/sub-category-designs?admin_id=${encodeURIComponent(currentAdminId.value)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error("load-failed");
-    editableSubCategoryDesigns.value = (await res.json()).map(withConstructionDraftState);
+    const items = await res.json();
+    editableSubCategoryDesigns.value = (await Promise.all(
+      items.map(async (item) => withConstructionDraftState(await enrichDesignWithPreview(item)))
+    ));
     constructionDeletedSubCategoryDesignIds.value = [];
   } catch (_) {
     showAlert("خواندن جدول طرح‌های ساب‌کت از دیتابیس انجام نشد.", { title: "خطا" });
+  }
+}
+
+function normalizeCabinetBox(box) {
+  return {
+    width: Math.max(1, Number(box?.width) || 0),
+    depth: Math.max(1, Number(box?.depth) || 0),
+    height: Math.max(1, Number(box?.height) || 0),
+    cx: Number(box?.cx) || 0,
+    cy: Number(box?.cy) || 0,
+    cz: Number(box?.cz) || 0,
+  };
+}
+
+function buildModel2dLinesFromBoxes(boxes) {
+  const lines = [];
+  for (const rawBox of Array.isArray(boxes) ? boxes : []) {
+    const box = normalizeCabinetBox(rawBox);
+    const halfW = box.width * 0.5;
+    const halfD = box.depth * 0.5;
+    const x1 = box.cx - halfW;
+    const x2 = box.cx + halfW;
+    const y1 = box.cy - halfD;
+    const y2 = box.cy + halfD;
+    lines.push(
+      { ax: x1, ay: y1, bx: x2, by: y1, thickness: 18, label: "" },
+      { ax: x2, ay: y1, bx: x2, by: y2, thickness: 18, label: "" },
+      { ax: x2, ay: y2, bx: x1, by: y2, thickness: 18, label: "" },
+      { ax: x1, ay: y2, bx: x1, by: y1, thickness: 18, label: "" },
+    );
+  }
+  return lines;
+}
+
+function getLinesBounds(lines) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const l of Array.isArray(lines) ? lines : []) {
+    minX = Math.min(minX, Number(l?.ax), Number(l?.bx));
+    maxX = Math.max(maxX, Number(l?.ax), Number(l?.bx));
+    minY = Math.min(minY, Number(l?.ay), Number(l?.by));
+    maxY = Math.max(maxY, Number(l?.ay), Number(l?.by));
+  }
+  if (!isFinite(minX) || !isFinite(maxX) || !isFinite(minY) || !isFinite(maxY)) return null;
+  return { minX, maxX, minY, maxY };
+}
+
+function getLinesIconWalls(lines) {
+  const bounds = getLinesBounds(lines);
+  if (!bounds) return [];
+  const iconSize = 44;
+  const iconPad = 4;
+  const spanX = Math.max(1, bounds.maxX - bounds.minX);
+  const spanY = Math.max(1, bounds.maxY - bounds.minY);
+  const scale = Math.min((iconSize - iconPad * 2) / spanX, (iconSize - iconPad * 2) / spanY);
+  const cx = (bounds.minX + bounds.maxX) * 0.5;
+  const cy = (bounds.minY + bounds.maxY) * 0.5;
+  return lines.map((l) => ({
+    x1: iconSize * 0.5 + (Number(l.ax) - cx) * scale,
+    y1: iconSize * 0.5 - (Number(l.ay) - cy) * scale,
+    x2: iconSize * 0.5 + (Number(l.bx) - cx) * scale,
+    y2: iconSize * 0.5 - (Number(l.by) - cy) * scale,
+    sw: Math.max(2, (Number(l.thickness) || 18) * scale),
+  }));
+}
+
+function getCabinetBoxesBounds(boxes) {
+  return getLinesBounds(buildModel2dLinesFromBoxes(boxes));
+}
+
+function translateCabinetBoxesToClient(boxes, clientX, clientY) {
+  const full = editorRef.value?.getState?.();
+  const st = full?.state || {};
+  const zoom = Number(st.zoom);
+  const offsetX = Number(st.offsetX);
+  const offsetY = Number(st.offsetY);
+  const stageRect = stageEl.value?.getBoundingClientRect();
+  const bounds = getCabinetBoxesBounds(boxes);
+  if (!stageRect || !bounds || !Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(offsetX) || !Number.isFinite(offsetY)) {
+    return Array.isArray(boxes) ? boxes.map(normalizeCabinetBox) : [];
+  }
+  const stageX = clientX - stageRect.left;
+  const stageY = clientY - stageRect.top;
+  const worldX = (stageX - offsetX) / zoom;
+  const worldY = -(stageY - offsetY) / zoom;
+  const dx = worldX - ((bounds.minX + bounds.maxX) * 0.5);
+  const dy = worldY - ((bounds.minY + bounds.maxY) * 0.5);
+  return boxes.map((rawBox) => {
+    const box = normalizeCabinetBox(rawBox);
+    return {
+      ...box,
+      cx: box.cx + dx,
+      cy: box.cy + dy,
+    };
+  });
+}
+
+function getCabinetDesignPreviewLines(design) {
+  return buildModel2dLinesFromBoxes(design?.preview?.viewer_boxes || []);
+}
+
+function getCabinetDesignIconWalls(design) {
+  return getLinesIconWalls(getCabinetDesignPreviewLines(design));
+}
+
+
+async function fetchSubCategoryDesignPreview(designId) {
+  const previewRes = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(designId))}/preview`);
+  if (!previewRes.ok) throw new Error("preview-failed");
+  return await previewRes.json();
+}
+
+async function enrichDesignWithPreview(item) {
+  try {
+    const preview = await fetchSubCategoryDesignPreview(item.id);
+    return {
+      ...item,
+      sub_cat_title: getConstructionSubCategoryTitleByDesign(item),
+      preview,
+    };
+  } catch (_) {
+    return {
+      ...item,
+      sub_cat_title: getConstructionSubCategoryTitleByDesign(item),
+      preview: null,
+    };
+  }
+}
+
+async function loadCabinetDesignCatalog(force = false) {
+  const adminKey = String(currentAdminId.value || "");
+  if (cabinetDesignCatalogLoading.value) return;
+  if (!force && cabinetDesignCatalogLoadedForAdmin.value === adminKey && cabinetDesignCatalog.value.length) return;
+
+  cabinetDesignCatalogLoading.value = true;
+  try {
+    const listRes = await fetch(`/api/sub-category-designs?admin_id=${encodeURIComponent(currentAdminId.value)}`);
+    if (!listRes.ok) {
+      throw new Error(await readApiErrorMessage(listRes, "خواندن طرح‌های کابینت انجام نشد."));
+    }
+    const items = await listRes.json();
+    cabinetDesignCatalog.value = await Promise.all(items.map((item) => enrichDesignWithPreview(item)));
+    cabinetDesignCatalogLoadedForAdmin.value = adminKey;
+  } catch (error) {
+    cabinetDesignCatalog.value = [];
+    showAlert(error?.message || "خواندن طرح‌های کابینت از دیتابیس انجام نشد.", { title: "خطا" });
+  } finally {
+    cabinetDesignCatalogLoading.value = false;
   }
 }
 
@@ -5048,6 +5234,7 @@ function enable2dInput() {
 }
 
 function onGlbModel2d(payload) {
+  if (Array.isArray(stageCabinetPlaceholderBoxes.value) && stageCabinetPlaceholderBoxes.value.length) return;
   const lines = payload?.lines;
   if (!Array.isArray(lines)) return;
   editorRef.value?.setModel2dLines?.(lines, payload?.opts || null);
@@ -5095,11 +5282,13 @@ function startWallPresetDrag(ev, preset) {
     active: true,
     type: "wallPreset",
     preset,
+    design: null,
     clientX: ev.clientX,
     clientY: ev.clientY,
     startX: ev.clientX,
     startY: ev.clientY,
     enteredStage: false,
+    leftPanel: false,
   };
   disable2dInput();
   window.addEventListener("pointermove", onPresetPointerMove);
@@ -5114,11 +5303,32 @@ function startColumnDrag(ev) {
     active: true,
     type: "column",
     preset: null,
+    design: null,
     clientX: ev.clientX,
     clientY: ev.clientY,
     startX: ev.clientX,
     startY: ev.clientY,
     enteredStage: false,
+    leftPanel: false,
+  };
+  disable2dInput();
+  window.addEventListener("pointermove", onPresetPointerMove);
+  window.addEventListener("pointerup", onPresetPointerUp, { once: true });
+}
+
+function startCabinetDesignDrag(ev, design) {
+  if (!ev?.isPrimary || !design?.preview?.viewer_boxes?.length) return;
+  presetDrag.value = {
+    active: true,
+    type: "cabinetDesign",
+    preset: null,
+    design,
+    clientX: ev.clientX,
+    clientY: ev.clientY,
+    startX: ev.clientX,
+    startY: ev.clientY,
+    enteredStage: false,
+    leftPanel: false,
   };
   disable2dInput();
   window.addEventListener("pointermove", onPresetPointerMove);
@@ -5128,14 +5338,19 @@ function startColumnDrag(ev) {
 function onPresetPointerMove(ev) {
   if (!presetDrag.value.active) return;
   const stageRect = stageEl.value?.getBoundingClientRect();
+  const panelRect = menuPanelEl.value?.getBoundingClientRect();
   const inStage = !!stageRect
     && ev.clientX >= stageRect.left && ev.clientX <= stageRect.right
     && ev.clientY >= stageRect.top && ev.clientY <= stageRect.bottom;
+  const inPanel = !!panelRect
+    && ev.clientX >= panelRect.left && ev.clientX <= panelRect.right
+    && ev.clientY >= panelRect.top && ev.clientY <= panelRect.bottom;
   presetDrag.value = {
     ...presetDrag.value,
     clientX: ev.clientX,
     clientY: ev.clientY,
     enteredStage: presetDrag.value.enteredStage || inStage,
+    leftPanel: presetDrag.value.leftPanel || !inPanel,
   };
 }
 
@@ -5147,15 +5362,21 @@ function onPresetPointerUp(ev) {
   const dragDy = ev.clientY - (presetDrag.value.startY || ev.clientY);
   const movedEnough = Math.hypot(dragDx, dragDy) >= PRESET_PREVIEW_MIN_DRAG_PX;
 
-  if (inStage && movedEnough && presetDrag.value.enteredStage) {
+  const canDropCabinet = presetDrag.value.type !== "cabinetDesign" || presetDrag.value.leftPanel;
+  if (inStage && movedEnough && presetDrag.value.enteredStage && canDropCabinet) {
     if (presetDrag.value.type === "column") {
       editorRef.value?.placeColumnAtClient?.(ev.clientX, ev.clientY);
+    } else if (presetDrag.value.type === "cabinetDesign" && presetDrag.value.design?.preview?.viewer_boxes?.length) {
+      const localBoxes = presetDrag.value.design.preview.viewer_boxes.map(normalizeCabinetBox);
+      stageCabinetPlaceholderBoxes.value = translateCabinetBoxesToClient(localBoxes, ev.clientX, ev.clientY);
+      activeCabinetDesignId.value = presetDrag.value.design.id || null;
+      editorRef.value?.placeModel2dPresetAtClient?.(buildModel2dLinesFromBoxes(localBoxes), ev.clientX, ev.clientY);
     } else if (presetDrag.value.preset) {
       const lines = buildPresetLines(presetDrag.value.preset.kind);
       editorRef.value?.placeWallPresetAtClient?.(lines, ev.clientX, ev.clientY);
     }
   }
-  presetDrag.value = { active: false, type: null, preset: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false };
+  presetDrag.value = { active: false, type: null, preset: null, design: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false, leftPanel: false };
   window.removeEventListener("pointermove", onPresetPointerMove);
   enable2dInput();
 }
@@ -5163,7 +5384,8 @@ function onPresetPointerUp(ev) {
 const presetPreview = computed(() => {
   const drag = presetDrag.value;
   if (!drag.active) return null;
-  if (drag.type !== "column" && !drag.preset) return null;
+  if (drag.type !== "column" && !drag.preset && !drag.design) return null;
+  if (drag.type === "cabinetDesign" && !drag.leftPanel) return null;
 
   const dx = drag.clientX - (drag.startX || drag.clientX);
   const dy = drag.clientY - (drag.startY || drag.clientY);
@@ -5198,6 +5420,8 @@ const presetPreview = computed(() => {
           name: "Column",
         }];
       })()
+    : drag.type === "cabinetDesign"
+      ? getCabinetDesignPreviewLines(drag.design)
     : buildPresetLines(drag.preset.kind);
   if (!Array.isArray(lines) || lines.length === 0) return null;
 
@@ -5219,8 +5443,14 @@ const presetPreview = computed(() => {
   const cy = (minY + maxY) * 0.5;
   const previewFill = drag.type === "column"
     ? (walls3dSnapshot.value?.state?.columnFillColor || "#A6A6A6")
-    : (walls3dSnapshot.value?.state?.wallFillColor || "#A6A6A6");
-  const previewIdBase = drag.type === "column" ? "column-preview" : drag.preset.id;
+    : drag.type === "cabinetDesign"
+      ? "#d3c7b7"
+      : (walls3dSnapshot.value?.state?.wallFillColor || "#A6A6A6");
+  const previewIdBase = drag.type === "column"
+    ? "column-preview"
+    : drag.type === "cabinetDesign"
+      ? String(drag.design?.id || "cabinet-preview")
+      : drag.preset.id;
 
   const screenLines = lines.map((l, idx) => {
     const ax = Number(l.ax) - cx + centerWorldX;
@@ -5240,7 +5470,7 @@ const presetPreview = computed(() => {
       x2,
       y2,
       sw,
-      label: drag.type === "column" ? `C${idx + 1}` : (l.name || `Wall ${idx + 1}`),
+      label: drag.type === "column" ? `C${idx + 1}` : (l.label || l.name || ""),
       midX: (x1 + x2) * 0.5,
       midY: (y1 + y2) * 0.5,
       angle: Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI,
@@ -5358,6 +5588,9 @@ function setSubRail(id) {
   activeMenu.value = "design";
   openMenuPanel.value = "design";
   openMode.value = "menu";
+  if (id === "cabinet") {
+    loadCabinetDesignCatalog();
+  }
   if (designBtnEl.value) scheduleMenuPanelPosition(designBtnEl.value);
   scheduleSubRailPosition();
 }
@@ -5738,61 +5971,108 @@ onBeforeUnmount(() => {
 
           <template v-else-if="openMenuPanel === 'design'">
             <div class="designMenu">
-              <div class="designMenu__grid" aria-label="Design Tools Grid">
-                <button
-                  v-for="it in designMenuTools"
-                  :key="it.id"
-                  type="button"
-                  class="designToolBtn"
-                  :class="{ 'is-active': designMenuTool === it.id }"
-                  :title="it.title"
-                  @pointerdown.prevent="it.id === 'column' ? startColumnDrag($event) : null"
-                  @click="setDesignMenuTool(it.id)"
-                >
-                  <img :src="it.icon" alt="" />
-                </button>
-                <!-- keep 2x3 grid: add one empty cell -->
-                <div class="designToolBtn designToolBtn--empty" aria-hidden="true"></div>
-              </div>
-
-              <div class="designMenu__sep" role="separator"></div>
-
-              <div class="designMenu__presetsHead">مدل های دیوار</div>
-              <div class="designMenu__presets" aria-label="Wall Presets">
-                <button
-                  v-for="p in wallPresets"
-                  :key="p.id"
-                  type="button"
-                  class="presetTile"
-                  :title="p.title"
-                  @pointerdown.prevent="startWallPresetDrag($event, p)"
-                >
-                  <svg class="presetTile__svg" viewBox="0 0 44 44" aria-hidden="true">
-                    <g fill="none" stroke="#111827" stroke-linecap="square" stroke-linejoin="miter">
-                      <line
-                        v-for="(w,idx) in getPresetIconWalls(p.kind)"
-                        :key="`edge-${p.id}-${idx}`"
-                        :x1="w.x1"
-                        :y1="w.y1"
-                        :x2="w.x2"
-                        :y2="w.y2"
-                        :stroke-width="w.sw + 1.5"
+              <template v-if="activeSubRail === 'wall'">
+                <div class="designMenu__grid" aria-label="Design Tools Grid">
+                  <button
+                    v-for="it in designMenuTools"
+                    :key="it.id"
+                    type="button"
+                    class="designToolBtn"
+                    :class="{ 'is-active': designMenuTool === it.id }"
+                    :title="it.title"
+                    @pointerdown.prevent="it.id === 'column' ? startColumnDrag($event) : null"
+                    @click="setDesignMenuTool(it.id)"
+                  >
+                    <img :src="it.icon" alt="" />
+                  </button>
+                  <div class="designToolBtn designToolBtn--empty" aria-hidden="true"></div>
+                </div>
+                <div class="designMenu__sep"></div>
+                <div class="designMenu__presetsHead">مدل های دیوار</div>
+                <div class="designMenu__presets" aria-label="Wall Presets">
+                  <button
+                    v-for="p in wallPresets"
+                    :key="p.id"
+                    type="button"
+                    class="presetTile"
+                    :title="p.title"
+                    @pointerdown.prevent="startWallPresetDrag($event, p)"
+                  >
+                    <svg class="presetTile__svg" viewBox="0 0 44 44" aria-hidden="true">
+                      <g fill="none" stroke="#111827" stroke-linecap="square" stroke-linejoin="miter">
+                        <line
+                          v-for="(w,idx) in getPresetIconWalls(p.kind)"
+                          :key="`edge-${p.id}-${idx}`"
+                          :x1="w.x1"
+                          :y1="w.y1"
+                          :x2="w.x2"
+                          :y2="w.y2"
+                          :stroke-width="w.sw + 1.5"
+                        />
+                      </g>
+                      <g fill="none" stroke="#A6A6A6" stroke-linecap="square" stroke-linejoin="miter">
+                        <line
+                          v-for="(w,idx) in getPresetIconWalls(p.kind)"
+                          :key="`fill-${p.id}-${idx}`"
+                          :x1="w.x1"
+                          :y1="w.y1"
+                          :x2="w.x2"
+                          :y2="w.y2"
+                          :stroke-width="w.sw"
+                        />
+                      </g>
+                    </svg>
+                  </button>
+                </div>
+              </template>
+              <template v-else-if="activeSubRail === 'cabinet'">
+                <div class="designMenu__presetsHead">طرح های کابینت دیتابیس</div>
+                <div class="designMenu__cabinetHint">طرح را بگیرید و داخل فضای دوبعدی رها کنید.</div>
+                <div v-if="cabinetDesignCatalogLoading" class="designMenu__cabinetState">در حال خواندن طرح‌ها از دیتابیس...</div>
+                <div v-else-if="cabinetDesignCatalog.length === 0" class="designMenu__cabinetState">فعلاً هیچ طرحی در دیتابیس پیدا نشد.</div>
+                <div v-else class="designMenu__cabinetList" aria-label="Cabinet Designs">
+                  <div
+                    v-for="design in cabinetDesignCatalog"
+                    :key="design.id"
+                    class="cabinetDesignCard"
+                    :class="{
+                      'is-active': activeCabinetDesignId === design.id,
+                      'is-disabled': !design.preview?.viewer_boxes?.length,
+                    }"
+                    :title="design.design_title"
+                    @pointerenter="hoveredCabinetDesignId = design.id"
+                    @pointerleave="hoveredCabinetDesignId = null"
+                    @pointerdown.prevent="design.preview?.viewer_boxes?.length ? startCabinetDesignDrag($event, design) : null"
+                  >
+                    <div class="cabinetDesignCard__head">
+                      <span class="cabinetDesignCard__title">{{ design.design_title }}</span>
+                    </div>
+                    <div
+                      v-if="getConstructionSubCategoryTitleByDesign(design) && getConstructionSubCategoryTitleByDesign(design) !== design.design_title"
+                      class="cabinetDesignCard__meta"
+                    >
+                      <span>{{ getConstructionSubCategoryTitleByDesign(design) }}</span>
+                    </div>
+                    <div
+                      v-if="design.preview?.viewer_boxes?.length"
+                      class="cabinetDesignCard__viewer"
+                      aria-hidden="true"
+                    >
+                      <GlbViewerWidget
+                        src="/models/1_z1.glb"
+                        :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                        :placeholder-boxes="design.preview.viewer_boxes"
+                        :show-attrs-panel="false"
+                        :embedded="true"
+                        :preview-only="true"
+                        :preview-active="hoveredCabinetDesignId === design.id"
                       />
-                    </g>
-                    <g fill="none" stroke="#A6A6A6" stroke-linecap="square" stroke-linejoin="miter">
-                      <line
-                        v-for="(w,idx) in getPresetIconWalls(p.kind)"
-                        :key="`fill-${p.id}-${idx}`"
-                        :x1="w.x1"
-                        :y1="w.y1"
-                        :x2="w.x2"
-                        :y2="w.y2"
-                        :stroke-width="w.sw"
-                      />
-                    </g>
-                  </svg>
-                </button>
-              </div>
+                    </div>
+                    <div v-else class="cabinetDesignCard__empty">preview ندارد</div>
+                  </div>
+                </div>
+              </template>
+              <div v-else class="designMenu__cabinetState">این زیرمنو فعلاً خالی است.</div>
             </div>
           </template>
 
@@ -6057,6 +6337,7 @@ onBeforeUnmount(() => {
             src="/models/1_z1.glb"
             :model2d-transform="model2dTransformRef"
             :walls2d="walls3dSnapshot"
+            :placeholder-boxes="stageCabinetPlaceholderBoxes"
             :wall-style-draft="wallStyleDraft"
             :selected-wall-style="selectedWallStyle"
             @update:wallStyleDraft="updateWallStyleDraft"
@@ -7200,25 +7481,44 @@ onBeforeUnmount(() => {
               <table class="constructionDialog__table">
                 <thead>
                   <tr>
-                    <th class="constructionDialog__col constructionDialog__col--id">مالک</th>
+                    <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
                     <th class="constructionDialog__col constructionDialog__col--id">تمپلیت</th>
                     <th class="constructionDialog__col constructionDialog__col--id">دسته</th>
-                    <th class="constructionDialog__col constructionDialog__col--id">ساب‌کت</th>
+                    <th class="constructionDialog__col constructionDialog__col--title">ساب‌کت</th>
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه طرح</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان طرح</th>
-                    <th class="constructionDialog__col constructionDialog__col--defaults">قطعات</th>
+                    <th class="constructionDialog__col constructionDialog__col--preview">پیش‌نمایش</th>
                     <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="item in constructionSubCategoryDesigns" :key="item.id">
-                    <td class="constructionDialog__col constructionDialog__col--id">{{ item.admin_id }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--owner">
+                      <span
+                        class="constructionDialog__pill constructionDialog__ownerBadge"
+                        :class="getConstructionOwnerBadge(item).tone === 'system' ? 'constructionDialog__ownerBadge--system' : 'constructionDialog__ownerBadge--admin'"
+                      >
+                        {{ getConstructionOwnerBadge(item).text }}
+                      </span>
+                    </td>
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.temp_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.cat_id) }}</td>
-                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.sub_cat_id) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--title">{{ getConstructionSubCategoryTitleByDesign(item) || toPersianDigits(item.sub_cat_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.design_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--title">{{ item.design_title }}</td>
-                    <td class="constructionDialog__col constructionDialog__col--defaults">{{ toPersianDigits(item.parts?.length || 0) }} قطعه</td>
+                    <td class="constructionDialog__col constructionDialog__col--preview">
+                      <div v-if="item.preview?.viewer_boxes?.length" class="constructionDialog__previewThumb">
+                        <GlbViewerWidget
+                          src="/models/1_z1.glb"
+                          :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                          :placeholder-boxes="item.preview.viewer_boxes"
+                          :show-attrs-panel="false"
+                          :embedded="true"
+                          :preview-only="true"
+                        />
+                      </div>
+                      <span v-else class="constructionDialog__previewEmpty">ندارد</span>
+                    </td>
                     <td class="constructionDialog__col constructionDialog__col--actions">
                       <div class="constructionDialog__actionsCell">
                         <button type="button" class="constructionDialog__textBtn" @click="openSubCategoryDesignEditor(item)">ویرایش طرح</button>

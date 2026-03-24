@@ -332,6 +332,9 @@ textarea {
   width: max-content;
   max-width: min(92vw, 360px);
 }
+.menuPanel--cabinet {
+  width: 420px;
+}
 .menuPanel__head {
   display: flex;
   align-items: center;
@@ -457,10 +460,88 @@ textarea {
   opacity: 0.9;
   text-align: center;
 }
+.designMenu__cabinetHint,
+.designMenu__cabinetState {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px dashed rgba(52, 20, 31, 0.16);
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+  text-align: center;
+}
+.designMenu__cabinetList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 .designMenu__presets {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
+}
+.cabinetDesignCard {
+  width: 100%;
+  border: 1px solid rgba(52, 20, 31, 0.12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.24);
+  box-shadow: 0 10px 18px rgba(11, 34, 48, 0.06);
+  cursor: pointer;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+  text-align: right;
+  overflow: hidden;
+}
+.cabinetDesignCard:hover {
+  filter: brightness(1.02);
+}
+.cabinetDesignCard.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.cabinetDesignCard.is-active {
+  border-color: rgba(118, 45, 71, 0.26);
+  background: rgba(243, 222, 230, 0.42);
+}
+.cabinetDesignCard__head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  order: 1;
+}
+.cabinetDesignCard__title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.4;
+}
+.cabinetDesignCard__meta {
+  display: flex;
+  order: 2;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.cabinetDesignCard__viewer {
+  order: 3;
+  width: 100%;
+  height: 220px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(52, 20, 31, 0.08);
+  background: rgba(255, 255, 255, 0.5);
+}
+.cabinetDesignCard__empty {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
 }
 .constructionMenu {
   display: flex;
@@ -1012,6 +1093,27 @@ textarea {
   max-height: none;
   resize: none;
   border-radius: 18px;
+}
+.glbWidget.is-embedded .glbWidget__head {
+  height: 0;
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
+}
+.glbWidget.is-embedded .glbWidget__host {
+  top: 0;
+}
+.glbWidget.is-embedded .glbWidget__view,
+.glbWidget.is-embedded .glbWidget__edgeToggle,
+.glbWidget.is-embedded .glbWidget__opacity {
+  display: none;
+}
+.glbWidget.is-embedded {
+  border-color: rgba(52, 20, 31, 0.08);
+  background:
+    radial-gradient(120% 110% at 30% 15%, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0) 58%),
+    linear-gradient(180deg, rgba(223, 170, 188, 0.03) 0%, rgba(223, 170, 188, 0.015) 100%);
+  box-shadow: none;
 }
 .glbWallAttrs {
   border-radius: 14px;
@@ -1876,9 +1978,9 @@ textarea {
   max-width: 60px !important;
 }
 .constructionDialog__col--owner {
-  min-width: 70px !important;
-  width: 70px;
-  max-width: 82px !important;
+  min-width: 106px !important;
+  width: 106px;
+  max-width: 120px !important;
 }
 .constructionDialog__col--scope {
   min-width: 72px !important;
@@ -1895,13 +1997,18 @@ textarea {
   width: max-content;
 }
 .constructionDialog__col--title {
-  min-width: 150px !important;
+  min-width: 220px !important;
   width: max-content;
 }
 .constructionDialog__col--defaults {
   min-width: 112px !important;
   width: 112px;
   max-width: 132px !important;
+}
+.constructionDialog__col--preview {
+  min-width: 168px !important;
+  width: 168px;
+  max-width: 188px !important;
 }
 .constructionDialog__col--formulaCode {
   min-width: 0 !important;
@@ -2120,6 +2227,37 @@ textarea {
   font-size: 10px;
   font-weight: 700;
   font-family: Vazirmatn, sans-serif;
+}
+.constructionDialog__ownerBadge {
+  min-width: 78px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 800;
+  font-family: Vazirmatn, sans-serif;
+}
+.constructionDialog__ownerBadge--system {
+  color: #29543c;
+  background: rgba(156, 201, 180, 0.36);
+  border-color: rgba(41, 84, 60, 0.14);
+}
+.constructionDialog__ownerBadge--admin {
+  color: #6d2940;
+  background: rgba(223, 170, 188, 0.42);
+  border-color: rgba(109, 41, 64, 0.14);
+}
+.constructionDialog__previewThumb {
+  width: 180px;
+  height: 132px;
+  margin: 0 auto;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(52, 20, 31, 0.08);
+  background: rgba(255, 255, 255, 0.62);
+}
+.constructionDialog__previewEmpty {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
 }
 .constructionDialog__scopeBtn {
   font-family: Vazirmatn, sans-serif !important;

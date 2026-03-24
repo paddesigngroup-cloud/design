@@ -241,10 +241,10 @@ class SubCategoryParamDefault(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMix
 class SubCategoryDesign(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
     __tablename__ = "sub_category_designs"
 
-    admin_id: Mapped[uuid.UUID] = mapped_column(
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("admins.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     sub_category_id: Mapped[uuid.UUID] = mapped_column(
@@ -263,7 +263,7 @@ class SubCategoryDesign(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
-    admin: Mapped["Admin"] = relationship()
+    admin: Mapped["Admin | None"] = relationship()
     sub_category: Mapped["SubCategory"] = relationship(
         back_populates="designs",
         primaryjoin="foreign(SubCategoryDesign.sub_category_id) == SubCategory.id",

@@ -61,7 +61,7 @@ class SubCategoryDesignPreviewResponse(BaseModel):
 
 class SubCategoryDesignItem(BaseModel):
     id: uuid.UUID
-    admin_id: uuid.UUID
+    admin_id: uuid.UUID | None
     sub_category_id: uuid.UUID
     temp_id: int
     cat_id: int
@@ -78,7 +78,7 @@ class SubCategoryDesignItem(BaseModel):
 
 
 class SubCategoryDesignCreate(BaseModel):
-    admin_id: uuid.UUID
+    admin_id: uuid.UUID | None = None
     sub_category_id: uuid.UUID
     design_id: int | None = Field(default=None, ge=1)
     design_title: str = Field(min_length=1, max_length=255)
@@ -88,7 +88,7 @@ class SubCategoryDesignCreate(BaseModel):
 
 
 class SubCategoryDesignUpdate(BaseModel):
-    admin_id: uuid.UUID
+    admin_id: uuid.UUID | None = None
     sub_category_id: uuid.UUID
     design_id: int = Field(ge=1)
     design_title: str = Field(min_length=1, max_length=255)
@@ -235,11 +235,15 @@ async def list_sub_category_designs(
     session: AsyncSession = Depends(get_db_session),
 ) -> list[SubCategoryDesignItem]:
     await require_admin_if_present(session, admin_id)
-    stmt = (
-        select(SubCategoryDesign)
-        .options(selectinload(SubCategoryDesign.parts))
-        .where(SubCategoryDesign.admin_id == admin_id)
-        .order_by(SubCategoryDesign.sort_order.asc(), SubCategoryDesign.design_id.asc())
+    stmt = select(SubCategoryDesign).options(selectinload(SubCategoryDesign.parts))
+    if admin_id is None:
+        stmt = stmt.where(SubCategoryDesign.admin_id.is_(None))
+    else:
+        stmt = stmt.where(or_(SubCategoryDesign.admin_id.is_(None), SubCategoryDesign.admin_id == admin_id))
+    stmt = stmt.order_by(
+        SubCategoryDesign.is_system.desc(),
+        SubCategoryDesign.sort_order.asc(),
+        SubCategoryDesign.design_id.asc(),
     )
     if sub_cat_id is not None:
         stmt = stmt.where(SubCategoryDesign.sub_cat_id == sub_cat_id)

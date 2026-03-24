@@ -85,10 +85,23 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   let isMouseOverCanvas = false;
   let inputEnabled = true;
 
+  function clearTransientHoverState() {
+    hoverUi = null;
+    hoverWallHandle = null;
+    hoverDimTextWallId = null;
+    hoverDimTextHiddenId = null;
+    hoverWallId = null;
+    hoverHiddenId = null;
+    hoverDimId = null;
+    hoverObjectAxis = null;
+    hoverModelOutline = false;
+  }
+
   function setInputEnabled(v) {
     inputEnabled = !!v;
     if (!inputEnabled) {
       isPanning = false;
+      clearTransientHoverState();
     }
   }
 
@@ -4702,6 +4715,7 @@ function hitTestModelFill(screenX, screenY) {
    Selection + hover highlight
 ============================= */
 function drawSelectionAndHover() {
+  if (!inputEnabled) return;
   // Hover/selection "light strip" uses the fixed right menu color, like a soft neon.
   const MENU_BASE = "#762D47";
   function hexToRgb(hex) {
@@ -7674,6 +7688,7 @@ function onWindowMouseUp() {
 function onWindowMouseMove(e) {
   if (!inputEnabled) {
     isMouseOverCanvas = false;
+    clearTransientHoverState();
     return;
   }
   const effectiveMode = getEffectiveDrawingMode();

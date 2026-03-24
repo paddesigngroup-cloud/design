@@ -103,15 +103,13 @@ def evaluate_formula_expression(expression: str, values: dict[str, float]) -> fl
 async def require_accessible_sub_category(
     session: AsyncSession,
     *,
-    admin_id: uuid.UUID,
+    admin_id: uuid.UUID | None,
     sub_category_id: uuid.UUID,
 ) -> SubCategory:
-    item = await session.scalar(
-        select(SubCategory).where(
-            SubCategory.id == sub_category_id,
-            or_(SubCategory.admin_id.is_(None), SubCategory.admin_id == admin_id),
-        )
-    )
+    stmt = select(SubCategory).where(SubCategory.id == sub_category_id)
+    if admin_id is not None:
+        stmt = stmt.where(or_(SubCategory.admin_id.is_(None), SubCategory.admin_id == admin_id))
+    item = await session.scalar(stmt)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found for this admin scope.")
     await sync_defaults_for_sub_categories(session, [item])
@@ -121,21 +119,17 @@ async def require_accessible_sub_category(
 async def require_accessible_part_formulas(
     session: AsyncSession,
     *,
-    admin_id: uuid.UUID,
+    admin_id: uuid.UUID | None,
     part_formula_ids: list[int],
 ) -> list[PartFormula]:
     if not part_formula_ids:
         return []
-    items = (
-        await session.scalars(
-            select(PartFormula)
-            .where(
-                PartFormula.part_formula_id.in_(part_formula_ids),
-                or_(PartFormula.admin_id.is_(None), PartFormula.admin_id == admin_id),
-            )
-            .order_by(PartFormula.sort_order.asc(), PartFormula.part_formula_id.asc())
-        )
-    ).all()
+    stmt = select(PartFormula).where(PartFormula.part_formula_id.in_(part_formula_ids))
+    if admin_id is not None:
+        stmt = stmt.where(or_(PartFormula.admin_id.is_(None), PartFormula.admin_id == admin_id))
+    items = (await session.scalars(
+        stmt.order_by(PartFormula.sort_order.asc(), PartFormula.part_formula_id.asc())
+    )).all()
     found_ids = {int(item.part_formula_id) for item in items}
     missing = [str(item) for item in part_formula_ids if int(item) not in found_ids]
     if missing:
@@ -164,14 +158,13 @@ async def get_sub_category_resolved_params(
     return raw_values, numeric_values
 
 
-async def resolve_base_formula_values(session: AsyncSession, *, admin_id: uuid.UUID, params: dict[str, float]) -> dict[str, float]:
-    formulas = (
-        await session.scalars(
-            select(BaseFormula)
-            .where(or_(BaseFormula.admin_id.is_(None), BaseFormula.admin_id == admin_id))
-            .order_by(BaseFormula.sort_order.asc(), BaseFormula.fo_id.asc())
-        )
-    ).all()
+async def resolve_base_formula_values(session: AsyncSession, *, admin_id: uuid.UUID | None, params: dict[str, float]) -> dict[str, float]:
+    stmt = select(BaseFormula)
+    if admin_id is not None:
+        stmt = stmt.where(or_(BaseFormula.admin_id.is_(None), BaseFormula.admin_id == admin_id))
+    formulas = (await session.scalars(
+        stmt.order_by(BaseFormula.sort_order.asc(), BaseFormula.fo_id.asc())
+    )).all()
     resolved: dict[str, float] = {}
     pending = {str(item.param_formula): str(item.formula) for item in formulas}
     max_passes = max(1, len(pending) * 2)
@@ -240,7 +233,7 @@ def build_part_viewer_payload(part_formula: PartFormula, resolved_part_formulas:
 async def compose_sub_category_design_preview(
     session: AsyncSession,
     *,
-    admin_id: uuid.UUID,
+    admin_id: uuid.UUID | None,
     sub_category: SubCategory,
     part_selections: list[dict[str, object]],
 ) -> tuple[dict[str, str | None], dict[str, float], list[ResolvedPartSnapshot]]:
