@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, ForeignKeyConstraint, String, UniqueConstraint, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, ForeignKeyConstraint, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -96,9 +96,13 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
             name="fk_orders_user_id_admin_id_users",
             ondelete="RESTRICT",
         ),
+        UniqueConstraint("admin_id", "order_number", name="uq_orders_admin_order_number"),
     )
 
-    order_number: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    order_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    order_number: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", server_default="draft")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     admin_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("admins.id", ondelete="CASCADE"),

@@ -5,7 +5,7 @@ import { editorRef, model2dTransformRef } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
 import { useDialogService } from "./dialog_service.js";
 import { WALL_READY_PRESETS, buildPresetLines, getPresetIconWalls } from "./features/wall_preset_drag.js";
-import { CURRENT_ADMIN_ID, PART_KINDS_CATALOG } from "./features/part_kinds_catalog.js";
+import { CURRENT_ADMIN_ID, CURRENT_BOOTSTRAP_USER_ID, CURRENT_BOOTSTRAP_USER_NAME, PART_KINDS_CATALOG } from "./features/part_kinds_catalog.js";
 
 const activeTool = ref("select");
 const snapOn = ref(true);
@@ -155,6 +155,16 @@ const snapMenuItems = [
   { id: "ortho", title: "راستا (راست کلیک)", icon: "/icons/ortho_line.png" },
 ];
 const currentAdminId = ref(CURRENT_ADMIN_ID);
+const currentBootstrapUserId = ref(CURRENT_BOOTSTRAP_USER_ID);
+const currentBootstrapUserName = ref(CURRENT_BOOTSTRAP_USER_NAME);
+const activeOrder = ref(null);
+const ordersCatalog = ref([]);
+const ordersLoading = ref(false);
+const ordersSaving = ref(false);
+const orderEntryOpen = ref(false);
+const orderEntryTab = ref("create");
+const orderDraftMode = ref("create");
+const orderDraft = ref({ order_name: "", notes: "", status: "draft" });
 const cabinetDesignCatalog = ref([]);
 const cabinetDesignCatalogLoading = ref(false);
 const cabinetDesignCatalogLoadedForAdmin = ref("");
@@ -5042,6 +5052,269 @@ function saveProjects() {
 }
 loadProjects();
 
+const requiresOrderGate = computed(() => route.name === "floorplan");
+const isOrderGateBlocking = computed(() => requiresOrderGate.value && !activeOrder.value);
+const orderStatusOptions = [
+  { value: "draft", label: "پیش نویس" },
+  { value: "designing", label: "در حال طراحی" },
+  { value: "submitted", label: "ثبت شده" },
+  { value: "archived", label: "آرشیو" },
+];
+const orderStatusLabelMap = Object.fromEntries(orderStatusOptions.map((item) => [item.value, item.label]));
+const activeOrderStatusLabel = computed(() => orderStatusLabelMap[String(activeOrder.value?.status || "draft")] || "پیش نویس");
+const isOrderDraftEditMode = computed(() => orderDraftMode.value === "edit");
+const orderEntryPreviewNumber = computed(() => {
+  if (isOrderDraftEditMode.value && activeOrder.value?.order_number) {
+    return String(activeOrder.value.order_number);
+  }
+  const year = new Date().getFullYear();
+  return `ORD-${year}-....`;
+});
+const orderEntryDisplayDate = computed(() =>
+  formatOrderDate(isOrderDraftEditMode.value ? activeOrder.value?.submitted_at : new Date().toISOString())
+);
+const orderEntrySubmitLabel = computed(() =>
+  ordersSaving.value
+    ? isOrderDraftEditMode.value
+      ? "در حال ذخیره..."
+      : "در حال ثبت..."
+    : isOrderDraftEditMode.value
+      ? "ذخیره تغییرات سفارش"
+      : "ثبت و ورود به طراحی"
+);
+
+function normalizeOrderRecord(item) {
+  if (!item) return null;
+  return {
+    id: String(item.id || ""),
+    order_name: String(item.order_name || "").trim(),
+    order_number: String(item.order_number || "").trim(),
+    status: String(item.status || "draft").trim().toLowerCase(),
+    notes: String(item.notes || "").trim(),
+    submitted_at: String(item.submitted_at || ""),
+    admin_id: String(item.admin_id || currentAdminId.value),
+    admin_name: String(item.admin_name || currentAdminId.value).trim(),
+    user_id: String(item.user_id || currentBootstrapUserId.value),
+    user_name: String(item.user_name || currentBootstrapUserName.value).trim(),
+  };
+}
+
+function formatOrderDate(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return "-";
+  try {
+    return new Intl.DateTimeFormat("fa-IR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  } catch (_) {
+    return date.toLocaleString();
+  }
+}
+
+async function loadOrders() {
+  ordersLoading.value = true;
+  try {
+    const res = await fetch(`/api/orders?admin_id=${encodeURIComponent(currentAdminId.value)}`);
+    if (!res.ok) throw new Error("load-orders-failed");
+    ordersCatalog.value = (await res.json()).map(normalizeOrderRecord).filter(Boolean);
+    if (activeOrder.value) {
+      const fresh = ordersCatalog.value.find((item) => item.id === activeOrder.value.id) || null;
+      activeOrder.value = fresh;
+    }
+    if (!activeOrder.value) {
+      orderEntryTab.value = ordersCatalog.value.length ? "list" : "create";
+    }
+  } catch (_) {
+    showAlert("خواندن سفارش‌ها انجام نشد.", { title: "خطا" });
+  } finally {
+    ordersLoading.value = false;
+  }
+}
+
+function openOrderEntry(tab = null) {
+  if (tab) orderEntryTab.value = tab;
+  else if (!activeOrder.value) orderEntryTab.value = ordersCatalog.value.length ? "list" : "create";
+  orderEntryOpen.value = true;
+}
+
+function closeOrderEntry(force = false) {
+  if (!force && !activeOrder.value && requiresOrderGate.value) return;
+  orderEntryOpen.value = false;
+}
+
+async function ensureOrderGate() {
+  if (!requiresOrderGate.value) return;
+  if (!ordersCatalog.value.length && !ordersLoading.value) {
+    await loadOrders();
+  }
+  if (!activeOrder.value) {
+    openOrderEntry();
+  }
+}
+
+function resetOrderDraft() {
+  orderDraft.value = { order_name: "", notes: "", status: "draft" };
+}
+
+function hydrateOrderDraftFromOrder(item) {
+  const normalized = normalizeOrderRecord(item);
+  if (!normalized) {
+    resetOrderDraft();
+    return;
+  }
+  orderDraft.value = {
+    order_name: String(normalized.order_name || "").trim(),
+    notes: String(normalized.notes || "").trim(),
+    status: String(normalized.status || "draft"),
+  };
+}
+
+function openOrderCreate(defaultName = "طرح جدید") {
+  orderDraftMode.value = "create";
+  resetOrderDraft();
+  orderDraft.value.order_name = String(defaultName || "طرح جدید").trim() || "طرح جدید";
+  orderEntryTab.value = "create";
+  orderEntryOpen.value = true;
+}
+
+function openOrderEditor() {
+  if (!activeOrder.value) {
+    openOrderEntry();
+    return;
+  }
+  orderDraftMode.value = "edit";
+  hydrateOrderDraftFromOrder(activeOrder.value);
+  orderEntryTab.value = "create";
+  orderEntryOpen.value = true;
+}
+
+function hasOrderDraftChanges() {
+  if (!activeOrder.value || !isOrderDraftEditMode.value) return false;
+  return (
+    String(orderDraft.value.order_name || "").trim() !== String(activeOrder.value.order_name || "").trim() ||
+    String(orderDraft.value.notes || "").trim() !== String(activeOrder.value.notes || "").trim() ||
+    String(orderDraft.value.status || "draft") !== String(activeOrder.value.status || "draft")
+  );
+}
+
+async function createOrder() {
+  const orderName = String(orderDraft.value.order_name || "").trim();
+  if (!orderName) {
+    showAlert("نام سفارش را وارد کنید.", { title: "خطا" });
+    return;
+  }
+  ordersSaving.value = true;
+  try {
+    const res = await fetch("/api/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        admin_id: currentAdminId.value,
+        user_id: currentBootstrapUserId.value,
+        order_name: orderName,
+        notes: String(orderDraft.value.notes || "").trim() || null,
+        status: String(orderDraft.value.status || "draft"),
+      }),
+    });
+    if (!res.ok) {
+      let detail = "";
+      try {
+        const payload = await res.json();
+        detail = String(payload?.detail || "").trim();
+      } catch (_) {}
+      throw new Error(detail || `create-order-failed-${res.status}`);
+    }
+    const created = normalizeOrderRecord(await res.json());
+    activeOrder.value = created;
+    orderDraftMode.value = "edit";
+    hydrateOrderDraftFromOrder(created);
+    await loadOrders();
+    closeOrderEntry(true);
+  } catch (err) {
+    const message = String(err?.message || "");
+    if (message.includes("User not found")) {
+      showAlert("کاربر bootstrap برای این ادمین در دیتابیس پیدا نشد. backend را با migration جدید بروزرسانی و restart کنید.", { title: "خطا" });
+    } else if (message.includes("unique order number") || message.includes("409")) {
+      showAlert("شماره سفارش تکراری شد. دوباره تلاش کنید یا backend را restart کنید تا generator جدید بارگذاری شود.", { title: "خطا" });
+    } else {
+      showAlert("ثبت سفارش انجام نشد.", { title: "خطا" });
+    }
+  } finally {
+    ordersSaving.value = false;
+  }
+}
+
+async function updateOrder() {
+  const target = normalizeOrderRecord(activeOrder.value);
+  if (!target?.id) {
+    openOrderEntry();
+    return;
+  }
+  const orderName = String(orderDraft.value.order_name || "").trim();
+  if (!orderName) {
+    showAlert("نام سفارش را وارد کنید.", { title: "خطا" });
+    return;
+  }
+  if (!hasOrderDraftChanges()) {
+    showAlert("تغییری برای ذخیره وجود ندارد.", { title: "ذخیره سفارش" });
+    return;
+  }
+  ordersSaving.value = true;
+  try {
+    const res = await fetch(`/api/orders/${encodeURIComponent(target.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order_name: orderName,
+        notes: String(orderDraft.value.notes || "").trim() || null,
+        status: String(orderDraft.value.status || "draft"),
+      }),
+    });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "update-order-failed"));
+    const updated = normalizeOrderRecord(await res.json());
+    activeOrder.value = updated;
+    orderDraftMode.value = "edit";
+    hydrateOrderDraftFromOrder(updated);
+    await loadOrders();
+    closeOrderEntry(true);
+    showAlert("آخرین تغییرات سفارش ذخیره شد.", { title: "ذخیره سفارش" });
+  } catch (_) {
+    showAlert("ذخیره سفارش انجام نشد.", { title: "خطا" });
+  } finally {
+    ordersSaving.value = false;
+  }
+}
+
+function selectOrder(item) {
+  activeOrder.value = normalizeOrderRecord(item);
+  orderDraftMode.value = "edit";
+  hydrateOrderDraftFromOrder(activeOrder.value);
+  closeOrderEntry(true);
+}
+
+async function archiveOrder(item) {
+  const target = normalizeOrderRecord(item);
+  if (!target?.id) return;
+  const ok = await showConfirm(`سفارش «${target.order_name || target.order_number || "بدون نام"}» آرشیو شود؟`, { title: "آرشیو سفارش" });
+  if (!ok) return;
+  ordersSaving.value = true;
+  try {
+    const res = await fetch(`/api/orders/${encodeURIComponent(target.id)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("archive-order-failed");
+    if (activeOrder.value?.id === target.id) activeOrder.value = null;
+    await loadOrders();
+    await ensureOrderGate();
+  } catch (_) {
+    showAlert("آرشیو سفارش انجام نشد.", { title: "خطا" });
+  } finally {
+    ordersSaving.value = false;
+  }
+}
+
 function getEditorState() {
   try {
     return editorRef.value?.getState?.() || null;
@@ -5059,31 +5332,25 @@ function isEditorEmpty() {
   return !(hasWalls || hasHidden || hasDims);
 }
 
-async function doNewDesign() {
-  if (!editorRef.value) return;
-  if (!isEditorEmpty()) {
-    const ok = await showConfirm("طرح فعلی ذخیره نشده است. بدون ذخیره پاک شود؟", { title: "طرح جدید" });
-    if (!ok) return;
-  }
-  editorRef.value.clearAll?.();
-  editorRef.value.goOrigin?.();
+function doNewDesign() {
+  openOrderCreate("طرح جدید");
 }
 
 async function doSaveProject() {
-  if (!editorRef.value) return;
-  const state = getEditorState();
-  if (!state) return;
-  const rawName = await showPrompt("نام طرح را وارد کنید:", "طرح جدید", { title: "ذخیره طرح" });
-  const name = (rawName || "").trim();
-  if (!name) return;
-  const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  projects.value.unshift({ id, name, ts: Date.now(), state });
-  projects.value = projects.value.slice(0, 50);
-  saveProjects();
+  if (!activeOrder.value) {
+    openOrderEntry();
+    return;
+  }
+  if (!isOrderDraftEditMode.value) {
+    orderDraftMode.value = "edit";
+    hydrateOrderDraftFromOrder(activeOrder.value);
+  }
+  await updateOrder();
 }
 
 function doOpenPicker() {
-  openMode.value = "open";
+  orderDraftMode.value = activeOrder.value ? "edit" : "create";
+  openOrderEntry("list");
 }
 function doOpenProject(p) {
   if (!editorRef.value?.setState || !p?.state) return;
@@ -5137,11 +5404,9 @@ function openMenuPanelAt(menuId, anchorEl, mode = "menu") {
 }
 
 function doOpenFromTopbar() {
-  // Open the main menu directly in "open" mode (online/localStorage picker).
-  openMenuPanelAt("menu", mainMenuBtnEl.value, "open");
+  doOpenPicker();
 }
 function doSaveFromTopbar() {
-  // Keep the main menu closed; just save the current state (online/localStorage).
   doSaveProject();
 }
 function doShareFromTopbar() {
@@ -5647,6 +5912,30 @@ function scheduleShift() {
   });
 }
 
+watch(
+  () => route.fullPath,
+  async () => {
+    if (requiresOrderGate.value) {
+      await ensureOrderGate();
+    } else {
+      closeOrderEntry(true);
+    }
+  }
+);
+
+watch(
+  isOrderGateBlocking,
+  (blocked) => {
+    if (blocked) {
+      editorRef.value?.setInputEnabled?.(false);
+      closeQuickMenus();
+    } else {
+      editorRef.value?.setInputEnabled?.(true);
+    }
+  },
+  { immediate: true }
+);
+
 onMounted(() => {
   window.__designkpDialogs = {
     alert: (msg, opts) => showAlert(msg, opts),
@@ -5658,6 +5947,7 @@ onMounted(() => {
   setTimeout(scheduleShift, 0);
   scheduleSubRailPosition();
   syncQuickStateFromEditor();
+  loadOrders().then(() => ensureOrderGate());
   _quickSyncTimer = window.setInterval(syncQuickStateFromEditor, 350);
 
   _quickOutsidePointerDown = (e) => {
@@ -5962,7 +6252,18 @@ onBeforeUnmount(() => {
         <div class="menuPanel__body">
           <!-- Main menu content -->
           <template v-if="openMenuPanel === 'menu'">
-            <div v-if="openMode === 'menu'" class="menuList">
+            <div class="menuList">
+              <button
+                v-if="activeOrder"
+                type="button"
+                class="menuPanel__orderCard"
+                :title="`${activeOrder.order_name} - ${activeOrder.order_number}`"
+                @click="openOrderEditor()"
+              >
+                <span class="menuPanel__orderLabel">سفارش فعال</span>
+                <span class="menuPanel__orderName">{{ activeOrder.order_name }}</span>
+                <span class="menuPanel__orderMeta">{{ activeOrder.order_number }} / {{ activeOrderStatusLabel }}</span>
+              </button>
               <button class="menuItem" type="button" @click="doNewDesign">طرح جدید</button>
               <button class="menuItem" type="button" @click="doOpenPicker">باز کردن</button>
               <button class="menuItem" type="button" @click="doSaveProject">ذخیره</button>
@@ -5971,23 +6272,6 @@ onBeforeUnmount(() => {
               <button class="menuItem" type="button" @click="goSettings">تنظیمات</button>
               <button class="menuItem" type="button" @click="setMenu('profile')">حساب کاربری</button>
               <button class="menuItem" type="button" @click="doMessages">پیام ها</button>
-            </div>
-
-            <div v-else class="menuList">
-              <div class="menuPanel__hint">طرح‌های ذخیره‌شده (آنلاین/LocalStorage)</div>
-              <div v-if="projects.length === 0" class="menuPanel__hint">هیچ طرحی ذخیره نشده.</div>
-              <div v-for="p in projects" :key="p.id" class="menuRow">
-                <button class="menuItem menuItem--grow" type="button" @click="doOpenProject(p)">
-                  {{ p.name }}
-                </button>
-                <button class="menuItem" type="button" title="تغییر نام" @click="doRenameProject(p)">
-                  نام
-                </button>
-                <button class="menuItem menuItem--danger" type="button" title="حذف" @click="doDeleteProject(p)">
-                  حذف
-                </button>
-              </div>
-              <button class="menuItem" type="button" @click="openMode='menu'">بازگشت</button>
             </div>
           </template>
 
@@ -6171,6 +6455,15 @@ onBeforeUnmount(() => {
 
       <section ref="stageEl" class="stage">
         <div ref="stageCardEl" class="stage__card">
+          <div v-if="isOrderGateBlocking" class="stageOrderGuard" @click="openOrderEntry()">
+            <div class="stageOrderGuard__card">
+              <div class="stageOrderGuard__title">قبل از طراحی، سفارش را انتخاب کنید</div>
+              <div class="stageOrderGuard__text">برای شروع کار باید یک سفارش جدید بسازید یا یک سفارش موجود را انتخاب کنید.</div>
+              <button type="button" class="menuItem" @click.stop="openOrderEntry()">
+                ورود به سفارش
+              </button>
+            </div>
+          </div>
           <div v-if="showStageOverlays" class="stageQuickBar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
             <button
               class="iconbtn iconbtn--sm stageQuickBar__btn"
@@ -8448,6 +8741,106 @@ onBeforeUnmount(() => {
       <div class="appDialog__actions">
         <button type="button" class="constructionDialog__textBtn" @click="closeSubCategoryUserPreview">انصراف</button>
         <button type="button" class="constructionDialog__textBtn is-primary" @click="applySubCategoryUserPreview">اعمال</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="orderEntryOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop"></div>
+    <div class="appDialog__card appDialog__card--order" dir="rtl">
+      <div class="orderEntry">
+        <div class="orderEntry__head">
+          <div>
+            <div class="orderEntry__title">ورود از مسیر سفارش</div>
+            <div class="orderEntry__subtitle">
+              {{ isOrderDraftEditMode ? "سفارش فعال را ویرایش و آخرین تغییرات آن را ذخیره کنید." : "قبل از طراحی، یک سفارش بسازید یا یکی از سفارش‌های موجود را انتخاب کنید." }}
+            </div>
+          </div>
+          <button v-if="activeOrder" type="button" class="menuPanel__close" title="بستن" @click="closeOrderEntry()">×</button>
+        </div>
+
+        <div class="orderEntry__tabs">
+          <button type="button" class="orderEntry__tab" :class="{ 'is-active': orderEntryTab === 'create' }" @click="openOrderCreate('طرح جدید')">سفارش جدید</button>
+          <button type="button" class="orderEntry__tab" :class="{ 'is-active': orderEntryTab === 'list' }" @click="orderEntryTab = 'list'">سفارش‌های موجود</button>
+        </div>
+
+        <div v-if="orderEntryTab === 'create'" class="orderEntry__body">
+          <div class="orderEntry__grid">
+            <label class="orderEntry__field">
+              <span>نام سفارش</span>
+              <input v-model="orderDraft.order_name" class="constructionDialog__input" type="text" placeholder="مثلاً آشپزخانه واحد ۳" />
+            </label>
+            <label class="orderEntry__field">
+              <span>شماره سفارش</span>
+              <input :value="orderEntryPreviewNumber" class="constructionDialog__input" type="text" readonly />
+            </label>
+            <label class="orderEntry__field">
+              <span>وضعیت</span>
+              <select v-model="orderDraft.status" class="constructionDialog__input">
+                <option v-for="status in orderStatusOptions" :key="status.value" :value="status.value">{{ status.label }}</option>
+              </select>
+            </label>
+            <label class="orderEntry__field">
+              <span>ثبت‌کننده</span>
+              <input :value="currentBootstrapUserName" class="constructionDialog__input" type="text" readonly />
+            </label>
+            <label class="orderEntry__field">
+              <span>ادمین مالک</span>
+              <input :value="currentAdminId" class="constructionDialog__input constructionDialog__input--mono" type="text" readonly />
+            </label>
+            <label class="orderEntry__field">
+              <span>تاریخ ثبت</span>
+              <input :value="orderEntryDisplayDate" class="constructionDialog__input" type="text" readonly />
+            </label>
+            <label class="orderEntry__field orderEntry__field--wide">
+              <span>توضیح کوتاه</span>
+              <textarea v-model="orderDraft.notes" class="constructionDialog__input orderEntry__textarea" rows="3" placeholder="توضیح کوتاه برای این سفارش"></textarea>
+            </label>
+          </div>
+          <div class="orderEntry__actions">
+            <button type="button" class="menuItem" :disabled="ordersSaving" @click="isOrderDraftEditMode ? updateOrder() : createOrder()">
+              {{ orderEntrySubmitLabel }}
+            </button>
+          </div>
+        </div>
+
+        <div v-else class="orderEntry__body">
+          <div v-if="ordersLoading" class="orderEntry__state">در حال خواندن سفارش‌ها...</div>
+          <div v-else-if="ordersCatalog.length === 0" class="orderEntry__state">هنوز سفارشی ثبت نشده است.</div>
+          <div v-else class="orderEntry__tableWrap">
+            <table class="constructionDialog__table orderEntry__table">
+              <thead>
+                <tr>
+                  <th class="constructionDialog__col constructionDialog__col--title">نام سفارش</th>
+                  <th class="constructionDialog__col constructionDialog__col--code">شماره سفارش</th>
+                  <th class="constructionDialog__col constructionDialog__col--scope">تاریخ ثبت</th>
+                  <th class="constructionDialog__col constructionDialog__col--title">ثبت‌کننده</th>
+                  <th class="constructionDialog__col constructionDialog__col--title">ادمین مالک</th>
+                  <th class="constructionDialog__col constructionDialog__col--scope">وضعیت</th>
+                  <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in ordersCatalog" :key="item.id">
+                  <td class="constructionDialog__col constructionDialog__col--title">{{ item.order_name }}</td>
+                  <td class="constructionDialog__col constructionDialog__col--code">{{ item.order_number }}</td>
+                  <td class="constructionDialog__col constructionDialog__col--scope">{{ formatOrderDate(item.submitted_at) }}</td>
+                  <td class="constructionDialog__col constructionDialog__col--title">{{ item.user_name }}</td>
+                  <td class="constructionDialog__col constructionDialog__col--title">{{ item.admin_name }}</td>
+                  <td class="constructionDialog__col constructionDialog__col--scope">
+                    <span class="constructionDialog__scopeBtn is-admin">{{ orderStatusLabelMap[item.status] || item.status }}</span>
+                  </td>
+                  <td class="constructionDialog__col constructionDialog__col--actions">
+                    <div class="constructionDialog__actionsCell">
+                      <button type="button" class="constructionDialog__textBtn" @click="selectOrder(item)">انتخاب</button>
+                      <button type="button" class="constructionDialog__iconBtn" title="آرشیو" @click="archiveOrder(item)">×</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
   </div>

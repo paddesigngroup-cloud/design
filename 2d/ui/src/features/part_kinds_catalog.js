@@ -1,4 +1,6 @@
 export const CURRENT_ADMIN_ID = "00000000-0000-0000-0000-000000000001";
+export const CURRENT_BOOTSTRAP_USER_ID = "00000000-0000-0000-0000-000000000101";
+export const CURRENT_BOOTSTRAP_USER_NAME = "کاربر دمو";
 
 // UI-side mirror of the current database shape for part_kinds until the API is wired.
 export const PART_KINDS_CATALOG = [

@@ -44,10 +44,32 @@ Purpose:
 Stores the orders registered in the software and identifies which customer admin and which user created each order.
 
 Current business role:
-- Records the main order registration data.
-- Keeps the order number for tracking each order.
+- Records the main order registration data before wall/design detail is attached.
+- Keeps both an order name and an order number for tracking each order.
 - Connects every order to one `admin` and one `user`.
 - Stores the order registration time.
+- Stores the current workflow state of the order.
+- Holds short order-level notes for UX and sales follow-up.
+
+Chosen v1 structure logic:
+- Business fields for this phase:
+  - `order_name`
+  - `order_number`
+  - `status`
+  - `notes`
+  - `submitted_at`
+  - `admin_id`
+  - `user_id`
+- `order_name` is the human-facing design/job name that the UI uses before any walls or drawings exist.
+- `order_number` is the system tracking code and is generated automatically.
+- `status` is currently one of:
+  - `draft`
+  - `designing`
+  - `submitted`
+  - `archived`
+- `notes` stores short free-text context for the order header and future workflow.
+- In this phase, `orders` is intentionally only the UX parent record.
+- Future tables for walls, design snapshots, and other formal links should reference `order_id` separately rather than being merged into this table.
 
 Current minimum relationship:
 - Each `order` belongs to one `admin`.
