@@ -259,7 +259,7 @@ class SubCategoryDesign(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
     sub_cat_id: Mapped[int] = mapped_column(ForeignKey("sub_categories.sub_cat_id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False, index=True)
     design_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
     design_title: Mapped[str] = mapped_column(String(255), nullable=False)
-    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

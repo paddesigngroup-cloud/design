@@ -12,7 +12,7 @@ from designkp_backend.db.base import Base
 from designkp_backend.db.mixins import SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 if TYPE_CHECKING:
-    from .catalog import BaseFormula, Category, Param, ParamGroup, PartFormula, PartKind, SubCategory, Template
+    from .catalog import BaseFormula, Category, Param, ParamGroup, PartFormula, PartKind, SubCategory, SubCategoryDesign, Template
 
 
 class SuperAdmin(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -41,6 +41,10 @@ class Admin(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
     order_drawings: Mapped[list["OrderDrawing"]] = relationship(
         back_populates="admin",
         foreign_keys="OrderDrawing.admin_id",
+    )
+    order_designs: Mapped[list["OrderDesign"]] = relationship(
+        back_populates="admin",
+        foreign_keys="OrderDesign.admin_id",
     )
     part_kinds: Mapped[list["PartKind"]] = relationship(
         back_populates="admin",
@@ -93,6 +97,10 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, B
         back_populates="user",
         foreign_keys="OrderDrawing.user_id",
     )
+    order_designs: Mapped[list["OrderDesign"]] = relationship(
+        back_populates="user",
+        foreign_keys="OrderDesign.user_id",
+    )
 
 
 class Order(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -136,6 +144,10 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
         cascade="all, delete-orphan",
         uselist=False,
     )
+    order_designs: Mapped[list["OrderDesign"]] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+    )
 
 
 class OrderDrawing(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -172,3 +184,55 @@ class OrderDrawing(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Version
     order: Mapped[Order] = relationship(back_populates="drawing")
     admin: Mapped[Admin] = relationship(back_populates="order_drawings", foreign_keys=[admin_id])
     user: Mapped[User] = relationship(back_populates="order_drawings", foreign_keys=[user_id])
+
+
+class OrderDesign(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "order_designs"
+    __table_args__ = (
+        UniqueConstraint("order_id", "instance_code", name="uq_order_designs_order_instance_code"),
+    )
+
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    admin_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    sub_category_design_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sub_category_designs.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    sub_category_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sub_categories.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    design_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    design_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    instance_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    sort_order: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", server_default="draft")
+    order_attr_values: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    order_attr_meta: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    part_snapshots: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
+    viewer_boxes: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
+
+    order: Mapped[Order] = relationship(back_populates="order_designs")
+    admin: Mapped[Admin] = relationship(back_populates="order_designs", foreign_keys=[admin_id])
+    user: Mapped[User] = relationship(back_populates="order_designs", foreign_keys=[user_id])
+    sub_category_design: Mapped["SubCategoryDesign"] = relationship()

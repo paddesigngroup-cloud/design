@@ -82,6 +82,7 @@ class SubCategoryDesignCreate(BaseModel):
     sub_category_id: uuid.UUID
     design_id: int | None = Field(default=None, ge=1)
     design_title: str = Field(min_length=1, max_length=255)
+    code: str = Field(min_length=1, max_length=64)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
     parts: list[SubCategoryDesignPartSelectionPayload] = Field(default_factory=list)
@@ -92,6 +93,7 @@ class SubCategoryDesignUpdate(BaseModel):
     sub_category_id: uuid.UUID
     design_id: int = Field(ge=1)
     design_title: str = Field(min_length=1, max_length=255)
+    code: str = Field(min_length=1, max_length=64)
     sort_order: int = Field(ge=0)
     is_system: bool
     parts: list[SubCategoryDesignPartSelectionPayload] = Field(default_factory=list)
@@ -103,13 +105,23 @@ class SubCategoryDesignPreviewDraftRequest(BaseModel):
     parts: list[SubCategoryDesignPartSelectionPayload] = Field(default_factory=list)
 
 
-def _code_for_design(design_id: int) -> str:
-    return f"sub_category_design_{design_id}"
-
-
 async def _next_design_id(session: AsyncSession) -> int:
     max_id = await session.scalar(select(func.max(SubCategoryDesign.design_id)))
     return int(max_id or 0) + 1
+
+
+async def _ensure_unique_design_code(
+    session: AsyncSession,
+    *,
+    code: str,
+    exclude_id: uuid.UUID | None = None,
+) -> None:
+    stmt = select(SubCategoryDesign).where(SubCategoryDesign.code == code)
+    if exclude_id is not None:
+        stmt = stmt.where(SubCategoryDesign.id != exclude_id)
+    duplicate = await session.scalar(stmt)
+    if duplicate:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Design code is already used.")
 
 
 def _serialize_design(item: SubCategoryDesign) -> SubCategoryDesignItem:
@@ -257,6 +269,10 @@ async def create_sub_category_design(payload: SubCategoryDesignCreate, session: 
     sub_category = await require_accessible_sub_category(session, admin_id=payload.admin_id, sub_category_id=payload.sub_category_id)
     next_design_id = payload.design_id or await _next_design_id(session)
     title = payload.design_title.strip()
+    code = payload.code.strip()
+    if not code:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Design code is required.")
+    await _ensure_unique_design_code(session, code=code)
     item = SubCategoryDesign(
         admin_id=payload.admin_id,
         sub_category_id=sub_category.id,
@@ -265,7 +281,7 @@ async def create_sub_category_design(payload: SubCategoryDesignCreate, session: 
         sub_cat_id=sub_category.sub_cat_id,
         design_id=next_design_id,
         design_title=title,
-        code=_code_for_design(next_design_id),
+        code=code,
         title=title,
         sort_order=payload.sort_order if payload.sort_order is not None else next_design_id,
         is_system=payload.is_system,
@@ -291,6 +307,10 @@ async def update_sub_category_design(
     await require_admin_if_present(session, payload.admin_id)
     sub_category = await require_accessible_sub_category(session, admin_id=payload.admin_id, sub_category_id=payload.sub_category_id)
     title = payload.design_title.strip()
+    code = payload.code.strip()
+    if not code:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Design code is required.")
+    await _ensure_unique_design_code(session, code=code, exclude_id=item.id)
     item.admin_id = payload.admin_id
     item.sub_category_id = sub_category.id
     item.temp_id = sub_category.temp_id
@@ -298,7 +318,7 @@ async def update_sub_category_design(
     item.sub_cat_id = sub_category.sub_cat_id
     item.design_id = payload.design_id
     item.design_title = title
-    item.code = _code_for_design(payload.design_id)
+    item.code = code
     item.title = title
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system

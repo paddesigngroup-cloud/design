@@ -22,7 +22,15 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  orderDesign: {
+    type: Object,
+    default: null,
+  },
   placeholderBoxes: {
+    type: Array,
+    default: () => [],
+  },
+  placeholderInstances: {
     type: Array,
     default: () => [],
   },
@@ -44,7 +52,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords"]);
+const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords", "update:orderDesignAttr"]);
 
 const widgetEl = ref(null);
 const hostEl = ref(null);
@@ -115,6 +123,85 @@ const colorFieldLabel = computed(() => {
   return "رنگ سه بعدی دیوار";
 });
 const showColorField = computed(() => selectedEntityType.value === "wall" || selectedEntityType.value === "beam" || selectedEntityType.value === "column");
+const activeOrderDesign = computed(() => props.orderDesign || null);
+const orderDesignInputDrafts = ref({});
+const orderDesignAttrGroups = computed(() => {
+  const item = activeOrderDesign.value;
+  if (!item?.order_attr_meta) return [];
+  const meta = item.order_attr_meta || {};
+  const values = item.order_attr_values || {};
+  const groupsMap = new Map();
+  for (const [key, rawMeta] of Object.entries(meta)) {
+    const entryMeta = rawMeta || {};
+    const groupKey = String(entryMeta.group_title || "سایر صفات").trim() || "سایر صفات";
+    if (!groupsMap.has(groupKey)) {
+      groupsMap.set(groupKey, {
+        key: groupKey,
+        title: groupKey,
+        order: Number(entryMeta.group_ui_order) || 0,
+        iconPath: String(entryMeta.group_icon_path || "").trim() || "",
+        items: [],
+      });
+    }
+    groupsMap.get(groupKey).items.push({
+      key,
+      label: String(entryMeta.label || key).trim() || key,
+      iconPath: String(entryMeta.group_icon_path || entryMeta.icon_path || "").trim() || "",
+      inputMode: entryMeta.input_mode === "binary" ? "binary" : "value",
+      binaryOffLabel: String(entryMeta.binary_off_label || "0").trim() || "0",
+      binaryOnLabel: String(entryMeta.binary_on_label || "1").trim() || "1",
+      value: Object.prototype.hasOwnProperty.call(orderDesignInputDrafts.value, key)
+        ? orderDesignInputDrafts.value[key]
+        : values[key] ?? "",
+      sortOrder: Number(entryMeta.param_ui_order) || 0,
+      paramId: Number(entryMeta.param_id) || 0,
+    });
+  }
+  return Array.from(groupsMap.values())
+    .map((group) => ({
+      ...group,
+      items: group.items.sort((a, b) => {
+        const orderDelta = a.sortOrder - b.sortOrder;
+        if (orderDelta !== 0) return orderDelta;
+        const idDelta = a.paramId - b.paramId;
+        if (idDelta !== 0) return idDelta;
+        return a.label.localeCompare(b.label, "fa");
+      }),
+    }))
+    .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title, "fa"));
+});
+const orderDesignAttrIconBase = computed(() => {
+  const adminId = String(activeOrderDesign.value?.admin_id || "").trim();
+  return adminId ? `/api/admin-storage/${encodeURIComponent(adminId)}/icons/` : "";
+});
+function resolveOrderDesignMetaIcon(path) {
+  const fileName = String(path || "").trim();
+  const base = orderDesignAttrIconBase.value;
+  if (!fileName || !base) return "";
+  return `${base}${encodeURIComponent(fileName)}`;
+}
+const hasOrderDesignAttrs = computed(() => !!activeOrderDesign.value && orderDesignAttrGroups.value.length > 0);
+const openOrderDesignGroupKey = ref("");
+
+watch(
+  () => String(activeOrderDesign.value?.id || ""),
+  () => {
+    orderDesignInputDrafts.value = {};
+    openOrderDesignGroupKey.value = String(orderDesignAttrGroups.value?.[0]?.key || "");
+  }
+);
+
+watch(
+  orderDesignAttrGroups,
+  (groups) => {
+    const firstKey = String(groups?.[0]?.key || "");
+    const hasCurrent = groups.some((group) => String(group.key) === String(openOrderDesignGroupKey.value));
+    if (!hasCurrent) {
+      openOrderDesignGroupKey.value = firstKey;
+    }
+  },
+  { immediate: true }
+);
 
 const selectedWallCount = computed(() => {
   const selectedIds = Array.isArray(attrsSnapshot.value?.selection?.selectedWallIds)
@@ -289,6 +376,27 @@ function patchWallStyleDraft(patch) {
 
 function patchSelectedWallCoords(patch) {
   emit("update:selectedWallCoords", patch);
+}
+
+function patchOrderDesignAttr(key, value) {
+  emit("update:orderDesignAttr", { key, value });
+}
+
+function setOrderDesignDraftValue(key, value) {
+  orderDesignInputDrafts.value = {
+    ...orderDesignInputDrafts.value,
+    [key]: value,
+  };
+}
+
+function commitOrderDesignDraftValue(key) {
+  patchOrderDesignAttr(key, orderDesignInputDrafts.value[key] ?? "");
+}
+
+function toggleOrderDesignGroup(groupKey) {
+  const key = String(groupKey || "");
+  if (!key) return;
+  openOrderDesignGroupKey.value = openOrderDesignGroupKey.value === key ? "" : key;
 }
 
 function patchCenterCoord(axis, value) {
@@ -625,67 +733,81 @@ function rebuildPlaceholderBoxes() {
 
   const root = new THREE.Group();
   root.name = "placeholder-boxes";
+  const instances = Array.isArray(props.placeholderInstances) && props.placeholderInstances.length
+    ? props.placeholderInstances
+    : [{
+        orderDesignId: "active",
+        boxes: Array.isArray(props.placeholderBoxes) ? props.placeholderBoxes : (props.embedded ? PLACEHOLDER_BOX_SPECS_MM : []),
+        transform: props.model2dTransform,
+        active: true,
+      }];
 
-  const specs = Array.isArray(props.placeholderBoxes)
-    ? props.placeholderBoxes
-    : (props.embedded ? PLACEHOLDER_BOX_SPECS_MM : []);
+  for (const instance of instances) {
+    const specs = Array.isArray(instance?.boxes) ? instance.boxes : [];
+    if (!specs.length) continue;
+    const tx = Number.isFinite(Number(instance?.transform?.x)) ? Number(instance.transform.x) : 0;
+    const ty = Number.isFinite(Number(instance?.transform?.y)) ? Number(instance.transform.y) : 0;
+    const rotRad = Number.isFinite(Number(instance?.transform?.rotRad)) ? Number(instance.transform.rotRad) : 0;
 
-  for (const spec of specs) {
-    const widthM = Math.max(0.001, Number(spec.width) * 0.001);
-    const depthM = Math.max(0.001, Number(spec.depth) * 0.001);
-    const heightM = Math.max(0.001, Number(spec.height) * 0.001);
-    const cxM = Number(spec.cx) * 0.001;
-    const cyM = Number(spec.cy) * 0.001;
-    const czM = Number(spec.cz) * 0.001;
+    const instanceRoot = new THREE.Group();
+    instanceRoot.name = `placeholder-instance-${String(instance?.orderDesignId || "item")}`;
+    instanceRoot.position.set(tx * 0.001, 0, -ty * 0.001);
+    instanceRoot.rotation.y = rotRad;
 
-    const geometry = new THREE.BoxGeometry(widthM, heightM, depthM);
-    const material = new THREE.MeshStandardMaterial({
-      color: new THREE.Color("#D9D4CB"),
-      roughness: 0.82,
-      metalness: 0.04,
-      transparent: true,
-      opacity: 1,
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.userData.isPlaceholderSolid = true;
-    const edges = new THREE.EdgesGeometry(geometry);
-    const edgeLines = new THREE.LineSegments(
-      edges,
-      new THREE.LineBasicMaterial({
-        color: new THREE.Color("#5F5A52"),
+    for (const spec of specs) {
+      const widthM = Math.max(0.001, Number(spec.width) * 0.001);
+      const depthM = Math.max(0.001, Number(spec.depth) * 0.001);
+      const heightM = Math.max(0.001, Number(spec.height) * 0.001);
+      const cxM = Number(spec.cx) * 0.001;
+      const cyM = Number(spec.cy) * 0.001;
+      const czM = Number(spec.cz) * 0.001;
+
+      const geometry = new THREE.BoxGeometry(widthM, heightM, depthM);
+      const material = new THREE.MeshStandardMaterial({
+        color: new THREE.Color("#D9D4CB"),
+        roughness: 0.82,
+        metalness: 0.04,
         transparent: true,
-        opacity: 0.95,
-        depthTest: true,
-        depthWrite: false,
-      })
-    );
-    edgeLines.userData.isPlaceholderEdge = true;
+        opacity: 1,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.userData.isPlaceholderSolid = true;
+      const edges = new THREE.EdgesGeometry(geometry);
+      const edgeLines = new THREE.LineSegments(
+        edges,
+        new THREE.LineBasicMaterial({
+          color: new THREE.Color("#5F5A52"),
+          transparent: true,
+          opacity: 0.95,
+          depthTest: true,
+          depthWrite: false,
+        })
+      );
+      edgeLines.userData.isPlaceholderEdge = true;
 
-    // Blender-like center-based data:
-    // X = width axis
-    // Y = depth axis
-    // Z = height axis
-    // Scene mapping in this viewer:
-    // X -> X, Z(height) -> Y, Y(depth) -> -Z
-    mesh.position.set(cxM, czM, -cyM);
-    edgeLines.position.copy(mesh.position);
-    root.add(mesh);
-    root.add(edgeLines);
+      mesh.position.set(cxM, czM, -cyM);
+      edgeLines.position.copy(mesh.position);
+      instanceRoot.add(mesh);
+      instanceRoot.add(edgeLines);
+    }
+
+    root.add(instanceRoot);
   }
 
   if (!root.children.length) return;
   placeholderBoxesRoot = root;
   scene.add(root);
-  applyModel2dTransformTo3d(props.model2dTransform);
-
-  try {
-    const lines = projectModelTo2DLines(root);
-    emit("model2d", {
-      lines,
-      opts: { color: "#8a98a3", lineWidthPx: 1, dash: [4, 7], alpha: 0.5 },
-    });
-  } catch (_) {
-    // no-op
+  if (!(Array.isArray(props.placeholderInstances) && props.placeholderInstances.length)) {
+    applyModel2dTransformTo3d(props.model2dTransform);
+    try {
+      const lines = projectModelTo2DLines(root);
+      emit("model2d", {
+        lines,
+        opts: { color: "#8a98a3", lineWidthPx: 1, dash: [4, 7], alpha: 0.5 },
+      });
+    } catch (_) {
+      // no-op
+    }
   }
 
   syncPlaceholderEdgeVisibility();
@@ -978,13 +1100,26 @@ function applyModel2dTransformTo3d(transform) {
   }
 
   if (placeholderBoxesRoot) {
-    placeholderBoxesRoot.position.set(xMm * mPerMm, 0, -yMm * mPerMm);
-    placeholderBoxesRoot.rotation.y = rotRad;
+    if (Array.isArray(props.placeholderInstances) && props.placeholderInstances.length) {
+      placeholderBoxesRoot.position.set(0, 0, 0);
+      placeholderBoxesRoot.rotation.y = 0;
+    } else {
+      placeholderBoxesRoot.position.set(xMm * mPerMm, 0, -yMm * mPerMm);
+      placeholderBoxesRoot.rotation.y = rotRad;
+    }
   }
 }
 
 watch(
   () => props.placeholderBoxes,
+  () => {
+    rebuildPlaceholderBoxes();
+  },
+  { immediate: true, deep: true }
+);
+
+watch(
+  () => props.placeholderInstances,
   () => {
     rebuildPlaceholderBoxes();
   },
@@ -1286,13 +1421,68 @@ watch(
   </div>
 
   <div v-if="showAttrsPanel" class="glbWallAttrs glbWallAttrs--panel" dir="rtl" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
-    <div class="glbWallAttrs__head">
-      <div class="menuPanel__title glbWallAttrs__title">صفات</div>
-      <div v-if="isGroupEditMode" class="glbWallAttrs__groupLabel">ویرایش گروهی</div>
+    <div class="glbWallAttrs__sticky">
+      <div class="glbWallAttrs__head">
+        <div class="menuPanel__title glbWallAttrs__title">صفات</div>
+        <div v-if="isGroupEditMode" class="glbWallAttrs__groupLabel">ویرایش گروهی</div>
+      </div>
+      <div class="glbWallAttrs__sep"></div>
     </div>
-    <div class="glbWallAttrs__sep"></div>
 
-    <template v-if="wallMetrics">
+    <template v-if="hasOrderDesignAttrs">
+      <div class="glbWallAttrs__objectTitle">
+        {{ activeOrderDesign?.design_title || activeOrderDesign?.instance_code || "طرح سفارش" }}
+      </div>
+      <div v-for="group in orderDesignAttrGroups" :key="group.key" class="glbWallAttrs__attrGroup">
+        <button type="button" class="glbWallAttrs__groupToggle" @click="toggleOrderDesignGroup(group.key)">
+          <span class="glbWallAttrs__groupLabel">
+            <img
+              v-if="resolveOrderDesignMetaIcon(group.iconPath)"
+              :src="resolveOrderDesignMetaIcon(group.iconPath)"
+              alt=""
+              class="glbWallAttrs__metaIcon glbWallAttrs__metaIcon--group"
+            />
+            <span>{{ group.title }}</span>
+          </span>
+          <span class="glbWallAttrs__groupCaret">{{ openOrderDesignGroupKey === group.key ? "−" : "+" }}</span>
+        </button>
+        <div v-if="openOrderDesignGroupKey === group.key" class="glbWallAttrs__editor glbWallAttrs__editor--attrs">
+          <label v-for="entry in group.items" :key="entry.key" class="glbWallAttrs__editRow glbWallAttrs__editRow--meta">
+            <span class="glbWallAttrs__metaLabel">
+              <img
+                v-if="resolveOrderDesignMetaIcon(entry.iconPath || group.iconPath)"
+                :src="resolveOrderDesignMetaIcon(entry.iconPath || group.iconPath)"
+                alt=""
+                class="glbWallAttrs__metaIcon"
+              />
+              <span>{{ entry.label }}</span>
+            </span>
+            <select
+              v-if="entry.inputMode === 'binary'"
+              class="glbWallAttrs__input"
+              :value="entry.value"
+              @change="patchOrderDesignAttr(entry.key, $event.target.value)"
+            >
+              <option value="0">{{ entry.binaryOffLabel }}</option>
+              <option value="1">{{ entry.binaryOnLabel }}</option>
+            </select>
+            <input
+              v-else
+              class="glbWallAttrs__input"
+              type="text"
+              inputmode="decimal"
+              :value="entry.value"
+              @input="setOrderDesignDraftValue(entry.key, $event.target.value)"
+              @blur="commitOrderDesignDraftValue(entry.key)"
+              @keydown.enter.prevent="commitOrderDesignDraftValue(entry.key)"
+            />
+          </label>
+        </div>
+        <div class="glbWallAttrs__sep"></div>
+      </div>
+    </template>
+
+    <template v-else-if="wallMetrics">
       <div v-if="selectedObjectTitle" class="glbWallAttrs__objectTitle">{{ selectedObjectTitle }}</div>
       <div class="glbWallAttrs__editor glbWallAttrs__editor--attrs">
         <label v-if="showLengthField" class="glbWallAttrs__editRow">
@@ -1465,6 +1655,6 @@ watch(
       </div>
     </template>
 
-    <div v-else class="menuPanel__hint glbWallAttrs__hint--soft">ترسیم خود را انتخاب نمایید</div>
+    <div v-else class="menuPanel__hint glbWallAttrs__hint--soft">ترسیم یا طرح سفارش خود را انتخاب نمایید</div>
   </div>
 </template>

@@ -68,7 +68,7 @@ function installGlobalErrorHooksOnce() {
   });
 }
 
-export function createWallApp({ canvas, container, onModel2dTransformChange } = {}) {
+export function createWallApp({ canvas, container, onModel2dTransformChange, onViewportChange } = {}) {
   installGlobalErrorHooksOnce();
 
   // Boot flag (used by standalone index.html to detect module load failures)
@@ -111,6 +111,7 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
   let DPR = 1;
   let viewportW = 1;
   let viewportH = 1;
+  let lastViewportEmit = null;
 
   function resize() {
     DPR = (typeof window !== "undefined" && window.devicePixelRatio) ? window.devicePixelRatio : 1;
@@ -126,6 +127,26 @@ export function createWallApp({ canvas, container, onModel2dTransformChange } = 
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   }
   resize();
+
+  function emitViewportChange(force = false) {
+    if (typeof onViewportChange !== "function") return;
+    const next = {
+      zoom: Number.isFinite(Number(state.zoom)) ? Number(state.zoom) : 1,
+      offsetX: Number.isFinite(Number(state.offsetX)) ? Number(state.offsetX) : 0,
+      offsetY: Number.isFinite(Number(state.offsetY)) ? Number(state.offsetY) : 0,
+    };
+    if (
+      !force &&
+      lastViewportEmit &&
+      lastViewportEmit.zoom === next.zoom &&
+      lastViewportEmit.offsetX === next.offsetX &&
+      lastViewportEmit.offsetY === next.offsetY
+    ) {
+      return;
+    }
+    lastViewportEmit = next;
+    onViewportChange(next);
+  }
 
   /* =============================
      State
@@ -5943,6 +5964,7 @@ let _standaloneUiBound = false;
 function loop() {
   if (!_attached) return;
   try {
+    emitViewportChange();
     drawGrid();
     drawModel2dOverlay();
     drawHiddenWalls({
@@ -8756,6 +8778,7 @@ function restoreSnapshot(snap) {
     y: model2d.offsetYmm || 0,
     rotRad: model2d.rotationRad || 0,
   });
+  emitViewportChange(true);
   _ui.updateToolButtons();
   _ui.updateSnapButton();
   updateCanvasCursor();

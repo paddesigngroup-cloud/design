@@ -1,6 +1,6 @@
 <script setup>
 import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from "vue";
-import { editorRef, model2dTransformRef } from "../editor/editor_store.js";
+import { editorRef, model2dTransformRef, editorViewportRef } from "../editor/editor_store.js";
 import { createWallApp } from "../../../main.js";
 
 const hostEl = ref(null);
@@ -19,6 +19,13 @@ onMounted(() => {
         const y = Number.isFinite(t?.y) ? t.y : 0;
         const rotRad = Number.isFinite(t?.rotRad) ? t.rotRad : 0;
         model2dTransformRef.value = { x, y, rotRad };
+      },
+      onViewportChange: (viewport) => {
+        editorViewportRef.value = {
+          zoom: Number.isFinite(viewport?.zoom) ? viewport.zoom : 1,
+          offsetX: Number.isFinite(viewport?.offsetX) ? viewport.offsetX : 0,
+          offsetY: Number.isFinite(viewport?.offsetY) ? viewport.offsetY : 0,
+        };
       },
     });
     // Vue shell starts in "no drawing" mode.

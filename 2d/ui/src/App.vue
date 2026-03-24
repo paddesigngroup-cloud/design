@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { editorRef, model2dTransformRef } from "./editor/editor_store.js";
+import { editorRef, model2dTransformRef, editorViewportRef } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
 import { useDialogService } from "./dialog_service.js";
 import { WALL_READY_PRESETS, buildPresetLines, getPresetIconWalls } from "./features/wall_preset_drag.js";
@@ -169,10 +169,18 @@ const orderDrawingLoading = ref(false);
 const cabinetDesignCatalog = ref([]);
 const cabinetDesignCatalogLoading = ref(false);
 const cabinetDesignCatalogLoadedForAdmin = ref("");
+const orderDesignCatalog = ref([]);
+const orderDesignCatalogLoading = ref(false);
+const orderDesignCatalogLoadedForOrderId = ref("");
+const orderDesignEditorOpen = ref(false);
+const orderDesignEditorDraft = ref(null);
+const orderDesignSavingId = ref("");
+const orderDesignPlacements = ref([]);
 const stageCabinetPlaceholderBoxes = ref([]);
 const activeCabinetDesignId = ref(null);
 const hoveredCabinetDesignId = ref(null);
 const hoveredConstructionDesignId = ref(null);
+const editorViewportState = editorViewportRef;
 const constructionWizardOpen = ref(false);
 const constructionStep = ref("templates");
 const PART_FORMULA_FIELDS = [
@@ -747,6 +755,7 @@ function normalizeSubCategoryDesignPayload(item) {
     sub_category_id: item.sub_category_id,
     design_id: Number(item.design_id),
     design_title: String(item.design_title || "").trim(),
+    code: String(item.code || "").trim(),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.design_id),
     is_system: !!item.is_system,
     parts: (Array.isArray(item.parts) ? item.parts : [])
@@ -1588,6 +1597,7 @@ function buildNewSubCategoryDesignDraft() {
     sub_cat_title: String(fallbackSubCategory?.sub_cat_title || "").trim(),
     design_id: nextId,
     design_title: `طرح ${toPersianDigits(nextId)}`,
+    code: `sub_category_design_${nextId}`,
     sort_order: nextId,
     is_system: true,
     parts: [],
@@ -1665,6 +1675,17 @@ function normalizeCabinetBox(box) {
   };
 }
 
+function normalizeOrderDesignPlacement(item) {
+  const orderDesignId = String(item?.orderDesignId || item?.order_design_id || item?.id || "").trim();
+  if (!orderDesignId) return null;
+  return {
+    orderDesignId,
+    x: Number.isFinite(Number(item?.x)) ? Number(item.x) : 0,
+    y: Number.isFinite(Number(item?.y)) ? Number(item.y) : 0,
+    rotRad: Number.isFinite(Number(item?.rotRad)) ? Number(item.rotRad) : 0,
+  };
+}
+
 function buildModel2dLinesFromBoxes(boxes) {
   const lines = [];
   for (const rawBox of Array.isArray(boxes) ? boxes : []) {
@@ -1683,6 +1704,17 @@ function buildModel2dLinesFromBoxes(boxes) {
     );
   }
   return lines;
+}
+
+function buildModel2dOutlineFromBoxes(boxes) {
+  const bounds = getCabinetBoxesBounds(boxes);
+  if (!bounds) return [];
+  return [
+    { x: bounds.minX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.maxY },
+    { x: bounds.minX, y: bounds.maxY },
+  ];
 }
 
 function getLinesBounds(lines) {
@@ -1723,31 +1755,22 @@ function getCabinetBoxesBounds(boxes) {
   return getLinesBounds(buildModel2dLinesFromBoxes(boxes));
 }
 
-function translateCabinetBoxesToClient(boxes, clientX, clientY) {
+function clientPointToStageWorld(clientX, clientY) {
   const full = editorRef.value?.getState?.();
   const st = full?.state || {};
   const zoom = Number(st.zoom);
   const offsetX = Number(st.offsetX);
   const offsetY = Number(st.offsetY);
   const stageRect = stageEl.value?.getBoundingClientRect();
-  const bounds = getCabinetBoxesBounds(boxes);
-  if (!stageRect || !bounds || !Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(offsetX) || !Number.isFinite(offsetY)) {
-    return Array.isArray(boxes) ? boxes.map(normalizeCabinetBox) : [];
+  if (!stageRect || !Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(offsetX) || !Number.isFinite(offsetY)) {
+    return null;
   }
   const stageX = clientX - stageRect.left;
   const stageY = clientY - stageRect.top;
-  const worldX = (stageX - offsetX) / zoom;
-  const worldY = -(stageY - offsetY) / zoom;
-  const dx = worldX - ((bounds.minX + bounds.maxX) * 0.5);
-  const dy = worldY - ((bounds.minY + bounds.maxY) * 0.5);
-  return boxes.map((rawBox) => {
-    const box = normalizeCabinetBox(rawBox);
-    return {
-      ...box,
-      cx: box.cx + dx,
-      cy: box.cy + dy,
-    };
-  });
+  return {
+    x: (stageX - offsetX) / zoom,
+    y: -(stageY - offsetY) / zoom,
+  };
 }
 
 function getCabinetDesignPreviewLines(design) {
@@ -1782,6 +1805,30 @@ async function enrichDesignWithPreview(item) {
   }
 }
 
+function normalizeOrderDesignRecord(item) {
+  if (!item || !item.id) return null;
+  return {
+    ...item,
+    id: String(item.id),
+    order_id: String(item.order_id || ""),
+    sub_category_design_id: String(item.sub_category_design_id || ""),
+    sub_category_id: String(item.sub_category_id || ""),
+    design_code: String(item.design_code || "").trim(),
+    design_title: String(item.design_title || "").trim(),
+    instance_code: String(item.instance_code || "").trim(),
+    status: String(item.status || "draft").trim() || "draft",
+    sort_order: Number(item.sort_order) || 0,
+    order_attr_values: Object.fromEntries(
+      Object.entries(item.order_attr_values || {}).map(([key, value]) => [key, value == null ? "" : String(value)])
+    ),
+    order_attr_meta: Object.fromEntries(
+      Object.entries(item.order_attr_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])
+    ),
+    part_snapshots: Array.isArray(item.part_snapshots) ? item.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
+    viewer_boxes: Array.isArray(item.viewer_boxes) ? item.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
+  };
+}
+
 async function loadCabinetDesignCatalog(force = false) {
   const adminKey = String(currentAdminId.value || "");
   if (cabinetDesignCatalogLoading.value) return;
@@ -1804,6 +1851,338 @@ async function loadCabinetDesignCatalog(force = false) {
   }
 }
 
+async function loadOrderDesignCatalog(force = false) {
+  const orderId = String(activeOrder.value?.id || "");
+  if (!orderId) {
+    orderDesignCatalog.value = [];
+    orderDesignCatalogLoadedForOrderId.value = "";
+    orderDesignPlacements.value = [];
+    stageCabinetPlaceholderBoxes.value = [];
+    activeCabinetDesignId.value = null;
+    return;
+  }
+  if (orderDesignCatalogLoading.value) return;
+  if (!force && orderDesignCatalogLoadedForOrderId.value === orderId) return;
+  orderDesignCatalogLoading.value = true;
+  try {
+    const res = await fetch(`/api/order-designs?order_id=${encodeURIComponent(orderId)}`);
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "خواندن طرح‌های سفارش انجام نشد."));
+    orderDesignCatalog.value = (await res.json()).map(normalizeOrderDesignRecord).filter(Boolean);
+    const validIds = new Set(orderDesignCatalog.value.map((item) => String(item.id)));
+    orderDesignPlacements.value = orderDesignPlacements.value.filter((placement) => validIds.has(String(placement.orderDesignId)));
+    orderDesignCatalogLoadedForOrderId.value = orderId;
+  } catch (error) {
+    orderDesignCatalog.value = [];
+    orderDesignCatalogLoadedForOrderId.value = "";
+    showAlert(error?.message || "خواندن طرح‌های سفارش انجام نشد.", { title: "خطا" });
+  } finally {
+    orderDesignCatalogLoading.value = false;
+  }
+}
+
+async function createOrderDesignFromSource(sourceDesign, { instanceCode = "", designTitle = "", orderAttrValues = {} } = {}) {
+  const orderId = String(activeOrder.value?.id || "").trim();
+  if (!orderId) {
+    openOrderEntry();
+    throw new Error("ابتدا یک سفارش فعال انتخاب کنید.");
+  }
+  const res = await fetch("/api/order-designs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      order_id: orderId,
+      sub_category_design_id: sourceDesign.id,
+      instance_code: String(instanceCode || "").trim() || null,
+      design_title: String(designTitle || sourceDesign.design_title || "").trim() || null,
+      order_attr_values: orderAttrValues,
+    }),
+  });
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن طرح به سفارش انجام نشد."));
+  const created = normalizeOrderDesignRecord(await res.json());
+  await loadOrderDesignCatalog(true);
+  return created;
+}
+
+function openOrderDesignEditor(item) {
+  const normalized = normalizeOrderDesignRecord(item);
+  if (!normalized) return;
+  orderDesignEditorDraft.value = {
+    ...normalized,
+    order_attr_values: { ...(normalized.order_attr_values || {}) },
+    order_attr_meta: { ...(normalized.order_attr_meta || {}) },
+  };
+  orderDesignEditorOpen.value = true;
+}
+
+function closeOrderDesignEditor() {
+  orderDesignEditorOpen.value = false;
+  orderDesignEditorDraft.value = null;
+}
+
+function getOrderDesignAttrEntries(item) {
+  const meta = item?.order_attr_meta || {};
+  const values = item?.order_attr_values || {};
+  return Object.keys(meta)
+    .map((key) => ({
+      key,
+      meta: meta[key] || {},
+      value: values[key] ?? "",
+    }))
+    .sort((a, b) => {
+      const groupDelta = (Number(a.meta.group_ui_order) || 0) - (Number(b.meta.group_ui_order) || 0);
+      if (groupDelta !== 0) return groupDelta;
+      const paramDelta = (Number(a.meta.param_ui_order) || 0) - (Number(b.meta.param_ui_order) || 0);
+      if (paramDelta !== 0) return paramDelta;
+      const idDelta = (Number(a.meta.param_id) || 0) - (Number(b.meta.param_id) || 0);
+      if (idDelta !== 0) return idDelta;
+      return String(a.meta.label || a.key).localeCompare(String(b.meta.label || b.key), "fa");
+    });
+}
+
+async function persistOrderDesignRecord(item, nextAttrValues = null) {
+  const target = normalizeOrderDesignRecord(item);
+  if (!target?.id) return null;
+  const payload = {
+    design_title: String(target.design_title || "").trim(),
+    instance_code: String(target.instance_code || "").trim(),
+    sort_order: Number(target.sort_order) || 0,
+    status: String(target.status || "draft"),
+    order_attr_values: nextAttrValues || target.order_attr_values || {},
+  };
+  const res = await fetch(`/api/order-designs/${encodeURIComponent(String(target.id))}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره صفات طرح سفارش انجام نشد."));
+  return normalizeOrderDesignRecord(await res.json());
+}
+
+async function updateActiveOrderDesignAttr({ key, value }) {
+  const active = activeStageOrderDesign.value;
+  const attrKey = String(key || "").trim();
+  if (!active?.id || !attrKey) return;
+  const activePlacement = activeStageOrderPlacement.value || getCurrentModel2dTransform();
+  const nextValues = {
+    ...(active.order_attr_values || {}),
+    [attrKey]: value == null ? "" : String(value),
+  };
+  orderDesignCatalog.value = orderDesignCatalog.value.map((item) =>
+    String(item.id) === String(active.id)
+      ? { ...item, order_attr_values: nextValues }
+      : item
+  );
+  orderDesignSavingId.value = String(active.id);
+  try {
+    const fresh = await persistOrderDesignRecord(active, nextValues);
+    if (fresh) {
+      orderDesignCatalog.value = orderDesignCatalog.value.map((item) =>
+        String(item.id) === String(fresh.id) ? fresh : item
+      );
+      if (String(activeCabinetDesignId.value || "") === String(fresh.id)) {
+        stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
+        restoreActiveOrderDesignToEditor(fresh, activePlacement);
+      }
+      await saveActiveOrderDrawing();
+    }
+  } catch (error) {
+    showAlert(error?.message || "ذخیره صفات طرح سفارش انجام نشد.", { title: "خطا" });
+    await loadOrderDesignCatalog(true);
+  } finally {
+    if (String(orderDesignSavingId.value) === String(active.id)) {
+      orderDesignSavingId.value = "";
+    }
+  }
+}
+
+async function saveOrderDesignEditor() {
+  const draft = orderDesignEditorDraft.value;
+  if (!draft?.id) return;
+  const designTitle = String(draft.design_title || "").trim();
+  const instanceCode = String(draft.instance_code || "").trim();
+  if (!designTitle) {
+    showAlert("عنوان طرح سفارش نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!instanceCode) {
+    showAlert("کد نمونه نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  try {
+    const fresh = await persistOrderDesignRecord({
+      ...draft,
+      design_title: designTitle,
+      instance_code: instanceCode,
+    });
+    if (fresh) {
+      orderDesignCatalog.value = orderDesignCatalog.value.map((item) =>
+        String(item.id) === String(fresh.id) ? fresh : item
+      );
+    } else {
+      await loadOrderDesignCatalog(true);
+    }
+    closeOrderDesignEditor();
+    showAlert("طرح سفارش ذخیره شد.", { title: "ذخیره طرح" });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره طرح سفارش انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function deleteOrderDesign(item) {
+  const target = normalizeOrderDesignRecord(item);
+  if (!target?.id) return;
+  const ok = await showConfirm(`نمونه «${target.instance_code || target.design_title || "طرح"}» حذف شود؟`, {
+    title: "حذف طرح سفارش",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  try {
+    const res = await fetch(`/api/order-designs/${encodeURIComponent(target.id)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف طرح سفارش انجام نشد."));
+    removeOrderDesignPlacement(target.id);
+    if (String(activeCabinetDesignId.value || "") === String(target.id)) {
+      stageCabinetPlaceholderBoxes.value = [];
+      activeCabinetDesignId.value = null;
+      editorRef.value?.clearModel2dLines?.(false);
+      saveActiveOrderDrawing().catch(() => {});
+    }
+    await loadOrderDesignCatalog(true);
+  } catch (error) {
+    showAlert(error?.message || "حذف طرح سفارش انجام نشد.", { title: "خطا" });
+  }
+}
+
+function localDesignToWorld(linesOrPoints, placement = null, kind = "lines") {
+  const normalized = Array.isArray(linesOrPoints) ? linesOrPoints.map((entry) => ({ ...(entry || {}) })) : [];
+  if (!normalized.length) return [];
+  const tx = Number.isFinite(Number(placement?.x)) ? Number(placement.x) : 0;
+  const ty = Number.isFinite(Number(placement?.y)) ? Number(placement.y) : 0;
+  const rotRad = Number.isFinite(Number(placement?.rotRad)) ? Number(placement.rotRad) : 0;
+  const cos = Math.cos(rotRad);
+  const sin = Math.sin(rotRad);
+  const mapPoint = (x, y) => {
+    const dx = Number(x);
+    const dy = Number(y);
+    return {
+      x: (dx * cos - dy * sin) + tx,
+      y: (dx * sin + dy * cos) + ty,
+    };
+  };
+  if (kind === "points") {
+    return normalized.map((point) => {
+      const next = mapPoint(point.x, point.y);
+      return {
+        ...point,
+        x: next.x,
+        y: next.y,
+      };
+    });
+  }
+  return normalized.map((line) => {
+    const a = mapPoint(line.ax, line.ay);
+    const b = mapPoint(line.bx, line.by);
+    return {
+      ...line,
+      ax: a.x,
+      ay: a.y,
+      bx: b.x,
+      by: b.y,
+    };
+  });
+}
+
+function upsertOrderDesignPlacement(item) {
+  const next = normalizeOrderDesignPlacement(item);
+  if (!next) return;
+  const index = orderDesignPlacements.value.findIndex((placement) => String(placement.orderDesignId) === String(next.orderDesignId));
+  if (index >= 0) {
+    orderDesignPlacements.value = orderDesignPlacements.value.map((placement, placementIndex) =>
+      placementIndex === index ? { ...placement, ...next } : placement
+    );
+    return;
+  }
+  orderDesignPlacements.value = [...orderDesignPlacements.value, next];
+}
+
+function removeOrderDesignPlacement(orderDesignId) {
+  const key = String(orderDesignId || "").trim();
+  if (!key) return;
+  orderDesignPlacements.value = orderDesignPlacements.value.filter((placement) => String(placement.orderDesignId) !== key);
+}
+
+function getOrderDesignPlacement(orderDesignId) {
+  return orderDesignPlacements.value.find((placement) => String(placement.orderDesignId) === String(orderDesignId || "").trim()) || null;
+}
+
+function getCurrentModel2dTransform() {
+  return {
+    x: Number.isFinite(Number(model2dTransformRef.value?.x)) ? Number(model2dTransformRef.value.x) : 0,
+    y: Number.isFinite(Number(model2dTransformRef.value?.y)) ? Number(model2dTransformRef.value.y) : 0,
+    rotRad: Number.isFinite(Number(model2dTransformRef.value?.rotRad)) ? Number(model2dTransformRef.value.rotRad) : 0,
+  };
+}
+
+function restoreActiveOrderDesignToEditor(item, placement = null) {
+  const target = normalizeOrderDesignRecord(item);
+  if (!target?.viewer_boxes?.length) return false;
+  const full = editorRef.value?.getState?.();
+  if (!full || !editorRef.value?.restoreSnapshot) return false;
+  const nextPlacement = normalizeOrderDesignPlacement({
+    orderDesignId: target.id,
+    ...(placement || {}),
+  }) || { orderDesignId: target.id, x: 0, y: 0, rotRad: 0 };
+  const nextSnapshot = {
+    ...full,
+    model2dSnap: {
+      ...(full.model2dSnap || {}),
+      lines: localDesignToWorld(buildModel2dLinesFromBoxes(target.viewer_boxes), nextPlacement, "lines"),
+      outline: localDesignToWorld(buildModel2dOutlineFromBoxes(target.viewer_boxes), nextPlacement, "points"),
+      offsetXmm: nextPlacement.x,
+      offsetYmm: nextPlacement.y,
+      rotationRad: nextPlacement.rotRad,
+    },
+  };
+  const restored = !!editorRef.value.restoreSnapshot(nextSnapshot);
+  if (restored) {
+    activeCabinetDesignId.value = target.id;
+    upsertOrderDesignPlacement(nextPlacement);
+  }
+  return restored;
+}
+
+function placeOrderDesignOnStage(item) {
+  const target = normalizeOrderDesignRecord(item);
+  if (!target?.viewer_boxes?.length) return;
+  stageCabinetPlaceholderBoxes.value = target.viewer_boxes.map(normalizeCabinetBox);
+  activeCabinetDesignId.value = target.id;
+  restoreActiveOrderDesignToEditor(target, getOrderDesignPlacement(target.id));
+  saveActiveOrderDrawing().catch(() => {});
+}
+
+function activateOrderDesignFromStage(orderDesignId) {
+  const key = String(orderDesignId || "").trim();
+  if (!key) return;
+  const target = orderDesignCatalog.value.find((item) => String(item.id) === key);
+  if (!target?.viewer_boxes?.length) return;
+  if (String(activeCabinetDesignId.value || "") === key) return;
+  stageCabinetPlaceholderBoxes.value = target.viewer_boxes.map(normalizeCabinetBox);
+  restoreActiveOrderDesignToEditor(target, getOrderDesignPlacement(target.id));
+}
+
+function clearStageOrderDesignPlacement({ persist = true } = {}) {
+  const hadStageDesign =
+    !!String(activeCabinetDesignId.value || "").trim() ||
+    (Array.isArray(stageCabinetPlaceholderBoxes.value) && stageCabinetPlaceholderBoxes.value.length > 0);
+  if (!hadStageDesign) return;
+  removeOrderDesignPlacement(activeCabinetDesignId.value);
+  stageCabinetPlaceholderBoxes.value = [];
+  activeCabinetDesignId.value = null;
+  if (persist && activeOrder.value?.id) {
+    saveActiveOrderDrawing().catch(() => {});
+  }
+}
+
 async function openSubCategoryDesignEditor(item = null) {
   const draft = item
     ? syncSubCategoryDesignDraftSubCategoryFields({
@@ -1816,6 +2195,7 @@ async function openSubCategoryDesignEditor(item = null) {
         sub_cat_title: item.sub_cat_title,
         design_id: item.design_id,
         design_title: item.design_title,
+        code: item.code,
         sort_order: item.sort_order,
         is_system: item.is_system,
         parts: Array.isArray(item.parts) ? item.parts.map((part) => ({
@@ -1881,8 +2261,13 @@ async function saveSubCategoryDesignEditor() {
     return;
   }
   const title = String(draft.design_title || "").trim();
+  const code = String(draft.code || "").trim();
   if (!title) {
     showAlert("عنوان طرح نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!code) {
+    showAlert("کد طرح نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
     return;
   }
   if (!draft.sub_category_id) {
@@ -1892,6 +2277,11 @@ async function saveSubCategoryDesignEditor() {
   const duplicate = editableSubCategoryDesigns.value.some((item) => Number(item.design_id) === designId && String(item.id) !== String(draft.id || ""));
   if (duplicate) {
     showAlert("شناسه طرح تکراری است.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const duplicateCode = editableSubCategoryDesigns.value.some((item) => String(item.code || "").trim() === code && String(item.id) !== String(draft.id || ""));
+  if (duplicateCode) {
+    showAlert("کد طرح تکراری است.", { title: "اعتبارسنجی" });
     return;
   }
   const payload = normalizeSubCategoryDesignPayload(draft);
@@ -4574,6 +4964,20 @@ function syncQuickStateFromEditor() {
   const full = editorRef.value?.getState?.();
   const s = full?.state;
   if (!s) return;
+  editorViewportState.value = {
+    zoom: Number.isFinite(Number(s.zoom)) ? Number(s.zoom) : 1,
+    offsetX: Number.isFinite(Number(s.offsetX)) ? Number(s.offsetX) : 0,
+    offsetY: Number.isFinite(Number(s.offsetY)) ? Number(s.offsetY) : 0,
+  };
+  const model2dLines = Array.isArray(full?.model2dSnap?.lines) ? full.model2dSnap.lines : [];
+  if (!model2dLines.length) {
+    clearStageOrderDesignPlacement({ persist: !orderDrawingLoading.value });
+  } else if (activeCabinetDesignId.value) {
+    upsertOrderDesignPlacement({
+      orderDesignId: activeCabinetDesignId.value,
+      ...getCurrentModel2dTransform(),
+    });
+  }
   showDimensions.value = s.showDimensions !== false;
   showOffsetWalls.value = !!s.offsetWallEnabled;
   showObjectAxes.value = !!s.showObjectAxes;
@@ -4940,6 +5344,9 @@ function buildDebugJsonPayload() {
       wallStyleDraft: wallStyleDraft.value,
       selectedWallStyle: selectedWallStyle.value,
       walls3dSnapshot: walls3dSnapshot.value,
+      orderDesignPlacements: orderDesignPlacements.value,
+      stageCabinetPlaceholderBoxes: stageCabinetPlaceholderBoxes.value,
+      activeCabinetDesignId: activeCabinetDesignId.value,
     },
   };
 }
@@ -5063,6 +5470,66 @@ const orderStatusOptions = [
 ];
 const orderStatusLabelMap = Object.fromEntries(orderStatusOptions.map((item) => [item.value, item.label]));
 const activeOrderStatusLabel = computed(() => orderStatusLabelMap[String(activeOrder.value?.status || "draft")] || "پیش نویس");
+const activeStageOrderDesign = computed(() =>
+  orderDesignCatalog.value.find((item) => String(item.id) === String(activeCabinetDesignId.value || "")) || null
+);
+const activeStageOrderPlacement = computed(() => getOrderDesignPlacement(activeCabinetDesignId.value));
+const stageOrderDesignInstances = computed(() =>
+  orderDesignPlacements.value
+    .map((placement) => {
+      const item = orderDesignCatalog.value.find((row) => String(row.id) === String(placement.orderDesignId));
+      if (!item?.viewer_boxes?.length) return null;
+      const isActive = String(item.id) === String(activeCabinetDesignId.value || "");
+      const liveTransform = isActive ? getCurrentModel2dTransform() : null;
+      return {
+        orderDesignId: item.id,
+        boxes: item.viewer_boxes.map(normalizeCabinetBox),
+        transform: isActive
+          ? {
+              x: liveTransform.x,
+              y: liveTransform.y,
+              rotRad: liveTransform.rotRad,
+            }
+          : {
+              x: placement.x,
+              y: placement.y,
+              rotRad: placement.rotRad,
+            },
+        active: isActive,
+      };
+    })
+    .filter(Boolean)
+);
+const passiveStageOrderDesignOverlays = computed(() => {
+  const zoom = Number(editorViewportState.value?.zoom);
+  const offsetX = Number(editorViewportState.value?.offsetX);
+  const offsetY = Number(editorViewportState.value?.offsetY);
+  if (!Number.isFinite(zoom) || zoom <= 0 || !Number.isFinite(offsetX) || !Number.isFinite(offsetY)) return [];
+  return orderDesignPlacements.value
+    .filter((placement) => String(placement.orderDesignId) !== String(activeCabinetDesignId.value || ""))
+    .map((placement) => {
+      const item = orderDesignCatalog.value.find((row) => String(row.id) === String(placement.orderDesignId));
+      if (!item?.viewer_boxes?.length) return null;
+      const worldLines = localDesignToWorld(buildModel2dLinesFromBoxes(item.viewer_boxes), placement, "lines");
+      const worldOutline = localDesignToWorld(buildModel2dOutlineFromBoxes(item.viewer_boxes), placement, "points");
+      if (!worldOutline.length || !worldLines.length) return null;
+      return {
+        id: placement.orderDesignId,
+        lines: worldLines.map((line, index) => ({
+          id: `${placement.orderDesignId}-line-${index}`,
+          x1: Number(line.ax) * zoom + offsetX,
+          y1: -Number(line.ay) * zoom + offsetY,
+          x2: Number(line.bx) * zoom + offsetX,
+          y2: -Number(line.by) * zoom + offsetY,
+        })),
+        points: worldOutline.map((point) => ({
+          x: Number(point.x) * zoom + offsetX,
+          y: -Number(point.y) * zoom + offsetY,
+        })),
+      };
+    })
+    .filter((item) => item && item.points.length >= 3 && item.lines.length >= 1);
+});
 const isOrderDraftEditMode = computed(() => orderDraftMode.value === "edit");
 const orderEntryPreviewNumber = computed(() => {
   if (isOrderDraftEditMode.value && activeOrder.value?.order_number) {
@@ -5208,6 +5675,11 @@ function openOrderEditor() {
 
 async function handleMissingActiveOrder(message = "سفارش فعال دیگر در دیتابیس وجود ندارد. یکی از سفارش‌های موجود را دوباره انتخاب کنید.") {
   activeOrder.value = null;
+  orderDesignCatalog.value = [];
+  orderDesignCatalogLoadedForOrderId.value = "";
+  orderDesignPlacements.value = [];
+  stageCabinetPlaceholderBoxes.value = [];
+  activeCabinetDesignId.value = null;
   orderDraftMode.value = "create";
   resetOrderDraft();
   await loadOrders();
@@ -5238,11 +5710,26 @@ async function loadOrderDrawing(orderId, { clearWhenMissing = true } = {}) {
     }
     const payload = await res.json();
     const snapshot = payload?.drawing_payload?.editorState || null;
+    const savedUiState = payload?.drawing_payload?.uiState || {};
     if (snapshot && editorRef.value?.restoreSnapshot) {
       editorRef.value.restoreSnapshot(snapshot);
     } else if (clearWhenMissing) {
       editorRef.value?.clearAll?.();
       editorRef.value?.goOrigin?.();
+    }
+    const savedBoxes = Array.isArray(savedUiState?.stageCabinetPlaceholderBoxes)
+      ? savedUiState.stageCabinetPlaceholderBoxes.map(normalizeCabinetBox)
+      : [];
+    stageCabinetPlaceholderBoxes.value = savedBoxes;
+    orderDesignPlacements.value = Array.isArray(savedUiState?.orderDesignPlacements)
+      ? savedUiState.orderDesignPlacements.map(normalizeOrderDesignPlacement).filter(Boolean)
+      : [];
+    activeCabinetDesignId.value = String(savedUiState?.activeCabinetDesignId || "").trim() || null;
+    if (!orderDesignPlacements.value.length && activeCabinetDesignId.value) {
+      upsertOrderDesignPlacement({
+        orderDesignId: activeCabinetDesignId.value,
+        ...getCurrentModel2dTransform(),
+      });
     }
     syncQuickStateFromEditor();
     return true;
@@ -5295,6 +5782,7 @@ async function createOrder() {
     orderDraftMode.value = "edit";
     hydrateOrderDraftFromOrder(created);
     await loadOrders();
+    await loadOrderDesignCatalog(true);
     closeOrderEntry(true);
   } catch (err) {
     const message = String(err?.message || "");
@@ -5383,6 +5871,7 @@ async function selectOrder(item) {
   orderDraftMode.value = "edit";
   hydrateOrderDraftFromOrder(activeOrder.value);
   await loadOrderDrawing(activeOrder.value?.id, { clearWhenMissing: true });
+  await loadOrderDesignCatalog(true);
   closeOrderEntry(true);
 }
 
@@ -5395,7 +5884,14 @@ async function archiveOrder(item) {
   try {
     const res = await fetch(`/api/orders/${encodeURIComponent(target.id)}`, { method: "DELETE" });
     if (!res.ok) throw new Error("archive-order-failed");
-    if (activeOrder.value?.id === target.id) activeOrder.value = null;
+    if (activeOrder.value?.id === target.id) {
+      activeOrder.value = null;
+      orderDesignCatalog.value = [];
+      orderDesignCatalogLoadedForOrderId.value = "";
+      orderDesignPlacements.value = [];
+      stageCabinetPlaceholderBoxes.value = [];
+      activeCabinetDesignId.value = null;
+    }
     await loadOrders();
     await ensureOrderGate();
   } catch (_) {
@@ -5600,6 +6096,23 @@ function goSettings() {
 
 
 watch(
+  () => activeOrder.value?.id || "",
+  async (orderId, previousId) => {
+    if (orderId && orderId !== previousId) {
+      await loadOrderDesignCatalog(true);
+      return;
+    }
+    if (!orderId) {
+      orderDesignCatalog.value = [];
+      orderDesignCatalogLoadedForOrderId.value = "";
+      orderDesignPlacements.value = [];
+      stageCabinetPlaceholderBoxes.value = [];
+      activeCabinetDesignId.value = null;
+    }
+  }
+);
+
+watch(
   () => route.path,
   (path) => {
     if (path !== "/settings") return;
@@ -5610,6 +6123,22 @@ watch(
     drawUiLock.value = false;
   },
   { immediate: true }
+);
+
+watch(
+  () => ({
+    x: Number.isFinite(Number(model2dTransformRef.value?.x)) ? Number(model2dTransformRef.value.x) : 0,
+    y: Number.isFinite(Number(model2dTransformRef.value?.y)) ? Number(model2dTransformRef.value.y) : 0,
+    rotRad: Number.isFinite(Number(model2dTransformRef.value?.rotRad)) ? Number(model2dTransformRef.value.rotRad) : 0,
+  }),
+  (transform) => {
+    if (!activeCabinetDesignId.value) return;
+    upsertOrderDesignPlacement({
+      orderDesignId: activeCabinetDesignId.value,
+      ...transform,
+    });
+  },
+  { deep: true }
 );
 
 function setMenu(menuId) {
@@ -5759,7 +6288,7 @@ function onPresetPointerMove(ev) {
   };
 }
 
-function onPresetPointerUp(ev) {
+async function onPresetPointerUp(ev) {
   const stageRect = stageEl.value?.getBoundingClientRect();
   const inStage = !!stageRect && ev.clientX >= stageRect.left && ev.clientX <= stageRect.right
     && ev.clientY >= stageRect.top && ev.clientY <= stageRect.bottom;
@@ -5772,10 +6301,28 @@ function onPresetPointerUp(ev) {
     if (presetDrag.value.type === "column") {
       editorRef.value?.placeColumnAtClient?.(ev.clientX, ev.clientY);
     } else if (presetDrag.value.type === "cabinetDesign" && presetDrag.value.design?.preview?.viewer_boxes?.length) {
-      const localBoxes = presetDrag.value.design.preview.viewer_boxes.map(normalizeCabinetBox);
-      stageCabinetPlaceholderBoxes.value = translateCabinetBoxesToClient(localBoxes, ev.clientX, ev.clientY);
-      activeCabinetDesignId.value = presetDrag.value.design.id || null;
-      editorRef.value?.placeModel2dPresetAtClient?.(buildModel2dLinesFromBoxes(localBoxes), ev.clientX, ev.clientY);
+      try {
+        const createdOrderDesign = await createOrderDesignFromSource(presetDrag.value.design);
+        const localBoxes = (createdOrderDesign?.viewer_boxes || []).map(normalizeCabinetBox);
+        const dropWorld = clientPointToStageWorld(ev.clientX, ev.clientY);
+        const placement = {
+          orderDesignId: createdOrderDesign?.id || "",
+          x: Number(dropWorld?.x) || 0,
+          y: Number(dropWorld?.y) || 0,
+          rotRad: 0,
+        };
+        stageCabinetPlaceholderBoxes.value = localBoxes;
+        activeCabinetDesignId.value = createdOrderDesign?.id || null;
+        restoreActiveOrderDesignToEditor(createdOrderDesign, placement);
+        window.requestAnimationFrame(() => {
+          if (createdOrderDesign?.id) {
+            upsertOrderDesignPlacement(placement);
+          }
+          saveActiveOrderDrawing().catch(() => {});
+        });
+      } catch (error) {
+        showAlert(error?.message || "افزودن طرح به سفارش انجام نشد.", { title: "خطا" });
+      }
     } else if (presetDrag.value.preset) {
       const lines = buildPresetLines(presetDrag.value.preset.kind);
       editorRef.value?.placeWallPresetAtClient?.(lines, ev.clientX, ev.clientY);
@@ -6765,16 +7312,46 @@ onBeforeUnmount(() => {
             </svg>
           </div>
 
+          <svg
+            v-if="showStageOverlays && passiveStageOrderDesignOverlays.length"
+            class="stageOrderOverlay"
+            aria-hidden="true"
+          >
+            <g
+              v-for="overlay in passiveStageOrderDesignOverlays"
+              :key="overlay.id"
+              class="stageOrderOverlay__group"
+              @pointerdown.stop="activateOrderDesignFromStage(overlay.id)"
+            >
+              <line
+                v-for="line in overlay.lines"
+                :key="line.id"
+                class="stageOrderOverlay__line"
+                :x1="line.x1"
+                :y1="line.y1"
+                :x2="line.x2"
+                :y2="line.y2"
+              />
+              <polygon
+                class="stageOrderOverlay__shape"
+                :points="overlay.points.map((point) => `${point.x},${point.y}`).join(' ')"
+              />
+            </g>
+          </svg>
+
           <GlbViewerWidget
             v-if="showStageOverlays"
             src="/models/1_z1.glb"
             :model2d-transform="model2dTransformRef"
             :walls2d="walls3dSnapshot"
+            :order-design="activeStageOrderDesign"
+            :placeholder-instances="stageOrderDesignInstances"
             :placeholder-boxes="stageCabinetPlaceholderBoxes"
             :wall-style-draft="wallStyleDraft"
             :selected-wall-style="selectedWallStyle"
             @update:wallStyleDraft="updateWallStyleDraft"
             @update:selectedWallCoords="updateSelectedWallCoords"
+            @update:orderDesignAttr="updateActiveOrderDesignAttr"
             @model2d="onGlbModel2d"
             @mouseenter="disable2dInput"
             @mouseleave="enable2dInput"
@@ -7932,6 +8509,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">دسته</th>
                     <th class="constructionDialog__col constructionDialog__col--title">ساب‌کت</th>
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه طرح</th>
+                    <th class="constructionDialog__col constructionDialog__col--code">کد طرح</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان طرح</th>
                     <th class="constructionDialog__col constructionDialog__col--preview">پیش‌نمایش</th>
                     <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
@@ -7951,6 +8529,7 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.cat_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--title">{{ getConstructionSubCategoryTitleByDesign(item) || toPersianDigits(item.sub_cat_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.design_id) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--code">{{ item.code }}</td>
                     <td class="constructionDialog__col constructionDialog__col--title">{{ item.design_title }}</td>
                     <td class="constructionDialog__col constructionDialog__col--preview">
                       <div
@@ -7979,7 +8558,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionSubCategoryDesigns.length">
-                    <td class="constructionDialog__col constructionDialog__col--title" colspan="8">هنوز طرحی برای ساب‌کت‌ها ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="9">هنوز طرحی برای ساب‌کت‌ها ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -8333,6 +8912,10 @@ onBeforeUnmount(() => {
           <label class="subCategoryDesignEditor__field">
             <span>عنوان طرح</span>
             <input v-model="subCategoryDesignEditorDraft.design_title" class="constructionDialog__input" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field">
+            <span>کد طرح</span>
+            <input v-model="subCategoryDesignEditorDraft.code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
           </label>
           <div class="subCategoryDesignEditor__metaActions">
             <button type="button" class="subCategoryDesignEditor__settingsBtn" @click="openSubCategoryAdminDefaultsFromDesignEditor">
@@ -8920,6 +9503,56 @@ onBeforeUnmount(() => {
               {{ orderEntrySubmitLabel }}
             </button>
           </div>
+          <div v-if="isOrderDraftEditMode" class="constructionDialog__tableWrap" style="margin-top: 18px;">
+            <div class="constructionDialog__sectionTitle" style="margin-bottom: 8px;">طرح‌های سفارش</div>
+            <div v-if="orderDesignCatalogLoading" class="orderEntry__state">در حال خواندن طرح‌های سفارش...</div>
+            <table v-else class="constructionDialog__table orderEntry__table">
+              <thead>
+                <tr>
+                  <th class="constructionDialog__col constructionDialog__col--code">کد نمونه</th>
+                  <th class="constructionDialog__col constructionDialog__col--code">کد طرح</th>
+                  <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
+                  <th class="constructionDialog__col constructionDialog__col--preview">پیش‌نمایش</th>
+                  <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="item in orderDesignCatalog"
+                  :key="item.id"
+                  class="orderEntry__designRow"
+                  :class="{ 'is-active': String(activeCabinetDesignId || '') === String(item.id) }"
+                >
+                  <td class="constructionDialog__col constructionDialog__col--code">{{ item.instance_code }}</td>
+                  <td class="constructionDialog__col constructionDialog__col--code">{{ item.design_code }}</td>
+                  <td class="constructionDialog__col constructionDialog__col--title">{{ item.design_title }}</td>
+                  <td class="constructionDialog__col constructionDialog__col--preview">
+                    <div v-if="item.viewer_boxes?.length" class="constructionDialog__previewThumb">
+                      <GlbViewerWidget
+                        src="/models/1_z1.glb"
+                        :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                        :placeholder-boxes="item.viewer_boxes"
+                        :show-attrs-panel="false"
+                        :embedded="true"
+                        :preview-only="true"
+                        :preview-active="false"
+                      />
+                    </div>
+                    <span v-else class="constructionDialog__previewEmpty">ندارد</span>
+                  </td>
+                  <td class="constructionDialog__col constructionDialog__col--actions">
+                    <div class="constructionDialog__actionsCell" @click.stop>
+                      <button type="button" class="constructionDialog__textBtn" @click="openOrderDesignEditor(item)">ویرایش</button>
+                      <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteOrderDesign(item)">×</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr v-if="!orderDesignCatalog.length">
+                  <td class="constructionDialog__col constructionDialog__col--title" colspan="5">هنوز طرحی برای این سفارش ثبت نشده است. از پنل طراحی، طرح ساب‌کت را داخل صحنه رها کنید.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div v-else class="orderEntry__body">
@@ -8959,6 +9592,67 @@ onBeforeUnmount(() => {
             </table>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="orderDesignEditorOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeOrderDesignEditor"></div>
+    <div class="appDialog__card appDialog__card--order" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش طرح سفارش</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeOrderDesignEditor">×</button>
+      </div>
+      <div v-if="orderDesignEditorDraft" class="orderEntry__body">
+        <div class="orderEntry__grid">
+          <label class="orderEntry__field">
+            <span>عنوان</span>
+            <input v-model="orderDesignEditorDraft.design_title" class="constructionDialog__input" type="text" />
+          </label>
+          <label class="orderEntry__field">
+            <span>کد نمونه</span>
+            <input v-model="orderDesignEditorDraft.instance_code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+          </label>
+          <label class="orderEntry__field">
+            <span>کد طرح منبع</span>
+            <input :value="orderDesignEditorDraft.design_code" class="constructionDialog__input constructionDialog__input--mono" type="text" readonly />
+          </label>
+        </div>
+        <div class="constructionDialog__tableWrap" style="margin-top: 16px;">
+          <table class="constructionDialog__table orderEntry__table">
+            <thead>
+              <tr>
+                <th class="constructionDialog__col constructionDialog__col--title">صفت</th>
+                <th class="constructionDialog__col constructionDialog__col--title">مقدار</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="entry in getOrderDesignAttrEntries(orderDesignEditorDraft)" :key="entry.key">
+                <td class="constructionDialog__col constructionDialog__col--title">{{ entry.meta.label || entry.key }}</td>
+                <td class="constructionDialog__col constructionDialog__col--title">
+                  <select
+                    v-if="entry.meta.input_mode === 'binary'"
+                    v-model="orderDesignEditorDraft.order_attr_values[entry.key]"
+                    class="constructionDialog__input"
+                  >
+                    <option value="0">{{ entry.meta.binary_off_label || "0" }}</option>
+                    <option value="1">{{ entry.meta.binary_on_label || "1" }}</option>
+                  </select>
+                  <input
+                    v-else
+                    v-model="orderDesignEditorDraft.order_attr_values[entry.key]"
+                    class="constructionDialog__input"
+                    type="text"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closeOrderDesignEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="saveOrderDesignEditor">ذخیره طرح</button>
       </div>
     </div>
   </div>
