@@ -11,6 +11,7 @@ from designkp_backend.api.routers.params import router as params_router
 from designkp_backend.api.routers.param_groups import router as param_groups_router
 from designkp_backend.api.routers.part_kinds import router as part_kinds_router
 from designkp_backend.api.routers.sub_categories import router as sub_categories_router
+from designkp_backend.api.routers.sub_category_designs import router as sub_category_designs_router
 from designkp_backend.api.routers.templates import router as templates_router
 from designkp_backend.db.models import import_model_modules
 
@@ -45,3 +46,4 @@ app.include_router(part_formulas_router, prefix="/api")
 app.include_router(templates_router, prefix="/api")
 app.include_router(categories_router, prefix="/api")
 app.include_router(sub_categories_router, prefix="/api")
+app.include_router(sub_category_designs_router, prefix="/api")

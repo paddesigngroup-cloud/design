@@ -22,6 +22,18 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  placeholderBoxes: {
+    type: Array,
+    default: () => [],
+  },
+  showAttrsPanel: {
+    type: Boolean,
+    default: true,
+  },
+  embedded: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords"]);
@@ -605,7 +617,11 @@ function rebuildPlaceholderBoxes() {
   const root = new THREE.Group();
   root.name = "placeholder-boxes";
 
-  for (const spec of PLACEHOLDER_BOX_SPECS_MM) {
+  const specs = Array.isArray(props.placeholderBoxes) && props.placeholderBoxes.length
+    ? props.placeholderBoxes
+    : PLACEHOLDER_BOX_SPECS_MM;
+
+  for (const spec of specs) {
     const widthM = Math.max(0.001, Number(spec.width) * 0.001);
     const depthM = Math.max(0.001, Number(spec.depth) * 0.001);
     const heightM = Math.max(0.001, Number(spec.height) * 0.001);
@@ -857,6 +873,9 @@ function resizeToHost() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  if (props.embedded) {
+    fitCameraToAll();
+  }
 }
 
 function setWidgetSizePx(w, h) {
@@ -948,6 +967,14 @@ function applyModel2dTransformTo3d(transform) {
   );
   modelRoot.rotation.y = modelBaseRotationY + rotRad;
 }
+
+watch(
+  () => props.placeholderBoxes,
+  () => {
+    rebuildPlaceholderBoxes();
+  },
+  { immediate: true, deep: true }
+);
 
 watch(
   () => props.model2dTransform,
@@ -1168,7 +1195,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="widgetEl" class="glbWidget" :class="{ 'is-max': isMax }" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
+  <div ref="widgetEl" class="glbWidget" :class="{ 'is-max': isMax, 'is-embedded': embedded }" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
     <div class="glbWidget__head" dir="rtl">
       <div class="glbWidget__headBtns">
         <button type="button" class="glbWidget__btn" title="کوچک" @click="goSmall">–</button>
@@ -1225,7 +1252,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div class="glbWallAttrs glbWallAttrs--panel" dir="rtl" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
+  <div v-if="showAttrsPanel" class="glbWallAttrs glbWallAttrs--panel" dir="rtl" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
     <div class="glbWallAttrs__head">
       <div class="menuPanel__title glbWallAttrs__title">صفات</div>
       <div v-if="isGroupEditMode" class="glbWallAttrs__groupLabel">ویرایش گروهی</div>

@@ -4,7 +4,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from designkp_backend.db.base import Base
@@ -202,6 +202,12 @@ class SubCategory(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionM
         back_populates="sub_category",
         cascade="all, delete-orphan",
     )
+    designs: Mapped[list["SubCategoryDesign"]] = relationship(
+        back_populates="sub_category",
+        cascade="all, delete-orphan",
+        primaryjoin="SubCategory.id == foreign(SubCategoryDesign.sub_category_id)",
+        foreign_keys="SubCategoryDesign.sub_category_id",
+    )
 
 
 class SubCategoryParamDefault(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -230,3 +236,96 @@ class SubCategoryParamDefault(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMix
 
     sub_category: Mapped["SubCategory"] = relationship(back_populates="param_defaults")
     param: Mapped["Param"] = relationship(back_populates="sub_category_defaults")
+
+
+class SubCategoryDesign(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "sub_category_designs"
+
+    admin_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sub_category_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sub_categories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    temp_id: Mapped[int] = mapped_column(ForeignKey("templates.temp_id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False, index=True)
+    cat_id: Mapped[int] = mapped_column(ForeignKey("categories.cat_id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False, index=True)
+    sub_cat_id: Mapped[int] = mapped_column(ForeignKey("sub_categories.sub_cat_id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False, index=True)
+    design_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    design_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    admin: Mapped["Admin"] = relationship()
+    sub_category: Mapped["SubCategory"] = relationship(
+        back_populates="designs",
+        primaryjoin="foreign(SubCategoryDesign.sub_category_id) == SubCategory.id",
+        foreign_keys=[sub_category_id],
+    )
+    parts: Mapped[list["SubCategoryDesignPart"]] = relationship(
+        back_populates="design",
+        cascade="all, delete-orphan",
+    )
+
+
+class SubCategoryDesignPart(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "sub_category_design_parts"
+
+    design_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sub_category_designs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_formula_id: Mapped[int] = mapped_column(
+        ForeignKey("part_formulas.part_formula_id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_kind_id: Mapped[int] = mapped_column(
+        ForeignKey("part_kinds.part_kind_id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    part_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+    design: Mapped["SubCategoryDesign"] = relationship(back_populates="parts")
+    part_formula: Mapped["PartFormula"] = relationship()
+    snapshots: Mapped[list["SubCategoryDesignPartSnapshot"]] = relationship(
+        back_populates="design_part",
+        cascade="all, delete-orphan",
+    )
+
+
+class SubCategoryDesignPartSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "sub_category_design_part_snapshots"
+
+    design_part_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sub_category_design_parts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        unique=True,
+    )
+    resolved_params: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+    resolved_base_formulas: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+    resolved_part_formulas: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+    width: Mapped[float | None] = mapped_column(nullable=True)
+    depth: Mapped[float | None] = mapped_column(nullable=True)
+    height: Mapped[float | None] = mapped_column(nullable=True)
+    cx: Mapped[float | None] = mapped_column(nullable=True)
+    cy: Mapped[float | None] = mapped_column(nullable=True)
+    cz: Mapped[float | None] = mapped_column(nullable=True)
+    viewer_payload: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+
+    design_part: Mapped["SubCategoryDesignPart"] = relationship(back_populates="snapshots")

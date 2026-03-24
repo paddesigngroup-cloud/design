@@ -173,6 +173,7 @@ const editablePartKinds = ref(PART_KINDS_CATALOG.map((item) => ({ ...item })));
 const editableParamGroups = ref([]);
 const editableParams = ref([]);
 const editableSubCategories = ref([]);
+const editableSubCategoryDesigns = ref([]);
 const editableBaseFormulas = ref([]);
 const editablePartFormulas = ref([]);
 const subCategoryDefaultsEditorOpen = ref(false);
@@ -189,6 +190,12 @@ const subCategoryUserPreviewOpen = ref(false);
 const subCategoryUserPreviewRowId = ref(null);
 const subCategoryUserPreviewValues = ref({});
 const subCategoryUserPreviewActiveGroupId = ref("");
+const subCategoryDesignEditorOpen = ref(false);
+const subCategoryDesignEditorDraft = ref(null);
+const subCategoryDesignEditorPreview = ref(null);
+const subCategoryDesignPreviewLoading = ref(false);
+const subCategoryDesignPreviewError = ref("");
+const subCategoryDesignPreviewRequestSeq = ref(0);
 const baseFormulaBuilderOpen = ref(false);
 const baseFormulaBuilderMode = ref("create");
 const baseFormulaBuilderEntity = ref("base_formulas");
@@ -207,6 +214,7 @@ const constructionDeletedPartKindIds = ref([]);
 const constructionDeletedParamGroupIds = ref([]);
 const constructionDeletedParamIds = ref([]);
 const constructionDeletedSubCategoryIds = ref([]);
+const constructionDeletedSubCategoryDesignIds = ref([]);
 const constructionDeletedBaseFormulaIds = ref([]);
 const constructionDeletedPartFormulaIds = ref([]);
 const constructionImportInputEl = ref(null);
@@ -223,6 +231,7 @@ const constructionTables = [
   { id: "param_groups", title: "گروه پارامترها", status: "active" },
   { id: "params", title: "پارامترها", status: "active" },
   { id: "sub_categories", title: "ساب‌کت‌ها", status: "active" },
+  { id: "sub_category_designs", title: "طرح‌های ساب‌کت", status: "active" },
   { id: "base_formulas", title: "فرمول های پایه", status: "active" },
   { id: "part_formulas", title: "فرمول های قطعات", status: "active" },
 ];
@@ -260,6 +269,16 @@ const constructionSubCategories = computed(() =>
       const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
       if (orderDelta !== 0) return orderDelta;
       return (Number(a.sub_cat_id) || 0) - (Number(b.sub_cat_id) || 0);
+    })
+);
+const constructionSubCategoryDesigns = computed(() =>
+  editableSubCategoryDesigns.value
+    .filter((item) => item.admin_id === currentAdminId.value)
+    .slice()
+    .sort((a, b) => {
+      const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return (Number(a.design_id) || 0) - (Number(b.design_id) || 0);
     })
 );
 const systemSubCategoriesCount = computed(() => constructionSubCategories.value.filter((item) => item.admin_id === null).length);
@@ -453,6 +472,21 @@ const activeSubCategoryDefaultsGroup = computed(() =>
 const activeSubCategoryDefaultsCount = computed(() =>
   Object.values(subCategoryDefaultsEditorDraft.value || {}).filter((value) => String(value || "").trim()).length
 );
+const constructionSubCategoryDesignSubCategoryOptions = computed(() =>
+  constructionSubCategories.value.map((item) => ({
+    value: String(item.id),
+    label: `${toPersianDigits(item.temp_id)} / ${toPersianDigits(item.cat_id)} / ${toPersianDigits(item.sub_cat_id)} - ${String(item.sub_cat_title || "").trim()}`,
+  }))
+);
+const constructionSubCategoryDesignPartFormulaOptions = computed(() =>
+  constructionPartFormulas.value.map((item) => ({
+    id: Number(item.part_formula_id),
+    title: String(item.part_title || item.title || item.part_code || "").trim(),
+    code: String(item.part_code || "").trim(),
+    partKindId: Number(item.part_kind_id) || 0,
+    uiOrder: Number(item.sort_order) || Number(item.part_formula_id) || 0,
+  }))
+);
 const activeSubCategoryUserPreviewRow = computed(() =>
   editableSubCategories.value.find((item) => String(item.id) === String(subCategoryUserPreviewRowId.value)) || null
 );
@@ -586,6 +620,7 @@ function openConstructionWizard() {
   loadConstructionParamGroups();
   loadConstructionParams();
   loadConstructionSubCategories();
+  loadConstructionSubCategoryDesigns();
   loadConstructionBaseFormulas();
   loadConstructionPartFormulas();
   constructionDeletedTemplateIds.value = [];
@@ -622,6 +657,7 @@ async function closeConstructionWizard() {
     await loadConstructionParamGroups();
     await loadConstructionParams();
     await loadConstructionSubCategories();
+    await loadConstructionSubCategoryDesigns();
     await loadConstructionBaseFormulas();
     await loadConstructionPartFormulas();
   }
@@ -681,6 +717,24 @@ function normalizeSubCategoryPayload(item) {
         }];
       })
     ),
+  };
+}
+
+function normalizeSubCategoryDesignPayload(item) {
+  return {
+    admin_id: item.admin_id,
+    sub_category_id: item.sub_category_id,
+    design_id: Number(item.design_id),
+    design_title: String(item.design_title || "").trim(),
+    sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.design_id),
+    is_system: !!item.is_system,
+    parts: (Array.isArray(item.parts) ? item.parts : [])
+      .filter((part) => Number(part?.part_formula_id) > 0)
+      .map((part, index) => ({
+        part_formula_id: Number(part.part_formula_id),
+        enabled: part.enabled !== false,
+        ui_order: Number.isFinite(Number(part.ui_order)) ? Number(part.ui_order) : index,
+      })),
   };
 }
 
@@ -1453,6 +1507,218 @@ function withConstructionDraftState(item) {
   return buildPartKindDraft(item, { __isNew: false, __dirty: false });
 }
 
+function syncSubCategoryDesignDraftSubCategoryFields(item) {
+  if (!item) return item;
+  const subCategory = editableSubCategories.value.find((row) => String(row.id) === String(item.sub_category_id));
+  if (!subCategory) return item;
+  item.temp_id = Number(subCategory.temp_id) || 0;
+  item.cat_id = Number(subCategory.cat_id) || 0;
+  item.sub_cat_id = Number(subCategory.sub_cat_id) || 0;
+  item.sub_cat_title = String(subCategory.sub_cat_title || "").trim();
+  return item;
+}
+
+function buildNewSubCategoryDesignDraft() {
+  const nextId = editableSubCategoryDesigns.value.reduce((max, item) => Math.max(max, Number(item.design_id) || 0), 0) + 1;
+  const fallbackSubCategory = constructionSubCategories.value[0] || null;
+  return syncSubCategoryDesignDraftSubCategoryFields({
+    id: null,
+    admin_id: currentAdminId.value,
+    sub_category_id: fallbackSubCategory?.id || "",
+    temp_id: Number(fallbackSubCategory?.temp_id) || 0,
+    cat_id: Number(fallbackSubCategory?.cat_id) || 0,
+    sub_cat_id: Number(fallbackSubCategory?.sub_cat_id) || 0,
+    sub_cat_title: String(fallbackSubCategory?.sub_cat_title || "").trim(),
+    design_id: nextId,
+    design_title: `طرح ${toPersianDigits(nextId)}`,
+    sort_order: nextId,
+    is_system: false,
+    parts: [],
+  });
+}
+
+function closeSubCategoryDesignEditor() {
+  subCategoryDesignEditorOpen.value = false;
+  subCategoryDesignEditorDraft.value = null;
+  subCategoryDesignEditorPreview.value = null;
+  subCategoryDesignPreviewLoading.value = false;
+  subCategoryDesignPreviewError.value = "";
+}
+
+async function refreshSubCategoryDesignPreview() {
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft?.sub_category_id) {
+    subCategoryDesignEditorPreview.value = null;
+    return;
+  }
+  const seq = subCategoryDesignPreviewRequestSeq.value + 1;
+  subCategoryDesignPreviewRequestSeq.value = seq;
+  subCategoryDesignPreviewLoading.value = true;
+  subCategoryDesignPreviewError.value = "";
+  try {
+    const res = await fetch("/api/sub-category-designs/preview-draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        admin_id: currentAdminId.value,
+        sub_category_id: draft.sub_category_id,
+        parts: normalizeSubCategoryDesignPayload(draft).parts,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(await readApiErrorMessage(res, "پیش‌نمایش طرح ساخته نشد."));
+    }
+    const payload = await res.json();
+    if (seq !== subCategoryDesignPreviewRequestSeq.value) return;
+    subCategoryDesignEditorPreview.value = payload;
+  } catch (error) {
+    if (seq !== subCategoryDesignPreviewRequestSeq.value) return;
+    subCategoryDesignEditorPreview.value = null;
+    subCategoryDesignPreviewError.value = error?.message || "پیش‌نمایش طرح ساخته نشد.";
+  } finally {
+    if (seq === subCategoryDesignPreviewRequestSeq.value) {
+      subCategoryDesignPreviewLoading.value = false;
+    }
+  }
+}
+
+async function loadConstructionSubCategoryDesigns() {
+  try {
+    const url = `/api/sub-category-designs?admin_id=${encodeURIComponent(currentAdminId.value)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("load-failed");
+    editableSubCategoryDesigns.value = (await res.json()).map(withConstructionDraftState);
+    constructionDeletedSubCategoryDesignIds.value = [];
+  } catch (_) {
+    showAlert("خواندن جدول طرح‌های ساب‌کت از دیتابیس انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function openSubCategoryDesignEditor(item = null) {
+  const draft = item
+    ? syncSubCategoryDesignDraftSubCategoryFields({
+        id: item.id,
+        admin_id: item.admin_id,
+        sub_category_id: item.sub_category_id,
+        temp_id: item.temp_id,
+        cat_id: item.cat_id,
+        sub_cat_id: item.sub_cat_id,
+        sub_cat_title: item.sub_cat_title,
+        design_id: item.design_id,
+        design_title: item.design_title,
+        sort_order: item.sort_order,
+        is_system: item.is_system,
+        parts: Array.isArray(item.parts) ? item.parts.map((part) => ({
+          part_formula_id: Number(part.part_formula_id),
+          enabled: part.enabled !== false,
+          ui_order: Number(part.ui_order) || 0,
+        })) : [],
+      })
+    : buildNewSubCategoryDesignDraft();
+  subCategoryDesignEditorDraft.value = draft;
+  subCategoryDesignEditorPreview.value = null;
+  subCategoryDesignPreviewError.value = "";
+  subCategoryDesignEditorOpen.value = true;
+  await refreshSubCategoryDesignPreview();
+}
+
+function onSubCategoryDesignSubCategoryChange() {
+  syncSubCategoryDesignDraftSubCategoryFields(subCategoryDesignEditorDraft.value);
+  refreshSubCategoryDesignPreview();
+}
+
+function openSubCategoryAdminDefaultsFromDesignEditor() {
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft?.sub_category_id) return;
+  const target = constructionSubCategories.value.find((item) => String(item.id) === String(draft.sub_category_id));
+  if (!target) {
+    showAlert("ساب‌کت انتخاب‌شده در جدول ساب‌کت‌ها پیدا نشد.", { title: "پیش‌فرض ادمین" });
+    return;
+  }
+  openSubCategoryUserPreview(target);
+}
+
+function isPartFormulaSelectedInDesign(partFormulaId) {
+  return !!subCategoryDesignEditorDraft.value?.parts?.some((part) => Number(part.part_formula_id) === Number(partFormulaId) && part.enabled !== false);
+}
+
+function togglePartFormulaInDesign(partFormulaId) {
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft) return;
+  const existing = draft.parts.find((part) => Number(part.part_formula_id) === Number(partFormulaId));
+  if (existing) {
+    draft.parts = draft.parts.filter((part) => Number(part.part_formula_id) !== Number(partFormulaId));
+  } else {
+    const formula = constructionSubCategoryDesignPartFormulaOptions.value.find((item) => Number(item.id) === Number(partFormulaId));
+    draft.parts = [
+      ...draft.parts,
+      {
+        part_formula_id: Number(partFormulaId),
+        enabled: true,
+        ui_order: Number(formula?.uiOrder) || draft.parts.length,
+      },
+    ];
+  }
+  refreshSubCategoryDesignPreview();
+}
+
+async function saveSubCategoryDesignEditor() {
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft) return;
+  const designId = Number(draft.design_id);
+  if (!Number.isInteger(designId) || designId < 1) {
+    showAlert("شناسه طرح باید معتبر و بزرگ‌تر از صفر باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const title = String(draft.design_title || "").trim();
+  if (!title) {
+    showAlert("عنوان طرح نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!draft.sub_category_id) {
+    showAlert("برای طرح باید یک ساب‌کت انتخاب شود.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const duplicate = editableSubCategoryDesigns.value.some((item) => Number(item.design_id) === designId && String(item.id) !== String(draft.id || ""));
+  if (duplicate) {
+    showAlert("شناسه طرح تکراری است.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const payload = normalizeSubCategoryDesignPayload(draft);
+  try {
+    const res = await fetch(
+      draft.id ? `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}` : "/api/sub-category-designs",
+      {
+        method: draft.id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره طرح ساب‌کت انجام نشد."));
+    await loadConstructionSubCategoryDesigns();
+    closeSubCategoryDesignEditor();
+    showAlert("طرح ساب‌کت با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره طرح ساب‌کت انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function deleteConstructionSubCategoryDesign(id) {
+  const ok = await showConfirm("این طرح ساب‌کت حذف شود؟", {
+    title: "حذف طرح",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  try {
+    const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("delete-failed");
+    await loadConstructionSubCategoryDesigns();
+  } catch (_) {
+    showAlert("حذف طرح ساب‌کت انجام نشد.", { title: "خطا" });
+  }
+}
+
 function markConstructionPartKindDirty(item) {
   if (!item || item.__isNew) return;
   item.__dirty = true;
@@ -1806,6 +2072,32 @@ async function closeSubCategoryDefaultsEditor() {
   subCategoryDefaultsActiveGroupId.value = "";
 }
 
+async function persistSubCategoryRow(row) {
+  if (!row?.id) throw new Error("Sub-category row is missing.");
+  const payload = normalizeSubCategoryPayload(row);
+  const res = await fetch(`/api/sub-categories/${encodeURIComponent(String(row.id))}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(await readApiErrorMessage(res, "ذخیره پیش‌فرض‌های ساب‌کت انجام نشد."));
+  }
+  const savedRow = ensureSubCategoryParamDefaults(withConstructionDraftState(await res.json()));
+  editableSubCategories.value = editableSubCategories.value.map((item) =>
+    String(item.id) === String(savedRow.id) ? savedRow : item
+  );
+  if (
+    subCategoryDesignEditorOpen.value &&
+    subCategoryDesignEditorDraft.value &&
+    String(subCategoryDesignEditorDraft.value.sub_category_id) === String(savedRow.id)
+  ) {
+    syncSubCategoryDesignDraftSubCategoryFields(subCategoryDesignEditorDraft.value);
+    await refreshSubCategoryDesignPreview();
+  }
+  return savedRow;
+}
+
 async function applySubCategoryDefaultsEditor() {
   const row = activeSubCategoryDefaultsRow.value;
   if (!row) return;
@@ -1830,6 +2122,12 @@ async function applySubCategoryDefaultsEditor() {
     }
   }
   markConstructionSubCategoryDirty(row);
+  try {
+    await persistSubCategoryRow(row);
+  } catch (error) {
+    showAlert(error?.message || "ذخیره پیش‌فرض‌های ساب‌کت انجام نشد.", { title: "خطا" });
+    return;
+  }
   clearSubCategoryDefaultIconPreviews();
   subCategoryDefaultsEditorOpen.value = false;
   subCategoryDefaultsEditorRowId.value = null;
@@ -1886,7 +2184,7 @@ async function closeSubCategoryUserPreview() {
   subCategoryUserPreviewActiveGroupId.value = "";
 }
 
-function applySubCategoryUserPreview() {
+async function applySubCategoryUserPreview() {
   const row = activeSubCategoryUserPreviewRow.value;
   if (!row) return;
   ensureSubCategoryParamDefaults(row);
@@ -1898,6 +2196,12 @@ function applySubCategoryUserPreview() {
       : nextValue;
   }
   markConstructionSubCategoryDirty(row);
+  try {
+    await persistSubCategoryRow(row);
+  } catch (error) {
+    showAlert(error?.message || "ذخیره پیش‌فرض‌های ساب‌کت انجام نشد.", { title: "خطا" });
+    return;
+  }
   subCategoryUserPreviewOpen.value = false;
   subCategoryUserPreviewRowId.value = null;
   subCategoryUserPreviewValues.value = {};
@@ -6872,6 +7176,67 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
+          <template v-else-if="constructionStep === 'sub_category_designs'">
+            <div class="constructionDialog__toolbar">
+              <div class="constructionDialog__toolbarMain">
+                <div class="constructionDialog__sectionTitle">جدول طرح‌های ساب‌کت</div>
+                <div class="constructionDialog__sectionHint">
+                  در این جدول برای هر ساب‌کت سمپل طرح می‌سازید، قطعات را از فرمول‌های قطعه به آن نسبت می‌دهید و پیش‌نمایش سه‌بعدی را بر اساس پیش‌فرض‌های همان ساب‌کت می‌بینید.
+                </div>
+              </div>
+              <div class="constructionDialog__toolbarActions">
+                <button type="button" class="constructionDialog__textBtn" @click="openSubCategoryDesignEditor()">افزودن طرح</button>
+              </div>
+            </div>
+
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionSubCategoryDesigns.length) }}</span>
+                <span class="constructionDialog__summaryLabel">کل طرح‌ها</span>
+              </div>
+            </div>
+
+            <div class="constructionDialog__tableWrap">
+              <table class="constructionDialog__table">
+                <thead>
+                  <tr>
+                    <th class="constructionDialog__col constructionDialog__col--id">مالک</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">تمپلیت</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">دسته</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">ساب‌کت</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">شناسه طرح</th>
+                    <th class="constructionDialog__col constructionDialog__col--title">عنوان طرح</th>
+                    <th class="constructionDialog__col constructionDialog__col--defaults">قطعات</th>
+                    <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in constructionSubCategoryDesigns" :key="item.id">
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ item.admin_id }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.temp_id) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.cat_id) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.sub_cat_id) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.design_id) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--title">{{ item.design_title }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--defaults">{{ toPersianDigits(item.parts?.length || 0) }} قطعه</td>
+                    <td class="constructionDialog__col constructionDialog__col--actions">
+                      <div class="constructionDialog__actionsCell">
+                        <button type="button" class="constructionDialog__textBtn" @click="openSubCategoryDesignEditor(item)">ویرایش طرح</button>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionSubCategoryDesign(item.id)">×</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="!constructionSubCategoryDesigns.length">
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="8">هنوز طرحی برای ساب‌کت‌ها ثبت نشده است.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="constructionDialog__sheetHint">
+              ساخت و ویرایش قطعات طرح از پنجره ویرایش انجام می‌شود و ذخیره آن مستقیم در دیتابیس طرح‌های ساب‌کت اعمال می‌گردد.
+            </div>
+          </template>
+
           <template v-else-if="constructionStep === 'base_formulas'">
             <input
               ref="constructionImportInputEl"
@@ -7186,6 +7551,83 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="subCategoryDesignEditorOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeSubCategoryDesignEditor"></div>
+    <div class="appDialog__card appDialog__card--subDesign" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش طرح ساب‌کت</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeSubCategoryDesignEditor">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        قطعات طرح از فرمول‌های قطعات انتخاب می‌شوند و preview به‌صورت مستقیم از پیش‌فرض‌های ساب‌کت و محاسبات فرمولی بازسازی می‌شود.
+      </div>
+
+      <div v-if="subCategoryDesignEditorDraft" class="subCategoryDesignEditor">
+        <div class="subCategoryDesignEditor__meta">
+          <label class="subCategoryDesignEditor__field">
+            <span>ساب‌کت</span>
+            <select v-model="subCategoryDesignEditorDraft.sub_category_id" class="constructionDialog__input" @change="onSubCategoryDesignSubCategoryChange">
+              <option v-for="item in constructionSubCategoryDesignSubCategoryOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+            </select>
+          </label>
+          <label class="subCategoryDesignEditor__field">
+            <span>شناسه طرح</span>
+            <input v-model.number="subCategoryDesignEditorDraft.design_id" class="constructionDialog__input" type="number" min="1" step="1" />
+          </label>
+          <label class="subCategoryDesignEditor__field">
+            <span>عنوان طرح</span>
+            <input v-model="subCategoryDesignEditorDraft.design_title" class="constructionDialog__input" type="text" />
+          </label>
+          <div class="subCategoryDesignEditor__metaActions">
+            <button type="button" class="subCategoryDesignEditor__settingsBtn" @click="openSubCategoryAdminDefaultsFromDesignEditor">
+              <span>پیش‌فرض ادمین</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="subCategoryDesignEditor__layout">
+          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
+            <div class="subCategoryDesignEditor__panelTitle">قطعات قابل افزودن</div>
+            <div class="subCategoryDesignEditor__partList">
+              <label v-for="item in constructionSubCategoryDesignPartFormulaOptions" :key="item.id" class="subCategoryDesignEditor__partItem">
+                <input :checked="isPartFormulaSelectedInDesign(item.id)" type="checkbox" @change="togglePartFormulaInDesign(item.id)" />
+                <span class="subCategoryDesignEditor__partMeta">
+                  <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
+                  <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview">
+            <div class="subCategoryDesignEditor__panelTitle">پیش‌نمایش طرح</div>
+            <div v-if="subCategoryDesignEditorPreview" class="subCategoryDesignEditor__previewBody">
+              <div class="subCategoryDesignEditor__viewerWrap">
+                <GlbViewerWidget
+                  src="/models/1_z1.glb"
+                  :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                  :placeholder-boxes="subCategoryDesignEditorPreview.viewer_boxes"
+                  :show-attrs-panel="false"
+                  :embedded="true"
+                />
+                <div v-if="subCategoryDesignPreviewLoading" class="subCategoryDesignEditor__viewerOverlay">
+                  <div class="constructionDialog__loading">در حال بازسازی preview طرح...</div>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="subCategoryDesignPreviewLoading" class="constructionDialog__loading">در حال بازسازی preview طرح...</div>
+            <div v-else-if="subCategoryDesignPreviewError" class="formulaBuilder__error">{{ subCategoryDesignPreviewError }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closeSubCategoryDesignEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="saveSubCategoryDesignEditor">ذخیره طرح</button>
       </div>
     </div>
   </div>

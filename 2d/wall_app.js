@@ -2336,16 +2336,11 @@ function loadWallHandleImg(key, urls) {
 }
 
 function resolveIconUrls(name) {
-  const out = [];
-  try {
-    out.push(new URL(`../icons/${name}`, import.meta.url).href);
-  } catch (_) {
-    // no-op
-  }
-  out.push(`/icons/${name}`);
-  out.push(`./icons/${name}`);
-  out.push(`icons/${name}`);
-  return out;
+  return [
+    `/icons/${name}`,
+    `./icons/${name}`,
+    `icons/${name}`,
+  ];
 }
 
 function initCursorImagesOnce() {
