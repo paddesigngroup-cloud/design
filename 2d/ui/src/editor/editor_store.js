@@ -12,3 +12,6 @@ export const editorViewportRef = shallowRef({ zoom: 1, offsetX: 0, offsetY: 0 })
 // Handler used by the 2D engine when a passive saved design is clicked in canvas space.
 export const passiveModelSelectionHandlerRef = shallowRef(null);
 
+// Handler used by the 2D engine when the active saved design is deleted from canvas space.
+export const activeModelDeleteHandlerRef = shallowRef(null);
+

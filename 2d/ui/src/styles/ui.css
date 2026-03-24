@@ -780,27 +780,35 @@ textarea {
   background: rgba(118, 45, 71, 0.08);
   box-shadow: inset 0 0 0 1px rgba(118, 45, 71, 0.18);
 }
-.glbWallAttrs__groupLabel,
-.glbWallAttrs__metaLabel {
+.glbWallAttrs__groupTitleRow,
+.glbWallAttrs__paramLabel {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex-direction: row;
+  justify-content: flex-start;
+  width: 100%;
+  text-align: right;
 }
-.glbWallAttrs__metaLabel {
+.glbWallAttrs__paramLabel {
   min-width: 0;
 }
 .glbWallAttrs__editRow--meta {
   align-items: center;
 }
 .glbWallAttrs__metaIcon {
-  width: 18px;
-  height: 18px;
+  width: 40px;
+  height: 40px;
   object-fit: contain;
   flex: 0 0 auto;
 }
 .glbWallAttrs__metaIcon--group {
-  width: 20px;
-  height: 20px;
+  width: 34px;
+  height: 34px;
+}
+.glbWallAttrs__metaIcon--binary {
+  width: 28px;
+  height: 28px;
 }
 .stageOrderGuard {
   position: absolute;
@@ -1212,7 +1220,7 @@ textarea {
   position: absolute;
   top: 210px;
   left: 12px;
-  width: 196px;
+  width: 236px;
   z-index: 7;
   max-width: calc(100% - 24px);
   max-height: calc(100% - 222px);
@@ -1393,22 +1401,115 @@ textarea {
 }
 .glbWallAttrs__editor--attrs .glbWallAttrs__editRow {
   flex-direction: column;
-  gap: 4px;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 6px;
+  width: calc(100% - 24px);
+  max-width: 100%;
+  padding: 2px 0;
+  margin-inline: auto;
+  box-sizing: border-box;
 }
-.glbWallAttrs__editor--attrs .glbWallAttrs__editRow > span {
-  text-align: center;
+.glbWallAttrs__editor--attrs .glbWallAttrs__editRow > span,
+.glbWallAttrs__editor--attrs .glbWallAttrs__editRow > div {
+  width: 100%;
 }
 .glbWallAttrs__editor--attrs .glbWallAttrs__input,
 .glbWallAttrs__editor--attrs .glbWallAttrs__color {
-  width: min(120px, 100%);
+  width: min(92px, 100%);
 }
 .glbWallAttrs__input {
-  width: 76px;
+  width: 96px;
   border: 1px solid rgba(11, 34, 48, 0.2);
   border-radius: 8px;
   padding: 4px 6px;
-  font-size: 11px;
+  font-size: 15px;
   text-align: center;
+}
+.glbWallAttrs__binaryRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: min(104px, 100%);
+}
+.glbWallAttrs__binaryBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 1px solid rgba(11, 34, 48, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #334155;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+}
+.glbWallAttrs__binaryBtn.is-active {
+  border-color: rgba(118, 45, 71, 0.34);
+  background: rgba(243, 222, 230, 0.9);
+  color: #762d47;
+}
+.glbWallAttrs__paramLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 6px;
+}
+.glbWallAttrs__paramLabel span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.glbWallAttrs__editRow--meta .glbWallAttrs__paramLabel {
+  justify-content: flex-start;
+}
+.glbWallAttrs__editRow--meta .glbWallAttrs__input,
+.glbWallAttrs__editRow--meta .glbWallAttrs__binaryRow {
+  flex: 0 0 auto;
+}
+.glbWallAttrs__fieldTitle {
+  display: block;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+}
+.glbWallAttrs__fieldBody {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.glbWallAttrs__editRow--meta .glbWallAttrs__fieldBody {
+  display: inline-flex;
+  flex-direction: row-reverse;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  padding-inline: 0;
+}
+.glbWallAttrs__editRow--meta .glbWallAttrs__fieldBody > .glbWallAttrs__metaIcon {
+  flex: 0 0 auto;
+}
+.glbWallAttrs__editRow--meta .glbWallAttrs__fieldBody > .glbWallAttrs__input {
+  flex: 0 1 92px;
+  width: 92px;
+  min-width: 0;
+}
+.glbWallAttrs__editRow--meta .glbWallAttrs__fieldBody > .glbWallAttrs__binaryRow {
+  flex: 0 1 104px;
+  width: 104px;
 }
 .glbWallAttrs__color {
   width: 76px;
@@ -1422,7 +1523,14 @@ textarea {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
-  width: 158px;
+  width: 100%;
+  max-width: 158px;
+}
+.glbWallAttrs__coordGrid .glbWallAttrs__input,
+.glbWallAttrs__axisSingleRow .glbWallAttrs__input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .glbWallAttrs__moveRow {
   gap: 6px;
@@ -1434,7 +1542,8 @@ textarea {
   gap: 8px;
 }
 .glbWallAttrs__axisSingleRow {
-  width: 158px;
+  width: 100%;
+  max-width: 158px;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;

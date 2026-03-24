@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { editorRef, model2dTransformRef, editorViewportRef, passiveModelSelectionHandlerRef } from "./editor/editor_store.js";
+import { editorRef, model2dTransformRef, editorViewportRef, passiveModelSelectionHandlerRef, activeModelDeleteHandlerRef } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
 import { useDialogService } from "./dialog_service.js";
 import { WALL_READY_PRESETS, buildPresetLines, getPresetIconWalls } from "./features/wall_preset_drag.js";
@@ -2053,6 +2053,22 @@ async function deleteOrderDesign(item) {
   }
 }
 
+async function deleteActiveOrderDesignFromStage() {
+  const target = activeStageOrderDesign.value;
+  if (!target?.id) return;
+  try {
+    const res = await fetch(`/api/order-designs/${encodeURIComponent(String(target.id))}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف طرح سفارش انجام نشد."));
+    removeOrderDesignPlacement(target.id);
+    stageCabinetPlaceholderBoxes.value = [];
+    activeCabinetDesignId.value = null;
+    await loadOrderDesignCatalog(true);
+    saveActiveOrderDrawing().catch(() => {});
+  } catch (error) {
+    showAlert(error?.message || "حذف طرح سفارش انجام نشد.", { title: "خطا" });
+  }
+}
+
 function localDesignToWorld(linesOrPoints, placement = null, kind = "lines") {
   const normalized = Array.isArray(linesOrPoints) ? linesOrPoints.map((entry) => ({ ...(entry || {}) })) : [];
   if (!normalized.length) return [];
@@ -2172,6 +2188,7 @@ function activateOrderDesignFromStage(orderDesignId) {
 }
 
 passiveModelSelectionHandlerRef.value = activateOrderDesignFromStage;
+activeModelDeleteHandlerRef.value = deleteActiveOrderDesignFromStage;
 
 function clearStageOrderDesignPlacement({ persist = true } = {}) {
   const hadStageDesign =
@@ -5022,6 +5039,7 @@ function syncQuickStateFromEditor() {
       selectedHiddenIds,
       selectedBeamId: full?.selection?.selectedBeamId || null,
       selectedBeamIds,
+      selectedModelOutline: !!full?.selection?.selectedModelOutline,
     },
     metrics: {
       nodes: metricsEntityType === "hidden" ? hiddenNodes : metricsEntityType === "beam" ? beamNodes : wallNodes,
@@ -5029,6 +5047,7 @@ function syncQuickStateFromEditor() {
       selection: {
         selectedWallId: metricsEntityType === "hidden" ? selectedHiddenId : metricsEntityType === "beam" ? selectedBeamId : selectedWallId,
         selectedWallIds: metricsEntityType === "hidden" ? selectedHiddenIds : metricsEntityType === "beam" ? selectedBeamIds : selectedWallIds,
+        selectedModelOutline: !!full?.selection?.selectedModelOutline,
       },
       entityType: metricsEntityType,
     },
@@ -6805,6 +6824,7 @@ onBeforeUnmount(() => {
     delete window.__designkpDrawLockRaf;
   }
   passiveModelSelectionHandlerRef.value = null;
+  activeModelDeleteHandlerRef.value = null;
   editorRef.value?.setPassiveModels?.([]);
 });
 </script>

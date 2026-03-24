@@ -125,6 +125,7 @@ const colorFieldLabel = computed(() => {
 const showColorField = computed(() => selectedEntityType.value === "wall" || selectedEntityType.value === "beam" || selectedEntityType.value === "column");
 const activeOrderDesign = computed(() => props.orderDesign || null);
 const orderDesignInputDrafts = ref({});
+const brokenOrderDesignIcons = ref({});
 const orderDesignAttrGroups = computed(() => {
   const item = activeOrderDesign.value;
   if (!item?.order_attr_meta) return [];
@@ -146,10 +147,12 @@ const orderDesignAttrGroups = computed(() => {
     groupsMap.get(groupKey).items.push({
       key,
       label: String(entryMeta.label || key).trim() || key,
-      iconPath: String(entryMeta.group_icon_path || entryMeta.icon_path || "").trim() || "",
+      iconPath: String(entryMeta.icon_path || entryMeta.group_icon_path || "").trim() || "",
       inputMode: entryMeta.input_mode === "binary" ? "binary" : "value",
       binaryOffLabel: String(entryMeta.binary_off_label || "0").trim() || "0",
       binaryOnLabel: String(entryMeta.binary_on_label || "1").trim() || "1",
+      binaryOffIconPath: String(entryMeta.binary_off_icon_path || entryMeta.icon_path || entryMeta.group_icon_path || "").trim() || "",
+      binaryOnIconPath: String(entryMeta.binary_on_icon_path || entryMeta.icon_path || entryMeta.group_icon_path || "").trim() || "",
       value: Object.prototype.hasOwnProperty.call(orderDesignInputDrafts.value, key)
         ? orderDesignInputDrafts.value[key]
         : values[key] ?? "",
@@ -177,16 +180,33 @@ const orderDesignAttrIconBase = computed(() => {
 function resolveOrderDesignMetaIcon(path) {
   const fileName = String(path || "").trim();
   const base = orderDesignAttrIconBase.value;
-  if (!fileName || !base) return "";
+  if (!fileName) return "";
+  if (/^(https?:)?\/\//i.test(fileName) || fileName.startsWith("/")) return fileName;
+  if (!base) return "";
+  const cacheKey = `${base}::${fileName}`;
+  if (brokenOrderDesignIcons.value[cacheKey]) return "";
   return `${base}${encodeURIComponent(fileName)}`;
 }
+function markOrderDesignIconBroken(path) {
+  const fileName = String(path || "").trim();
+  const base = orderDesignAttrIconBase.value;
+  if (!fileName || !base) return;
+  const cacheKey = `${base}::${fileName}`;
+  brokenOrderDesignIcons.value = {
+    ...brokenOrderDesignIcons.value,
+    [cacheKey]: true,
+  };
+}
 const hasOrderDesignAttrs = computed(() => !!activeOrderDesign.value && orderDesignAttrGroups.value.length > 0);
+const hasModelOutlineSelection = computed(() => !!attrsSnapshot.value?.selection?.selectedModelOutline);
+const hasAnyAttrSelection = computed(() => !!wallMetrics.value || hasModelOutlineSelection.value);
 const openOrderDesignGroupKey = ref("");
 
 watch(
   () => String(activeOrderDesign.value?.id || ""),
   () => {
     orderDesignInputDrafts.value = {};
+    brokenOrderDesignIcons.value = {};
     openOrderDesignGroupKey.value = String(orderDesignAttrGroups.value?.[0]?.key || "");
   }
 );
@@ -390,6 +410,7 @@ function setOrderDesignDraftValue(key, value) {
 }
 
 function commitOrderDesignDraftValue(key) {
+  if (!Object.prototype.hasOwnProperty.call(orderDesignInputDrafts.value, key)) return;
   patchOrderDesignAttr(key, orderDesignInputDrafts.value[key] ?? "");
 }
 
@@ -1429,18 +1450,19 @@ watch(
       <div class="glbWallAttrs__sep"></div>
     </div>
 
-    <template v-if="hasOrderDesignAttrs">
+    <template v-if="hasOrderDesignAttrs && hasModelOutlineSelection">
       <div class="glbWallAttrs__objectTitle">
         {{ activeOrderDesign?.design_title || activeOrderDesign?.instance_code || "طرح سفارش" }}
       </div>
       <div v-for="group in orderDesignAttrGroups" :key="group.key" class="glbWallAttrs__attrGroup">
         <button type="button" class="glbWallAttrs__groupToggle" @click="toggleOrderDesignGroup(group.key)">
-          <span class="glbWallAttrs__groupLabel">
+          <span class="glbWallAttrs__groupTitleRow">
             <img
               v-if="resolveOrderDesignMetaIcon(group.iconPath)"
               :src="resolveOrderDesignMetaIcon(group.iconPath)"
               alt=""
               class="glbWallAttrs__metaIcon glbWallAttrs__metaIcon--group"
+              @error="markOrderDesignIconBroken(group.iconPath)"
             />
             <span>{{ group.title }}</span>
           </span>
@@ -1448,34 +1470,59 @@ watch(
         </button>
         <div v-if="openOrderDesignGroupKey === group.key" class="glbWallAttrs__editor glbWallAttrs__editor--attrs">
           <label v-for="entry in group.items" :key="entry.key" class="glbWallAttrs__editRow glbWallAttrs__editRow--meta">
-            <span class="glbWallAttrs__metaLabel">
+            <span class="glbWallAttrs__fieldTitle">{{ entry.label }}</span>
+            <div v-if="entry.inputMode === 'binary'" class="glbWallAttrs__fieldBody">
+              <div class="glbWallAttrs__binaryRow">
+                <button
+                  type="button"
+                  class="glbWallAttrs__binaryBtn"
+                  :class="{ 'is-active': String(entry.value ?? '') === '0' }"
+                  @click="patchOrderDesignAttr(entry.key, '0')"
+                >
+                  <img
+                    v-if="resolveOrderDesignMetaIcon(entry.binaryOffIconPath)"
+                    :src="resolveOrderDesignMetaIcon(entry.binaryOffIconPath)"
+                    alt=""
+                    class="glbWallAttrs__metaIcon glbWallAttrs__metaIcon--binary"
+                    @error="markOrderDesignIconBroken(entry.binaryOffIconPath)"
+                  />
+                  <span>{{ entry.binaryOffLabel }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="glbWallAttrs__binaryBtn"
+                  :class="{ 'is-active': String(entry.value ?? '') === '1' }"
+                  @click="patchOrderDesignAttr(entry.key, '1')"
+                >
+                  <img
+                    v-if="resolveOrderDesignMetaIcon(entry.binaryOnIconPath)"
+                    :src="resolveOrderDesignMetaIcon(entry.binaryOnIconPath)"
+                    alt=""
+                    class="glbWallAttrs__metaIcon glbWallAttrs__metaIcon--binary"
+                    @error="markOrderDesignIconBroken(entry.binaryOnIconPath)"
+                  />
+                  <span>{{ entry.binaryOnLabel }}</span>
+                </button>
+              </div>
+            </div>
+            <div v-else class="glbWallAttrs__fieldBody">
+              <input
+                class="glbWallAttrs__input"
+                type="text"
+                inputmode="decimal"
+                :value="entry.value"
+                @input="setOrderDesignDraftValue(entry.key, $event.target.value)"
+                @blur="commitOrderDesignDraftValue(entry.key)"
+                @keydown.enter.prevent="commitOrderDesignDraftValue(entry.key)"
+              />
               <img
                 v-if="resolveOrderDesignMetaIcon(entry.iconPath || group.iconPath)"
                 :src="resolveOrderDesignMetaIcon(entry.iconPath || group.iconPath)"
                 alt=""
                 class="glbWallAttrs__metaIcon"
+                @error="markOrderDesignIconBroken(entry.iconPath || group.iconPath)"
               />
-              <span>{{ entry.label }}</span>
-            </span>
-            <select
-              v-if="entry.inputMode === 'binary'"
-              class="glbWallAttrs__input"
-              :value="entry.value"
-              @change="patchOrderDesignAttr(entry.key, $event.target.value)"
-            >
-              <option value="0">{{ entry.binaryOffLabel }}</option>
-              <option value="1">{{ entry.binaryOnLabel }}</option>
-            </select>
-            <input
-              v-else
-              class="glbWallAttrs__input"
-              type="text"
-              inputmode="decimal"
-              :value="entry.value"
-              @input="setOrderDesignDraftValue(entry.key, $event.target.value)"
-              @blur="commitOrderDesignDraftValue(entry.key)"
-              @keydown.enter.prevent="commitOrderDesignDraftValue(entry.key)"
-            />
+            </div>
           </label>
         </div>
         <div class="glbWallAttrs__sep"></div>
@@ -1486,58 +1533,68 @@ watch(
       <div v-if="selectedObjectTitle" class="glbWallAttrs__objectTitle">{{ selectedObjectTitle }}</div>
       <div class="glbWallAttrs__editor glbWallAttrs__editor--attrs">
         <label v-if="showLengthField" class="glbWallAttrs__editRow">
-          <span>{{ lengthFieldLabel }}</span>
-          <input
-            class="glbWallAttrs__input"
-            type="number"
-            min="1"
-            step="0.1"
-            :value="isGroupEditMode ? '' : wallMetrics.lengthCm"
-            :disabled="isGroupEditMode"
-            @input="patchWallStyleDraft({ lengthCm: +$event.target.value })"
-          />
+          <span class="glbWallAttrs__fieldTitle">{{ lengthFieldLabel }}</span>
+          <div class="glbWallAttrs__fieldBody">
+            <input
+              class="glbWallAttrs__input"
+              type="number"
+              min="1"
+              step="0.1"
+              :value="isGroupEditMode ? '' : wallMetrics.lengthCm"
+              :disabled="isGroupEditMode"
+              @input="patchWallStyleDraft({ lengthCm: +$event.target.value })"
+            />
+          </div>
         </label>
         <label v-if="showThicknessField" class="glbWallAttrs__editRow">
-          <span>{{ thicknessFieldLabel }}</span>
-          <input
-            class="glbWallAttrs__input"
-            type="number"
-            min="0.1"
-            step="0.5"
-            :value="wallStyleDraft.thicknessCm"
-            @input="patchWallStyleDraft({ thicknessCm: +$event.target.value })"
-          />
+          <span class="glbWallAttrs__fieldTitle">{{ thicknessFieldLabel }}</span>
+          <div class="glbWallAttrs__fieldBody">
+            <input
+              class="glbWallAttrs__input"
+              type="number"
+              min="0.1"
+              step="0.5"
+              :value="wallStyleDraft.thicknessCm"
+              @input="patchWallStyleDraft({ thicknessCm: +$event.target.value })"
+            />
+          </div>
         </label>
         <label v-if="showHeightField" class="glbWallAttrs__editRow">
-          <span>ارتفاع (cm)</span>
-          <input
-            class="glbWallAttrs__input"
-            type="number"
-            min="1"
-            step="1"
-            :value="wallStyleDraft.heightCm"
-            @input="patchWallStyleDraft({ heightCm: +$event.target.value })"
-          />
+          <span class="glbWallAttrs__fieldTitle">ارتفاع (cm)</span>
+          <div class="glbWallAttrs__fieldBody">
+            <input
+              class="glbWallAttrs__input"
+              type="number"
+              min="1"
+              step="1"
+              :value="wallStyleDraft.heightCm"
+              @input="patchWallStyleDraft({ heightCm: +$event.target.value })"
+            />
+          </div>
         </label>
         <label v-if="showFloorDistanceField" class="glbWallAttrs__editRow">
-          <span>ارتفاع از کف (cm)</span>
-          <input
-            class="glbWallAttrs__input"
-            type="number"
-            min="0"
-            step="0.1"
-            :value="wallStyleDraft.floorOffsetCm"
-            @input="patchWallStyleDraft({ floorOffsetCm: +$event.target.value })"
-          />
+          <span class="glbWallAttrs__fieldTitle">ارتفاع از کف (cm)</span>
+          <div class="glbWallAttrs__fieldBody">
+            <input
+              class="glbWallAttrs__input"
+              type="number"
+              min="0"
+              step="0.1"
+              :value="wallStyleDraft.floorOffsetCm"
+              @input="patchWallStyleDraft({ floorOffsetCm: +$event.target.value })"
+            />
+          </div>
         </label>
         <label v-if="showColorField" class="glbWallAttrs__editRow">
-          <span>{{ colorFieldLabel }}</span>
-          <input
-            class="glbWallAttrs__color"
-            type="color"
-            :value="wallStyleDraft.color"
-            @input="patchWallStyleDraft({ color: $event.target.value })"
-          />
+          <span class="glbWallAttrs__fieldTitle">{{ colorFieldLabel }}</span>
+          <div class="glbWallAttrs__fieldBody">
+            <input
+              class="glbWallAttrs__color"
+              type="color"
+              :value="wallStyleDraft.color"
+              @input="patchWallStyleDraft({ color: $event.target.value })"
+            />
+          </div>
         </label>
       </div>
 
@@ -1655,6 +1712,7 @@ watch(
       </div>
     </template>
 
-    <div v-else class="menuPanel__hint glbWallAttrs__hint--soft">ترسیم یا طرح سفارش خود را انتخاب نمایید</div>
+    <div v-else-if="!hasAnyAttrSelection" class="menuPanel__hint glbWallAttrs__hint--soft">ترسیم یا طرح سفارش خود را انتخاب نمایید</div>
+    <div v-else class="menuPanel__hint glbWallAttrs__hint--soft">برای مورد انتخاب‌شده صفتی نمایش داده نشد.</div>
   </div>
 </template>

@@ -1,6 +1,6 @@
 <script setup>
 import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from "vue";
-import { editorRef, model2dTransformRef, editorViewportRef, passiveModelSelectionHandlerRef } from "../editor/editor_store.js";
+import { editorRef, model2dTransformRef, editorViewportRef, passiveModelSelectionHandlerRef, activeModelDeleteHandlerRef } from "../editor/editor_store.js";
 import { createWallApp } from "../../../main.js";
 
 const hostEl = ref(null);
@@ -30,6 +30,10 @@ onMounted(() => {
       onPassiveModelSelect: (modelId) => {
         const handler = passiveModelSelectionHandlerRef.value;
         if (typeof handler === "function") handler(modelId);
+      },
+      onActiveModelDelete: () => {
+        const handler = activeModelDeleteHandlerRef.value;
+        if (typeof handler === "function") handler();
       },
     });
     // Vue shell starts in "no drawing" mode.

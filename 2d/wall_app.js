@@ -68,7 +68,7 @@ function installGlobalErrorHooksOnce() {
   });
 }
 
-export function createWallApp({ canvas, container, onModel2dTransformChange, onViewportChange, onPassiveModelSelect } = {}) {
+export function createWallApp({ canvas, container, onModel2dTransformChange, onViewportChange, onPassiveModelSelect, onActiveModelDelete } = {}) {
   installGlobalErrorHooksOnce();
 
   // Boot flag (used by standalone index.html to detect module load failures)
@@ -8424,6 +8424,7 @@ function onWindowKeyDown(e) {
           model2d.offsetYmm = 0;
           model2d.rotationRad = 0;
           emitModel2dTransform();
+          if (typeof onActiveModelDelete === "function") onActiveModelDelete();
         }
         deleteOrphanNodes(graph, tool.pendingStartNodeId ? new Set([tool.pendingStartNodeId]) : null);
         if (tool.pendingStartNodeId && !graph.getNode(tool.pendingStartNodeId)) tool.stopChaining();
