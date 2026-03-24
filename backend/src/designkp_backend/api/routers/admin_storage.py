@@ -36,6 +36,7 @@ def _param_group_headers() -> list[str]:
         "org_param_group_title",
         "param_group_icon_path",
         "ui_order",
+        "show_in_order_attrs",
         "admin_mode",
     ]
 
@@ -157,6 +158,7 @@ async def _param_group_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[
             row.org_param_group_title,
             normalize_icon_file_name(row.param_group_icon_path) or "",
             row.ui_order,
+            1 if row.show_in_order_attrs else 0,
             "system" if row.admin_id is None else "admin",
         ]
         for row in rows

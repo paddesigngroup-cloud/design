@@ -48,6 +48,7 @@ class ParamGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMi
     param_group_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     org_param_group_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     param_group_icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    show_in_order_attrs: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)

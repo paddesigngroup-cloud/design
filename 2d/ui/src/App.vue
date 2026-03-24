@@ -161,6 +161,7 @@ const cabinetDesignCatalogLoadedForAdmin = ref("");
 const stageCabinetPlaceholderBoxes = ref([]);
 const activeCabinetDesignId = ref(null);
 const hoveredCabinetDesignId = ref(null);
+const hoveredConstructionDesignId = ref(null);
 const constructionWizardOpen = ref(false);
 const constructionStep = ref("templates");
 const PART_FORMULA_FIELDS = [
@@ -407,6 +408,7 @@ const constructionSubCategoryParamTree = computed(() => {
           ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/icons/${encodeURIComponent(normalizeIconFileName(group.param_group_icon_path))}`
           : "",
         order: Number.isFinite(Number(group.ui_order)) ? Number(group.ui_order) : Number(group.param_group_id) || 0,
+        showInOrderAttrs: normalizeBooleanFlag(group.show_in_order_attrs, true),
         items: [],
       },
     ])
@@ -522,6 +524,7 @@ const activeSubCategoryUserPreviewGroups = computed(() => {
         };
       }),
     }))
+    .filter((group) => group.showInOrderAttrs !== false)
     .filter((group) => group.items.length > 0);
 });
 const activeSubCategoryUserPreviewGroup = computed(() =>
@@ -949,6 +952,16 @@ function buildPartKindDraft(item, overrides = {}) {
     ...item,
     ...overrides,
   };
+}
+
+function normalizeBooleanFlag(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const text = String(value ?? "").trim().toLowerCase();
+  if (!text) return !!fallback;
+  if (["1", "true", "yes", "on"].includes(text)) return true;
+  if (["0", "false", "no", "off"].includes(text)) return false;
+  return !!fallback;
 }
 
 function normalizeDuplicateValue(field, value) {
@@ -1923,6 +1936,7 @@ function normalizeParamGroupPayload(item) {
     param_group_code: String(item.param_group_code || "").trim(),
     org_param_group_title: String(item.org_param_group_title || "").trim(),
     param_group_icon_path: normalizeIconFileName(item.param_group_icon_path) || null,
+    show_in_order_attrs: normalizeBooleanFlag(item.show_in_order_attrs, true),
     ui_order: Number.isFinite(Number(item.ui_order)) ? Number(item.ui_order) : 0,
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.param_group_id),
     is_system: !!item.is_system,
@@ -2622,7 +2636,7 @@ function getConstructionCsvHeaders() {
     return ["param_id", "part_kind_id", "param_code", "param_title_en", "param_title_fa", "param_group_id", "ui_order", "admin_mode"];
   }
   if (constructionStep.value === "param_groups") {
-    return ["param_group_id", "param_group_code", "org_param_group_title", "param_group_icon_path", "ui_order", "admin_mode"];
+    return ["param_group_id", "param_group_code", "org_param_group_title", "param_group_icon_path", "ui_order", "show_in_order_attrs", "admin_mode"];
   }
   return ["part_kind_id", "part_kind_code", "org_part_kind_title", "admin_mode"];
 }
@@ -2711,6 +2725,7 @@ function getConstructionCsvRows(items = null) {
         String(item.org_param_group_title || "").trim(),
         normalizeIconFileName(item.param_group_icon_path),
         Number(item.ui_order) || 0,
+        normalizeBooleanFlag(item.show_in_order_attrs, true) ? 1 : 0,
         item.admin_id === null ? "system" : "admin",
       ]);
   }
@@ -3006,7 +3021,8 @@ async function onConstructionImportFileChange(event) {
         const orgTitle = String(row[2] || "").trim();
         const iconPath = String(row[3] || "").trim();
         const uiOrder = Number(row[4]);
-        const adminMode = String(row[5] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const showInOrderAttrs = normalizeBooleanFlag(row[5], true);
+        const adminMode = String(row[6] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         return {
           lineNo: index + 2,
           param_group_id: paramGroupId,
@@ -3014,6 +3030,7 @@ async function onConstructionImportFileChange(event) {
           org_param_group_title: orgTitle,
           param_group_icon_path: normalizeIconFileName(iconPath),
           ui_order: uiOrder,
+          show_in_order_attrs: showInOrderAttrs,
           admin_mode: adminMode,
         };
       });
@@ -3102,7 +3119,8 @@ async function onConstructionImportFileChange(event) {
             row.param_group_id < 1 ||
             !row.param_group_code ||
             !row.org_param_group_title ||
-            !Number.isFinite(row.ui_order)
+            !Number.isFinite(row.ui_order) ||
+            typeof row.show_in_order_attrs !== "boolean"
         )
       : previewRows.find(
           (row) =>
@@ -3221,6 +3239,7 @@ function buildImportedConstructionParamGroupDrafts(rows) {
       org_param_group_title: String(row.org_param_group_title || "").trim(),
       param_group_icon_path: normalizeIconFileName(row.param_group_icon_path) || null,
       ui_order: Number(row.ui_order),
+      show_in_order_attrs: normalizeBooleanFlag(row.show_in_order_attrs, true),
       code: String(row.param_group_code || "").trim(),
       title: String(row.org_param_group_title || "").trim(),
       sort_order: index + 1,
@@ -3240,6 +3259,7 @@ function buildImportedConstructionParamGroupDrafts(rows) {
       String(existing.org_param_group_title || "").trim() !== nextPayload.org_param_group_title ||
       normalizeIconFileName(existing.param_group_icon_path) !== normalizeIconFileName(nextPayload.param_group_icon_path) ||
       Number(existing.ui_order) !== nextPayload.ui_order ||
+      normalizeBooleanFlag(existing.show_in_order_attrs, true) !== nextPayload.show_in_order_attrs ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system;
     return buildPartKindDraft(existing, {
@@ -3552,6 +3572,7 @@ async function loadConstructionParamGroups() {
       withConstructionDraftState({
         ...item,
         param_group_icon_path: normalizeIconFileName(item.param_group_icon_path),
+        show_in_order_attrs: normalizeBooleanFlag(item.show_in_order_attrs, true),
       })
     );
     constructionDeletedParamGroupIds.value = [];
@@ -3704,6 +3725,7 @@ function addConstructionParamGroup() {
       org_param_group_title: `گروه پارامتر ${toPersianDigits(nextId)}`,
       param_group_icon_path: "",
       ui_order: nextId - 1,
+      show_in_order_attrs: true,
       code: `param_group_${nextId}`,
       title: `گروه پارامتر ${toPersianDigits(nextId)}`,
       sort_order: nextId,
@@ -7012,6 +7034,7 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
                       <th class="constructionDialog__col constructionDialog__col--icon">آیکون</th>
                       <th class="constructionDialog__col constructionDialog__col--uiOrder">ترتیب UI</th>
+                      <th class="constructionDialog__col constructionDialog__col--scope">نمایش در سفارش</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
                   </thead>
@@ -7022,6 +7045,7 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.org_param_group_title }}</td>
                       <td class="constructionDialog__col constructionDialog__col--icon">{{ row.param_group_icon_path || "-" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--uiOrder">{{ row.ui_order }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ row.show_in_order_attrs ? "نمایش" : "مخفی" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
                     </tr>
                   </tbody>
@@ -7052,6 +7076,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--code">کد</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
                     <th class="constructionDialog__col constructionDialog__col--uiOrder">ترتیب UI</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope">نمایش در سفارش</th>
                     <th class="constructionDialog__col constructionDialog__col--icon">آیکون</th>
                     <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
                     <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
@@ -7080,6 +7105,16 @@ onBeforeUnmount(() => {
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--uiOrder">
                       <input v-model.number="item.ui_order" class="constructionDialog__input" type="number" min="0" step="1" @input="markConstructionParamGroupDirty(item)" />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--scope">
+                      <button
+                        type="button"
+                        class="constructionDialog__scopeBtn"
+                        :class="normalizeBooleanFlag(item.show_in_order_attrs, true) ? 'is-admin' : 'is-system'"
+                        @click="item.show_in_order_attrs = !normalizeBooleanFlag(item.show_in_order_attrs, true); markConstructionParamGroupDirty(item)"
+                      >
+                        {{ normalizeBooleanFlag(item.show_in_order_attrs, true) ? "نمایش" : "مخفی" }}
+                      </button>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--icon">
                       <div class="constructionDialog__iconCell">
@@ -7507,7 +7542,12 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.design_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--title">{{ item.design_title }}</td>
                     <td class="constructionDialog__col constructionDialog__col--preview">
-                      <div v-if="item.preview?.viewer_boxes?.length" class="constructionDialog__previewThumb">
+                      <div
+                        v-if="item.preview?.viewer_boxes?.length"
+                        class="constructionDialog__previewThumb"
+                        @pointerenter="hoveredConstructionDesignId = item.id"
+                        @pointerleave="hoveredConstructionDesignId = null"
+                      >
                         <GlbViewerWidget
                           src="/models/1_z1.glb"
                           :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
@@ -7515,6 +7555,7 @@ onBeforeUnmount(() => {
                           :show-attrs-panel="false"
                           :embedded="true"
                           :preview-only="true"
+                          :preview-active="hoveredConstructionDesignId === item.id"
                         />
                       </div>
                       <span v-else class="constructionDialog__previewEmpty">ندارد</span>

@@ -22,6 +22,7 @@ class ParamGroupItem(BaseModel):
     param_group_code: str
     org_param_group_title: str
     param_group_icon_path: str | None
+    show_in_order_attrs: bool
     ui_order: int
     code: str
     title: str
@@ -37,6 +38,7 @@ class ParamGroupCreate(BaseModel):
     param_group_code: str = Field(min_length=1, max_length=64)
     org_param_group_title: str = Field(min_length=1, max_length=255)
     param_group_icon_path: str | None = Field(default=None, max_length=255)
+    show_in_order_attrs: bool = True
     ui_order: int | None = Field(default=None, ge=0)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
@@ -48,6 +50,7 @@ class ParamGroupUpdate(BaseModel):
     param_group_code: str = Field(min_length=1, max_length=64)
     org_param_group_title: str = Field(min_length=1, max_length=255)
     param_group_icon_path: str | None = Field(default=None, max_length=255)
+    show_in_order_attrs: bool = True
     ui_order: int = Field(ge=0)
     sort_order: int = Field(ge=0)
     is_system: bool
@@ -93,6 +96,7 @@ async def create_param_group(payload: ParamGroupCreate, session: AsyncSession = 
         param_group_code=payload.param_group_code.strip(),
         org_param_group_title=payload.org_param_group_title.strip(),
         param_group_icon_path=final_icon_file_name,
+        show_in_order_attrs=payload.show_in_order_attrs,
         ui_order=ui_order,
         code=payload.param_group_code.strip(),
         title=payload.org_param_group_title.strip(),
@@ -132,6 +136,7 @@ async def update_param_group(
     item.param_group_code = payload.param_group_code.strip()
     item.org_param_group_title = payload.org_param_group_title.strip()
     item.param_group_icon_path = next_icon_file_name
+    item.show_in_order_attrs = payload.show_in_order_attrs
     item.ui_order = payload.ui_order
     item.code = payload.param_group_code.strip()
     item.title = payload.org_param_group_title.strip()
