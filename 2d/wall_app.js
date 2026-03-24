@@ -8623,6 +8623,12 @@ function clearAll() {
 function getState() {
   const graphSnap = snapshotGraph(graph);
   const hiddenGraphSnap = snapshotGraph(hiddenGraph);
+  const toolSnap = snapshotTool(tool);
+  const hiddenToolSnap = snapshotHiddenTool(hiddenTool);
+  const beamToolSnap = snapshotBeamTool(beamTool);
+  const dimToolSnap = snapshotDimTool(dimTool);
+  const dimensionsSnap = snapshotDimensions(dimensions);
+  const model2dSnap = snapshotModel2d(model2d);
   const beamNodeIds = new Set();
   const beamWalls = [];
   for (const w of graphSnap.walls) {
@@ -8640,6 +8646,12 @@ function getState() {
     graphSnap,
     hiddenGraphSnap,
     beamGraphSnap,
+    toolSnap,
+    hiddenToolSnap,
+    beamToolSnap,
+    dimToolSnap,
+    dimensionsSnap,
+    model2dSnap,
     counts: {
       solidNodes: graphSnap.nodes.length,
       solidWalls: graphSnap.walls.length,
@@ -8711,6 +8723,43 @@ function getState() {
     cursor: { mode: uiCursorMode },
     viewport: { w: viewportW, h: viewportH, dpr: DPR },
   };
+}
+
+function restoreSnapshot(snap) {
+  if (!snap || typeof snap !== "object") return false;
+  restoreGraph(graph, snap.graphSnap || { _nid: 1, _wid: 1, nodes: [], walls: [] });
+  restoreGraph(hiddenGraph, snap.hiddenGraphSnap || { _nid: 1, _wid: 1, nodes: [], walls: [] });
+  restoreTool(tool, graph, snap.toolSnap || null);
+  restoreHiddenTool(hiddenTool, hiddenGraph, snap.hiddenToolSnap || null);
+  restoreBeamTool(beamTool, graph, snap.beamToolSnap || null);
+  restoreDimTool(dimTool, snap.dimToolSnap || null);
+  restoreDimensions(dimensions, Array.isArray(snap.dimensionsSnap) ? snap.dimensionsSnap : []);
+  restoreModel2d(model2d, snap.model2dSnap || { lines: [], outline: [], offsetXmm: 0, offsetYmm: 0, rotationRad: 0 });
+  setState(snap.state || {});
+  selectedWallId = null;
+  hoverWallId = null;
+  selectedWallIds = [];
+  selectedHiddenId = null;
+  hoverHiddenId = null;
+  selectedHiddenIds = [];
+  selectedDimId = null;
+  hoverDimId = null;
+  selectedDimIds = [];
+  selectedModelOutline = false;
+  hoverModelOutline = false;
+  moveCommand.mode = "idle";
+  copyCommand.mode = "idle";
+  rotateCommand.mode = "idle";
+  beamTool.stopChaining?.();
+  onModel2dTransformChange?.({
+    x: model2d.offsetXmm || 0,
+    y: model2d.offsetYmm || 0,
+    rotRad: model2d.rotationRad || 0,
+  });
+  _ui.updateToolButtons();
+  _ui.updateSnapButton();
+  updateCanvasCursor();
+  return true;
 }
 
 function setState(patch) {
@@ -9427,6 +9476,7 @@ return {
   goOrigin: resetCameraToOriginCenter,
 
   getState,
+  restoreSnapshot,
   setState,
   setSelectedWallStyle,
   setSelectedBeamStyle,

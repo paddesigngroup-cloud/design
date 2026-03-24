@@ -165,6 +165,7 @@ const orderEntryOpen = ref(false);
 const orderEntryTab = ref("create");
 const orderDraftMode = ref("create");
 const orderDraft = ref({ order_name: "", notes: "", status: "draft" });
+const orderDrawingLoading = ref(false);
 const cabinetDesignCatalog = ref([]);
 const cabinetDesignCatalogLoading = ref(false);
 const cabinetDesignCatalogLoadedForAdmin = ref("");
@@ -5099,6 +5100,19 @@ function normalizeOrderRecord(item) {
   };
 }
 
+function buildOrderDrawingSavePayload() {
+  const payload = buildDebugJsonPayload();
+  if (!payload) return null;
+  return {
+    drawing_payload: payload,
+    walls_count: Number(payload?.counts?.walls) || 0,
+    hidden_walls_count: Number(payload?.counts?.hiddenWalls) || 0,
+    dimensions_count: Number(payload?.counts?.dimensions) || 0,
+    beams_count: Number(payload?.counts?.beams) || 0,
+    columns_count: Number(payload?.counts?.columns) || 0,
+  };
+}
+
 function formatOrderDate(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return "-";
@@ -5190,6 +5204,54 @@ function openOrderEditor() {
   hydrateOrderDraftFromOrder(activeOrder.value);
   orderEntryTab.value = "create";
   orderEntryOpen.value = true;
+}
+
+async function handleMissingActiveOrder(message = "سفارش فعال دیگر در دیتابیس وجود ندارد. یکی از سفارش‌های موجود را دوباره انتخاب کنید.") {
+  activeOrder.value = null;
+  orderDraftMode.value = "create";
+  resetOrderDraft();
+  await loadOrders();
+  openOrderEntry("list");
+  showAlert(message, { title: "سفارش یافت نشد" });
+}
+
+async function loadOrderDrawing(orderId, { clearWhenMissing = true } = {}) {
+  const normalizedOrderId = String(orderId || "").trim();
+  if (!normalizedOrderId) return false;
+  orderDrawingLoading.value = true;
+  try {
+    const res = await fetch(`/api/orders/${encodeURIComponent(normalizedOrderId)}/drawing`);
+    if (res.status === 404) {
+      if (clearWhenMissing) {
+        editorRef.value?.clearAll?.();
+        editorRef.value?.goOrigin?.();
+      }
+      return false;
+    }
+    if (!res.ok) {
+      const message = await readApiErrorMessage(res, "خواندن ترسیمات سفارش انجام نشد.");
+      if (res.status === 404 && /Order not found/i.test(message)) {
+        await handleMissingActiveOrder();
+        return false;
+      }
+      throw new Error(message);
+    }
+    const payload = await res.json();
+    const snapshot = payload?.drawing_payload?.editorState || null;
+    if (snapshot && editorRef.value?.restoreSnapshot) {
+      editorRef.value.restoreSnapshot(snapshot);
+    } else if (clearWhenMissing) {
+      editorRef.value?.clearAll?.();
+      editorRef.value?.goOrigin?.();
+    }
+    syncQuickStateFromEditor();
+    return true;
+  } catch (error) {
+    showAlert(error?.message || "خواندن ترسیمات سفارش انجام نشد.", { title: "خطا" });
+    return false;
+  } finally {
+    orderDrawingLoading.value = false;
+  }
 }
 
 function hasOrderDraftChanges() {
@@ -5289,10 +5351,38 @@ async function updateOrder() {
   }
 }
 
-function selectOrder(item) {
+async function saveActiveOrderDrawing() {
+  const target = normalizeOrderRecord(activeOrder.value);
+  if (!target?.id) {
+    openOrderEntry();
+    return false;
+  }
+  const payload = buildOrderDrawingSavePayload();
+  if (!payload) {
+    showAlert("ترسیم فعالی برای ذخیره وجود ندارد.", { title: "ذخیره سفارش" });
+    return false;
+  }
+  const res = await fetch(`/api/orders/${encodeURIComponent(target.id)}/drawing`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const message = await readApiErrorMessage(res, "ذخیره ترسیمات سفارش انجام نشد.");
+    if (res.status === 404 && /Order not found/i.test(message)) {
+      await handleMissingActiveOrder();
+      return false;
+    }
+    throw new Error(message);
+  }
+  return true;
+}
+
+async function selectOrder(item) {
   activeOrder.value = normalizeOrderRecord(item);
   orderDraftMode.value = "edit";
   hydrateOrderDraftFromOrder(activeOrder.value);
+  await loadOrderDrawing(activeOrder.value?.id, { clearWhenMissing: true });
   closeOrderEntry(true);
 }
 
@@ -5328,7 +5418,7 @@ function isEditorEmpty() {
   // Expect shape from wall_app.js getState()
   const hasWalls = (s?.graphSnap?.walls?.length || 0) > 0;
   const hasHidden = (s?.hiddenGraphSnap?.walls?.length || 0) > 0;
-  const hasDims = (s?.dimensions?.length || 0) > 0;
+  const hasDims = (s?.dimensionsSnap?.length || s?.counts?.dimensions || 0) > 0;
   return !(hasWalls || hasHidden || hasDims);
 }
 
@@ -5341,11 +5431,39 @@ async function doSaveProject() {
     openOrderEntry();
     return;
   }
-  if (!isOrderDraftEditMode.value) {
-    orderDraftMode.value = "edit";
-    hydrateOrderDraftFromOrder(activeOrder.value);
+  const shouldSaveMeta = orderEntryOpen.value && orderEntryTab.value === "create" && isOrderDraftEditMode.value && hasOrderDraftChanges();
+  ordersSaving.value = true;
+  try {
+    if (!isOrderDraftEditMode.value) {
+      orderDraftMode.value = "edit";
+      hydrateOrderDraftFromOrder(activeOrder.value);
+    }
+    if (shouldSaveMeta) {
+      const res = await fetch(`/api/orders/${encodeURIComponent(activeOrder.value.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order_name: String(orderDraft.value.order_name || "").trim(),
+          notes: String(orderDraft.value.notes || "").trim() || null,
+          status: String(orderDraft.value.status || "draft"),
+        }),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "update-order-failed"));
+      const updated = normalizeOrderRecord(await res.json());
+      activeOrder.value = updated;
+      hydrateOrderDraftFromOrder(updated);
+    }
+    await saveActiveOrderDrawing();
+    await loadOrders();
+    showAlert("آخرین تغییرات سفارش و ترسیمات آن ذخیره شد.", { title: "ذخیره سفارش" });
+    if (orderEntryOpen.value && orderEntryTab.value === "create" && isOrderDraftEditMode.value) {
+      closeOrderEntry(true);
+    }
+  } catch (error) {
+    showAlert(error?.message || "ذخیره سفارش انجام نشد.", { title: "خطا" });
+  } finally {
+    ordersSaving.value = false;
   }
-  await updateOrder();
 }
 
 function doOpenPicker() {

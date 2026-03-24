@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.account import Order, User
+from designkp_backend.db.models.account import Order, OrderDrawing, User
 from designkp_backend.services.admin_access import require_admin
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -44,6 +44,23 @@ class OrderUpdate(BaseModel):
     order_name: str = Field(min_length=1, max_length=255)
     notes: str | None = Field(default=None, max_length=2000)
     status: OrderStatus
+
+
+class OrderDrawingPayload(BaseModel):
+    drawing_payload: dict[str, object] = Field(default_factory=dict)
+    walls_count: int = Field(default=0, ge=0)
+    hidden_walls_count: int = Field(default=0, ge=0)
+    dimensions_count: int = Field(default=0, ge=0)
+    beams_count: int = Field(default=0, ge=0)
+    columns_count: int = Field(default=0, ge=0)
+
+
+class OrderDrawingItem(OrderDrawingPayload):
+    id: uuid.UUID
+    order_id: uuid.UUID
+    admin_id: uuid.UUID
+    user_id: uuid.UUID
+    updated_at: datetime
 
 
 def _display_name(full_name: str | None, email: str, fallback: str) -> str:
@@ -83,6 +100,22 @@ def _to_response(item: Order) -> OrderItem:
     )
 
 
+def _to_drawing_response(item: OrderDrawing) -> OrderDrawingItem:
+    return OrderDrawingItem(
+        id=item.id,
+        order_id=item.order_id,
+        admin_id=item.admin_id,
+        user_id=item.user_id,
+        drawing_payload=item.drawing_payload or {},
+        walls_count=int(item.walls_count or 0),
+        hidden_walls_count=int(item.hidden_walls_count or 0),
+        dimensions_count=int(item.dimensions_count or 0),
+        beams_count=int(item.beams_count or 0),
+        columns_count=int(item.columns_count or 0),
+        updated_at=item.updated_at,
+    )
+
+
 async def _require_accessible_user(session: AsyncSession, *, admin_id: uuid.UUID, user_id: uuid.UUID) -> User:
     user = await session.scalar(
         select(User).where(
@@ -96,6 +129,18 @@ async def _require_accessible_user(session: AsyncSession, *, admin_id: uuid.UUID
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found for this admin.")
     return user
+
+
+async def _require_order(session: AsyncSession, order_id: uuid.UUID) -> Order:
+    item = await session.scalar(
+        select(Order)
+        .options(joinedload(Order.admin), joinedload(Order.user), joinedload(Order.drawing))
+        .where(and_(Order.id == order_id, Order.deleted_at.is_(None)))
+    )
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+    await require_admin(session, item.admin_id)
+    return item
 
 
 async def _next_order_number(session: AsyncSession, *, admin_id: uuid.UUID) -> str:
@@ -208,12 +253,46 @@ async def update_order(
     return _to_response(fresh)
 
 
+@router.get("/{order_id}/drawing", response_model=OrderDrawingItem)
+async def get_order_drawing(order_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> OrderDrawingItem:
+    item = await _require_order(session, order_id)
+    drawing = item.drawing
+    if not drawing or drawing.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order drawing not found.")
+    return _to_drawing_response(drawing)
+
+
+@router.put("/{order_id}/drawing", response_model=OrderDrawingItem)
+async def upsert_order_drawing(
+    order_id: uuid.UUID,
+    payload: OrderDrawingPayload,
+    session: AsyncSession = Depends(get_db_session),
+) -> OrderDrawingItem:
+    item = await _require_order(session, order_id)
+    drawing = item.drawing
+    if drawing is None or drawing.deleted_at is not None:
+        drawing = OrderDrawing(id=uuid.uuid4(), order_id=item.id, admin_id=item.admin_id, user_id=item.user_id)
+        session.add(drawing)
+    drawing.admin_id = item.admin_id
+    drawing.user_id = item.user_id
+    drawing.deleted_at = None
+    drawing.drawing_payload = payload.drawing_payload
+    drawing.walls_count = payload.walls_count
+    drawing.hidden_walls_count = payload.hidden_walls_count
+    drawing.dimensions_count = payload.dimensions_count
+    drawing.beams_count = payload.beams_count
+    drawing.columns_count = payload.columns_count
+    await session.commit()
+    await session.refresh(drawing)
+    return _to_drawing_response(drawing)
+
+
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def archive_order(order_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
-    item = await session.scalar(select(Order).where(and_(Order.id == order_id, Order.deleted_at.is_(None))))
-    if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+    item = await _require_order(session, order_id)
     item.status = "archived"
     item.deleted_at = datetime.now(timezone.utc)
+    if item.drawing and item.drawing.deleted_at is None:
+        item.drawing.deleted_at = datetime.now(timezone.utc)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

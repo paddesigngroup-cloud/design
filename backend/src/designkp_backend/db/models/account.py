@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, ForeignKeyConstraint, String, Text, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from designkp_backend.db.base import Base
@@ -37,6 +37,10 @@ class Admin(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
     orders: Mapped[list["Order"]] = relationship(
         back_populates="admin",
         foreign_keys="Order.admin_id",
+    )
+    order_drawings: Mapped[list["OrderDrawing"]] = relationship(
+        back_populates="admin",
+        foreign_keys="OrderDrawing.admin_id",
     )
     part_kinds: Mapped[list["PartKind"]] = relationship(
         back_populates="admin",
@@ -85,6 +89,10 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, B
         back_populates="user",
         foreign_keys="Order.user_id",
     )
+    order_drawings: Mapped[list["OrderDrawing"]] = relationship(
+        back_populates="user",
+        foreign_keys="OrderDrawing.user_id",
+    )
 
 
 class Order(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -123,3 +131,44 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
 
     admin: Mapped[Admin] = relationship(back_populates="orders", foreign_keys=[admin_id])
     user: Mapped[User] = relationship(back_populates="orders", foreign_keys=[user_id])
+    drawing: Mapped["OrderDrawing | None"] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class OrderDrawing(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "order_drawings"
+    __table_args__ = (
+        UniqueConstraint("order_id", name="uq_order_drawings_order_id"),
+    )
+
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    admin_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    drawing_payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    walls_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    hidden_walls_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    dimensions_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    beams_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    columns_count: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+
+    order: Mapped[Order] = relationship(back_populates="drawing")
+    admin: Mapped[Admin] = relationship(back_populates="order_drawings", foreign_keys=[admin_id])
+    user: Mapped[User] = relationship(back_populates="order_drawings", foreign_keys=[user_id])

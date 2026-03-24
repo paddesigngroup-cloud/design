@@ -77,7 +77,38 @@ Current minimum relationship:
 - One `admin` can have many `orders`.
 - One `user` can have many `orders`.
 
-## 5. `part_kinds`
+## 5. `order_drawings`
+
+Purpose:
+Stores the saved drawing snapshot for each order, including walls, guide lines, dimensions, beams, columns, and the related 2D editor state.
+
+Current business role:
+- Keeps the latest saved drawing state of a specific order outside the `orders` header table.
+- Persists the actual floorplan payload when the user clicks `ذخیره`.
+- Holds aggregated counts for quick inspection and future reporting.
+- Acts as the source for restoring a saved order drawing back into the 2D editor.
+
+Chosen structure logic:
+- One row per order.
+- Main fields for this phase:
+  - `order_id`
+  - `admin_id`
+  - `user_id`
+  - `drawing_payload`
+  - `walls_count`
+  - `hidden_walls_count`
+  - `dimensions_count`
+  - `beams_count`
+  - `columns_count`
+- `drawing_payload` stores the full editor snapshot JSON, including solid walls, hidden guide lines, dimensions, beam data, column data, and model/viewport-related snapshot state needed for restore.
+
+Current minimum relationship:
+- Each `order_drawing` belongs to one `order`.
+- Each `order_drawing` belongs to one `admin`.
+- Each `order_drawing` belongs to one `user`.
+- Each `order` has at most one current drawing snapshot in this phase.
+
+## 6. `part_kinds`
 
 Purpose:
 Stores the catalog of part categories used in the software, such as unit, shelf, drawer, door, and similar structural or visible cabinet parts.
