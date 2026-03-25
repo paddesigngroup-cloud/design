@@ -4,17 +4,25 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.exc import IntegrityError
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.catalog import SubCategory, SubCategoryDesign, SubCategoryDesignPart
+from designkp_backend.db.models.catalog import SubCategory, SubCategoryDesign, SubCategoryDesignInteriorInstance, SubCategoryDesignPart
+from designkp_backend.db.models.account import OrderDesign
 from designkp_backend.services.admin_access import require_admin_if_present
 from designkp_backend.services.sub_category_designs import (
+    build_sub_category_param_display_snapshot,
     compose_sub_category_design_preview,
+    derive_interior_box_snapshot,
+    interior_instance_tables_ready,
     rebuild_design_snapshots,
+    require_accessible_internal_part_group,
     require_accessible_sub_category,
+    resolve_internal_instance_preview,
+    serialize_resolved_part_snapshot,
 )
 
 router = APIRouter(prefix="/sub-category-designs", tags=["sub_category_designs"])
@@ -50,6 +58,38 @@ class SubCategoryDesignPartPreviewItem(BaseModel):
     viewer_payload: dict[str, object]
 
 
+class SubCategoryDesignInteriorInstanceItem(BaseModel):
+    id: uuid.UUID
+    internal_part_group_id: uuid.UUID
+    instance_code: str
+    ui_order: int
+    placement_z: float
+    interior_box_snapshot: dict[str, object]
+    param_values: dict[str, str | None]
+    param_meta: dict[str, dict[str, object]]
+    part_snapshots: list[dict[str, object]]
+    viewer_boxes: list[dict[str, object]]
+    status: str
+
+    model_config = {"from_attributes": True}
+
+
+class SubCategoryDesignInteriorInstancePreviewItem(BaseModel):
+    id: uuid.UUID | None = None
+    internal_part_group_id: uuid.UUID
+    internal_part_group_code: str
+    internal_part_group_title: str
+    instance_code: str
+    ui_order: int
+    placement_z: float
+    interior_box_snapshot: dict[str, object]
+    param_values: dict[str, str | None]
+    param_meta: dict[str, dict[str, object]]
+    auto_params: dict[str, float]
+    part_snapshots: list[dict[str, object]]
+    viewer_boxes: list[dict[str, object]]
+
+
 class SubCategoryDesignPreviewResponse(BaseModel):
     design_id: uuid.UUID | None = None
     sub_category_id: uuid.UUID
@@ -57,6 +97,7 @@ class SubCategoryDesignPreviewResponse(BaseModel):
     resolved_base_formulas: dict[str, float]
     viewer_boxes: list[dict[str, object]]
     parts: list[SubCategoryDesignPartPreviewItem]
+    interior_instances: list[SubCategoryDesignInteriorInstancePreviewItem]
 
 
 class SubCategoryDesignItem(BaseModel):
@@ -73,6 +114,7 @@ class SubCategoryDesignItem(BaseModel):
     sort_order: int
     is_system: bool
     parts: list[SubCategoryDesignPartItem]
+    interior_instances: list[SubCategoryDesignInteriorInstanceItem]
 
     model_config = {"from_attributes": True}
 
@@ -105,6 +147,21 @@ class SubCategoryDesignPreviewDraftRequest(BaseModel):
     parts: list[SubCategoryDesignPartSelectionPayload] = Field(default_factory=list)
 
 
+class SubCategoryDesignInteriorInstanceCreate(BaseModel):
+    internal_part_group_id: uuid.UUID
+    placement_z: float = 0
+    ui_order: int | None = Field(default=None, ge=0)
+    instance_code: str | None = Field(default=None, max_length=64)
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
+class SubCategoryDesignInteriorInstanceUpdate(BaseModel):
+    placement_z: float
+    ui_order: int = Field(ge=0)
+    instance_code: str = Field(min_length=1, max_length=64)
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
 async def _next_design_id(session: AsyncSession) -> int:
     max_id = await session.scalar(select(func.max(SubCategoryDesign.design_id)))
     return int(max_id or 0) + 1
@@ -124,7 +181,7 @@ async def _ensure_unique_design_code(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Design code is already used.")
 
 
-def _serialize_design(item: SubCategoryDesign) -> SubCategoryDesignItem:
+def _serialize_design(item: SubCategoryDesign, *, include_interior: bool = True) -> SubCategoryDesignItem:
     return SubCategoryDesignItem(
         id=item.id,
         admin_id=item.admin_id,
@@ -142,6 +199,13 @@ def _serialize_design(item: SubCategoryDesign) -> SubCategoryDesignItem:
             SubCategoryDesignPartItem.model_validate(part)
             for part in sorted(item.parts, key=lambda part: (int(part.ui_order), int(part.part_formula_id)))
         ],
+        interior_instances=(
+            [
+                SubCategoryDesignInteriorInstanceItem.model_validate(instance)
+                for instance in sorted(item.interior_instances, key=lambda row: (int(row.ui_order), str(row.instance_code or "")))
+            ]
+            if include_interior else []
+        ),
     )
 
 
@@ -152,6 +216,7 @@ def _serialize_preview(
     raw_params: dict[str, str | None],
     resolved_base_formulas: dict[str, float],
     snapshots: list,
+    interior_instances: list,
 ) -> SubCategoryDesignPreviewResponse:
     parts = [
         SubCategoryDesignPartPreviewItem(
@@ -173,17 +238,34 @@ def _serialize_preview(
         resolved_base_formulas=resolved_base_formulas,
         viewer_boxes=[item.viewer_payload["box"] for item in snapshots],
         parts=parts,
+        interior_instances=[
+            SubCategoryDesignInteriorInstancePreviewItem(
+                id=item.instance_id,
+                internal_part_group_id=item.internal_part_group_id,
+                internal_part_group_code=item.internal_part_group_code,
+                internal_part_group_title=item.internal_part_group_title,
+                instance_code=item.instance_code,
+                ui_order=item.ui_order,
+                placement_z=item.placement_z,
+                interior_box_snapshot=item.interior_box_snapshot,
+                param_values=item.param_values,
+                param_meta=item.param_meta,
+                auto_params=item.auto_params,
+                part_snapshots=item.part_snapshots,
+                viewer_boxes=item.viewer_boxes,
+            )
+            for item in interior_instances
+        ],
     )
 
 
 async def _load_design(session: AsyncSession, design_uuid: uuid.UUID) -> SubCategoryDesign:
-    item = await session.scalar(
-        select(SubCategoryDesign)
-        .options(
-            selectinload(SubCategoryDesign.parts).selectinload(SubCategoryDesignPart.snapshots),
-        )
-        .where(SubCategoryDesign.id == design_uuid)
+    stmt = select(SubCategoryDesign).options(
+        selectinload(SubCategoryDesign.parts).selectinload(SubCategoryDesignPart.snapshots),
     )
+    if await interior_instance_tables_ready(session):
+        stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
+    item = await session.scalar(stmt.where(SubCategoryDesign.id == design_uuid))
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design not found.")
     return item
@@ -247,7 +329,10 @@ async def list_sub_category_designs(
     session: AsyncSession = Depends(get_db_session),
 ) -> list[SubCategoryDesignItem]:
     await require_admin_if_present(session, admin_id)
+    include_interior = await interior_instance_tables_ready(session)
     stmt = select(SubCategoryDesign).options(selectinload(SubCategoryDesign.parts))
+    if include_interior:
+        stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
     if admin_id is None:
         stmt = stmt.where(SubCategoryDesign.admin_id.is_(None))
     else:
@@ -260,7 +345,7 @@ async def list_sub_category_designs(
     if sub_cat_id is not None:
         stmt = stmt.where(SubCategoryDesign.sub_cat_id == sub_cat_id)
     items = (await session.scalars(stmt)).all()
-    return [_serialize_design(item) for item in items]
+    return [_serialize_design(item, include_interior=include_interior) for item in items]
 
 
 @router.post("", response_model=SubCategoryDesignItem, status_code=status.HTTP_201_CREATED)
@@ -294,7 +379,7 @@ async def create_sub_category_design(payload: SubCategoryDesignCreate, session: 
     await rebuild_design_snapshots(session, item)
     await session.commit()
     item = await _load_design(session, item.id)
-    return _serialize_design(item)
+    return _serialize_design(item, include_interior=await interior_instance_tables_ready(session))
 
 
 @router.patch("/{design_uuid}", response_model=SubCategoryDesignItem)
@@ -328,7 +413,7 @@ async def update_sub_category_design(
     await rebuild_design_snapshots(session, item)
     await session.commit()
     item = await _load_design(session, item.id)
-    return _serialize_design(item)
+    return _serialize_design(item, include_interior=await interior_instance_tables_ready(session))
 
 
 @router.delete("/{design_uuid}", status_code=status.HTTP_204_NO_CONTENT)
@@ -336,8 +421,29 @@ async def delete_sub_category_design(design_uuid: uuid.UUID, session: AsyncSessi
     item = await session.get(SubCategoryDesign, design_uuid)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design not found.")
-    await session.delete(item)
-    await session.commit()
+    linked_order_design = await session.scalar(
+        select(OrderDesign.id).where(
+            OrderDesign.sub_category_design_id == design_uuid,
+            OrderDesign.deleted_at.is_(None),
+        ).limit(1)
+    )
+    if linked_order_design:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This sub-category design is used in one or more order designs and cannot be deleted.",
+        )
+    try:
+        if await interior_instance_tables_ready(session):
+            await session.delete(item)
+        else:
+            await session.execute(delete(SubCategoryDesign).where(SubCategoryDesign.id == design_uuid))
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This sub-category design is still referenced and cannot be deleted.",
+        ) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -348,7 +454,7 @@ async def preview_sub_category_design_draft(
 ) -> SubCategoryDesignPreviewResponse:
     await require_admin_if_present(session, payload.admin_id)
     sub_category = await require_accessible_sub_category(session, admin_id=payload.admin_id, sub_category_id=payload.sub_category_id)
-    raw_params, resolved_base_formulas, snapshots = await compose_sub_category_design_preview(
+    raw_params, resolved_base_formulas, snapshots, interior_instances = await compose_sub_category_design_preview(
         session,
         admin_id=payload.admin_id,
         sub_category=sub_category,
@@ -360,6 +466,7 @@ async def preview_sub_category_design_draft(
         raw_params=raw_params,
         resolved_base_formulas=resolved_base_formulas,
         snapshots=snapshots,
+        interior_instances=interior_instances,
     )
 
 
@@ -374,6 +481,7 @@ async def rebuild_sub_category_design_parts(design_uuid: uuid.UUID, session: Asy
 @router.get("/{design_uuid}/preview", response_model=SubCategoryDesignPreviewResponse)
 async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> SubCategoryDesignPreviewResponse:
     item = await _load_design(session, design_uuid)
+    include_interior = await interior_instance_tables_ready(session)
     sub_category = await session.get(SubCategory, item.sub_category_id)
     if not sub_category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found for this design.")
@@ -409,6 +517,156 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
         sub_category_id=sub_category.id,
         resolved_params=raw_params,
         resolved_base_formulas=resolved_base_formulas,
-        viewer_boxes=viewer_boxes,
+        viewer_boxes=viewer_boxes + ([
+            dict(box or {})
+            for instance in sorted(item.interior_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
+            for box in list(instance.viewer_boxes or [])
+        ] if include_interior else []),
         parts=parts,
+        interior_instances=[
+            SubCategoryDesignInteriorInstancePreviewItem(
+                id=instance.id,
+                internal_part_group_id=instance.internal_part_group_id,
+                internal_part_group_code="",
+                internal_part_group_title="",
+                instance_code=str(instance.instance_code or ""),
+                ui_order=int(instance.ui_order or 0),
+                placement_z=float(instance.placement_z or 0),
+                interior_box_snapshot=dict(instance.interior_box_snapshot or {}),
+                param_values={str(key): (None if value is None else str(value)) for key, value in dict(instance.param_values or {}).items()},
+                param_meta={str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()},
+                auto_params={},
+                part_snapshots=[dict(row or {}) for row in list(instance.part_snapshots or [])],
+                viewer_boxes=[dict(row or {}) for row in list(instance.viewer_boxes or [])],
+            )
+            for instance in sorted(item.interior_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
+        ] if include_interior else [],
     )
+
+
+def _normalize_interior_param_values(payload: dict[str, str | int | float | bool | None]) -> dict[str, str | None]:
+    return {
+        str(key): (None if value is None else str(value))
+        for key, value in dict(payload or {}).items()
+        if str(key or "").strip()
+    }
+
+
+async def _next_interior_instance_state(
+    session: AsyncSession,
+    *,
+    design: SubCategoryDesign,
+    group_id: uuid.UUID,
+    placement_z: float,
+    ui_order: int | None,
+    instance_code: str | None,
+    param_values: dict[str, str | int | float | bool | None],
+) -> tuple[str, int, dict[str, object], dict[str, str | None], dict[str, dict[str, object]]]:
+    sub_category = await require_accessible_sub_category(session, admin_id=design.admin_id, sub_category_id=design.sub_category_id)
+    group = await require_accessible_internal_part_group(session, admin_id=design.admin_id, group_id=group_id)
+    existing = list(design.interior_instances or [])
+    next_order = ui_order if ui_order is not None else (max([int(item.ui_order or 0) for item in existing], default=-1) + 1)
+    next_code = str(instance_code or "").strip() or f"{str(group.code or 'interior').strip() or 'interior'}-{next_order + 1:02d}"
+    base_boxes = [item.viewer_payload["box"] for item in (await preview_sub_category_design(design.id, session)).parts if isinstance(item.viewer_payload.get("box"), dict)]
+    interior_box_snapshot = derive_interior_box_snapshot(base_boxes)
+    normalized_values = _normalize_interior_param_values(param_values)
+    _, meta = await build_sub_category_param_display_snapshot(session, sub_category=sub_category, codes=set(normalized_values.keys()) or None)
+    resolved = await resolve_internal_instance_preview(
+        session,
+        admin_id=design.admin_id,
+        sub_category=sub_category,
+        internal_group=group,
+        instance_id=None,
+        instance_code=next_code,
+        ui_order=next_order,
+        placement_z=placement_z,
+        interior_box_snapshot=interior_box_snapshot,
+        param_values=normalized_values,
+        param_meta=meta,
+    )
+    return next_code, next_order, resolved.interior_box_snapshot, resolved.param_values, resolved.param_meta
+
+
+@router.post("/{design_uuid}/interior-instances", response_model=SubCategoryDesignInteriorInstanceItem, status_code=status.HTTP_201_CREATED)
+async def create_sub_category_design_interior_instance(
+    design_uuid: uuid.UUID,
+    payload: SubCategoryDesignInteriorInstanceCreate,
+    session: AsyncSession = Depends(get_db_session),
+) -> SubCategoryDesignInteriorInstanceItem:
+    if not await interior_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interior-instance tables are not available yet. Run database migrations first.")
+    design = await _load_design(session, design_uuid)
+    next_code, next_order, interior_box_snapshot, param_values, param_meta = await _next_interior_instance_state(
+        session,
+        design=design,
+        group_id=payload.internal_part_group_id,
+        placement_z=float(payload.placement_z or 0),
+        ui_order=payload.ui_order,
+        instance_code=payload.instance_code,
+        param_values=payload.param_values,
+    )
+    item = SubCategoryDesignInteriorInstance(
+        design=design,
+        internal_part_group_id=payload.internal_part_group_id,
+        instance_code=next_code,
+        ui_order=next_order,
+        placement_z=float(payload.placement_z or 0),
+        interior_box_snapshot=interior_box_snapshot,
+        param_values=param_values,
+        param_meta=param_meta,
+        status="draft",
+    )
+    session.add(item)
+    await session.flush()
+    design = await _load_design(session, design.id)
+    await rebuild_design_snapshots(session, design)
+    await session.commit()
+    design = await _load_design(session, design.id)
+    target = next(instance for instance in design.interior_instances if instance.id == item.id)
+    return SubCategoryDesignInteriorInstanceItem.model_validate(target)
+
+
+@router.patch("/{design_uuid}/interior-instances/{instance_id}", response_model=SubCategoryDesignInteriorInstanceItem)
+async def update_sub_category_design_interior_instance(
+    design_uuid: uuid.UUID,
+    instance_id: uuid.UUID,
+    payload: SubCategoryDesignInteriorInstanceUpdate,
+    session: AsyncSession = Depends(get_db_session),
+) -> SubCategoryDesignInteriorInstanceItem:
+    if not await interior_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interior-instance tables are not available yet. Run database migrations first.")
+    design = await _load_design(session, design_uuid)
+    item = next((row for row in design.interior_instances if row.id == instance_id), None)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design interior instance not found.")
+    item.instance_code = str(payload.instance_code or "").strip()
+    item.ui_order = int(payload.ui_order)
+    item.placement_z = float(payload.placement_z or 0)
+    item.param_values = _normalize_interior_param_values(payload.param_values)
+    await session.flush()
+    design = await _load_design(session, design.id)
+    await rebuild_design_snapshots(session, design)
+    await session.commit()
+    design = await _load_design(session, design.id)
+    target = next(instance for instance in design.interior_instances if instance.id == item.id)
+    return SubCategoryDesignInteriorInstanceItem.model_validate(target)
+
+
+@router.delete("/{design_uuid}/interior-instances/{instance_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_sub_category_design_interior_instance(
+    design_uuid: uuid.UUID,
+    instance_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    if not await interior_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interior-instance tables are not available yet. Run database migrations first.")
+    design = await _load_design(session, design_uuid)
+    item = next((row for row in design.interior_instances if row.id == instance_id), None)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design interior instance not found.")
+    await session.delete(item)
+    await session.flush()
+    design = await _load_design(session, design.id)
+    await rebuild_design_snapshots(session, design)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

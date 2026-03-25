@@ -2396,6 +2396,58 @@ textarea {
 .constructionDialog__table--preview td {
   padding: 8px 8px;
 }
+.constructionDialog__table--subDesigns {
+  width: 100%;
+  min-width: 980px;
+  table-layout: fixed;
+}
+.constructionDialog__table--subDesigns .constructionDialog__col--owner {
+  min-width: 92px !important;
+  width: 92px;
+  max-width: 96px !important;
+}
+.constructionDialog__table--subDesigns .constructionDialog__col--scope {
+  min-width: 92px !important;
+  width: 92px;
+  max-width: 96px !important;
+}
+.constructionDialog__table--subDesigns .constructionDialog__col--id {
+  min-width: 58px !important;
+  width: 58px;
+  max-width: 62px !important;
+}
+.constructionDialog__table--subDesigns .constructionDialog__col--code {
+  min-width: 116px !important;
+  width: 116px;
+  max-width: 132px !important;
+}
+.constructionDialog__table--subDesigns .constructionDialog__col--title {
+  min-width: 150px !important;
+}
+.constructionDialog__table--subDesigns .constructionDialog__col--preview {
+  min-width: 134px !important;
+  width: 134px;
+  max-width: 146px !important;
+}
+.constructionDialog__table--subDesigns .constructionDialog__col--actions {
+  min-width: 102px !important;
+  width: 102px;
+  max-width: 112px !important;
+}
+.constructionDialog__table--subDesigns .constructionDialog__scopeBtn {
+  width: 100%;
+}
+.constructionDialog__table--subDesigns .constructionDialog__ownerBadge {
+  width: 100%;
+  justify-content: center;
+}
+.constructionDialog__table--subDesigns .constructionDialog__previewThumb {
+  width: 136px;
+  height: 104px;
+}
+.constructionDialog__table--subDesigns .constructionDialog__actionsCell {
+  gap: 5px;
+}
 .constructionDialog__input {
   width: 100%;
   min-width: 0;
@@ -3012,11 +3064,28 @@ textarea {
   min-height: 0;
   overflow: hidden;
 }
+.subCategoryDesignEditor__layout--interiorLibrary {
+  direction: ltr;
+  grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.9fr);
+  gap: 16px;
+}
+.subCategoryDesignEditor__layout--interiorLibrary > * {
+  direction: rtl;
+}
+.subCategoryDesignEditor__panel--interiorPreview {
+  min-height: 660px;
+}
+.subCategoryDesignEditor__panel--interiorSidebar {
+  min-height: 660px;
+}
 .subCategoryDesignEditor__previewBody {
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+}
+.subCategoryDesignEditor__previewBody--interior {
+  min-height: 0;
 }
 .subCategoryDesignEditor__viewerWrap {
   position: relative;
@@ -3026,6 +3095,80 @@ textarea {
   border-radius: 18px;
   overflow: hidden;
   background: rgba(246, 244, 246, 0.9);
+}
+.subCategoryDesignEditor__viewerWrap--interior {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 580px;
+  padding: 20px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,245,244,0.95)),
+    radial-gradient(circle at top left, rgba(118, 45, 71, 0.05), transparent 42%);
+}
+.subCategoryDesignEditor__frontSvg {
+  width: 100%;
+  height: 100%;
+  min-height: 560px;
+}
+.subCategoryDesignEditor__partItem--interiorCard {
+  display: block;
+  padding: 14px;
+  border-radius: 18px;
+}
+.subCategoryDesignEditor__interiorGroupHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.subCategoryDesignEditor__interiorGroupActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.subCategoryDesignEditor__settingsBtn--mini {
+  min-width: 42px;
+  min-height: 42px;
+  padding: 0;
+}
+.subCategoryDesignEditor__chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.subCategoryDesignEditor__groupChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(118, 45, 71, 0.14);
+  border-radius: 999px;
+  background: rgba(250, 243, 246, 0.86);
+  color: #5b2a39;
+  font-family: Vazirmatn, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.subCategoryDesignEditor__groupChip:hover {
+  border-color: rgba(118, 45, 71, 0.24);
+  background: rgba(248, 237, 242, 0.96);
+}
+.subCategoryDesignEditor__interiorParams {
+  margin-top: 12px;
+}
+.subCategoryDesignEditor__interiorParamsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #6d4d58;
+  font-size: 12px;
+  font-weight: 700;
 }
 .subCategoryDesignEditor__viewerOverlay {
   position: absolute;
@@ -3042,6 +3185,21 @@ textarea {
 .appDialog__card--subDesign .appDialog__actions {
   margin-top: auto;
   padding-top: 14px;
+}
+@media (max-width: 1180px) {
+  .subCategoryDesignEditor__layout--interiorLibrary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .subCategoryDesignEditor__panel--interiorPreview,
+  .subCategoryDesignEditor__panel--interiorSidebar {
+    min-height: unset;
+  }
+
+  .subCategoryDesignEditor__viewerWrap--interior,
+  .subCategoryDesignEditor__frontSvg {
+    min-height: 420px;
+  }
 }
 .subCategoryDefaults__panelTitle,
 .subCategoryDefaults__groupTitle,

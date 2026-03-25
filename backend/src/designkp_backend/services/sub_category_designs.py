@@ -5,10 +5,23 @@ import uuid
 from dataclasses import dataclass
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from designkp_backend.db.models.catalog import BaseFormula, Param, PartFormula, SubCategory, SubCategoryDesign, SubCategoryDesignPart, SubCategoryDesignPartSnapshot, SubCategoryParamDefault
+from designkp_backend.db.models.catalog import (
+    BaseFormula,
+    InternalPartGroup,
+    Param,
+    ParamGroup,
+    PartFormula,
+    SubCategory,
+    SubCategoryDesign,
+    SubCategoryDesignInteriorInstance,
+    SubCategoryDesignPart,
+    SubCategoryDesignPartSnapshot,
+    SubCategoryParamDefault,
+)
 from designkp_backend.services.sub_category_defaults import sync_defaults_for_sub_categories
 
 
@@ -31,6 +44,23 @@ class ResolvedPartSnapshot:
     enabled: bool
     resolved_part_formulas: dict[str, float]
     viewer_payload: dict[str, object]
+
+
+@dataclass(slots=True)
+class ResolvedInteriorInstanceSnapshot:
+    instance_id: uuid.UUID | None
+    internal_part_group_id: uuid.UUID
+    internal_part_group_code: str
+    internal_part_group_title: str
+    instance_code: str
+    ui_order: int
+    placement_z: float
+    interior_box_snapshot: dict[str, object]
+    param_values: dict[str, str | None]
+    param_meta: dict[str, dict[str, object]]
+    auto_params: dict[str, float]
+    part_snapshots: list[dict[str, object]]
+    viewer_boxes: list[dict[str, object]]
 
 
 def _round_number(value: float | int) -> float:
@@ -86,6 +116,18 @@ def _evaluate_ast(node: ast.AST, values: dict[str, float]) -> float:
     raise ValueError("unsupported-expression")
 
 
+def extract_expression_names(expression: str) -> set[str]:
+    try:
+        parsed = ast.parse(str(expression or "").strip(), mode="eval")
+    except Exception:  # noqa: BLE001
+        return set()
+    names: set[str] = set()
+    for node in ast.walk(parsed):
+        if isinstance(node, ast.Name):
+            names.add(str(node.id))
+    return names
+
+
 def evaluate_formula_expression(expression: str, values: dict[str, float]) -> float:
     try:
         parsed = ast.parse(str(expression or "").strip(), mode="eval")
@@ -114,6 +156,17 @@ async def require_accessible_sub_category(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found for this admin scope.")
     await sync_defaults_for_sub_categories(session, [item])
     return item
+
+
+async def interior_instance_tables_ready(session: AsyncSession) -> bool:
+    result = await session.execute(
+        select(
+            func.to_regclass("sub_category_design_interior_instances"),
+            func.to_regclass("order_design_interior_instances"),
+        )
+    )
+    subcat_table, order_table = result.one()
+    return bool(subcat_table) and bool(order_table)
 
 
 async def require_accessible_part_formulas(
@@ -187,6 +240,189 @@ async def resolve_base_formula_values(session: AsyncSession, *, admin_id: uuid.U
     return resolved
 
 
+async def list_accessible_params(session: AsyncSession, *, admin_id: uuid.UUID | None) -> list[Param]:
+    stmt = select(Param)
+    if admin_id is not None:
+        stmt = stmt.where(or_(Param.admin_id.is_(None), Param.admin_id == admin_id))
+    return (
+        await session.scalars(stmt.order_by(Param.sort_order.asc(), Param.param_id.asc()))
+    ).all()
+
+
+async def list_accessible_base_formulas(session: AsyncSession, *, admin_id: uuid.UUID | None) -> list[BaseFormula]:
+    stmt = select(BaseFormula)
+    if admin_id is not None:
+        stmt = stmt.where(or_(BaseFormula.admin_id.is_(None), BaseFormula.admin_id == admin_id))
+    return (
+        await session.scalars(stmt.order_by(BaseFormula.sort_order.asc(), BaseFormula.fo_id.asc()))
+    ).all()
+
+
+async def get_auto_param_codes(session: AsyncSession, *, admin_id: uuid.UUID | None) -> set[str]:
+    params = await list_accessible_params(session, admin_id=admin_id)
+    return {
+        str(item.param_code).strip()
+        for item in params
+        if str(item.interior_value_mode or "").strip().lower() == "auto" and str(item.param_code or "").strip()
+    }
+
+
+def _compute_boxes_bounds(boxes: list[dict[str, object]]) -> dict[str, float] | None:
+    if not boxes:
+        return None
+    min_x = float("inf")
+    max_x = float("-inf")
+    min_y = float("inf")
+    max_y = float("-inf")
+    min_z = float("inf")
+    max_z = float("-inf")
+    for box in boxes:
+        width = max(0.0, float(box.get("width") or 0))
+        depth = max(0.0, float(box.get("depth") or 0))
+        height = max(0.0, float(box.get("height") or 0))
+        cx = float(box.get("cx") or 0)
+        cy = float(box.get("cy") or 0)
+        cz = float(box.get("cz") or 0)
+        min_x = min(min_x, cx - (width * 0.5))
+        max_x = max(max_x, cx + (width * 0.5))
+        min_y = min(min_y, cy - (depth * 0.5))
+        max_y = max(max_y, cy + (depth * 0.5))
+        min_z = min(min_z, cz - (height * 0.5))
+        max_z = max(max_z, cz + (height * 0.5))
+    if not all(map(lambda item: item not in {float("inf"), float("-inf")}, [min_x, max_x, min_y, max_y, min_z, max_z])):
+        return None
+    return {
+        "min_x": _round_number(min_x),
+        "max_x": _round_number(max_x),
+        "min_y": _round_number(min_y),
+        "max_y": _round_number(max_y),
+        "min_z": _round_number(min_z),
+        "max_z": _round_number(max_z),
+        "width": _round_number(max_x - min_x),
+        "depth": _round_number(max_y - min_y),
+        "height": _round_number(max_z - min_z),
+        "cx": _round_number((min_x + max_x) * 0.5),
+        "cy": _round_number((min_y + max_y) * 0.5),
+        "cz": _round_number((min_z + max_z) * 0.5),
+    }
+
+
+def derive_interior_box_snapshot(viewer_boxes: list[dict[str, object]]) -> dict[str, object]:
+    bounds = _compute_boxes_bounds(viewer_boxes) or {
+        "min_x": 0.0,
+        "max_x": 0.0,
+        "min_y": 0.0,
+        "max_y": 0.0,
+        "min_z": 0.0,
+        "max_z": 0.0,
+        "width": 0.0,
+        "depth": 0.0,
+        "height": 0.0,
+        "cx": 0.0,
+        "cy": 0.0,
+        "cz": 0.0,
+    }
+    return {key: _round_number(value) for key, value in bounds.items()}
+
+
+async def build_sub_category_param_display_snapshot(
+    session: AsyncSession,
+    *,
+    sub_category: SubCategory,
+    codes: set[str] | None = None,
+) -> tuple[dict[str, str | None], dict[str, dict[str, object]]]:
+    rows = (
+        await session.execute(
+            select(SubCategoryParamDefault, Param.param_code, Param.param_title_fa, Param.param_id, Param.ui_order, ParamGroup)
+            .join(Param, Param.param_id == SubCategoryParamDefault.param_id)
+            .join(ParamGroup, ParamGroup.param_group_id == Param.param_group_id)
+            .where(SubCategoryParamDefault.sub_category_id == sub_category.id)
+            .order_by(ParamGroup.ui_order.asc(), Param.ui_order.asc(), Param.param_id.asc())
+        )
+    ).all()
+    values: dict[str, str | None] = {}
+    meta: dict[str, dict[str, object]] = {}
+    filter_codes = {str(item).strip() for item in (codes or set()) if str(item).strip()} if codes else None
+    for default_row, param_code, param_title_fa, param_id, param_ui_order, group in rows:
+        code = str(param_code or "").strip()
+        if not code or (filter_codes is not None and code not in filter_codes):
+            continue
+        values[code] = default_row.default_value
+        meta[code] = {
+            "label": str(default_row.display_title or param_title_fa or code).strip() or code,
+            "description_text": str(default_row.description_text or "").strip() or None,
+            "input_mode": default_row.input_mode if str(default_row.input_mode or "") == "binary" else "value",
+            "binary_off_label": str(default_row.binary_off_label or "0").strip() or "0",
+            "binary_on_label": str(default_row.binary_on_label or "1").strip() or "1",
+            "group_id": int(group.param_group_id or 0),
+            "group_title": str(group.org_param_group_title or group.title or group.param_group_code or "").strip() or None,
+            "group_ui_order": int(group.ui_order or 0),
+            "group_show_in_order_attrs": bool(group.show_in_order_attrs),
+            "param_id": int(param_id or 0),
+            "param_ui_order": int(param_ui_order or 0),
+        }
+    return values, meta
+
+
+async def require_accessible_internal_part_group(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    group_id: uuid.UUID,
+) -> InternalPartGroup:
+    stmt = (
+        select(InternalPartGroup)
+        .options(selectinload(InternalPartGroup.parts))
+        .where(InternalPartGroup.id == group_id)
+    )
+    if admin_id is not None:
+        stmt = stmt.where(or_(InternalPartGroup.admin_id.is_(None), InternalPartGroup.admin_id == admin_id))
+    item = await session.scalar(stmt)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Internal part group not found for this admin scope.")
+    return item
+
+
+async def collect_internal_group_param_codes(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    group: InternalPartGroup,
+) -> set[str]:
+    part_formula_ids = [
+        int(item.part_formula_id)
+        for item in list(group.__dict__.get("parts") or [])
+        if bool(item.enabled)
+    ]
+    formulas = await require_accessible_part_formulas(session, admin_id=admin_id, part_formula_ids=part_formula_ids)
+    params = await list_accessible_params(session, admin_id=admin_id)
+    param_codes = {str(item.param_code).strip() for item in params if str(item.param_code or "").strip()}
+    base_formulas = await list_accessible_base_formulas(session, admin_id=admin_id)
+    base_formula_map = {
+        str(item.param_formula).strip(): str(item.formula or "")
+        for item in base_formulas
+        if str(item.param_formula or "").strip()
+    }
+    pending: list[str] = []
+    for formula in formulas:
+        for field_name in PART_FORMULA_FIELDS:
+            pending.extend(extract_expression_names(str(getattr(formula, field_name) or "")))
+    resolved: set[str] = set()
+    seen: set[str] = set()
+    while pending:
+        name = str(pending.pop()).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        if name in param_codes:
+            resolved.add(name)
+            continue
+        expression = base_formula_map.get(name)
+        if expression:
+            pending.extend(extract_expression_names(expression))
+    return resolved
+
+
 def resolve_part_formula_values(
     part_formula: PartFormula,
     *,
@@ -230,13 +466,118 @@ def build_part_viewer_payload(part_formula: PartFormula, resolved_part_formulas:
     }
 
 
+def serialize_resolved_part_snapshot(item: ResolvedPartSnapshot) -> dict[str, object]:
+    return {
+        "part_formula_id": int(item.part_formula.part_formula_id),
+        "part_kind_id": int(item.part_formula.part_kind_id),
+        "part_code": item.part_formula.part_code,
+        "part_title": item.part_formula.part_title,
+        "enabled": bool(item.enabled),
+        "ui_order": int(item.ui_order),
+        "resolved_part_formulas": dict(item.resolved_part_formulas),
+        "viewer_payload": dict(item.viewer_payload),
+    }
+
+
+async def resolve_internal_instance_preview(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    sub_category: SubCategory,
+    internal_group: InternalPartGroup,
+    instance_id: uuid.UUID | None,
+    instance_code: str,
+    ui_order: int,
+    placement_z: float,
+    interior_box_snapshot: dict[str, object],
+    param_values: dict[str, object] | None = None,
+    param_meta: dict[str, dict[str, object]] | None = None,
+) -> ResolvedInteriorInstanceSnapshot:
+    group_param_codes = await collect_internal_group_param_codes(session, admin_id=admin_id, group=internal_group)
+    copied_values, copied_meta = await build_sub_category_param_display_snapshot(
+        session,
+        sub_category=sub_category,
+        codes=group_param_codes,
+    )
+    raw_values = {**copied_values, **{str(key): (None if value is None else str(value)) for key, value in dict(param_values or {}).items()}}
+    meta = {**copied_meta, **dict(param_meta or {})}
+    auto_param_codes = await get_auto_param_codes(session, admin_id=admin_id)
+    auto_values: dict[str, float] = {}
+    width = _round_number(_coerce_numeric(interior_box_snapshot.get("width")))
+    depth = _round_number(_coerce_numeric(interior_box_snapshot.get("depth")))
+    placement = _round_number(placement_z)
+    if "u_i_w" in auto_param_codes:
+        auto_values["u_i_w"] = width
+        raw_values["u_i_w"] = str(width)
+    if "u_i_d" in auto_param_codes:
+        auto_values["u_i_d"] = depth
+        raw_values["u_i_d"] = str(depth)
+    if "f_s_cz" in auto_param_codes:
+        auto_values["f_s_cz"] = placement
+        raw_values["f_s_cz"] = str(placement)
+    if "m_s_cz" in auto_param_codes:
+        auto_values["m_s_cz"] = placement
+        raw_values["m_s_cz"] = str(placement)
+    numeric_params = {str(key): _round_number(_coerce_numeric(value)) for key, value in raw_values.items()}
+    numeric_params.update(auto_values)
+    resolved_base_formulas = await resolve_base_formula_values(session, admin_id=admin_id, params=numeric_params)
+    selected_ids = [
+        int(item.part_formula_id)
+        for item in list(internal_group.__dict__.get("parts") or [])
+        if bool(item.enabled)
+    ]
+    formulas = await require_accessible_part_formulas(session, admin_id=admin_id, part_formula_ids=selected_ids)
+    formula_by_id = {int(item.part_formula_id): item for item in formulas}
+    part_snapshots: list[dict[str, object]] = []
+    viewer_boxes: list[dict[str, object]] = []
+    for selection in sorted(list(internal_group.__dict__.get("parts") or []), key=lambda item: (int(item.ui_order or 0), int(item.part_formula_id or 0))):
+        if not bool(selection.enabled):
+            continue
+        formula = formula_by_id.get(int(selection.part_formula_id))
+        if not formula:
+            continue
+        resolved_part_formulas = resolve_part_formula_values(formula, params=numeric_params, base_formulas=resolved_base_formulas)
+        viewer_payload = build_part_viewer_payload(formula, resolved_part_formulas)
+        part_snapshots.append(
+            {
+                "part_formula_id": int(formula.part_formula_id),
+                "part_kind_id": int(formula.part_kind_id),
+                "part_code": formula.part_code,
+                "part_title": formula.part_title,
+                "enabled": True,
+                "ui_order": int(selection.ui_order or 0),
+                "resolved_part_formulas": resolved_part_formulas,
+                "viewer_payload": viewer_payload,
+            }
+        )
+        box = viewer_payload.get("box")
+        if isinstance(box, dict):
+            viewer_boxes.append(box)
+    return ResolvedInteriorInstanceSnapshot(
+        instance_id=instance_id,
+        internal_part_group_id=internal_group.id,
+        internal_part_group_code=str(internal_group.code or "").strip(),
+        internal_part_group_title=str(internal_group.group_title or internal_group.title or "").strip(),
+        instance_code=str(instance_code or "").strip(),
+        ui_order=int(ui_order),
+        placement_z=placement,
+        interior_box_snapshot={str(key): value for key, value in dict(interior_box_snapshot or {}).items()},
+        param_values={str(key): (None if value is None else str(value)) for key, value in raw_values.items()},
+        param_meta={str(key): dict(value or {}) for key, value in meta.items()},
+        auto_params=auto_values,
+        part_snapshots=part_snapshots,
+        viewer_boxes=viewer_boxes,
+    )
+
+
 async def compose_sub_category_design_preview(
     session: AsyncSession,
     *,
     admin_id: uuid.UUID | None,
     sub_category: SubCategory,
     part_selections: list[dict[str, object]],
-) -> tuple[dict[str, str | None], dict[str, float], list[ResolvedPartSnapshot]]:
+    interior_instances: list[SubCategoryDesignInteriorInstance] | None = None,
+) -> tuple[dict[str, str | None], dict[str, float], list[ResolvedPartSnapshot], list[ResolvedInteriorInstanceSnapshot]]:
     raw_params, numeric_params = await get_sub_category_resolved_params(session, sub_category)
     resolved_base_formulas = await resolve_base_formula_values(session, admin_id=admin_id, params=numeric_params)
 
@@ -262,13 +603,39 @@ async def compose_sub_category_design_preview(
                 viewer_payload=build_part_viewer_payload(formula, resolved_part_formulas),
             )
         )
-    return raw_params, resolved_base_formulas, snapshots
+    base_boxes = [item.viewer_payload["box"] for item in snapshots if isinstance(item.viewer_payload.get("box"), dict)]
+    interior_box_snapshot = derive_interior_box_snapshot(base_boxes)
+    resolved_interior: list[ResolvedInteriorInstanceSnapshot] = []
+    for instance in sorted(list(interior_instances or []), key=lambda item: (int(item.ui_order or 0), str(item.instance_code or ""))):
+        internal_group = await require_accessible_internal_part_group(
+            session,
+            admin_id=admin_id,
+            group_id=instance.internal_part_group_id,
+        )
+        resolved_interior.append(
+            await resolve_internal_instance_preview(
+                session,
+                admin_id=admin_id,
+                sub_category=sub_category,
+                internal_group=internal_group,
+                instance_id=instance.id,
+                instance_code=str(instance.instance_code or ""),
+                ui_order=int(instance.ui_order or 0),
+                placement_z=float(instance.placement_z or 0),
+                interior_box_snapshot=dict(instance.interior_box_snapshot or {}) or dict(interior_box_snapshot),
+                param_values=dict(instance.param_values or {}),
+                param_meta={str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()},
+            )
+        )
+    return raw_params, resolved_base_formulas, snapshots, resolved_interior
 
 
 async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDesign) -> None:
     sub_category = await session.get(SubCategory, design.sub_category_id)
     if not sub_category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found for this design.")
+    schema_ready = await interior_instance_tables_ready(session)
+    interior_instances = list(design.__dict__.get("interior_instances") or []) if schema_ready else []
 
     part_selections = [
         {
@@ -278,11 +645,12 @@ async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDes
         }
         for part in design.parts
     ]
-    raw_params, resolved_base_formulas, snapshots = await compose_sub_category_design_preview(
+    raw_params, resolved_base_formulas, snapshots, resolved_interior = await compose_sub_category_design_preview(
         session,
         admin_id=design.admin_id,
         sub_category=sub_category,
         part_selections=part_selections,
+        interior_instances=interior_instances,
     )
 
     snapshots_by_formula_id = {int(item.part_formula.part_formula_id): item for item in snapshots}
@@ -310,3 +678,16 @@ async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDes
         snapshot.cy = computed.viewer_payload["cy"]
         snapshot.cz = computed.viewer_payload["cz"]
         snapshot.viewer_payload = computed.viewer_payload
+
+    interior_by_id = {item.instance_id: item for item in resolved_interior if item.instance_id is not None}
+    for instance in interior_instances:
+        computed = interior_by_id.get(instance.id)
+        if not computed:
+            instance.part_snapshots = []
+            instance.viewer_boxes = []
+            continue
+        instance.interior_box_snapshot = computed.interior_box_snapshot
+        instance.param_values = computed.param_values
+        instance.param_meta = computed.param_meta
+        instance.part_snapshots = computed.part_snapshots
+        instance.viewer_boxes = computed.viewer_boxes

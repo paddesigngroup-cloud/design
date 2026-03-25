@@ -1,0 +1,85 @@
+[33m73ac93d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mselected_design[m[33m)[m automatic_params
+[33m23e1ec6[m group_parts
+[33m2772442[m selected_design
+[33m59d2bf6[m drag_unit_3
+[33m2215f02[m DRAG_UNIT_2
+[33m7e4fc57[m DRAG_UNIT
+[33m9c3c4b0[m DB_V17
+[33m49b699e[m DB_V16
+[33mf5e8e25[m DB_15
+[33mb4edbd8[m DB_V14
+[33mb4c39e5[m design_db
+[33m5de7f18[m subcat_v2
+[33m19cd41d[m SUBCAT
+[33m91d0e37[m DB_V13
+[33m2950a53[m database_V12
+[33ma358c8f[m database_V11
+[33m6fb53a1[m database_V10
+[33m6f221e8[m style_css_subcat_db
+[33mf6c1a1f[m database_V9
+[33m9221e32[m database_V8
+[33m6896d44[m database_V7
+[33mf78d9f2[m database_V6
+[33m4226dd8[m database_V5
+[33m3e23706[m database_V4
+[33m84153a4[m database_V3
+[33m1c9915d[m database_V2
+[33m5cc2940[m database_V1
+[33mb71607b[m right_click_free_degree_line
+[33m24c9157[m drag_selection_done
+[33mc3f5b66[m colomn_done
+[33ma4f7579[m drag_wall_effect
+[33mfc2dbb0[m extend_done
+[33m7ba52b0[m extend_V1
+[33m8429793[m[33m ([m[1;32mbeam_fix[m[33m)[m extende_wall_beam_line
+[33m999ce0d[m beam_fix_1
+[33m5af2a90[m beam
+[33mc0a808d[m beam_error
+[33mcdf4e9d[m beam_V1_not_stable
+[33mb2ca9d8[m right_click_ortho_fix_bogs
+[33m3d87b90[m copy_skil_V2
+[33mc2877c9[m copy_skill_V1
+[33mb7bad87[m rotation_V3
+[33maf7b252[m rotation_V2
+[33m0095b72[m rotatation_V1
+[33m84d20e6[m move_skil_V1
+[33m84782d6[m dimention_engine_V3
+[33mc5098ac[m dimention_engine_V2
+[33m1b77b4d[m dimention_engine_V1
+[33m13a8a6a[m draw_selection
+[33mbedb0fd[m axis_widget_3d_2d_done
+[33m2f8d2eb[m axis_widget_3d_2d
+[33m2445144[m hidden_wall_done
+[33md4cb0f2[m len_a, len_b_steps_done
+[33mbd741a0[m selectedObjectTitle
+[33me86f80e[m Add step-by-step drawing feature_done
+[33m014ed6f[m Add step-by-step drawing feature_V2
+[33medd7e5d[m Add step-by-step drawing feature_V1
+[33maea402d[m wall_snaps(shift+R.click)&clear_bugs_
+[33m4c6a546[m Add draggable wall icons to 2D canvasـ_V2
+[33mb888e25[m Add draggable wall icons to 2D canvas_V1
+[33mf1e63c6[m Fix wall start point handling
+[33m90a05cd[m Fix default wall property display_2
+[33m6ef2281[m Fix default wall property display
+[33m2935775[m attribeute_6
+[33m946a004[m attribeute_5
+[33m2910772[m attribeute_4
+[33mc1a91d0[m attribeute_3
+[33m3d84772[m attribeute_2
+[33m140e751[m attribeute_1
+[33m4dfe96f[m minimize_maximize_glb_viewer
+[33m337470b[m origin point_move group
+[33mb6136cf[m move origin but not group
+[33m74a58ad[m stable origin point without group move
+[33ma6b2fa5[m stable without move origin point
+[33mc59fe6b[m Select all objects in drawing (cut-design)
+[33m39c113a[m Select all objects in drawing
+[33md5d7efc[m stable
+[33mfda659f[m stable
+[33me29b66d[m ATTACHED
+[33me4db007[m ORIGIN
+[33m12b8ef0[m feat(ui): improve GLB viewer walls, camera fitting, and view controls
+[33mf82fac7[m wall_3d_viewer
+[33m6bc1212[m snapshot2
+[33m90440d4[m snapshot(new)
+[33m2717f72[m fresh start

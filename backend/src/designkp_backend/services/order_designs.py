@@ -7,17 +7,21 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from designkp_backend.db.models.account import Order, OrderDesign
-from designkp_backend.db.models.catalog import Param, ParamGroup, SubCategory, SubCategoryDesign, SubCategoryDesignPart, SubCategoryParamDefault
+from designkp_backend.db.models.account import Order, OrderDesign, OrderDesignInteriorInstance
+from designkp_backend.db.models.catalog import Param, ParamGroup, SubCategory, SubCategoryDesign, SubCategoryDesignInteriorInstance, SubCategoryDesignPart, SubCategoryParamDefault
 from designkp_backend.services.admin_access import require_admin
 from designkp_backend.services.admin_storage import admin_icon_exists, normalize_icon_file_name
 from designkp_backend.services.sub_category_designs import (
     _coerce_numeric,
     _round_number,
+    build_sub_category_param_display_snapshot,
     build_part_viewer_payload,
     get_sub_category_resolved_params,
+    interior_instance_tables_ready,
+    require_accessible_internal_part_group,
     require_accessible_part_formulas,
     require_accessible_sub_category,
+    resolve_internal_instance_preview,
     resolve_base_formula_values,
     resolve_part_formula_values,
 )
@@ -40,9 +44,13 @@ async def require_accessible_sub_category_design(
     admin_id: uuid.UUID,
     design_id: uuid.UUID,
 ) -> SubCategoryDesign:
+    stmt = select(SubCategoryDesign).options(
+        selectinload(SubCategoryDesign.parts).selectinload(SubCategoryDesignPart.snapshots),
+    )
+    if await interior_instance_tables_ready(session):
+        stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
     item = await session.scalar(
-        select(SubCategoryDesign)
-        .options(selectinload(SubCategoryDesign.parts).selectinload(SubCategoryDesignPart.snapshots))
+        stmt
         .where(
             and_(
                 SubCategoryDesign.id == design_id,
@@ -134,6 +142,7 @@ async def build_order_design_snapshot(
     order: Order,
     source_design: SubCategoryDesign,
     override_attr_values: dict[str, object] | None = None,
+    interior_instances: list[OrderDesignInteriorInstance | SubCategoryDesignInteriorInstance] | None = None,
 ) -> dict[str, object]:
     sub_category = await require_accessible_sub_category(
         session,
@@ -193,6 +202,56 @@ async def build_order_design_snapshot(
             }
         )
 
+    resolved_interior_instances: list[dict[str, object]] = []
+    schema_ready = await interior_instance_tables_ready(session)
+    for instance in sorted(list(interior_instances or []), key=lambda row: (int(row.ui_order or 0), str(row.instance_code or ""))) if schema_ready else []:
+        internal_group = await require_accessible_internal_part_group(
+            session,
+            admin_id=order.admin_id,
+            group_id=instance.internal_part_group_id,
+        )
+        param_values = {str(key): value for key, value in dict(instance.param_values or {}).items()}
+        param_meta = {str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()}
+        if not param_meta:
+            _, param_meta = await build_sub_category_param_display_snapshot(
+                session,
+                sub_category=sub_category,
+                codes=set(param_values.keys()) or None,
+            )
+        resolved = await resolve_internal_instance_preview(
+            session,
+            admin_id=order.admin_id,
+            sub_category=sub_category,
+            internal_group=internal_group,
+            instance_id=getattr(instance, "id", None),
+            instance_code=str(instance.instance_code or ""),
+            ui_order=int(instance.ui_order or 0),
+            placement_z=float(instance.placement_z or 0),
+            interior_box_snapshot=dict(instance.interior_box_snapshot or {}),
+            param_values=param_values,
+            param_meta=param_meta,
+        )
+        resolved_interior_instances.append(
+            {
+                "id": resolved.instance_id,
+                "internal_part_group_id": resolved.internal_part_group_id,
+                "internal_part_group_code": resolved.internal_part_group_code,
+                "internal_part_group_title": resolved.internal_part_group_title,
+                "instance_code": resolved.instance_code,
+                "ui_order": resolved.ui_order,
+                "placement_z": resolved.placement_z,
+                "interior_box_snapshot": resolved.interior_box_snapshot,
+                "param_values": resolved.param_values,
+                "param_meta": resolved.param_meta,
+                "auto_params": resolved.auto_params,
+                "part_snapshots": resolved.part_snapshots,
+                "viewer_boxes": resolved.viewer_boxes,
+                "status": str(getattr(instance, "status", "draft") or "draft"),
+            }
+        )
+        viewer_boxes.extend([dict(box or {}) for box in resolved.viewer_boxes])
+        part_snapshots.extend([dict(row or {}) for row in resolved.part_snapshots])
+
     return {
         "sub_category_id": sub_category.id,
         "design_code": str(source_design.code or "").strip(),
@@ -201,6 +260,7 @@ async def build_order_design_snapshot(
         "order_attr_meta": order_attr_meta,
         "part_snapshots": part_snapshots,
         "viewer_boxes": viewer_boxes,
+        "interior_instances": resolved_interior_instances,
     }
 
 
@@ -212,6 +272,7 @@ async def sync_order_design_snapshot(
     source_design: SubCategoryDesign | None = None,
 ) -> bool:
     current_order = order or await require_accessible_order(session, order_id=item.order_id)
+    schema_ready = await interior_instance_tables_ready(session)
     current_source_design = source_design or await require_accessible_sub_category_design(
         session,
         admin_id=current_order.admin_id,
@@ -222,6 +283,7 @@ async def sync_order_design_snapshot(
         order=current_order,
         source_design=current_source_design,
         override_attr_values=dict(item.order_attr_values or {}),
+        interior_instances=list(item.interior_instances or []) if schema_ready else [],
     )
     changed = False
     if dict(item.order_attr_values or {}) != snapshot["order_attr_values"]:
@@ -236,6 +298,27 @@ async def sync_order_design_snapshot(
     if list(item.viewer_boxes or []) != snapshot["viewer_boxes"]:
         item.viewer_boxes = snapshot["viewer_boxes"]
         changed = True
+    if schema_ready:
+        interior_by_id = {str(getattr(instance, "id", "")): instance for instance in list(item.interior_instances or [])}
+        for resolved in snapshot["interior_instances"]:
+            instance = interior_by_id.get(str(resolved.get("id") or ""))
+            if not instance:
+                continue
+            if dict(instance.interior_box_snapshot or {}) != resolved["interior_box_snapshot"]:
+                instance.interior_box_snapshot = resolved["interior_box_snapshot"]
+                changed = True
+            if dict(instance.param_values or {}) != resolved["param_values"]:
+                instance.param_values = resolved["param_values"]
+                changed = True
+            if dict(instance.param_meta or {}) != resolved["param_meta"]:
+                instance.param_meta = resolved["param_meta"]
+                changed = True
+            if list(instance.part_snapshots or []) != resolved["part_snapshots"]:
+                instance.part_snapshots = resolved["part_snapshots"]
+                changed = True
+            if list(instance.viewer_boxes or []) != resolved["viewer_boxes"]:
+                instance.viewer_boxes = resolved["viewer_boxes"]
+                changed = True
     if item.sub_category_id != snapshot["sub_category_id"]:
         item.sub_category_id = snapshot["sub_category_id"]
         changed = True

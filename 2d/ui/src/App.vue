@@ -315,9 +315,11 @@ const constructionSubCategoryDesigns = computed(() =>
       if (!!a.is_system !== !!b.is_system) return a.is_system ? -1 : 1;
       const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
       if (orderDelta !== 0) return orderDelta;
-      return (Number(a.design_id) || 0) - (Number(b.design_id) || 0);
+        return (Number(a.design_id) || 0) - (Number(b.design_id) || 0);
     })
 );
+const systemSubCategoryDesignsCount = computed(() => constructionSubCategoryDesigns.value.filter((item) => item.admin_id === null).length);
+const adminSubCategoryDesignsCount = computed(() => constructionSubCategoryDesigns.value.filter((item) => item.admin_id === currentAdminId.value).length);
 const systemSubCategoriesCount = computed(() => constructionSubCategories.value.filter((item) => item.admin_id === null).length);
 const adminSubCategoriesCount = computed(() => constructionSubCategories.value.filter((item) => item.admin_id === currentAdminId.value).length);
 const constructionSubCategoryDuplicateState = computed(() => buildDuplicateState(editableSubCategories.value, ["sub_cat_id"]));
@@ -446,6 +448,13 @@ const constructionSubCategoryParamMetaByCode = computed(() =>
     ])
   )
 );
+const constructionParamsByCode = computed(() =>
+  new Map(
+    constructionParams.value
+      .map((item) => [String(item.param_code || "").trim(), item])
+      .filter(([code]) => code)
+  )
+);
 const constructionSubCategoryParamTree = computed(() => {
   const groupsById = new Map(
     constructionParamGroups.value.map((group) => [
@@ -567,6 +576,176 @@ const constructionInteriorPartFormulaOptions = computed(() =>
       };
     })
 );
+const activeInteriorLibrarySubCategory = computed(() => {
+  const subCategoryId = String(subCategoryDesignEditorDraft.value?.sub_category_id || "").trim();
+  if (!subCategoryId) return null;
+  return constructionSubCategories.value.find((item) => String(item.id) === subCategoryId) || null;
+});
+const FRONT_VIEW_WIDTH = 760;
+const FRONT_VIEW_HEIGHT = 460;
+const FRONT_VIEW_PAD = 28;
+
+function buildFrontViewLinesFromBoxes(boxes) {
+  const normalized = Array.isArray(boxes) ? boxes.map(normalizeCabinetBox) : [];
+  if (!normalized.length) {
+    return { outer: [], inner: [], bounds: null };
+  }
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  const inner = [];
+  for (const box of normalized) {
+    const halfW = box.width * 0.5;
+    const halfH = box.height * 0.5;
+    const x1 = box.cx - halfW;
+    const x2 = box.cx + halfW;
+    const z1 = box.cz - halfH;
+    const z2 = box.cz + halfH;
+    minX = Math.min(minX, x1);
+    maxX = Math.max(maxX, x2);
+    minZ = Math.min(minZ, z1);
+    maxZ = Math.max(maxZ, z2);
+    inner.push(
+      { ax: x1, az: z1, bx: x2, bz: z1 },
+      { ax: x2, az: z1, bx: x2, bz: z2 },
+      { ax: x2, az: z2, bx: x1, bz: z2 },
+      { ax: x1, az: z2, bx: x1, bz: z1 },
+    );
+  }
+  const bounds = { minX, maxX, minZ, maxZ };
+  const outer = [
+    { ax: minX, az: minZ, bx: maxX, bz: minZ },
+    { ax: maxX, az: minZ, bx: maxX, bz: maxZ },
+    { ax: maxX, az: maxZ, bx: minX, bz: maxZ },
+    { ax: minX, az: maxZ, bx: minX, bz: minZ },
+  ];
+  return { outer, inner, bounds };
+}
+
+const interiorLibraryFrontView = computed(() =>
+  buildFrontViewLinesFromBoxes(subCategoryDesignEditorPreview.value?.viewer_boxes || [])
+);
+const interiorLibraryPreviewSvgLines = computed(() => {
+  const data = interiorLibraryFrontView.value;
+  const bounds = data?.bounds;
+  if (!bounds) return { outer: [], inner: [] };
+  const width = FRONT_VIEW_WIDTH;
+  const height = FRONT_VIEW_HEIGHT;
+  const pad = FRONT_VIEW_PAD;
+  const spanX = Math.max(1, bounds.maxX - bounds.minX);
+  const spanZ = Math.max(1, bounds.maxZ - bounds.minZ);
+  const scale = Math.min((width - pad * 2) / spanX, (height - pad * 2) / spanZ);
+  const cx = (bounds.minX + bounds.maxX) * 0.5;
+  const cz = (bounds.minZ + bounds.maxZ) * 0.5;
+  const project = (line, sw, dashed = false) => ({
+    x1: width * 0.5 + (Number(line.ax) - cx) * scale,
+    y1: height * 0.5 - (Number(line.az) - cz) * scale,
+    x2: width * 0.5 + (Number(line.bx) - cx) * scale,
+    y2: height * 0.5 - (Number(line.bz) - cz) * scale,
+    sw,
+    dashed,
+  });
+  return {
+    outer: (data.outer || []).map((line) => project(line, 2.2, false)),
+    inner: (data.inner || []).map((line) => project(line, 1.15, true)),
+  };
+});
+const interiorLibraryPreviewAxisLabels = computed(() => {
+  if (!interiorLibraryFrontView.value?.bounds) return null;
+  const width = 760;
+  const height = 460;
+  return {
+    x: { x: width - 20, y: height - 14, text: "X" },
+    z: { x: 16, y: 20, text: "Z" },
+  };
+});
+
+function extractFormulaNamesLocal(expression) {
+  return Array.from(new Set(String(expression || "").match(/[A-Za-z_][A-Za-z0-9_]*/g) || []));
+}
+
+function collectInternalGroupParamCodesLocal(group) {
+  const formulasById = new Map(
+    constructionPartFormulas.value.map((item) => [Number(item.part_formula_id) || 0, item])
+  );
+  const baseFormulaMap = new Map(
+    constructionBaseFormulas.value.map((item) => [String(item.param_formula || "").trim(), String(item.formula || "")])
+  );
+  const paramCodeSet = new Set(
+    constructionParams.value.map((item) => String(item.param_code || "").trim()).filter(Boolean)
+  );
+  const pending = [];
+  for (const part of Array.isArray(group?.parts) ? group.parts : []) {
+    const formula = formulasById.get(Number(part.part_formula_id) || 0);
+    if (!formula) continue;
+    for (const field of PART_FORMULA_FIELDS) {
+      pending.push(...extractFormulaNamesLocal(formula[field.key] || formula[field] || ""));
+    }
+  }
+  const resolved = new Set();
+  const visited = new Set();
+  while (pending.length) {
+    const name = String(pending.pop() || "").trim();
+    if (!name || visited.has(name)) continue;
+    visited.add(name);
+    if (paramCodeSet.has(name)) {
+      resolved.add(name);
+      continue;
+    }
+    const nested = baseFormulaMap.get(name);
+    if (nested) pending.push(...extractFormulaNamesLocal(nested));
+  }
+  return Array.from(resolved);
+}
+
+const interiorLibraryGroupCards = computed(() => {
+  const subCategory = activeInteriorLibrarySubCategory.value;
+  if (!subCategory) return [];
+  ensureSubCategoryParamDefaults(subCategory);
+  return constructionInternalPartGroups.value.map((group) => {
+    const paramCodes = collectInternalGroupParamCodesLocal(group);
+    const relatedGroups = Array.from(
+      new Set(
+        paramCodes
+          .map((code) => String(constructionParamsByCode.value.get(code)?.param_group_id || "").trim())
+          .filter(Boolean)
+      )
+    )
+      .map((groupId) => constructionSubCategoryParamTree.value.find((item) => String(item.id) === groupId))
+      .filter(Boolean)
+      .map((item) => ({
+        id: String(item.id),
+        title: item.title,
+        count: item.items.length,
+      }));
+    const params = paramCodes
+      .map((code) => {
+        const override = subCategory.param_overrides?.[code] || {};
+        return {
+          code,
+          label: String(override.display_title || constructionSubCategoryParamMetaByCode.value[code]?.label || code).trim() || code,
+          value: String(subCategory.param_defaults?.[code] ?? "").trim(),
+        };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label, "fa"));
+    return {
+      ...group,
+      params,
+      relatedGroups,
+    };
+  });
+});
+
+function openInteriorLibraryGroupDefaults(group) {
+  const subCategory = activeInteriorLibrarySubCategory.value;
+  if (!subCategory) return;
+  openSubCategoryDefaultsEditor(subCategory);
+  const targetGroupId = String(group?.relatedGroups?.[0]?.id || "").trim();
+  if (targetGroupId) {
+    subCategoryDefaultsActiveGroupId.value = targetGroupId;
+  }
+}
 
 function getConstructionPartKindInternalLabel(partKindId) {
   const partKind = constructionPartKindsById.value.get(Number(partKindId) || 0);
@@ -853,6 +1032,28 @@ function normalizeInternalPartGroupPayload(item) {
         enabled: part.enabled !== false,
         ui_order: Number.isFinite(Number(part.ui_order)) ? Number(part.ui_order) : index,
       })),
+  };
+}
+
+function normalizeInteriorInstanceRecord(item) {
+  if (!item || !item.id) return null;
+  return {
+    ...item,
+    id: String(item.id),
+    internal_part_group_id: String(item.internal_part_group_id || ""),
+    instance_code: String(item.instance_code || "").trim(),
+    ui_order: Number(item.ui_order) || 0,
+    placement_z: Number(item.placement_z) || 0,
+    interior_box_snapshot: { ...(item.interior_box_snapshot || {}) },
+    param_values: Object.fromEntries(
+      Object.entries(item.param_values || {}).map(([key, value]) => [key, value == null ? "" : String(value)])
+    ),
+    param_meta: Object.fromEntries(
+      Object.entries(item.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])
+    ),
+    part_snapshots: Array.isArray(item.part_snapshots) ? item.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
+    viewer_boxes: Array.isArray(item.viewer_boxes) ? item.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
+    status: String(item.status || "draft").trim() || "draft",
   };
 }
 
@@ -1678,6 +1879,7 @@ function buildNewSubCategoryDesignDraft() {
     sort_order: nextId,
     is_system: true,
     parts: [],
+    interior_instances: [],
   });
 }
 
@@ -1724,7 +1926,7 @@ async function refreshSubCategoryDesignPreview() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        admin_id: currentAdminId.value,
+        admin_id: draft.admin_id ?? currentAdminId.value,
         sub_category_id: draft.sub_category_id,
         parts: normalizeSubCategoryDesignPayload(draft).parts,
       }),
@@ -1923,6 +2125,7 @@ function normalizeOrderDesignRecord(item) {
     ),
     part_snapshots: Array.isArray(item.part_snapshots) ? item.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
     viewer_boxes: Array.isArray(item.viewer_boxes) ? item.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
+    interior_instances: Array.isArray(item.interior_instances) ? item.interior_instances.map(normalizeInteriorInstanceRecord).filter(Boolean) : [],
   };
 }
 
@@ -2510,6 +2713,29 @@ async function deleteConstructionSubCategoryDesign(id) {
     await loadConstructionSubCategoryDesigns();
   } catch (_) {
     showAlert("حذف طرح ساب‌کت انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function toggleConstructionSubCategoryDesignScope(item) {
+  if (!item?.id) return;
+  const saveKey = String(item.id);
+  constructionSavingIds.value = [...new Set([...constructionSavingIds.value, saveKey])];
+  try {
+    const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(saveKey)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(normalizeSubCategoryDesignPayload({
+        ...item,
+        admin_id: item.admin_id === null ? currentAdminId.value : null,
+        is_system: item.admin_id !== null,
+      })),
+    });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "تغییر وضعیت مالکیت طرح ساب‌کت انجام نشد."));
+    await loadConstructionSubCategoryDesigns();
+  } catch (error) {
+    showAlert(error?.message || "تغییر وضعیت مالکیت طرح ساب‌کت انجام نشد.", { title: "خطا" });
+  } finally {
+    constructionSavingIds.value = constructionSavingIds.value.filter((value) => value !== saveKey);
   }
 }
 
@@ -5824,31 +6050,57 @@ const activeStageOrderDesign = computed(() =>
   orderDesignCatalog.value.find((item) => String(item.id) === String(activeCabinetDesignId.value || "")) || null
 );
 const activeStageOrderPlacement = computed(() => getOrderDesignPlacement(activeCabinetDesignId.value));
+const draggedCabinetPreviewInstance = computed(() => {
+  const drag = presetDrag.value;
+  if (!drag?.active || drag.type !== "cabinetDesign" || !drag.design?.preview?.viewer_boxes?.length) return null;
+  if (!drag.leftPanel) return null;
+
+  const dx = drag.clientX - (drag.startX || drag.clientX);
+  const dy = drag.clientY - (drag.startY || drag.clientY);
+  if (Math.hypot(dx, dy) < PRESET_PREVIEW_MIN_DRAG_PX) return null;
+
+  const dropWorld = clientPointToStageWorld(drag.clientX, drag.clientY);
+  if (!dropWorld) return null;
+
+  return {
+    orderDesignId: `drag-preview-${String(drag.design.id || "cabinet")}`,
+    boxes: drag.design.preview.viewer_boxes.map(normalizeCabinetBox),
+    transform: {
+      x: Number(dropWorld.x) || 0,
+      y: Number(dropWorld.y) || 0,
+      rotRad: 0,
+    },
+    active: false,
+  };
+});
 const stageOrderDesignInstances = computed(() =>
-  orderDesignPlacements.value
-    .map((placement) => {
-      const item = orderDesignCatalog.value.find((row) => String(row.id) === String(placement.orderDesignId));
-      if (!item?.viewer_boxes?.length) return null;
-      const isActive = String(item.id) === String(activeCabinetDesignId.value || "");
-      const liveTransform = isActive ? getCurrentModel2dTransform() : null;
-      return {
-        orderDesignId: item.id,
-        boxes: item.viewer_boxes.map(normalizeCabinetBox),
-        transform: isActive
-          ? {
-              x: liveTransform.x,
-              y: liveTransform.y,
-              rotRad: liveTransform.rotRad,
-            }
-          : {
-              x: placement.x,
-              y: placement.y,
-              rotRad: placement.rotRad,
-            },
-        active: isActive,
-      };
-    })
-    .filter(Boolean)
+  [
+    ...orderDesignPlacements.value
+      .map((placement) => {
+        const item = orderDesignCatalog.value.find((row) => String(row.id) === String(placement.orderDesignId));
+        if (!item?.viewer_boxes?.length) return null;
+        const isActive = String(item.id) === String(activeCabinetDesignId.value || "");
+        const liveTransform = isActive ? getCurrentModel2dTransform() : null;
+        return {
+          orderDesignId: item.id,
+          boxes: item.viewer_boxes.map(normalizeCabinetBox),
+          transform: isActive
+            ? {
+                x: liveTransform.x,
+                y: liveTransform.y,
+                rotRad: liveTransform.rotRad,
+              }
+            : {
+                x: placement.x,
+                y: placement.y,
+                rotRad: placement.rotRad,
+              },
+          active: isActive,
+        };
+      })
+      .filter(Boolean),
+    ...(draggedCabinetPreviewInstance.value ? [draggedCabinetPreviewInstance.value] : []),
+  ]
 );
 const passiveStageOrderDesignModels = computed(() =>
   orderDesignPlacements.value
@@ -6535,6 +6787,9 @@ function openInteriorLibrary() {
   openMode.value = "menu";
   loadConstructionPartKinds();
   loadConstructionPartFormulas();
+  if (subCategoryDesignEditorOpen.value && !subCategoryDesignPreviewLoading.value) {
+    refreshSubCategoryDesignPreview();
+  }
   scheduleSubRailPosition();
 }
 
@@ -8887,13 +9142,22 @@ onBeforeUnmount(() => {
                 <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionSubCategoryDesigns.length) }}</span>
                 <span class="constructionDialog__summaryLabel">کل طرح‌ها</span>
               </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(systemSubCategoryDesignsCount) }}</span>
+                <span class="constructionDialog__summaryLabel">سیستمی</span>
+              </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(adminSubCategoryDesignsCount) }}</span>
+                <span class="constructionDialog__summaryLabel">اختصاصی</span>
+              </div>
             </div>
 
             <div class="constructionDialog__tableWrap">
-              <table class="constructionDialog__table">
+              <table class="constructionDialog__table constructionDialog__table--subDesigns">
                 <thead>
                   <tr>
                     <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     <th class="constructionDialog__col constructionDialog__col--id">تمپلیت</th>
                     <th class="constructionDialog__col constructionDialog__col--id">دسته</th>
                     <th class="constructionDialog__col constructionDialog__col--title">ساب‌کت</th>
@@ -8913,6 +9177,16 @@ onBeforeUnmount(() => {
                       >
                         {{ getConstructionOwnerBadge(item).text }}
                       </span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--scope">
+                      <button
+                        type="button"
+                        class="constructionDialog__scopeBtn"
+                        :class="item.admin_id === null ? 'is-system' : 'is-admin'"
+                        @click="toggleConstructionSubCategoryDesignScope(item)"
+                      >
+                        {{ item.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین" }}
+                      </button>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.temp_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.cat_id) }}</td>
@@ -8943,11 +9217,12 @@ onBeforeUnmount(() => {
                       <div class="constructionDialog__actionsCell">
                         <button type="button" class="constructionDialog__textBtn" @click="openSubCategoryDesignEditor(item)">ویرایش طرح</button>
                         <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionSubCategoryDesign(item.id)">×</button>
+                        <span v-if="constructionSavingIds.includes(String(item.id))" class="constructionDialog__saving constructionDialog__saving--compact">در حال ذخیره</span>
                       </div>
                     </td>
                   </tr>
                   <tr v-if="!constructionSubCategoryDesigns.length">
-                    <td class="constructionDialog__col constructionDialog__col--title" colspan="9">هنوز طرحی برای ساب‌کت‌ها ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="10">هنوز طرحی برای ساب‌کت‌ها ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -9527,20 +9802,105 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeInteriorLibrary">×</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        این لیست فقط قطعاتی را نشان می‌دهد که در جدول انواع قطعات با ستون «داخلی» علامت خورده‌اند. قواعد افزودن آن‌ها به فضای داخلی بعداً تکمیل می‌شود.
+        در این مرحله، سمت راست گروه‌های قطعات داخلی و پیش‌فرض‌های مرتبط ساب‌کت نمایش داده می‌شوند و سمت چپ نمای روبه‌روی خطیِ طرح اصلی دیده می‌شود.
       </div>
+      <div class="subCategoryDesignEditor__layout subCategoryDesignEditor__layout--interiorLibrary">
+        <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview subCategoryDesignEditor__panel--interiorPreview">
+          <div class="subCategoryDesignEditor__panelTitle">نمای روبه‌رو طرح</div>
+          <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
+            <div class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior">
+              <svg
+                v-if="interiorLibraryPreviewSvgLines.outer.length"
+                :viewBox="`0 0 ${FRONT_VIEW_WIDTH} ${FRONT_VIEW_HEIGHT}`"
+                class="subCategoryDesignEditor__frontSvg"
+              >
+                <defs>
+                  <pattern id="interior-front-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(90,60,66,0.08)" stroke-width="1" />
+                  </pattern>
+                </defs>
+                <rect x="0" y="0" :width="FRONT_VIEW_WIDTH" :height="FRONT_VIEW_HEIGHT" fill="url(#interior-front-grid)" />
+                <line
+                  v-for="(line, index) in interiorLibraryPreviewSvgLines.inner"
+                  :key="`interior-inner-${index}`"
+                  :x1="line.x1"
+                  :y1="line.y1"
+                  :x2="line.x2"
+                  :y2="line.y2"
+                  :stroke-width="line.sw"
+                  stroke="#8a98a3"
+                  stroke-linecap="round"
+                  stroke-dasharray="6 8"
+                  opacity="0.88"
+                />
+                <line
+                  v-for="(line, index) in interiorLibraryPreviewSvgLines.outer"
+                  :key="`interior-outer-${index}`"
+                  :x1="line.x1"
+                  :y1="line.y1"
+                  :x2="line.x2"
+                  :y2="line.y2"
+                  :stroke-width="line.sw"
+                  stroke="#4f4144"
+                  stroke-linecap="round"
+                />
+                <text v-if="interiorLibraryPreviewAxisLabels" :x="interiorLibraryPreviewAxisLabels.x.x" :y="interiorLibraryPreviewAxisLabels.x.y" fill="#79676d" font-size="14" font-weight="700">X</text>
+                <text v-if="interiorLibraryPreviewAxisLabels" :x="interiorLibraryPreviewAxisLabels.z.x" :y="interiorLibraryPreviewAxisLabels.z.y" fill="#79676d" font-size="14" font-weight="700">Z</text>
+              </svg>
+              <div v-else class="designMenu__cabinetState">برای این طرح هنوز preview خطی قابل نمایش نیست.</div>
+            </div>
+          </div>
+        </div>
 
-      <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
-        <div class="subCategoryDesignEditor__panelTitle">لیست قطعات داخلی</div>
-        <div v-if="constructionLoading" class="constructionDialog__loading">در حال خواندن قطعات داخلی...</div>
-        <div v-else-if="!constructionInteriorPartFormulaOptions.length" class="designMenu__cabinetState">هنوز فرمول قطعه داخلی تعریف نشده است.</div>
-        <div v-else class="subCategoryDesignEditor__partList">
-          <div v-for="item in constructionInteriorPartFormulaOptions" :key="item.id" class="subCategoryDesignEditor__partItem is-static">
-            <span class="subCategoryDesignEditor__partMeta">
-              <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
-              <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
-            </span>
-            <span class="constructionDialog__pill">{{ item.partKindTitle || "داخلی" }}</span>
+        <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorSidebar">
+          <div class="subCategoryDesignEditor__panelTitle">گروه‌های قطعات داخلی</div>
+          <div v-if="constructionLoading" class="constructionDialog__loading">در حال خواندن گروه‌های داخلی...</div>
+          <div v-else-if="!interiorLibraryGroupCards.length" class="designMenu__cabinetState">هنوز گروه قطعات داخلی یا ساب‌کت انتخاب‌شده آماده نمایش نیست.</div>
+          <div v-else class="subCategoryDesignEditor__partList">
+            <div v-for="item in interiorLibraryGroupCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+              <div class="subCategoryDesignEditor__interiorGroupHead">
+                <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                  <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
+                  <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+                </span>
+                <div class="subCategoryDesignEditor__interiorGroupActions">
+                  <span class="constructionDialog__pill">{{ toPersianDigits(item.parts?.length || 0) }} قطعه</span>
+                  <button
+                    type="button"
+                    class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
+                    title="تنظیمات پیش‌فرض‌های این گروه"
+                    @click="openInteriorLibraryGroupDefaults(item)"
+                  >
+                    <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                  </button>
+                </div>
+              </div>
+              <div v-if="item.relatedGroups.length" class="subCategoryDesignEditor__chipRow">
+                <button
+                  v-for="group in item.relatedGroups"
+                  :key="`${item.id}-${group.id}`"
+                  type="button"
+                  class="subCategoryDesignEditor__groupChip"
+                  @click="openInteriorLibraryGroupDefaults({ relatedGroups: [group] })"
+                >
+                  <span>{{ group.title }}</span>
+                  <span>{{ toPersianDigits(group.count) }}</span>
+                </button>
+              </div>
+              <div class="subCategoryDesignEditor__interiorParams">
+                <div class="subCategoryDesignEditor__interiorParamsHead">
+                  <span>پیش‌فرض‌های درگیر این گروه</span>
+                  <span>{{ toPersianDigits(item.params.length) }} پارامتر</span>
+                </div>
+                <div style="margin-top:10px; display:grid; gap:8px;">
+                  <div v-if="item.params.length" v-for="param in item.params" :key="`${item.id}-${param.code}`" style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid rgba(120,86,92,0.14); border-radius:12px; background:#fff;">
+                    <span class="subCategoryDesignEditor__partTitle" style="font-size:14px;">{{ param.label }}</span>
+                    <span class="subCategoryDesignEditor__partCode" style="font-size:13px;">{{ param.value || "خالی" }}</span>
+                  </div>
+                  <div v-else class="designMenu__cabinetState" style="margin:0;">پارامتر مستقیمی از پیش‌فرض ساب‌کت برای این گروه پیدا نشد.</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

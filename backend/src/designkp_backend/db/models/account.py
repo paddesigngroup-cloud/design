@@ -12,7 +12,7 @@ from designkp_backend.db.base import Base
 from designkp_backend.db.mixins import SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 if TYPE_CHECKING:
-    from .catalog import BaseFormula, Category, Param, ParamGroup, PartFormula, PartKind, SubCategory, SubCategoryDesign, Template
+    from .catalog import BaseFormula, Category, InternalPartGroup, Param, ParamGroup, PartFormula, PartKind, SubCategory, SubCategoryDesign, SubCategoryDesignInteriorInstance, Template
 
 
 class SuperAdmin(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -236,3 +236,43 @@ class OrderDesign(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionM
     admin: Mapped[Admin] = relationship(back_populates="order_designs", foreign_keys=[admin_id])
     user: Mapped[User] = relationship(back_populates="order_designs", foreign_keys=[user_id])
     sub_category_design: Mapped["SubCategoryDesign"] = relationship()
+    interior_instances: Mapped[list["OrderDesignInteriorInstance"]] = relationship(
+        back_populates="order_design",
+        cascade="all, delete-orphan",
+    )
+
+
+class OrderDesignInteriorInstance(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "order_design_interior_instances"
+
+    order_design_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("order_designs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_instance_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sub_category_design_interior_instances.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    internal_part_group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("internal_part_groups.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    instance_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    ui_order: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    placement_z: Mapped[float] = mapped_column(nullable=False, default=0)
+    interior_box_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    param_values: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    param_meta: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    part_snapshots: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
+    viewer_boxes: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", server_default="draft")
+
+    order_design: Mapped["OrderDesign"] = relationship(back_populates="interior_instances")
+    source_instance: Mapped["SubCategoryDesignInteriorInstance | None"] = relationship()
+    internal_part_group: Mapped["InternalPartGroup"] = relationship()
