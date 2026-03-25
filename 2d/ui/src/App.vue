@@ -185,6 +185,8 @@ const stageCabinetPlaceholderBoxes = ref([]);
 const activeCabinetDesignId = ref(null);
 const hoveredCabinetDesignId = ref(null);
 const hoveredConstructionDesignId = ref(null);
+const cabinetDesignDropLoading = ref(false);
+const cabinetDesignDropLoadingTitle = ref("");
 const editorViewportState = editorViewportRef;
 const constructionWizardOpen = ref(false);
 const constructionStep = ref("templates");
@@ -3113,6 +3115,39 @@ function ensureSubCategoryParamDefaults(item) {
   return item;
 }
 
+function cloneSubCategoryDefaultsSeed(source) {
+  const seeded = ensureSubCategoryParamDefaults({
+    param_defaults: Object.fromEntries(
+      constructionSubCategoryParamColumns.value.map((column) => [
+        column.key,
+        String(source?.param_defaults?.[column.key] ?? ""),
+      ])
+    ),
+    param_overrides: Object.fromEntries(
+      constructionSubCategoryParamColumns.value.map((column) => {
+        const baseLabel = constructionSubCategoryParamMetaByCode.value[column.key]?.label || column.key;
+        const override = source?.param_overrides?.[column.key] || {};
+        return [column.key, {
+          display_title: String(override.display_title || "").trim() || baseLabel,
+          description_text: String(override.description_text || "").trim(),
+          icon_path: normalizeIconFileName(override.icon_path) || "",
+          input_mode: override.input_mode === "binary" ? "binary" : "value",
+          binary_off_label: String(override.binary_off_label || "").trim() || "0",
+          binary_on_label: String(override.binary_on_label || "").trim() || "1",
+          binary_off_icon_path: normalizeIconFileName(override.binary_off_icon_path) || "",
+          binary_on_icon_path: normalizeIconFileName(override.binary_on_icon_path) || "",
+        }];
+      })
+    ),
+  });
+  return {
+    param_defaults: { ...(seeded.param_defaults || {}) },
+    param_overrides: Object.fromEntries(
+      Object.entries(seeded.param_overrides || {}).map(([key, value]) => [key, { ...(value || {}) }])
+    ),
+  };
+}
+
 function getSubCategoryDefaultsSummary(item) {
   const total = constructionSubCategoryParamColumns.value.length;
   const filled = Object.values(item?.param_defaults || {}).filter((value) => String(value || "").trim()).length;
@@ -4633,6 +4668,8 @@ function addConstructionCategory() {
 function addConstructionSubCategory() {
   const nextId = editableSubCategories.value.reduce((max, item) => Math.max(max, Number(item.sub_cat_id) || 0), 0) + 1;
   const fallbackCategory = constructionCategories.value[0];
+  const latestSubCategory = constructionSubCategories.value[constructionSubCategories.value.length - 1] || null;
+  const clonedDefaults = cloneSubCategoryDefaultsSeed(latestSubCategory);
   editableSubCategories.value = [
     ...editableSubCategories.value,
     ensureSubCategoryParamDefaults({
@@ -4646,8 +4683,8 @@ function addConstructionSubCategory() {
       title: `ساب‌کت ${toPersianDigits(nextId)}`,
       sort_order: nextId,
       is_system: false,
-      param_defaults: {},
-      param_overrides: {},
+      param_defaults: clonedDefaults.param_defaults,
+      param_overrides: clonedDefaults.param_overrides,
       __isNew: true,
       __dirty: false,
     }),
@@ -6938,6 +6975,8 @@ async function onPresetPointerUp(ev) {
     if (presetDrag.value.type === "column") {
       editorRef.value?.placeColumnAtClient?.(ev.clientX, ev.clientY);
     } else if (presetDrag.value.type === "cabinetDesign" && presetDrag.value.design?.preview?.viewer_boxes?.length) {
+      cabinetDesignDropLoading.value = true;
+      cabinetDesignDropLoadingTitle.value = String(presetDrag.value.design.design_title || "").trim();
       try {
         const createdOrderDesign = await createOrderDesignFromSource(presetDrag.value.design);
         const localBoxes = (createdOrderDesign?.viewer_boxes || []).map(normalizeCabinetBox);
@@ -6959,6 +6998,9 @@ async function onPresetPointerUp(ev) {
         });
       } catch (error) {
         showAlert(error?.message || "افزودن طرح به سفارش انجام نشد.", { title: "خطا" });
+      } finally {
+        cabinetDesignDropLoading.value = false;
+        cabinetDesignDropLoadingTitle.value = "";
       }
     } else if (presetDrag.value.preset) {
       const lines = buildPresetLines(presetDrag.value.preset.kind);
@@ -7765,16 +7807,23 @@ onBeforeUnmount(() => {
 
       <section ref="stageEl" class="stage">
         <div ref="stageCardEl" class="stage__card">
-          <div v-if="isOrderGateBlocking" class="stageOrderGuard" @click="openOrderEntry()">
-            <div class="stageOrderGuard__card">
-              <div class="stageOrderGuard__title">قبل از طراحی، سفارش را انتخاب کنید</div>
-              <div class="stageOrderGuard__text">برای شروع کار باید یک سفارش جدید بسازید یا یک سفارش موجود را انتخاب کنید.</div>
-              <button type="button" class="menuItem" @click.stop="openOrderEntry()">
-                ورود به سفارش
-              </button>
-            </div>
+        <div v-if="isOrderGateBlocking" class="stageOrderGuard" @click="openOrderEntry()">
+          <div class="stageOrderGuard__card">
+            <div class="stageOrderGuard__title">قبل از طراحی، سفارش را انتخاب کنید</div>
+            <div class="stageOrderGuard__text">برای شروع کار باید یک سفارش جدید بسازید یا یک سفارش موجود را انتخاب کنید.</div>
+            <button type="button" class="menuItem" @click.stop="openOrderEntry()">
+              ورود به سفارش
+            </button>
           </div>
-          <div v-if="showStageOverlays" class="stageQuickBar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
+        </div>
+        <div v-if="cabinetDesignDropLoading" class="stageDropLoading" aria-live="polite">
+          <div class="stageDropLoading__card">
+            <span class="stageDropLoading__spinner" aria-hidden="true"></span>
+            <div class="stageDropLoading__title">در حال افزودن طرح به صحنه...</div>
+            <div v-if="cabinetDesignDropLoadingTitle" class="stageDropLoading__caption">{{ cabinetDesignDropLoadingTitle }}</div>
+          </div>
+        </div>
+        <div v-if="showStageOverlays" class="stageQuickBar" @mouseenter="disable2dInput" @mouseleave="enable2dInput">
             <button
               class="iconbtn iconbtn--sm stageQuickBar__btn"
               :class="{ 'is-active': showDimensions }"

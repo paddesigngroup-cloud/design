@@ -224,6 +224,14 @@ function markOrderDesignIconBroken(path) {
   };
 }
 const hasOrderDesignAttrs = computed(() => !!activeOrderDesign.value && orderDesignAttrGroups.value.length > 0);
+const activeOrderDesignIdentity = computed(() => {
+  const item = activeOrderDesign.value;
+  if (!item) return null;
+  const title = String(item.design_title || item.instance_code || "").trim();
+  const code = String(item.design_code || "").trim();
+  if (!title && !code) return null;
+  return { title, code };
+});
 const hasModelOutlineSelection = computed(() => !!attrsSnapshot.value?.selection?.selectedModelOutline);
 const hasAnyAttrSelection = computed(() => !!wallMetrics.value || hasModelOutlineSelection.value);
 const openOrderDesignGroupKey = ref("");
@@ -1476,9 +1484,10 @@ watch(
       <div class="glbWallAttrs__sep"></div>
     </div>
 
-    <template v-if="hasOrderDesignAttrs && hasModelOutlineSelection">
-      <div class="glbWallAttrs__objectTitle">
-        {{ activeOrderDesign?.design_title || activeOrderDesign?.instance_code || "طرح سفارش" }}
+    <template v-if="activeOrderDesignIdentity && hasModelOutlineSelection">
+      <div class="glbWallAttrs__objectTitle glbWallAttrs__objectTitle--design">
+        <div class="glbWallAttrs__objectTitleMain">{{ activeOrderDesignIdentity.title || "طرح سفارش" }}</div>
+        <div v-if="activeOrderDesignIdentity.code" class="glbWallAttrs__objectTitleMeta">کد طرح: {{ activeOrderDesignIdentity.code }}</div>
       </div>
       <div v-for="group in orderDesignAttrGroups" :key="group.key" class="glbWallAttrs__attrGroup">
         <button type="button" class="glbWallAttrs__groupToggle" @click="toggleOrderDesignGroup(group.key)">
@@ -1553,6 +1562,7 @@ watch(
         </div>
         <div class="glbWallAttrs__sep"></div>
       </div>
+      <div v-if="!hasOrderDesignAttrs" class="menuPanel__hint glbWallAttrs__hint--soft">برای این طرح هنوز صفتی تعریف نشده است.</div>
     </template>
 
     <template v-else-if="wallMetrics">
