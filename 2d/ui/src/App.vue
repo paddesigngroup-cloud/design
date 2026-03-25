@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { editorRef, model2dTransformRef, editorViewportRef, passiveModelSelectionHandlerRef, activeModelDeleteHandlerRef } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
@@ -95,6 +95,10 @@ const menuIcons = {
   sheet: "/icons/sheet.png",
   profile: "/icons/profile.png",
 };
+const PARAM_INTERIOR_VALUE_MODE_OPTIONS = [
+  { value: "formula", label: "محاسبه‌ای" },
+  { value: "auto", label: "اتوماتیک" },
+];
 const openMenuTitle = computed(() => (openMenuPanel.value ? menuTitles[openMenuPanel.value] || "" : ""));
 const openMenuIcon = computed(() => (openMenuPanel.value ? menuIcons[openMenuPanel.value] || "" : ""));
 const isMenuPanelOpen = computed(() => !!openMenuPanel.value);
@@ -248,6 +252,7 @@ const constructionDeletedSubCategoryDesignIds = ref([]);
 const constructionDeletedBaseFormulaIds = ref([]);
 const constructionDeletedPartFormulaIds = ref([]);
 const constructionImportInputEl = ref(null);
+const constructionParamsTableWrapEl = ref(null);
 const paramGroupIconInputEl = ref(null);
 const constructionImportPreviewRows = ref([]);
 const constructionImportFileName = ref("");
@@ -2677,10 +2682,15 @@ function normalizeParamPayload(item) {
     param_title_en: String(item.param_title_en || "").trim(),
     param_title_fa: String(item.param_title_fa || "").trim(),
     param_group_id: Number(item.param_group_id),
+    interior_value_mode: String(item.interior_value_mode || "").trim().toLowerCase() === "auto" ? "auto" : "formula",
     ui_order: Number.isFinite(Number(item.ui_order)) ? Number(item.ui_order) : 0,
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.param_id),
     is_system: !!item.is_system,
   };
+}
+
+function getParamInteriorValueModeLabel(value) {
+  return String(value || "").trim().toLowerCase() === "auto" ? "اتوماتیک" : "محاسبه‌ای";
 }
 
 function normalizeBaseFormulaPayload(item) {
@@ -3179,6 +3189,7 @@ function validateConstructionParams() {
     const paramCode = String(item.param_code || "").trim();
     const titleEn = String(item.param_title_en || "").trim();
     const titleFa = String(item.param_title_fa || "").trim();
+    const interiorValueMode = String(item.interior_value_mode || "").trim().toLowerCase();
     if (!Number.isInteger(paramId) || paramId < 1) {
       showAlert("برای همه پارامترها شناسه معتبر و بزرگ‌تر از صفر وارد کنید.", { title: "اعتبارسنجی" });
       return false;
@@ -3193,6 +3204,10 @@ function validateConstructionParams() {
     }
     if (!paramCode || !titleEn || !titleFa) {
       showAlert("کد، عنوان انگلیسی و عنوان فارسی پارامتر نباید خالی باشند.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!["formula", "auto"].includes(interiorValueMode)) {
+      showAlert("برای همه پارامترها حالت فضای داخلی را از بین «محاسبه‌ای» یا «اتوماتیک» انتخاب کنید.", { title: "اعتبارسنجی" });
       return false;
     }
   }
@@ -3320,7 +3335,7 @@ function getConstructionCsvHeaders() {
     return ["fo_id", "param_formula", "formula", "admin_mode"];
   }
   if (constructionStep.value === "params") {
-    return ["param_id", "part_kind_id", "param_code", "param_title_en", "param_title_fa", "param_group_id", "ui_order", "admin_mode"];
+    return ["param_id", "part_kind_id", "param_code", "param_title_en", "param_title_fa", "param_group_id", "interior_value_mode", "ui_order", "admin_mode"];
   }
   if (constructionStep.value === "param_groups") {
     return ["param_group_id", "param_group_code", "org_param_group_title", "param_group_icon_path", "ui_order", "show_in_order_attrs", "admin_mode"];
@@ -3400,6 +3415,7 @@ function getConstructionCsvRows(items = null) {
       String(item.param_title_en || "").trim(),
       String(item.param_title_fa || "").trim(),
       Number(item.param_group_id) || "",
+      String(item.interior_value_mode || "").trim().toLowerCase() === "auto" ? "auto" : "formula",
       Number(item.ui_order) || 0,
       item.admin_id === null ? "system" : "admin",
     ]);
@@ -3663,6 +3679,22 @@ async function onConstructionImportFileChange(event) {
           formula_cx: String(row[10] || "").trim(),
           formula_cy: String(row[11] || "").trim(),
           formula_cz: String(row[12] || "").trim(),
+          admin_mode: adminMode,
+        };
+      });
+    } else if (constructionStep.value === "params") {
+      previewRows = rows.slice(1).map((row, index) => {
+        const adminMode = String(row[8] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        return {
+          lineNo: index + 2,
+          param_id: Number(row[0]),
+          part_kind_id: Number(row[1]),
+          param_code: String(row[2] || "").trim(),
+          param_title_en: String(row[3] || "").trim(),
+          param_title_fa: String(row[4] || "").trim(),
+          param_group_id: Number(row[5]),
+          interior_value_mode: String(row[6] || "").trim().toLowerCase() === "auto" ? "auto" : "formula",
+          ui_order: Number(row[7]),
           admin_mode: adminMode,
         };
       });
@@ -3981,6 +4013,7 @@ function buildImportedConstructionParamDrafts(rows) {
       param_title_en: String(row.param_title_en || "").trim(),
       param_title_fa: String(row.param_title_fa || "").trim(),
       param_group_id: Number(row.param_group_id),
+      interior_value_mode: String(row.interior_value_mode || "").trim().toLowerCase() === "auto" ? "auto" : "formula",
       ui_order: Number(row.ui_order),
       code: String(row.param_code || "").trim(),
       title: String(row.param_title_fa || "").trim(),
@@ -4002,6 +4035,7 @@ function buildImportedConstructionParamDrafts(rows) {
       String(existing.param_title_en || "").trim() !== nextPayload.param_title_en ||
       String(existing.param_title_fa || "").trim() !== nextPayload.param_title_fa ||
       Number(existing.param_group_id) !== nextPayload.param_group_id ||
+      String(existing.interior_value_mode || "").trim() !== nextPayload.interior_value_mode ||
       Number(existing.ui_order) !== nextPayload.ui_order ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system;
@@ -4282,7 +4316,12 @@ async function loadConstructionParams() {
     const url = `/api/params?admin_id=${encodeURIComponent(currentAdminId.value)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error("load-failed");
-    editableParams.value = (await res.json()).map(withConstructionDraftState);
+    editableParams.value = (await res.json()).map((item) =>
+      withConstructionDraftState({
+        ...item,
+        interior_value_mode: String(item.interior_value_mode || "").trim().toLowerCase() === "auto" ? "auto" : "formula",
+      })
+    );
     constructionDeletedParamIds.value = [];
   } catch (_) {
     showAlert("خواندن جدول پارامترها از دیتابیس انجام نشد.", { title: "خطا" });
@@ -4435,10 +4474,12 @@ function addConstructionParamGroup() {
 
 function addConstructionParam() {
   const nextId = editableParams.value.reduce((max, item) => Math.max(max, Number(item.param_id) || 0), 0) + 1;
+  const nextSortOrder = editableParams.value.reduce((min, item) => Math.min(min, Number(item.sort_order) || 0), 0) - 1;
+  const draftId = `draft-param-row-${Date.now()}-${nextId}`;
   editableParams.value = [
     ...editableParams.value,
     {
-      id: `draft-param-row-${Date.now()}-${nextId}`,
+      id: draftId,
       admin_id: currentAdminId.value,
       param_id: nextId,
       part_kind_id: 1,
@@ -4446,15 +4487,26 @@ function addConstructionParam() {
       param_title_en: `param_${nextId}`,
       param_title_fa: `پارامتر ${toPersianDigits(nextId)}`,
       param_group_id: 1,
+      interior_value_mode: "formula",
       ui_order: 1,
       code: `param_${nextId}`,
       title: `پارامتر ${toPersianDigits(nextId)}`,
-      sort_order: nextId,
+      sort_order: nextSortOrder,
       is_system: false,
       __isNew: true,
       __dirty: false,
     },
   ];
+  nextTick(() => {
+    const wrapEl = constructionParamsTableWrapEl.value;
+    if (!wrapEl) return;
+    const rowEl = wrapEl.querySelector(`[data-row-id="${draftId}"]`);
+    if (rowEl && typeof rowEl.scrollIntoView === "function") {
+      rowEl.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+      return;
+    }
+    wrapEl.scrollTo?.({ top: 0, behavior: "smooth" });
+  });
 }
 
 function addConstructionBaseFormula() {
@@ -8529,6 +8581,7 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--title">عنوان EN</th>
                       <th class="constructionDialog__col constructionDialog__col--title">عنوان FA</th>
                       <th class="constructionDialog__col constructionDialog__col--id">گروه</th>
+                      <th class="constructionDialog__col constructionDialog__col--scope">فضای داخلی</th>
                       <th class="constructionDialog__col constructionDialog__col--uiOrder">ترتیب UI</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
@@ -8541,6 +8594,7 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.param_title_en }}</td>
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.param_title_fa }}</td>
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.param_group_id }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ getParamInteriorValueModeLabel(row.interior_value_mode) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--uiOrder">{{ row.ui_order }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
                     </tr>
@@ -8574,6 +8628,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان EN</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان FA</th>
                     <th class="constructionDialog__col constructionDialog__col--id">گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope">فضای داخلی</th>
                     <th class="constructionDialog__col constructionDialog__col--uiOrder">ترتیب UI</th>
                     <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
                     <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
@@ -8581,7 +8636,7 @@ onBeforeUnmount(() => {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="item in constructionParams" :key="item.id">
+                  <tr v-for="item in constructionParams" :key="item.id" :data-row-id="item.id">
                     <td class="constructionDialog__col constructionDialog__col--id">
                       <input v-model.number="item.param_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionParamDirty(item)" />
                     </td>
@@ -8608,6 +8663,11 @@ onBeforeUnmount(() => {
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--id">
                       <input v-model.number="item.param_group_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionParamDirty(item)" />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--scope">
+                      <select v-model="item.interior_value_mode" class="constructionDialog__input" @change="markConstructionParamDirty(item)">
+                        <option v-for="mode in PARAM_INTERIOR_VALUE_MODE_OPTIONS" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
+                      </select>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--uiOrder">
                       <input v-model.number="item.ui_order" class="constructionDialog__input" type="number" min="0" step="1" @input="markConstructionParamDirty(item)" />
@@ -8917,7 +8977,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="constructionDialog__tableWrap">
+            <div ref="constructionParamsTableWrapEl" class="constructionDialog__tableWrap">
               <table class="constructionDialog__table">
                 <thead>
                   <tr>

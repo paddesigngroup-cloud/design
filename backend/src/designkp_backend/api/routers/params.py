@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
@@ -23,6 +24,7 @@ class ParamItem(BaseModel):
     param_title_en: str
     param_title_fa: str
     param_group_id: int
+    interior_value_mode: Literal["formula", "auto"]
     ui_order: int
     code: str
     title: str
@@ -40,6 +42,7 @@ class ParamCreate(BaseModel):
     param_title_en: str = Field(min_length=1, max_length=255)
     param_title_fa: str = Field(min_length=1, max_length=255)
     param_group_id: int = Field(ge=1)
+    interior_value_mode: Literal["formula", "auto"] = "formula"
     ui_order: int | None = Field(default=None, ge=0)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
@@ -53,6 +56,7 @@ class ParamUpdate(BaseModel):
     param_title_en: str = Field(min_length=1, max_length=255)
     param_title_fa: str = Field(min_length=1, max_length=255)
     param_group_id: int = Field(ge=1)
+    interior_value_mode: Literal["formula", "auto"]
     ui_order: int = Field(ge=0)
     sort_order: int = Field(ge=0)
     is_system: bool
@@ -96,6 +100,7 @@ async def create_param(payload: ParamCreate, session: AsyncSession = Depends(get
         param_title_en=payload.param_title_en.strip(),
         param_title_fa=payload.param_title_fa.strip(),
         param_group_id=payload.param_group_id,
+        interior_value_mode=payload.interior_value_mode,
         ui_order=ui_order,
         code=payload.param_code.strip(),
         title=payload.param_title_fa.strip(),
@@ -126,6 +131,7 @@ async def update_param(
     item.param_title_en = payload.param_title_en.strip()
     item.param_title_fa = payload.param_title_fa.strip()
     item.param_group_id = payload.param_group_id
+    item.interior_value_mode = payload.interior_value_mode
     item.ui_order = payload.ui_order
     item.code = payload.param_code.strip()
     item.title = payload.param_title_fa.strip()

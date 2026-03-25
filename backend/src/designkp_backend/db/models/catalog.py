@@ -75,6 +75,7 @@ class Param(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
     param_title_en: Mapped[str] = mapped_column(String(255), nullable=False)
     param_title_fa: Mapped[str] = mapped_column(String(255), nullable=False)
     param_group_id: Mapped[int] = mapped_column(ForeignKey("param_groups.param_group_id", ondelete="RESTRICT"), nullable=False, index=True)
+    interior_value_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="formula", server_default="formula")
     ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
