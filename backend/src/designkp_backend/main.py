@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from designkp_backend.api.routers.admin_storage import router as admin_storage_router
 from designkp_backend.api.routers.base_formulas import router as base_formulas_router
 from designkp_backend.api.routers.categories import router as categories_router
+from designkp_backend.api.routers.internal_part_groups import router as internal_part_groups_router
 from designkp_backend.api.routers.orders import router as orders_router
 from designkp_backend.api.routers.order_designs import router as order_designs_router
 from designkp_backend.api.routers.part_formulas import router as part_formulas_router
@@ -51,3 +52,4 @@ app.include_router(templates_router, prefix="/api")
 app.include_router(categories_router, prefix="/api")
 app.include_router(sub_categories_router, prefix="/api")
 app.include_router(sub_category_designs_router, prefix="/api")
+app.include_router(internal_part_groups_router, prefix="/api")

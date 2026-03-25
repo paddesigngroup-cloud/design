@@ -23,6 +23,7 @@ class PartKindItem(BaseModel):
     code: str
     title: str
     sort_order: int
+    is_internal: bool
     is_system: bool
 
     model_config = {"from_attributes": True}
@@ -34,6 +35,7 @@ class PartKindCreate(BaseModel):
     part_kind_code: str = Field(min_length=1, max_length=64)
     org_part_kind_title: str = Field(min_length=1, max_length=255)
     sort_order: int | None = Field(default=None, ge=0)
+    is_internal: bool = False
     is_system: bool = False
 
 
@@ -43,6 +45,7 @@ class PartKindUpdate(BaseModel):
     part_kind_code: str = Field(min_length=1, max_length=64)
     org_part_kind_title: str = Field(min_length=1, max_length=255)
     sort_order: int = Field(ge=0)
+    is_internal: bool = False
     is_system: bool
 
 
@@ -82,6 +85,7 @@ async def create_part_kind(payload: PartKindCreate, session: AsyncSession = Depe
         code=payload.part_kind_code.strip(),
         title=payload.org_part_kind_title.strip(),
         sort_order=payload.sort_order if payload.sort_order is not None else next_id,
+        is_internal=payload.is_internal,
         is_system=payload.is_system,
     )
     session.add(item)
@@ -108,6 +112,7 @@ async def update_part_kind(
     item.code = payload.part_kind_code.strip()
     item.title = payload.org_part_kind_title.strip()
     item.sort_order = payload.sort_order
+    item.is_internal = payload.is_internal
     item.is_system = payload.is_system
 
     await session.commit()

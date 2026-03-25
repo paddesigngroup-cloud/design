@@ -13,6 +13,7 @@ export const PART_KINDS_CATALOG = [
     code: "unit",
     title: "یونیت",
     sort_order: 1,
+    is_internal: false,
     is_system: true,
   },
   {
@@ -24,6 +25,7 @@ export const PART_KINDS_CATALOG = [
     code: "stretcher",
     title: "ترک",
     sort_order: 2,
+    is_internal: false,
     is_system: true,
   },
   {
@@ -35,6 +37,7 @@ export const PART_KINDS_CATALOG = [
     code: "shelf",
     title: "طبقه",
     sort_order: 3,
+    is_internal: true,
     is_system: true,
   },
   {
@@ -46,6 +49,7 @@ export const PART_KINDS_CATALOG = [
     code: "drawer",
     title: "کشو",
     sort_order: 4,
+    is_internal: true,
     is_system: true,
   },
   {
@@ -57,6 +61,7 @@ export const PART_KINDS_CATALOG = [
     code: "partition",
     title: "جداکننده",
     sort_order: 5,
+    is_internal: false,
     is_system: true,
   },
   {
@@ -68,6 +73,7 @@ export const PART_KINDS_CATALOG = [
     code: "door",
     title: "درب",
     sort_order: 6,
+    is_internal: false,
     is_system: true,
   },
   {
@@ -79,6 +85,7 @@ export const PART_KINDS_CATALOG = [
     code: "face_panel",
     title: "پنل نما",
     sort_order: 7,
+    is_internal: false,
     is_system: true,
   },
   {
@@ -90,6 +97,7 @@ export const PART_KINDS_CATALOG = [
     code: "toe_kick",
     title: "پاخور",
     sort_order: 8,
+    is_internal: false,
     is_system: true,
   },
   {
@@ -101,6 +109,7 @@ export const PART_KINDS_CATALOG = [
     code: "frame",
     title: "فریم",
     sort_order: 9,
+    is_internal: false,
     is_system: true,
   },
 ];

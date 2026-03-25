@@ -16,6 +16,7 @@ from designkp_backend.services.order_designs import (
     normalize_order_attr_value,
     require_accessible_order,
     require_accessible_sub_category_design,
+    sync_order_design_snapshot,
 )
 
 router = APIRouter(prefix="/order-designs", tags=["order_designs"])
@@ -87,7 +88,10 @@ async def _require_item(session: AsyncSession, item_id: uuid.UUID) -> OrderDesig
     item = await session.scalar(select(OrderDesign).where(and_(OrderDesign.id == item_id, OrderDesign.deleted_at.is_(None))))
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design not found.")
-    await require_accessible_order(session, order_id=item.order_id)
+    order = await require_accessible_order(session, order_id=item.order_id)
+    if await sync_order_design_snapshot(session, item=item, order=order):
+        await session.commit()
+        await session.refresh(item)
     return item
 
 
@@ -129,7 +133,7 @@ async def list_order_designs(
     order_id: uuid.UUID = Query(...),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[OrderDesignItem]:
-    await require_accessible_order(session, order_id=order_id)
+    order = await require_accessible_order(session, order_id=order_id)
     items = (
         await session.scalars(
             select(OrderDesign)
@@ -137,6 +141,11 @@ async def list_order_designs(
             .order_by(OrderDesign.sort_order.asc(), OrderDesign.instance_code.asc())
         )
     ).all()
+    changed = False
+    for item in items:
+        changed = (await sync_order_design_snapshot(session, item=item, order=order)) or changed
+    if changed:
+        await session.commit()
     return [_serialize_item(item) for item in items]
 
 

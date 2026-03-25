@@ -1,11 +1,11 @@
-﻿part_kind_id,part_kind_code,org_part_kind_title,admin_mode
-1,unit,یونیت,system
-2,stretcher,تیرک,system
-3,shelve,طبقه,system
-4,drawer,کشو,system
-5,partition,جداکننده,system
-6,door,درب,system
-7,face_panel,پنل نما,system
-8,toe_kick,پاخور,system
-9,frame,فریم,system
-10,counter,صفحه کابینت,system
+part_kind_id,part_kind_code,org_part_kind_title,is_internal,admin_mode
+1,unit,یونیت,0,system
+2,stretcher,تیرک,0,system
+3,shelve,طبقه,1,system
+4,drawer,کشو,1,system
+5,partition,جداکننده,0,system
+6,door,درب,0,system
+7,face_panel,پنل نما,0,system
+8,toe_kick,پاخور,0,system
+9,frame,فریم,0,system
+10,counter,صفحه کابینت,0,system

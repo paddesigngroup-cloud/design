@@ -26,6 +26,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  orderParamGroups: {
+    type: Array,
+    default: () => [],
+  },
   placeholderBoxes: {
     type: Array,
     default: () => [],
@@ -126,6 +130,14 @@ const showColorField = computed(() => selectedEntityType.value === "wall" || sel
 const activeOrderDesign = computed(() => props.orderDesign || null);
 const orderDesignInputDrafts = ref({});
 const brokenOrderDesignIcons = ref({});
+const liveOrderParamGroupsById = computed(() =>
+  new Map(
+    (Array.isArray(props.orderParamGroups) ? props.orderParamGroups : []).map((group) => [
+      String(group?.param_group_id ?? ""),
+      group || {},
+    ])
+  )
+);
 const orderDesignAttrGroups = computed(() => {
   const item = activeOrderDesign.value;
   if (!item?.order_attr_meta) return [];
@@ -134,13 +146,27 @@ const orderDesignAttrGroups = computed(() => {
   const groupsMap = new Map();
   for (const [key, rawMeta] of Object.entries(meta)) {
     const entryMeta = rawMeta || {};
-    const groupKey = String(entryMeta.group_title || "سایر صفات").trim() || "سایر صفات";
+    const liveGroup = liveOrderParamGroupsById.value.get(String(entryMeta.group_id ?? ""));
+    const shouldShowGroup = liveGroup
+      ? liveGroup.show_in_order_attrs !== false
+      : entryMeta.group_show_in_order_attrs !== false;
+    if (!shouldShowGroup) continue;
+    const groupKey = String((entryMeta.group_id ?? entryMeta.group_title) || "سایر صفات").trim() || "سایر صفات";
+    const groupTitle = String(
+      liveGroup?.org_param_group_title || liveGroup?.title || entryMeta.group_title || "سایر صفات"
+    ).trim() || "سایر صفات";
+    const groupIconPath = String(
+      liveGroup?.param_group_icon_path || entryMeta.group_icon_path || ""
+    ).trim();
+    const groupOrder = Number.isFinite(Number(liveGroup?.ui_order))
+      ? Number(liveGroup.ui_order)
+      : (Number(entryMeta.group_ui_order) || 0);
     if (!groupsMap.has(groupKey)) {
       groupsMap.set(groupKey, {
         key: groupKey,
-        title: groupKey,
-        order: Number(entryMeta.group_ui_order) || 0,
-        iconPath: String(entryMeta.group_icon_path || "").trim() || "",
+        title: groupTitle,
+        order: groupOrder,
+        iconPath: groupIconPath,
         items: [],
       });
     }

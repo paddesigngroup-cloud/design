@@ -172,6 +172,7 @@ const cabinetDesignCatalogLoadedForAdmin = ref("");
 const orderDesignCatalog = ref([]);
 const orderDesignCatalogLoading = ref(false);
 const orderDesignCatalogLoadedForOrderId = ref("");
+const interiorLibraryOpen = ref(false);
 const orderDesignEditorOpen = ref(false);
 const orderDesignEditorDraft = ref(null);
 const orderDesignSavingId = ref("");
@@ -200,6 +201,7 @@ const editableParamGroups = ref([]);
 const editableParams = ref([]);
 const editableSubCategories = ref([]);
 const editableSubCategoryDesigns = ref([]);
+const editableInternalPartGroups = ref([]);
 const editableBaseFormulas = ref([]);
 const editablePartFormulas = ref([]);
 const subCategoryDefaultsEditorOpen = ref(false);
@@ -222,6 +224,8 @@ const subCategoryDesignEditorPreview = ref(null);
 const subCategoryDesignPreviewLoading = ref(false);
 const subCategoryDesignPreviewError = ref("");
 const subCategoryDesignPreviewRequestSeq = ref(0);
+const internalPartGroupEditorOpen = ref(false);
+const internalPartGroupEditorDraft = ref(null);
 const baseFormulaBuilderOpen = ref(false);
 const baseFormulaBuilderMode = ref("create");
 const baseFormulaBuilderEntity = ref("base_formulas");
@@ -258,6 +262,7 @@ const constructionTables = [
   { id: "params", title: "پارامترها", status: "active" },
   { id: "sub_categories", title: "ساب‌کت‌ها", status: "active" },
   { id: "sub_category_designs", title: "طرح‌های ساب‌کت", status: "active" },
+  { id: "internal_part_groups", title: "گروه قطعات داخلی", status: "active" },
   { id: "base_formulas", title: "فرمول های پایه", status: "active" },
   { id: "part_formulas", title: "فرمول های قطعات", status: "active" },
 ];
@@ -324,8 +329,29 @@ const constructionPartKinds = computed(() =>
       );
     })
 );
+const constructionInternalPartGroups = computed(() =>
+  editableInternalPartGroups.value
+    .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
+    .slice()
+    .sort((a, b) => {
+      if (!!a.is_system !== !!b.is_system) return a.is_system ? -1 : 1;
+      const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return (Number(a.group_id) || 0) - (Number(b.group_id) || 0);
+    })
+);
+const constructionPartKindsById = computed(() =>
+  new Map(constructionPartKinds.value.map((item) => [Number(item.part_kind_id) || 0, item]))
+);
+const constructionPartKindOptions = computed(() =>
+  constructionPartKinds.value.map((item) => ({
+    value: Number(item.part_kind_id) || 0,
+    label: `${toPersianDigits(item.part_kind_id)} - ${String(item.org_part_kind_title || item.title || "").trim()}`,
+  }))
+);
 const systemPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => item.admin_id === null).length);
 const adminPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => item.admin_id === currentAdminId.value).length);
+const internalPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => normalizeBooleanFlag(item.is_internal, false)).length);
 const constructionPartKindDuplicateState = computed(() => buildDuplicateState(editablePartKinds.value, ["part_kind_id", "part_kind_code"]));
 const constructionHasPendingChanges = computed(
   () =>
@@ -507,14 +533,40 @@ const constructionSubCategoryDesignSubCategoryOptions = computed(() =>
   }))
 );
 const constructionSubCategoryDesignPartFormulaOptions = computed(() =>
-  constructionPartFormulas.value.map((item) => ({
-    id: Number(item.part_formula_id),
-    title: String(item.part_title || item.title || item.part_code || "").trim(),
-    code: String(item.part_code || "").trim(),
-    partKindId: Number(item.part_kind_id) || 0,
-    uiOrder: Number(item.sort_order) || Number(item.part_formula_id) || 0,
-  }))
+  constructionPartFormulas.value
+    .filter((item) => {
+      const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
+      return !normalizeBooleanFlag(partKind?.is_internal, false);
+    })
+    .map((item) => ({
+      id: Number(item.part_formula_id),
+      title: String(item.part_title || item.title || item.part_code || "").trim(),
+      code: String(item.part_code || "").trim(),
+      partKindId: Number(item.part_kind_id) || 0,
+      uiOrder: Number(item.sort_order) || Number(item.part_formula_id) || 0,
+    }))
 );
+const constructionInteriorPartFormulaOptions = computed(() =>
+  constructionPartFormulas.value
+    .filter((item) => {
+      const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
+      return normalizeBooleanFlag(partKind?.is_internal, false);
+    })
+    .map((item) => {
+      const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
+      return {
+        id: Number(item.part_formula_id),
+        title: String(item.part_title || item.title || item.part_code || "").trim(),
+        code: String(item.part_code || "").trim(),
+        partKindTitle: String(partKind?.org_part_kind_title || partKind?.title || "").trim(),
+      };
+    })
+);
+
+function getConstructionPartKindInternalLabel(partKindId) {
+  const partKind = constructionPartKindsById.value.get(Number(partKindId) || 0);
+  return normalizeBooleanFlag(partKind?.is_internal, false) ? "داخلی" : "سازه";
+}
 const activeSubCategoryUserPreviewRow = computed(() =>
   editableSubCategories.value.find((item) => String(item.id) === String(subCategoryUserPreviewRowId.value)) || null
 );
@@ -543,7 +595,6 @@ const activeSubCategoryUserPreviewGroups = computed(() => {
         };
       }),
     }))
-    .filter((group) => group.showInOrderAttrs !== false)
     .filter((group) => group.items.length > 0);
 });
 const activeSubCategoryUserPreviewGroup = computed(() =>
@@ -650,6 +701,7 @@ function openConstructionWizard() {
   loadConstructionParams();
   loadConstructionSubCategories();
   loadConstructionSubCategoryDesigns();
+  loadConstructionInternalPartGroups();
   loadConstructionBaseFormulas();
   loadConstructionPartFormulas();
   constructionDeletedTemplateIds.value = [];
@@ -687,6 +739,7 @@ async function closeConstructionWizard() {
     await loadConstructionParams();
     await loadConstructionSubCategories();
     await loadConstructionSubCategoryDesigns();
+    await loadConstructionInternalPartGroups();
     await loadConstructionBaseFormulas();
     await loadConstructionPartFormulas();
   }
@@ -775,7 +828,26 @@ function normalizePartKindPayload(item) {
     part_kind_code: String(item.part_kind_code || "").trim(),
     org_part_kind_title: String(item.org_part_kind_title || "").trim(),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.part_kind_id),
+    is_internal: normalizeBooleanFlag(item.is_internal, false),
     is_system: !!item.is_system,
+  };
+}
+
+function normalizeInternalPartGroupPayload(item) {
+  return {
+    admin_id: item.admin_id,
+    group_id: Number(item.group_id),
+    group_title: String(item.group_title || "").trim(),
+    code: String(item.code || "").trim(),
+    sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.group_id),
+    is_system: !!item.is_system,
+    parts: (Array.isArray(item.parts) ? item.parts : [])
+      .filter((part) => Number(part?.part_formula_id) > 0)
+      .map((part, index) => ({
+        part_formula_id: Number(part.part_formula_id),
+        enabled: part.enabled !== false,
+        ui_order: Number.isFinite(Number(part.ui_order)) ? Number(part.ui_order) : index,
+      })),
   };
 }
 
@@ -1604,6 +1676,20 @@ function buildNewSubCategoryDesignDraft() {
   });
 }
 
+function buildNewInternalPartGroupDraft() {
+  const nextId = editableInternalPartGroups.value.reduce((max, item) => Math.max(max, Number(item.group_id) || 0), 0) + 1;
+  return {
+    id: null,
+    admin_id: null,
+    group_id: nextId,
+    group_title: `گروه داخلی ${toPersianDigits(nextId)}`,
+    code: `internal_part_group_${nextId}`,
+    sort_order: nextId,
+    is_system: true,
+    parts: [],
+  };
+}
+
 function closeSubCategoryDesignEditor() {
   subCategoryDesignEditorOpen.value = false;
   subCategoryDesignEditorDraft.value = null;
@@ -1611,6 +1697,12 @@ function closeSubCategoryDesignEditor() {
   subCategoryDesignPreviewLoading.value = false;
   subCategoryDesignPreviewError.value = "";
 }
+
+function closeInternalPartGroupEditor() {
+  internalPartGroupEditorOpen.value = false;
+  internalPartGroupEditorDraft.value = null;
+}
+
 
 async function refreshSubCategoryDesignPreview() {
   const draft = subCategoryDesignEditorDraft.value;
@@ -1878,6 +1970,35 @@ async function loadOrderDesignCatalog(force = false) {
   } finally {
     orderDesignCatalogLoading.value = false;
   }
+}
+
+async function loadConstructionInternalPartGroups() {
+  try {
+    const url = `/api/internal-part-groups?admin_id=${encodeURIComponent(currentAdminId.value)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("load-failed");
+    editableInternalPartGroups.value = (await res.json()).map((item) =>
+      withConstructionDraftState({
+        ...item,
+      })
+    );
+  } catch (_) {
+    showAlert("خواندن جدول گروه قطعات داخلی از دیتابیس انجام نشد.", { title: "خطا" });
+  }
+}
+
+function reconcileActiveOrderDesignSelection() {
+  const activeId = String(activeCabinetDesignId.value || "").trim();
+  if (!activeId) return false;
+  const target = orderDesignCatalog.value.find((item) => String(item.id) === activeId);
+  if (!target?.viewer_boxes?.length) return false;
+  stageCabinetPlaceholderBoxes.value = target.viewer_boxes.map(normalizeCabinetBox);
+  const placement = getOrderDesignPlacement(target.id) || getCurrentModel2dTransform();
+  const restored = restoreActiveOrderDesignToEditor(target, placement);
+  if (!restored) {
+    editorRef.value?.selectModelOutline?.();
+  }
+  return true;
 }
 
 async function createOrderDesignFromSource(sourceDesign, { instanceCode = "", designTitle = "", orderAttrValues = {} } = {}) {
@@ -2237,6 +2358,26 @@ async function openSubCategoryDesignEditor(item = null) {
   await refreshSubCategoryDesignPreview();
 }
 
+function openInternalPartGroupEditor(item = null) {
+  internalPartGroupEditorDraft.value = item
+    ? {
+        id: item.id,
+        admin_id: item.admin_id,
+        group_id: item.group_id,
+        group_title: item.group_title,
+        code: item.code,
+        sort_order: item.sort_order,
+        is_system: item.is_system,
+        parts: Array.isArray(item.parts) ? item.parts.map((part) => ({
+          part_formula_id: Number(part.part_formula_id),
+          enabled: part.enabled !== false,
+          ui_order: Number(part.ui_order) || 0,
+        })) : [],
+      }
+    : buildNewInternalPartGroupDraft();
+  internalPartGroupEditorOpen.value = true;
+}
+
 function onSubCategoryDesignSubCategoryChange() {
   syncSubCategoryDesignDraftSubCategoryFields(subCategoryDesignEditorDraft.value);
   refreshSubCategoryDesignPreview();
@@ -2275,6 +2416,29 @@ function togglePartFormulaInDesign(partFormulaId) {
     ];
   }
   refreshSubCategoryDesignPreview();
+}
+
+function isInternalPartFormulaSelectedInGroup(partFormulaId) {
+  return !!internalPartGroupEditorDraft.value?.parts?.some((part) => Number(part.part_formula_id) === Number(partFormulaId) && part.enabled !== false);
+}
+
+function togglePartFormulaInInternalGroup(partFormulaId) {
+  const draft = internalPartGroupEditorDraft.value;
+  if (!draft) return;
+  const existing = draft.parts.find((part) => Number(part.part_formula_id) === Number(partFormulaId));
+  if (existing) {
+    draft.parts = draft.parts.filter((part) => Number(part.part_formula_id) !== Number(partFormulaId));
+  } else {
+    const formula = constructionInteriorPartFormulaOptions.value.find((item) => Number(item.id) === Number(partFormulaId));
+    draft.parts = [
+      ...draft.parts,
+      {
+        part_formula_id: Number(partFormulaId),
+        enabled: true,
+        ui_order: draft.parts.length || Number(formula?.id) || 0,
+      },
+    ];
+  }
 }
 
 async function saveSubCategoryDesignEditor() {
@@ -2353,6 +2517,103 @@ function toggleConstructionPartKindScope(item) {
   item.admin_id = item.admin_id === null ? currentAdminId.value : null;
   item.is_system = item.admin_id === null;
   if (!item.__isNew) item.__dirty = true;
+}
+
+async function toggleConstructionPartKindInternalById(partKindId) {
+  const target = editablePartKinds.value.find((item) => Number(item.part_kind_id) === Number(partKindId));
+  if (!target) return;
+  const nextValue = !normalizeBooleanFlag(target.is_internal, false);
+  if (target.__isNew) {
+    target.is_internal = nextValue;
+    return;
+  }
+
+  const saveKey = String(target.id);
+  constructionSavingIds.value = [...new Set([...constructionSavingIds.value, saveKey])];
+  try {
+    const res = await fetch(`/api/part-kinds/${encodeURIComponent(saveKey)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(normalizePartKindPayload({
+        ...target,
+        is_internal: nextValue,
+      })),
+    });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره وضعیت داخلی قطعه انجام نشد."));
+    const saved = withConstructionDraftState(await res.json());
+    editablePartKinds.value = editablePartKinds.value.map((item) =>
+      String(item.id) === saveKey ? { ...saved, is_internal: normalizeBooleanFlag(saved.is_internal, false) } : item
+    );
+  } catch (error) {
+    showAlert(error?.message || "ذخیره وضعیت داخلی قطعه انجام نشد.", { title: "خطا" });
+  } finally {
+    constructionSavingIds.value = constructionSavingIds.value.filter((value) => value !== saveKey);
+  }
+}
+
+async function saveInternalPartGroupEditor() {
+  const draft = internalPartGroupEditorDraft.value;
+  if (!draft) return;
+  const groupId = Number(draft.group_id);
+  const title = String(draft.group_title || "").trim();
+  const code = String(draft.code || "").trim();
+  if (!Number.isInteger(groupId) || groupId < 1) {
+    showAlert("شناسه گروه باید معتبر و بزرگ‌تر از صفر باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!title) {
+    showAlert("عنوان گروه نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!code) {
+    showAlert("کد گروه نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const duplicate = editableInternalPartGroups.value.some((item) => Number(item.group_id) === groupId && String(item.id) !== String(draft.id || ""));
+  if (duplicate) {
+    showAlert("شناسه گروه تکراری است.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const duplicateCode = editableInternalPartGroups.value.some((item) => String(item.code || "").trim() === code && String(item.id) !== String(draft.id || ""));
+  if (duplicateCode) {
+    showAlert("کد گروه تکراری است.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const payload = normalizeInternalPartGroupPayload(draft);
+  try {
+    const res = await fetch(
+      draft.id ? `/api/internal-part-groups/${encodeURIComponent(String(draft.id))}` : "/api/internal-part-groups",
+      {
+        method: draft.id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره گروه قطعات داخلی انجام نشد."));
+    await loadConstructionInternalPartGroups();
+    closeInternalPartGroupEditor();
+    showAlert("گروه قطعات داخلی با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره گروه قطعات داخلی انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function deleteConstructionInternalPartGroup(id) {
+  const item = editableInternalPartGroups.value.find((row) => String(row.id) === String(id));
+  if (!item) return;
+  const ok = await showConfirm(`گروه «${item.group_title || item.title || "بدون عنوان"}» حذف شود؟`, {
+    title: "حذف گروه قطعات داخلی",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  try {
+    const res = await fetch(`/api/internal-part-groups/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("delete-failed");
+    await loadConstructionInternalPartGroups();
+  } catch (_) {
+    showAlert("حذف گروه قطعات داخلی انجام نشد.", { title: "خطا" });
+  }
 }
 
 function normalizeParamGroupPayload(item) {
@@ -3064,7 +3325,7 @@ function getConstructionCsvHeaders() {
   if (constructionStep.value === "param_groups") {
     return ["param_group_id", "param_group_code", "org_param_group_title", "param_group_icon_path", "ui_order", "show_in_order_attrs", "admin_mode"];
   }
-  return ["part_kind_id", "part_kind_code", "org_part_kind_title", "admin_mode"];
+  return ["part_kind_id", "part_kind_code", "org_part_kind_title", "is_internal", "admin_mode"];
 }
 
 function getConstructionCsvRows(items = null) {
@@ -3160,6 +3421,7 @@ function getConstructionCsvRows(items = null) {
     Number(item.part_kind_id) || "",
     String(item.part_kind_code || "").trim(),
     String(item.org_part_kind_title || "").trim(),
+    normalizeBooleanFlag(item.is_internal, false) ? 1 : 0,
     item.admin_id === null ? "system" : "admin",
   ]);
 }
@@ -3465,12 +3727,14 @@ async function onConstructionImportFileChange(event) {
         const partKindId = Number(row[0]);
         const partKindCode = String(row[1] || "").trim();
         const orgPartKindTitle = String(row[2] || "").trim();
-        const adminMode = String(row[3] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const isInternal = normalizeBooleanFlag(row[3], false);
+        const adminMode = String(row[4] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         return {
           lineNo: index + 2,
           part_kind_id: partKindId,
           part_kind_code: partKindCode,
           org_part_kind_title: orgPartKindTitle,
+          is_internal: isInternal,
           admin_mode: adminMode,
         };
       });
@@ -3553,7 +3817,8 @@ async function onConstructionImportFileChange(event) {
             !Number.isInteger(row.part_kind_id) ||
             row.part_kind_id < 1 ||
             !row.part_kind_code ||
-            !row.org_part_kind_title
+            !row.org_part_kind_title ||
+            typeof row.is_internal !== "boolean"
         );
     if (invalidRow) {
       throw new Error(`invalid-row-${invalidRow.lineNo}`);
@@ -3580,6 +3845,7 @@ function buildImportedConstructionDrafts(rows) {
       code: String(row.part_kind_code || "").trim(),
       title: String(row.org_part_kind_title || "").trim(),
       sort_order: index + 1,
+      is_internal: normalizeBooleanFlag(row.is_internal, false),
       is_system: adminId === null,
     };
     if (!existing) {
@@ -3595,6 +3861,7 @@ function buildImportedConstructionDrafts(rows) {
       String(existing.part_kind_code || "").trim() !== nextPayload.part_kind_code ||
       String(existing.org_part_kind_title || "").trim() !== nextPayload.org_part_kind_title ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
+      normalizeBooleanFlag(existing.is_internal, false) !== nextPayload.is_internal ||
       !!existing.is_system !== nextPayload.is_system;
     return buildPartKindDraft(existing, {
       ...nextPayload,
@@ -3980,7 +4247,10 @@ async function loadConstructionPartKinds() {
     const url = `/api/part-kinds?admin_id=${encodeURIComponent(currentAdminId.value)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error("load-failed");
-    editablePartKinds.value = (await res.json()).map(withConstructionDraftState);
+    editablePartKinds.value = (await res.json()).map((item) => withConstructionDraftState({
+      ...item,
+      is_internal: normalizeBooleanFlag(item.is_internal, false),
+    }));
     constructionDeletedPartKindIds.value = [];
   } catch (_) {
     showAlert("خواندن جدول انواع قطعات از دیتابیس انجام نشد.", { title: "خطا" });
@@ -4132,6 +4402,7 @@ async function createConstructionPartKind() {
       code: `custom_part_${nextId}`,
       title: `نوع قطعه ${nextId}`,
       sort_order: nextId,
+      is_internal: false,
       is_system: false,
       __isNew: true,
       __dirty: false,
@@ -5886,6 +6157,7 @@ async function selectOrder(item) {
   hydrateOrderDraftFromOrder(activeOrder.value);
   await loadOrderDrawing(activeOrder.value?.id, { clearWhenMissing: true });
   await loadOrderDesignCatalog(true);
+  reconcileActiveOrderDesignSelection();
   closeOrderEntry(true);
 }
 
@@ -6114,6 +6386,7 @@ watch(
   async (orderId, previousId) => {
     if (orderId && orderId !== previousId) {
       await loadOrderDesignCatalog(true);
+      reconcileActiveOrderDesignSelection();
       return;
     }
     if (!orderId) {
@@ -6123,6 +6396,17 @@ watch(
       stageCabinetPlaceholderBoxes.value = [];
       activeCabinetDesignId.value = null;
     }
+  }
+);
+
+watch(
+  () => [
+    String(activeCabinetDesignId.value || ""),
+    String(activeOrder.value?.id || ""),
+    orderDesignCatalog.value.length,
+  ],
+  () => {
+    reconcileActiveOrderDesignSelection();
   }
 );
 
@@ -6169,6 +6453,7 @@ watch(
 function setMenu(menuId) {
   activeMenu.value = menuId;
   openMenuPanel.value = menuId;
+  interiorLibraryOpen.value = false;
 }
 
 function closeMenuPanel() {
@@ -6180,9 +6465,29 @@ function closeMenuPanel() {
   openMenuPanel.value = null;
   activeMenu.value = null;
   activeSubRail.value = null;
+  interiorLibraryOpen.value = false;
   openMode.value = "menu";
   editorRef.value?.setInputEnabled?.(true);
   scheduleSubRailPosition();
+}
+
+function openInteriorLibrary() {
+  if (interiorLibraryOpen.value) {
+    closeInteriorLibrary();
+    return;
+  }
+  interiorLibraryOpen.value = true;
+  activeMenu.value = null;
+  openMenuPanel.value = null;
+  activeSubRail.value = null;
+  openMode.value = "menu";
+  loadConstructionPartKinds();
+  loadConstructionPartFormulas();
+  scheduleSubRailPosition();
+}
+
+function closeInteriorLibrary() {
+  interiorLibraryOpen.value = false;
 }
 
 function disable2dInput() {
@@ -6561,6 +6866,7 @@ function positionSubRail() {
 
 function setSubRail(id) {
   activeSubRail.value = id;
+  interiorLibraryOpen.value = false;
   // Selecting a design toolbar item behaves like opening the Design menu.
   activeMenu.value = "design";
   openMenuPanel.value = "design";
@@ -6885,7 +7191,7 @@ onBeforeUnmount(() => {
         <button class="iconbtn" title="درب">
           <img src="/icons/door_styles.png" alt="" />
         </button>
-        <button class="iconbtn" title="داخلی">
+        <button class="iconbtn" :class="{ 'is-active': interiorLibraryOpen }" title="داخلی" @click="openInteriorLibrary">
           <img src="/icons/enternal.png" alt="" />
         </button>
         <button class="iconbtn" title="سه بعدی">
@@ -7127,6 +7433,10 @@ onBeforeUnmount(() => {
                       <span class="constructionMenu__metaValue">{{ item.part_kind_id }}</span>
                     </div>
                     <div class="constructionMenu__metaRow">
+                      <span class="constructionMenu__metaLabel">جایگاه</span>
+                      <span class="constructionMenu__metaValue">{{ normalizeBooleanFlag(item.is_internal, false) ? "داخلی" : "سازه اصلی" }}</span>
+                    </div>
+                    <div class="constructionMenu__metaRow">
                       <span class="constructionMenu__metaLabel">کد اصلی</span>
                       <span class="constructionMenu__metaValue constructionMenu__metaValue--mono">{{ item.code }}</span>
                     </div>
@@ -7346,6 +7656,7 @@ onBeforeUnmount(() => {
             :model2d-transform="model2dTransformRef"
             :walls2d="walls3dSnapshot"
             :order-design="activeStageOrderDesign"
+            :order-param-groups="constructionParamGroups"
             :placeholder-instances="stageOrderDesignInstances"
             :placeholder-boxes="stageCabinetPlaceholderBoxes"
             :wall-style-draft="wallStyleDraft"
@@ -7868,6 +8179,7 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                       <th class="constructionDialog__col constructionDialog__col--code">کد</th>
                       <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
+                      <th class="constructionDialog__col constructionDialog__col--scope">داخلی</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
                   </thead>
@@ -7876,6 +8188,7 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.part_kind_id }}</td>
                       <td class="constructionDialog__col constructionDialog__col--code">{{ row.part_kind_code }}</td>
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.org_part_kind_title }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ row.is_internal ? "داخلی" : "سازه" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
                     </tr>
                   </tbody>
@@ -7896,6 +8209,10 @@ onBeforeUnmount(() => {
                 <span class="constructionDialog__summaryValue">{{ toPersianDigits(adminPartKindsCount) }}</span>
                 <span class="constructionDialog__summaryLabel">اختصاصی</span>
               </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(internalPartKindsCount) }}</span>
+                <span class="constructionDialog__summaryLabel">داخلی</span>
+              </div>
             </div>
 
             <div class="constructionDialog__tableWrap">
@@ -7905,6 +8222,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                     <th class="constructionDialog__col constructionDialog__col--code">کد</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope">داخلی</th>
                     <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
                     <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
                     <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
@@ -7941,6 +8259,16 @@ onBeforeUnmount(() => {
                         type="text"
                         @input="markConstructionPartKindDirty(item)"
                       />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--scope">
+                      <button
+                        type="button"
+                        class="constructionDialog__scopeBtn"
+                        :class="normalizeBooleanFlag(item.is_internal, false) ? 'is-admin' : 'is-system'"
+                        @click="item.is_internal = !normalizeBooleanFlag(item.is_internal, false); markConstructionPartKindDirty(item)"
+                      >
+                        {{ normalizeBooleanFlag(item.is_internal, false) ? "داخلی" : "سازه" }}
+                      </button>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--owner">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">
@@ -8569,6 +8897,70 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
+          <template v-else-if="constructionStep === 'internal_part_groups'">
+            <div class="constructionDialog__toolbar">
+              <div class="constructionDialog__toolbarMain">
+                <div class="constructionDialog__sectionTitle">جدول گروه قطعات داخلی</div>
+                <div class="constructionDialog__sectionHint">
+                  در این جدول از بین قطعات داخلی مثل کشو، طبقه و موارد مشابه گروه می‌سازید تا بعداً به‌صورت یک مجموعه قابل استفاده باشند.
+                </div>
+              </div>
+              <div class="constructionDialog__toolbarActions">
+                <button type="button" class="constructionDialog__textBtn" @click="openInternalPartGroupEditor()">افزودن گروه داخلی</button>
+              </div>
+            </div>
+
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionInternalPartGroups.length) }}</span>
+                <span class="constructionDialog__summaryLabel">کل گروه‌ها</span>
+              </div>
+            </div>
+
+            <div class="constructionDialog__tableWrap">
+              <table class="constructionDialog__table">
+                <thead>
+                  <tr>
+                    <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">شناسه گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--code">کد گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--title">عنوان گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">تعداد قطعات</th>
+                    <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in constructionInternalPartGroups" :key="item.id">
+                    <td class="constructionDialog__col constructionDialog__col--owner">
+                      <span
+                        class="constructionDialog__pill constructionDialog__ownerBadge"
+                        :class="getConstructionOwnerBadge(item).tone === 'system' ? 'constructionDialog__ownerBadge--system' : 'constructionDialog__ownerBadge--admin'"
+                      >
+                        {{ getConstructionOwnerBadge(item).text }}
+                      </span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.group_id) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--code">{{ item.code }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--title">{{ item.group_title }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.parts?.length || 0) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--actions">
+                      <div class="constructionDialog__actionsCell">
+                        <button type="button" class="constructionDialog__textBtn" @click="openInternalPartGroupEditor(item)">ویرایش گروه</button>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionInternalPartGroup(item.id)">×</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="!constructionInternalPartGroups.length">
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="6">هنوز گروهی برای قطعات داخلی ثبت نشده است.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="constructionDialog__sheetHint">
+              ساخت و ویرایش گروه از پنجره ویرایش انجام می‌شود و سمت راست آن فقط قطعات داخلی را برای انتخاب نشان می‌دهد.
+            </div>
+          </template>
+
           <template v-else-if="constructionStep === 'base_formulas'">
             <input
               ref="constructionImportInputEl"
@@ -8758,6 +9150,7 @@ onBeforeUnmount(() => {
                     <tr>
                       <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                       <th class="constructionDialog__col constructionDialog__col--id">نوع قطعه</th>
+                      <th class="constructionDialog__col constructionDialog__col--scope">داخلی</th>
                       <th class="constructionDialog__col constructionDialog__col--id">زیرنوع</th>
                       <th class="constructionDialog__col constructionDialog__col--code">کد قطعه</th>
                       <th class="constructionDialog__col constructionDialog__col--title">عنوان قطعه</th>
@@ -8769,6 +9162,7 @@ onBeforeUnmount(() => {
                     <tr v-for="row in constructionImportPreviewRows" :key="`${row.lineNo}-${row.part_formula_id}`">
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.part_formula_id }}</td>
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.part_kind_id }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ getConstructionPartKindInternalLabel(row.part_kind_id) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.part_sub_kind_id }}</td>
                       <td class="constructionDialog__col constructionDialog__col--code">{{ row.part_code }}</td>
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.part_title }}</td>
@@ -8801,6 +9195,7 @@ onBeforeUnmount(() => {
                   <tr>
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                     <th class="constructionDialog__col constructionDialog__col--id">نوع قطعه</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope">داخلی</th>
                     <th class="constructionDialog__col constructionDialog__col--id">زیرنوع</th>
                     <th class="constructionDialog__col constructionDialog__col--code">کد قطعه</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان قطعه</th>
@@ -8816,7 +9211,19 @@ onBeforeUnmount(() => {
                       <input v-model.number="item.part_formula_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionPartFormulaDirty(item)" />
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--id">
-                      <input v-model.number="item.part_kind_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionPartFormulaDirty(item)" />
+                      <select v-model.number="item.part_kind_id" class="constructionDialog__input" @change="markConstructionPartFormulaDirty(item)">
+                        <option v-for="option in constructionPartKindOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                      </select>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--scope">
+                      <button
+                        type="button"
+                        class="constructionDialog__scopeBtn"
+                        :class="getConstructionPartKindInternalLabel(item.part_kind_id) === 'داخلی' ? 'is-admin' : 'is-system'"
+                        @click="toggleConstructionPartKindInternalById(item.part_kind_id)"
+                      >
+                        {{ getConstructionPartKindInternalLabel(item.part_kind_id) }}
+                      </button>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--id">
                       <input v-model.number="item.part_sub_kind_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionPartFormulaDirty(item)" />
@@ -8900,26 +9307,31 @@ onBeforeUnmount(() => {
 
       <div v-if="subCategoryDesignEditorDraft" class="subCategoryDesignEditor">
         <div class="subCategoryDesignEditor__meta">
-          <label class="subCategoryDesignEditor__field">
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
             <span>ساب‌کت</span>
             <select v-model="subCategoryDesignEditorDraft.sub_category_id" class="constructionDialog__input" @change="onSubCategoryDesignSubCategoryChange">
               <option v-for="item in constructionSubCategoryDesignSubCategoryOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
             </select>
           </label>
-          <label class="subCategoryDesignEditor__field">
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
             <span>شناسه طرح</span>
             <input v-model.number="subCategoryDesignEditorDraft.design_id" class="constructionDialog__input" type="number" min="1" step="1" />
           </label>
-          <label class="subCategoryDesignEditor__field">
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
             <span>عنوان طرح</span>
             <input v-model="subCategoryDesignEditorDraft.design_title" class="constructionDialog__input" type="text" />
           </label>
-          <label class="subCategoryDesignEditor__field">
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
             <span>کد طرح</span>
             <input v-model="subCategoryDesignEditorDraft.code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
           </label>
           <div class="subCategoryDesignEditor__metaActions">
-            <button type="button" class="subCategoryDesignEditor__settingsBtn" @click="openSubCategoryAdminDefaultsFromDesignEditor">
+            <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': interiorLibraryOpen }" title="قطعات داخلی" @click="openInteriorLibrary">
+              <img src="/icons/enternal.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+              <span>داخلی</span>
+            </button>
+            <button type="button" class="subCategoryDesignEditor__settingsBtn" title="پیش‌فرض ادمین" @click="openSubCategoryAdminDefaultsFromDesignEditor">
+              <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
               <span>پیش‌فرض ادمین</span>
             </button>
           </div>
@@ -8968,6 +9380,117 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
+  <div v-if="internalPartGroupEditorOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeInternalPartGroupEditor"></div>
+    <div class="appDialog__card appDialog__card--subDesign" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش گروه قطعات داخلی</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeInternalPartGroupEditor">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        در این پنجره از بین قطعات داخلی سمت راست، گروه موردنظر را می‌سازید. فقط فرمول‌هایی که نوع قطعه‌شان داخلی است قابل انتخاب هستند.
+      </div>
+
+      <div v-if="internalPartGroupEditorDraft" class="subCategoryDesignEditor">
+        <div class="subCategoryDesignEditor__meta">
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>شناسه گروه</span>
+            <input v-model.number="internalPartGroupEditorDraft.group_id" class="constructionDialog__input" type="number" min="1" step="1" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>عنوان گروه</span>
+            <input v-model="internalPartGroupEditorDraft.group_title" class="constructionDialog__input" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>کد گروه</span>
+            <input v-model="internalPartGroupEditorDraft.code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+          </label>
+          <div class="subCategoryDesignEditor__metaActions">
+            <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': interiorLibraryOpen }" title="قطعات داخلی" @click="openInteriorLibrary">
+              <img src="/icons/enternal.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+              <span>داخلی</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="subCategoryDesignEditor__layout">
+          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
+            <div class="subCategoryDesignEditor__panelTitle">قطعات داخلی قابل انتخاب</div>
+            <div class="subCategoryDesignEditor__partList">
+              <label v-for="item in constructionInteriorPartFormulaOptions" :key="item.id" class="subCategoryDesignEditor__partItem">
+                <input :checked="isInternalPartFormulaSelectedInGroup(item.id)" type="checkbox" @change="togglePartFormulaInInternalGroup(item.id)" />
+                <span class="subCategoryDesignEditor__partMeta">
+                  <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
+                  <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
+            <div class="subCategoryDesignEditor__panelTitle">خلاصه گروه</div>
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(internalPartGroupEditorDraft.parts?.length || 0) }}</span>
+                <span class="constructionDialog__summaryLabel">قطعه انتخاب‌شده</span>
+              </div>
+            </div>
+            <div class="subCategoryDesignEditor__partList">
+              <div v-for="part in internalPartGroupEditorDraft.parts" :key="part.part_formula_id" class="subCategoryDesignEditor__partItem is-static">
+                <span class="subCategoryDesignEditor__partMeta">
+                  <span class="subCategoryDesignEditor__partTitle">
+                    {{ constructionInteriorPartFormulaOptions.find((item) => Number(item.id) === Number(part.part_formula_id))?.title || part.part_formula_id }}
+                  </span>
+                  <span class="subCategoryDesignEditor__partCode">
+                    {{ constructionInteriorPartFormulaOptions.find((item) => Number(item.id) === Number(part.part_formula_id))?.code || "" }}
+                  </span>
+                </span>
+              </div>
+              <div v-if="!(internalPartGroupEditorDraft.parts?.length)" class="designMenu__cabinetState">هنوز قطعه داخلی انتخاب نشده است.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closeInternalPartGroupEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="saveInternalPartGroupEditor">ذخیره گروه</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="interiorLibraryOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeInteriorLibrary"></div>
+    <div class="appDialog__card appDialog__card--subDesign" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">قطعات داخلی</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeInteriorLibrary">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        این لیست فقط قطعاتی را نشان می‌دهد که در جدول انواع قطعات با ستون «داخلی» علامت خورده‌اند. قواعد افزودن آن‌ها به فضای داخلی بعداً تکمیل می‌شود.
+      </div>
+
+      <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
+        <div class="subCategoryDesignEditor__panelTitle">لیست قطعات داخلی</div>
+        <div v-if="constructionLoading" class="constructionDialog__loading">در حال خواندن قطعات داخلی...</div>
+        <div v-else-if="!constructionInteriorPartFormulaOptions.length" class="designMenu__cabinetState">هنوز فرمول قطعه داخلی تعریف نشده است.</div>
+        <div v-else class="subCategoryDesignEditor__partList">
+          <div v-for="item in constructionInteriorPartFormulaOptions" :key="item.id" class="subCategoryDesignEditor__partItem is-static">
+            <span class="subCategoryDesignEditor__partMeta">
+              <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
+              <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+            </span>
+            <span class="constructionDialog__pill">{{ item.partKindTitle || "داخلی" }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closeInteriorLibrary">بستن</button>
+      </div>
+    </div>
+  </div>
+
   <div v-if="baseFormulaBuilderOpen" class="appDialog" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeBaseFormulaBuilder"></div>
     <div class="appDialog__card appDialog__card--builder" dir="rtl">
@@ -9002,7 +9525,20 @@ onBeforeUnmount(() => {
           </label>
           <label class="formulaBuilder__field">
             <span>نوع قطعه</span>
-            <input v-model.number="baseFormulaBuilderDraft.part_kind_id" class="constructionDialog__input" type="number" min="1" step="1" />
+            <select v-model.number="baseFormulaBuilderDraft.part_kind_id" class="constructionDialog__input">
+              <option v-for="option in constructionPartKindOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+          <label class="formulaBuilder__field">
+            <span>داخلی</span>
+            <button
+              type="button"
+              class="constructionDialog__scopeBtn"
+              :class="getConstructionPartKindInternalLabel(baseFormulaBuilderDraft.part_kind_id) === 'داخلی' ? 'is-admin' : 'is-system'"
+              @click="toggleConstructionPartKindInternalById(baseFormulaBuilderDraft.part_kind_id)"
+            >
+              {{ getConstructionPartKindInternalLabel(baseFormulaBuilderDraft.part_kind_id) }}
+            </button>
           </label>
           <label class="formulaBuilder__field">
             <span>زیرنوع</span>

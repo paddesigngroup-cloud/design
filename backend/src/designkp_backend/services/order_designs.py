@@ -81,7 +81,6 @@ async def _build_display_attr_snapshot(
             .where(
                 and_(
                     SubCategoryParamDefault.sub_category_id == sub_category.id,
-                    ParamGroup.show_in_order_attrs.is_(True),
                 )
             )
             .order_by(ParamGroup.ui_order.asc(), Param.ui_order.asc(), Param.param_id.asc())
@@ -122,6 +121,7 @@ async def _build_display_attr_snapshot(
             "group_title": str(group.org_param_group_title or group.title or group.param_group_code or "").strip() or None,
             "group_icon_path": normalize_icon_file_name(group.param_group_icon_path) or None,
             "group_ui_order": int(group.ui_order or 0),
+            "group_show_in_order_attrs": bool(group.show_in_order_attrs),
             "param_id": int(param_id or 0),
             "param_ui_order": int(param_ui_order or 0),
         }
@@ -202,6 +202,47 @@ async def build_order_design_snapshot(
         "part_snapshots": part_snapshots,
         "viewer_boxes": viewer_boxes,
     }
+
+
+async def sync_order_design_snapshot(
+    session: AsyncSession,
+    *,
+    item: OrderDesign,
+    order: Order | None = None,
+    source_design: SubCategoryDesign | None = None,
+) -> bool:
+    current_order = order or await require_accessible_order(session, order_id=item.order_id)
+    current_source_design = source_design or await require_accessible_sub_category_design(
+        session,
+        admin_id=current_order.admin_id,
+        design_id=item.sub_category_design_id,
+    )
+    snapshot = await build_order_design_snapshot(
+        session,
+        order=current_order,
+        source_design=current_source_design,
+        override_attr_values=dict(item.order_attr_values or {}),
+    )
+    changed = False
+    if dict(item.order_attr_values or {}) != snapshot["order_attr_values"]:
+        item.order_attr_values = snapshot["order_attr_values"]
+        changed = True
+    if dict(item.order_attr_meta or {}) != snapshot["order_attr_meta"]:
+        item.order_attr_meta = snapshot["order_attr_meta"]
+        changed = True
+    if list(item.part_snapshots or []) != snapshot["part_snapshots"]:
+        item.part_snapshots = snapshot["part_snapshots"]
+        changed = True
+    if list(item.viewer_boxes or []) != snapshot["viewer_boxes"]:
+        item.viewer_boxes = snapshot["viewer_boxes"]
+        changed = True
+    if item.sub_category_id != snapshot["sub_category_id"]:
+        item.sub_category_id = snapshot["sub_category_id"]
+        changed = True
+    if str(item.design_code or "").strip() != snapshot["design_code"]:
+        item.design_code = snapshot["design_code"]
+        changed = True
+    return changed
 
 
 async def next_order_design_instance_code(

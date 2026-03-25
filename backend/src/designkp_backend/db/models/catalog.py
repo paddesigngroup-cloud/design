@@ -29,6 +29,7 @@ class PartKind(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixi
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_internal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     admin: Mapped["Admin | None"] = relationship(back_populates="part_kinds")
@@ -330,3 +331,54 @@ class SubCategoryDesignPartSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, SoftDel
     viewer_payload: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
     design_part: Mapped["SubCategoryDesignPart"] = relationship(back_populates="snapshots")
+
+
+class InternalPartGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "internal_part_groups"
+
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    group_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    group_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    admin: Mapped["Admin | None"] = relationship()
+    parts: Mapped[list["InternalPartGroupItem"]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )
+
+
+class InternalPartGroupItem(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "internal_part_group_items"
+
+    group_ref_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("internal_part_groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_formula_id: Mapped[int] = mapped_column(
+        ForeignKey("part_formulas.part_formula_id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_kind_id: Mapped[int] = mapped_column(
+        ForeignKey("part_kinds.part_kind_id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    part_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+    group: Mapped["InternalPartGroup"] = relationship(back_populates="parts")
+    part_formula: Mapped["PartFormula"] = relationship()
