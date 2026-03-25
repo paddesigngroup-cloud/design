@@ -2342,6 +2342,7 @@ const model2d = {
 };
 let passiveModels = [];
 let hoverPassiveModelId = null;
+let selectedPassiveModelId = null;
 let hoverModelOutline = false;
 let selectedModelOutline = false;
 let uiCursorMode = null; // null | "wall" | "hidden" | "dim" | "beam" | "clicker"
@@ -2519,6 +2520,19 @@ function clearModel2dLines(recordUndo = true) {
   });
 }
 
+function selectModelOutline() {
+  if (!Array.isArray(model2d.outline) || model2d.outline.length < 3) return false;
+  hoverPassiveModelId = null;
+  selectedPassiveModelId = null;
+  hoverModelOutline = true;
+  clearGroupSelection();
+  selectedWallId = null;
+  selectedHiddenId = null;
+  selectedDimId = null;
+  selectedModelOutline = true;
+  return true;
+}
+
 function setPassiveModels(models = []) {
   passiveModels = (Array.isArray(models) ? models : [])
     .map((model) => {
@@ -2549,6 +2563,9 @@ function setPassiveModels(models = []) {
     .filter(Boolean);
   if (!passiveModels.some((model) => String(model.id) === String(hoverPassiveModelId || ""))) {
     hoverPassiveModelId = null;
+  }
+  if (!passiveModels.some((model) => String(model.id) === String(selectedPassiveModelId || ""))) {
+    selectedPassiveModelId = null;
   }
 }
 
@@ -4728,6 +4745,7 @@ function drawPassiveModelOverlays() {
   for (const model of passiveModels) {
     if (!Array.isArray(model?.lines) || !Array.isArray(model?.outline) || model.outline.length < 3) continue;
     const isHover = String(hoverPassiveModelId || "") === String(model.id || "");
+    const isSelected = String(selectedPassiveModelId || "") === String(model.id || "");
 
     ctx.save();
     ctx.setLineDash(model.dash || model2d.dash || []);
@@ -4746,17 +4764,17 @@ function drawPassiveModelOverlays() {
     ctx.restore();
 
     const pts = model.outline;
-    const col = isHover
+    const col = (isSelected || isHover)
       ? (model.outlineHoverColor || model2d.outlineSelectedColor)
       : (model.outlineColor || model2d.outlineColor);
 
     ctx.save();
     ctx.setLineDash([]);
-    ctx.lineWidth = isHover ? 5 : 3;
+    ctx.lineWidth = isSelected ? 6 : (isHover ? 5 : 3);
     ctx.strokeStyle = col;
-    ctx.globalAlpha = isHover ? 0.58 : 0.4;
+    ctx.globalAlpha = isSelected ? 0.78 : (isHover ? 0.58 : 0.4);
     ctx.shadowColor = col;
-    ctx.shadowBlur = isHover ? 12 : 0;
+    ctx.shadowBlur = isSelected ? 16 : (isHover ? 12 : 0);
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     const p0 = worldToScreen(pts[0].x, pts[0].y);
@@ -5680,7 +5698,7 @@ function drawToolCursor() {
     !!hoverPassiveModelId ||
     !!hoverModelOutline ||
     !!hoverWallId || !!hoverHiddenId || !!hoverDimId ||
-    !!selectedWallId || !!selectedHiddenId || !!selectedDimId || !!selectedModelOutline ||
+    !!selectedWallId || !!selectedHiddenId || !!selectedDimId || !!selectedModelOutline || !!selectedPassiveModelId ||
     selectedWallIds.length > 0 || selectedHiddenIds.length > 0 || selectedDimIds.length > 0;
 
   // Priority: explicit UI cursor mode (from Vue) -> drawing tool -> hover -> idle.
@@ -7438,12 +7456,27 @@ function onMouseDown(e) {
     return;
   }
 
-  // 3) Object hit (hovered) => select and STOP
-  if (hoverPassiveModelId) {
-    if (typeof onPassiveModelSelect === "function") onPassiveModelSelect(hoverPassiveModelId);
+  // 3) Object hit => select and STOP.
+  // Clicking a passive saved design should fully activate it on the first click.
+  // Hit-testing resolves from the full filled outline, not only its edges.
+  const clickedPassiveModelId = hitTestPassiveModel(e.offsetX, e.offsetY);
+  if (clickedPassiveModelId) {
+    hoverPassiveModelId = clickedPassiveModelId;
+    hoverModelOutline = false;
+    selectedPassiveModelId = clickedPassiveModelId;
+    selectedWallId = null;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    clearGroupSelection();
+    selectedModelOutline = false;
+    if (typeof onPassiveModelSelect === "function") onPassiveModelSelect(clickedPassiveModelId);
     return;
   }
-  if (hoverModelOutline) {
+  const clickedModelOutline = hitTestModelFill(e.offsetX, e.offsetY) || hitTestModelOutline(e.offsetX, e.offsetY);
+  if (clickedModelOutline) {
+    hoverPassiveModelId = null;
+    selectedPassiveModelId = null;
+    hoverModelOutline = true;
     if (isRemoveSelectModifier) {
       removeModelSelection();
       return;
@@ -7461,6 +7494,7 @@ function onMouseDown(e) {
     return;
   }
   if (hoverWallId) {
+    selectedPassiveModelId = null;
     if (isRemoveSelectModifier) {
       removeWallSelection(hoverWallId);
       return;
@@ -7477,6 +7511,7 @@ function onMouseDown(e) {
     return;
   }
   if (hoverHiddenId) {
+    selectedPassiveModelId = null;
     if (isRemoveSelectModifier) {
       removeHiddenSelection(hoverHiddenId);
       return;
@@ -7493,6 +7528,7 @@ function onMouseDown(e) {
     return;
   }
   if (hoverDimId) {
+    selectedPassiveModelId = null;
     if (isRemoveSelectModifier) {
       removeDimSelection(hoverDimId);
       return;
@@ -7524,6 +7560,7 @@ function onMouseDown(e) {
   }
 
   if (!isAddSelectModifier && !isRemoveSelectModifier) {
+    selectedPassiveModelId = null;
     selectedWallId = null;
     selectedHiddenId = null;
     selectedDimId = null;
@@ -8859,11 +8896,12 @@ function getState() {
 
 function hitTestPassiveModel(screenX, screenY) {
   if (!Array.isArray(passiveModels) || !passiveModels.length) return null;
+  const world = screenToWorld(screenX, screenY);
   for (let idx = passiveModels.length - 1; idx >= 0; idx--) {
     const model = passiveModels[idx];
     const pts = Array.isArray(model?.outline) ? model.outline : [];
     if (pts.length < 3) continue;
-    if (pointInPolygonScreen(screenX, screenY, pts.map((p) => worldToScreen(p.x, p.y)))) {
+    if (pointInPolygonWorld(world.x, world.y, pts)) {
       return model.id;
     }
     let prev = worldToScreen(pts[0].x, pts[0].y);
@@ -8900,6 +8938,7 @@ function restoreSnapshot(snap) {
   hoverDimId = null;
   selectedDimIds = [];
   hoverPassiveModelId = null;
+  selectedPassiveModelId = null;
   selectedModelOutline = false;
   hoverModelOutline = false;
   moveCommand.mode = "idle";
@@ -9617,6 +9656,7 @@ return {
   setModel2dLines,
   setPassiveModels,
   clearModel2dLines,
+  selectModelOutline,
   addRectModel2dPreset,
   placeModel2dPresetAtClient,
   placeWallPresetAtClient,

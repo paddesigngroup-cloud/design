@@ -2163,6 +2163,7 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
   if (restored) {
     activeCabinetDesignId.value = target.id;
     upsertOrderDesignPlacement(nextPlacement);
+    editorRef.value?.selectModelOutline?.();
   }
   return restored;
 }
@@ -2181,9 +2182,13 @@ function activateOrderDesignFromStage(orderDesignId) {
   if (!key) return;
   const target = orderDesignCatalog.value.find((item) => String(item.id) === key);
   if (!target?.viewer_boxes?.length) return;
-  if (String(activeCabinetDesignId.value || "") === key) return;
+  const alreadyActive = String(activeCabinetDesignId.value || "") === key;
   stageCabinetPlaceholderBoxes.value = target.viewer_boxes.map(normalizeCabinetBox);
-  restoreActiveOrderDesignToEditor(target, getOrderDesignPlacement(target.id));
+  activeCabinetDesignId.value = target.id;
+  const restored = restoreActiveOrderDesignToEditor(target, getOrderDesignPlacement(target.id));
+  if (!restored && alreadyActive) {
+    editorRef.value?.selectModelOutline?.();
+  }
   saveActiveOrderDrawing().catch(() => {});
 }
 
