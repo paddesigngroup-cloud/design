@@ -10,7 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from designkp_backend.db.models.account import Order, OrderDesign, OrderDesignInteriorInstance
-from designkp_backend.db.models.catalog import Param, ParamGroup, SubCategory, SubCategoryDesign, SubCategoryDesignInteriorInstance, SubCategoryDesignPart, SubCategoryParamDefault
+from designkp_backend.db.models.catalog import (
+    InternalPartGroup,
+    Param,
+    ParamGroup,
+    SubCategory,
+    SubCategoryDesign,
+    SubCategoryDesignInteriorInstance,
+    SubCategoryDesignPart,
+    SubCategoryParamDefault,
+)
 from designkp_backend.services.admin_access import require_admin
 from designkp_backend.services.admin_storage import admin_icon_exists, normalize_icon_file_name
 from designkp_backend.services.sub_category_designs import (
@@ -157,6 +166,19 @@ async def _build_display_attr_snapshot(
     values: dict[str, str | None] = {}
     meta: dict[str, dict[str, object]] = {}
     overrides = override_values or {}
+    icon_exists_cache: dict[str, bool] = {}
+
+    def _icon_exists_cached(file_name: str | None) -> bool:
+        normalized = normalize_icon_file_name(file_name)
+        if not normalized:
+            return False
+        cached = icon_exists_cache.get(normalized)
+        if cached is not None:
+            return cached
+        exists = admin_icon_exists(order_admin_id, normalized)
+        icon_exists_cache[normalized] = exists
+        return exists
+
     for default_row, param_code, param_title_fa, param_id, param_ui_order, group in rows:
         code = str(param_code or "").strip()
         if not code:
@@ -169,11 +191,11 @@ async def _build_display_attr_snapshot(
         icon_path = normalize_icon_file_name(default_row.icon_path)
         binary_off_icon_path = normalize_icon_file_name(default_row.binary_off_icon_path)
         binary_on_icon_path = normalize_icon_file_name(default_row.binary_on_icon_path)
-        if icon_path and not admin_icon_exists(order_admin_id, icon_path):
+        if icon_path and not _icon_exists_cached(icon_path):
             icon_path = ""
-        if binary_off_icon_path and not admin_icon_exists(order_admin_id, binary_off_icon_path):
+        if binary_off_icon_path and not _icon_exists_cached(binary_off_icon_path):
             binary_off_icon_path = ""
-        if binary_on_icon_path and not admin_icon_exists(order_admin_id, binary_on_icon_path):
+        if binary_on_icon_path and not _icon_exists_cached(binary_on_icon_path):
             binary_on_icon_path = ""
         values[code] = normalized_value
         meta[code] = {
@@ -194,6 +216,33 @@ async def _build_display_attr_snapshot(
             "param_ui_order": int(param_ui_order or 0),
         }
     return values, meta
+
+
+async def _load_accessible_internal_groups(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID,
+    group_ids: set[uuid.UUID],
+) -> dict[uuid.UUID, InternalPartGroup]:
+    if not group_ids:
+        return {}
+    groups = (
+        await session.scalars(
+            select(InternalPartGroup).where(
+                and_(
+                    InternalPartGroup.id.in_(list(group_ids)),
+                    or_(InternalPartGroup.admin_id.is_(None), InternalPartGroup.admin_id == admin_id),
+                )
+            )
+        )
+    ).all()
+    groups_by_id = {item.id: item for item in groups}
+    missing = [group_id for group_id in group_ids if group_id not in groups_by_id]
+    if missing:
+        # Keep current behavior (4xx for inaccessible group) while avoiding per-row queries.
+        missing_group = missing[0]
+        await require_accessible_internal_part_group(session, admin_id=admin_id, group_id=missing_group)
+    return groups_by_id
 
 
 async def build_order_design_snapshot(
@@ -264,20 +313,39 @@ async def build_order_design_snapshot(
 
     resolved_interior_instances: list[dict[str, object]] = []
     schema_ready = await interior_instance_tables_ready(session)
-    for instance in sorted(list(interior_instances or []), key=lambda row: (int(row.ui_order or 0), str(row.instance_code or ""))) if schema_ready else []:
-        internal_group = await require_accessible_internal_part_group(
-            session,
-            admin_id=order.admin_id,
-            group_id=instance.internal_part_group_id,
-        )
+    sorted_interior_instances = (
+        sorted(list(interior_instances or []), key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
+        if schema_ready else []
+    )
+    internal_groups_by_id = await _load_accessible_internal_groups(
+        session,
+        admin_id=order.admin_id,
+        group_ids={instance.internal_part_group_id for instance in sorted_interior_instances},
+    ) if sorted_interior_instances else {}
+    param_meta_cache: dict[tuple[str, ...], dict[str, dict[str, object]]] = {}
+    for instance in sorted_interior_instances:
+        internal_group = internal_groups_by_id.get(instance.internal_part_group_id)
+        if internal_group is None:
+            internal_group = await require_accessible_internal_part_group(
+                session,
+                admin_id=order.admin_id,
+                group_id=instance.internal_part_group_id,
+            )
         param_values = {str(key): value for key, value in dict(instance.param_values or {}).items()}
         param_meta = {str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()}
         if not param_meta:
-            _, param_meta = await build_sub_category_param_display_snapshot(
-                session,
-                sub_category=sub_category,
-                codes=set(param_values.keys()) or None,
-            )
+            cache_key = tuple(sorted(str(code) for code in set(param_values.keys())))
+            cached_param_meta = param_meta_cache.get(cache_key)
+            if cached_param_meta is not None:
+                param_meta = {str(key): dict(value or {}) for key, value in cached_param_meta.items()}
+            else:
+                _, resolved_param_meta = await build_sub_category_param_display_snapshot(
+                    session,
+                    sub_category=sub_category,
+                    codes=set(param_values.keys()) or None,
+                )
+                param_meta = {str(key): dict(value or {}) for key, value in resolved_param_meta.items()}
+                param_meta_cache[cache_key] = {str(key): dict(value or {}) for key, value in param_meta.items()}
         resolved = await resolve_internal_instance_preview(
             session,
             admin_id=order.admin_id,
