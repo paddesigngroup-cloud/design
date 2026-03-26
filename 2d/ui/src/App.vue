@@ -2131,6 +2131,16 @@ function normalizeOrderDesignRecord(item) {
   };
 }
 
+function sortOrderDesignCatalogRecords(items) {
+  return items
+    .slice()
+    .sort((a, b) => {
+      const orderDelta = (Number(a?.sort_order) || 0) - (Number(b?.sort_order) || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return String(a?.id || "").localeCompare(String(b?.id || ""), "fa");
+    });
+}
+
 async function loadCabinetDesignCatalog(force = false) {
   const adminKey = String(currentAdminId.value || "");
   if (cabinetDesignCatalogLoading.value) return;
@@ -2230,7 +2240,26 @@ async function createOrderDesignFromSource(sourceDesign, { instanceCode = "", de
   });
   if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن طرح به سفارش انجام نشد."));
   const created = normalizeOrderDesignRecord(await res.json());
-  await loadOrderDesignCatalog(true);
+  const hasInvalidPayload = !created?.id || String(created.order_id || "") !== orderId;
+  const hasDuplicateId = !hasInvalidPayload
+    && orderDesignCatalog.value.some((item) => String(item.id) === String(created.id));
+  if (hasInvalidPayload || hasDuplicateId) {
+    await loadOrderDesignCatalog(true);
+    const fallbackCreated = !hasInvalidPayload
+      ? orderDesignCatalog.value.find((item) => String(item.id) === String(created.id)) || null
+      : null;
+    if (!fallbackCreated) {
+      throw new Error("داده طرح سفارش ناسازگار است. فهرست دوباره بارگیری شد.");
+    }
+    if (String(activeCabinetDesignId.value || "") === String(fallbackCreated.id)) {
+      stageCabinetPlaceholderBoxes.value = (fallbackCreated.viewer_boxes || []).map(normalizeCabinetBox);
+    }
+    return fallbackCreated;
+  }
+  orderDesignCatalog.value = sortOrderDesignCatalogRecords([...orderDesignCatalog.value, created]);
+  if (String(activeCabinetDesignId.value || "") === String(created.id)) {
+    stageCabinetPlaceholderBoxes.value = (created.viewer_boxes || []).map(normalizeCabinetBox);
+  }
   return created;
 }
 
