@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 
 from fastapi import HTTPException, status
@@ -25,6 +27,64 @@ from designkp_backend.services.sub_category_designs import (
     resolve_base_formula_values,
     resolve_part_formula_values,
 )
+
+SNAPSHOT_META_KEY = "__snapshot_state"
+
+
+def strip_snapshot_state_from_meta(meta: dict[str, dict[str, object]] | None) -> dict[str, dict[str, object]]:
+    return {
+        str(key): dict(value or {})
+        for key, value in dict(meta or {}).items()
+        if str(key) != SNAPSHOT_META_KEY
+    }
+
+
+def build_order_design_snapshot_checksum(
+    *,
+    source_design: SubCategoryDesign,
+    order_attr_values: dict[str, object],
+    interior_instances: list[OrderDesignInteriorInstance | SubCategoryDesignInteriorInstance] | None,
+) -> str:
+    payload = {
+        "sub_category_design_id": str(source_design.id),
+        "sub_category_design_version": int(getattr(source_design, "version_id", 0) or 0),
+        "sub_category_design_updated_at": str(getattr(source_design, "updated_at", "") or ""),
+        "order_attr_values": {str(key): value for key, value in sorted(dict(order_attr_values or {}).items(), key=lambda row: str(row[0]))},
+        "interior_instances": [
+            {
+                "id": str(getattr(instance, "id", "") or ""),
+                "internal_part_group_id": str(getattr(instance, "internal_part_group_id", "") or ""),
+                "instance_code": str(getattr(instance, "instance_code", "") or ""),
+                "ui_order": int(getattr(instance, "ui_order", 0) or 0),
+                "placement_z": float(getattr(instance, "placement_z", 0) or 0),
+                "param_values": {
+                    str(key): value
+                    for key, value in sorted(dict(getattr(instance, "param_values", {}) or {}).items(), key=lambda row: str(row[0]))
+                },
+            }
+            for instance in sorted(
+                list(interior_instances or []),
+                key=lambda row: (
+                    int(getattr(row, "ui_order", 0) or 0),
+                    str(getattr(row, "instance_code", "") or ""),
+                    str(getattr(row, "id", "") or ""),
+                ),
+            )
+        ],
+    }
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def read_order_design_snapshot_checksum(meta: dict[str, object] | None) -> str:
+    state = dict((meta or {}).get(SNAPSHOT_META_KEY) or {})
+    return str(state.get("checksum") or "")
+
+
+def with_order_design_snapshot_checksum(meta: dict[str, dict[str, object]], *, checksum: str) -> dict[str, dict[str, object]]:
+    next_meta = strip_snapshot_state_from_meta(meta)
+    next_meta[SNAPSHOT_META_KEY] = {"version": 1, "checksum": checksum}
+    return next_meta
 
 
 async def require_accessible_order(session: AsyncSession, *, order_id: uuid.UUID) -> Order:
@@ -278,6 +338,13 @@ async def sync_order_design_snapshot(
         admin_id=current_order.admin_id,
         design_id=item.sub_category_design_id,
     )
+    next_checksum = build_order_design_snapshot_checksum(
+        source_design=current_source_design,
+        order_attr_values=dict(item.order_attr_values or {}),
+        interior_instances=list(item.interior_instances or []) if schema_ready else [],
+    )
+    if read_order_design_snapshot_checksum(dict(item.order_attr_meta or {})) == next_checksum:
+        return False
     snapshot = await build_order_design_snapshot(
         session,
         order=current_order,
@@ -289,8 +356,8 @@ async def sync_order_design_snapshot(
     if dict(item.order_attr_values or {}) != snapshot["order_attr_values"]:
         item.order_attr_values = snapshot["order_attr_values"]
         changed = True
-    if dict(item.order_attr_meta or {}) != snapshot["order_attr_meta"]:
-        item.order_attr_meta = snapshot["order_attr_meta"]
+    if strip_snapshot_state_from_meta(dict(item.order_attr_meta or {})) != snapshot["order_attr_meta"]:
+        item.order_attr_meta = with_order_design_snapshot_checksum(snapshot["order_attr_meta"], checksum=next_checksum)
         changed = True
     if list(item.part_snapshots or []) != snapshot["part_snapshots"]:
         item.part_snapshots = snapshot["part_snapshots"]
@@ -324,6 +391,9 @@ async def sync_order_design_snapshot(
         changed = True
     if str(item.design_code or "").strip() != snapshot["design_code"]:
         item.design_code = snapshot["design_code"]
+        changed = True
+    if read_order_design_snapshot_checksum(dict(item.order_attr_meta or {})) != next_checksum:
+        item.order_attr_meta = with_order_design_snapshot_checksum(dict(item.order_attr_meta or {}), checksum=next_checksum)
         changed = True
     return changed
 

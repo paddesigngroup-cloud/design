@@ -12,13 +12,16 @@ from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.account import OrderDesign, OrderDesignInteriorInstance
 from designkp_backend.services.order_designs import (
     build_order_design_snapshot,
+    build_order_design_snapshot_checksum,
     interior_instance_tables_ready,
     next_order_design_instance_code,
     next_order_design_sort_order,
     normalize_order_attr_value,
     require_accessible_order,
     require_accessible_sub_category_design,
+    strip_snapshot_state_from_meta,
     sync_order_design_snapshot,
+    with_order_design_snapshot_checksum,
 )
 
 router = APIRouter(prefix="/order-designs", tags=["order_designs"])
@@ -87,7 +90,7 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
         },
         order_attr_meta={
             str(key): dict(value or {})
-            for key, value in dict(item.order_attr_meta or {}).items()
+            for key, value in strip_snapshot_state_from_meta(dict(item.order_attr_meta or {})).items()
         },
         part_snapshots=[dict(row or {}) for row in list(item.part_snapshots or [])],
         viewer_boxes=[dict(row or {}) for row in list(item.viewer_boxes or [])],
@@ -128,10 +131,7 @@ async def _require_item(session: AsyncSession, item_id: uuid.UUID) -> OrderDesig
     )
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design not found.")
-    order = await require_accessible_order(session, order_id=item.order_id)
-    if await sync_order_design_snapshot(session, item=item, order=order):
-        await session.commit()
-        await session.refresh(item)
+    await require_accessible_order(session, order_id=item.order_id)
     return item
 
 
@@ -161,7 +161,7 @@ def _normalize_attr_values(
     current_meta: dict[str, dict[str, object]],
 ) -> dict[str, str | None]:
     normalized: dict[str, str | None] = {}
-    for key, meta in current_meta.items():
+    for key, meta in strip_snapshot_state_from_meta(current_meta).items():
         input_mode = "binary" if str(meta.get("input_mode") or "") == "binary" else "value"
         next_value = raw_values[key] if key in raw_values else None
         normalized[key] = normalize_order_attr_value(next_value, input_mode=input_mode)
@@ -173,7 +173,7 @@ async def list_order_designs(
     order_id: uuid.UUID = Query(...),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[OrderDesignItem]:
-    order = await require_accessible_order(session, order_id=order_id)
+    await require_accessible_order(session, order_id=order_id)
     include_interior = await interior_instance_tables_ready(session)
     items = (
         await session.scalars(
@@ -182,11 +182,6 @@ async def list_order_designs(
             .order_by(OrderDesign.sort_order.asc(), OrderDesign.instance_code.asc())
         )
     ).all()
-    changed = False
-    for item in items:
-        changed = (await sync_order_design_snapshot(session, item=item, order=order)) or changed
-    if changed:
-        await session.commit()
     return [_serialize_item(item, include_interior=include_interior) for item in items]
 
 
@@ -227,9 +222,21 @@ async def create_order_design(payload: OrderDesignCreate, session: AsyncSession 
         sort_order=payload.sort_order if payload.sort_order is not None else await next_order_design_sort_order(session, order_id=order.id),
         status=str(payload.status or "draft").strip() or "draft",
         order_attr_values=snapshot["order_attr_values"],
-        order_attr_meta=snapshot["order_attr_meta"],
+        order_attr_meta=with_order_design_snapshot_checksum(
+            snapshot["order_attr_meta"],
+            checksum=build_order_design_snapshot_checksum(
+                source_design=source_design,
+                order_attr_values=snapshot["order_attr_values"],
+                interior_instances=list(source_design.interior_instances or []) if include_interior else [],
+            ),
+        ),
         part_snapshots=snapshot["part_snapshots"],
         viewer_boxes=snapshot["viewer_boxes"],
+        snapshot_checksum=build_order_design_snapshot_checksum(
+            source_design=source_design,
+            order_attr_values=snapshot["order_attr_values"],
+            interior_instances=list(source_design.interior_instances or []) if include_interior else [],
+        ),
     )
     session.add(item)
     await session.flush()
@@ -290,9 +297,21 @@ async def update_order_design(
     item.sort_order = payload.sort_order
     item.status = str(payload.status or "draft").strip() or "draft"
     item.order_attr_values = snapshot["order_attr_values"]
-    item.order_attr_meta = snapshot["order_attr_meta"]
+    item.order_attr_meta = with_order_design_snapshot_checksum(
+        snapshot["order_attr_meta"],
+        checksum=build_order_design_snapshot_checksum(
+            source_design=source_design,
+            order_attr_values=snapshot["order_attr_values"],
+            interior_instances=list(item.interior_instances or []) if include_interior else [],
+        ),
+    )
     item.part_snapshots = snapshot["part_snapshots"]
     item.viewer_boxes = snapshot["viewer_boxes"]
+    item.snapshot_checksum = build_order_design_snapshot_checksum(
+        source_design=source_design,
+        order_attr_values=snapshot["order_attr_values"],
+        interior_instances=list(item.interior_instances or []) if include_interior else [],
+    )
     await session.commit()
     item = await _require_item(session, item.id)
     return _serialize_item(item, include_interior=include_interior)
@@ -345,6 +364,33 @@ async def update_order_design_interior_instance(
     )
     item.part_snapshots = snapshot["part_snapshots"]
     item.viewer_boxes = snapshot["viewer_boxes"]
+    item.order_attr_meta = with_order_design_snapshot_checksum(
+        dict(item.order_attr_meta or {}),
+        checksum=build_order_design_snapshot_checksum(
+            source_design=source_design,
+            order_attr_values=dict(item.order_attr_values or {}),
+            interior_instances=list(item.interior_instances or []),
+        ),
+    )
     await session.commit()
     item = await _require_item(session, item.id)
     return _serialize_item(item, include_interior=True)
+
+
+@router.post("/{item_id}/recompute", response_model=OrderDesignItem)
+async def recompute_order_design_snapshot(
+    item_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> OrderDesignItem:
+    item = await _require_item(session, item_id)
+    order = await require_accessible_order(session, order_id=item.order_id)
+    source_design = await require_accessible_sub_category_design(
+        session,
+        admin_id=order.admin_id,
+        design_id=item.sub_category_design_id,
+    )
+    if await sync_order_design_snapshot(session, item=item, order=order, source_design=source_design):
+        await session.commit()
+    include_interior = await interior_instance_tables_ready(session)
+    item = await _require_item(session, item.id)
+    return _serialize_item(item, include_interior=include_interior)

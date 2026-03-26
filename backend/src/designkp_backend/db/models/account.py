@@ -231,6 +231,7 @@ class OrderDesign(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionM
     order_attr_meta: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
     part_snapshots: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
     viewer_boxes: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
+    snapshot_checksum: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
 
     order: Mapped[Order] = relationship(back_populates="order_designs")
     admin: Mapped[Admin] = relationship(back_populates="order_designs", foreign_keys=[admin_id])
