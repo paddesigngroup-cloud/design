@@ -3447,6 +3447,7 @@ function validateConstructionParams() {
     const paramId = Number(item.param_id);
     const partKindId = Number(item.part_kind_id);
     const paramGroupId = Number(item.param_group_id);
+    const sortOrder = Number(item.sort_order);
     const paramCode = String(item.param_code || "").trim();
     const titleEn = String(item.param_title_en || "").trim();
     const titleFa = String(item.param_title_fa || "").trim();
@@ -3465,6 +3466,10 @@ function validateConstructionParams() {
     }
     if (!paramCode || !titleEn || !titleFa) {
       showAlert("کد، عنوان انگلیسی و عنوان فارسی پارامتر نباید خالی باشند.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!Number.isInteger(sortOrder) || sortOrder < 0) {
+      showAlert("برای همه پارامترها ترتیب مرتب‌سازی معتبر و صفر یا بزرگ‌تر وارد کنید.", { title: "اعتبارسنجی" });
       return false;
     }
     if (!["formula", "auto"].includes(interiorValueMode)) {
@@ -4737,7 +4742,7 @@ function addConstructionParamGroup() {
 
 function addConstructionParam() {
   const nextId = editableParams.value.reduce((max, item) => Math.max(max, Number(item.param_id) || 0), 0) + 1;
-  const nextSortOrder = editableParams.value.reduce((min, item) => Math.min(min, Number(item.sort_order) || 0), 0) - 1;
+  const nextSortOrder = editableParams.value.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), 0) + 1;
   const draftId = `draft-param-row-${Date.now()}-${nextId}`;
   editableParams.value = [
     ...editableParams.value,
