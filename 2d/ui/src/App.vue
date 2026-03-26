@@ -187,6 +187,8 @@ const hoveredCabinetDesignId = ref(null);
 const hoveredConstructionDesignId = ref(null);
 const cabinetDesignDropLoading = ref(false);
 const cabinetDesignDropLoadingTitle = ref("");
+const ORDER_DRAWING_AUTOSAVE_DEBOUNCE_MS = 900;
+let _orderDrawingSaveTimeout = 0;
 const editorViewportState = editorViewportRef;
 const constructionWizardOpen = ref(false);
 const constructionStep = ref("templates");
@@ -5961,11 +5963,20 @@ function buildHiddenDebugBucket(full) {
   };
 }
 
-function buildDebugJsonPayload() {
+function buildPersistedUiStateSnapshot() {
+  return {
+    orderDesignPlacements: orderDesignPlacements.value,
+    stageCabinetPlaceholderBoxes: stageCabinetPlaceholderBoxes.value,
+    activeCabinetDesignId: activeCabinetDesignId.value,
+  };
+}
+
+function buildDebugJsonPayload({ includeExtendedUiState = true } = {}) {
   const full = editorRef.value?.getState?.();
   if (!full) return null;
   const solid = buildSolidDebugBuckets(full);
   const hidden = buildHiddenDebugBucket(full);
+  const baseUiState = buildPersistedUiStateSnapshot();
   return {
     exportedAt: new Date().toISOString(),
     unit: "mm",
@@ -5985,16 +5996,16 @@ function buildDebugJsonPayload() {
       columns: solid.columns,
       hiddenWalls: hidden.walls,
     },
-    uiState: {
-      activeTool: activeTool.value,
-      designMenuTool: designMenuTool.value,
-      wallStyleDraft: wallStyleDraft.value,
-      selectedWallStyle: selectedWallStyle.value,
-      walls3dSnapshot: walls3dSnapshot.value,
-      orderDesignPlacements: orderDesignPlacements.value,
-      stageCabinetPlaceholderBoxes: stageCabinetPlaceholderBoxes.value,
-      activeCabinetDesignId: activeCabinetDesignId.value,
-    },
+    uiState: includeExtendedUiState
+      ? {
+          ...baseUiState,
+          activeTool: activeTool.value,
+          designMenuTool: designMenuTool.value,
+          wallStyleDraft: wallStyleDraft.value,
+          selectedWallStyle: selectedWallStyle.value,
+          walls3dSnapshot: walls3dSnapshot.value,
+        }
+      : baseUiState,
   };
 }
 
@@ -6228,7 +6239,7 @@ function normalizeOrderRecord(item) {
 }
 
 function buildOrderDrawingSavePayload() {
-  const payload = buildDebugJsonPayload();
+  const payload = buildDebugJsonPayload({ includeExtendedUiState: false });
   if (!payload) return null;
   return {
     drawing_payload: payload,
@@ -6238,6 +6249,16 @@ function buildOrderDrawingSavePayload() {
     beams_count: Number(payload?.counts?.beams) || 0,
     columns_count: Number(payload?.counts?.columns) || 0,
   };
+}
+
+function scheduleActiveOrderDrawingSave({ debounceMs = ORDER_DRAWING_AUTOSAVE_DEBOUNCE_MS } = {}) {
+  if (_orderDrawingSaveTimeout) {
+    clearTimeout(_orderDrawingSaveTimeout);
+  }
+  _orderDrawingSaveTimeout = window.setTimeout(() => {
+    _orderDrawingSaveTimeout = 0;
+    saveActiveOrderDrawing().catch(() => {});
+  }, Math.max(0, Number(debounceMs) || 0));
 }
 
 function formatOrderDate(value) {
@@ -7028,7 +7049,7 @@ async function onPresetPointerUp(ev) {
           if (createdOrderDesign?.id) {
             upsertOrderDesignPlacement(placement);
           }
-          saveActiveOrderDrawing().catch(() => {});
+          scheduleActiveOrderDrawingSave();
         });
       } catch (error) {
         showAlert(error?.message || "افزودن طرح به سفارش انجام نشد.", { title: "خطا" });
@@ -7480,6 +7501,10 @@ onBeforeUnmount(() => {
   if (_quickSyncTimer) {
     clearInterval(_quickSyncTimer);
     _quickSyncTimer = 0;
+  }
+  if (_orderDrawingSaveTimeout) {
+    clearTimeout(_orderDrawingSaveTimeout);
+    _orderDrawingSaveTimeout = 0;
   }
   if (_quickOutsidePointerDown) {
     window.removeEventListener("pointerdown", _quickOutsidePointerDown, true);
