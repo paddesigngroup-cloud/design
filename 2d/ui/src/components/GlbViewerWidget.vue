@@ -26,6 +26,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  selectedOrderDesignIds: {
+    type: Array,
+    default: () => [],
+  },
   orderParamGroups: {
     type: Array,
     default: () => [],
@@ -233,6 +237,11 @@ const activeOrderDesignIdentity = computed(() => {
   return { title, code };
 });
 const hasModelOutlineSelection = computed(() => !!attrsSnapshot.value?.selection?.selectedModelOutline);
+const selectedOrderDesignCount = computed(() => {
+  const ids = Array.isArray(props.selectedOrderDesignIds) ? props.selectedOrderDesignIds.filter(Boolean) : [];
+  return ids.length;
+});
+const hasOrderDesignSelection = computed(() => selectedOrderDesignCount.value > 0 || hasModelOutlineSelection.value);
 const hasAnyAttrSelection = computed(() => !!wallMetrics.value || hasModelOutlineSelection.value);
 const openOrderDesignGroupKey = ref("");
 
@@ -1479,14 +1488,16 @@ watch(
     <div class="glbWallAttrs__sticky">
       <div class="glbWallAttrs__head">
         <div class="menuPanel__title glbWallAttrs__title">صفات</div>
-        <div v-if="isGroupEditMode" class="glbWallAttrs__groupLabel">ویرایش گروهی</div>
+        <div v-if="isGroupEditMode || selectedOrderDesignCount > 1" class="glbWallAttrs__groupLabel">ویرایش گروهی</div>
       </div>
       <div class="glbWallAttrs__sep"></div>
     </div>
 
-    <template v-if="activeOrderDesignIdentity && hasModelOutlineSelection">
+    <template v-if="activeOrderDesignIdentity && hasOrderDesignSelection">
       <div class="glbWallAttrs__objectTitle glbWallAttrs__objectTitle--design">
-        <div class="glbWallAttrs__objectTitleMain">{{ activeOrderDesignIdentity.title || "طرح سفارش" }}</div>
+        <div class="glbWallAttrs__objectTitleMain">
+          {{ selectedOrderDesignCount > 1 ? `${selectedOrderDesignCount} طرح سفارش` : (activeOrderDesignIdentity.title || "طرح سفارش") }}
+        </div>
         <div v-if="activeOrderDesignIdentity.code" class="glbWallAttrs__objectTitleMeta">کد طرح: {{ activeOrderDesignIdentity.code }}</div>
       </div>
       <div v-for="group in orderDesignAttrGroups" :key="group.key" class="glbWallAttrs__attrGroup">

@@ -68,7 +68,15 @@ function installGlobalErrorHooksOnce() {
   });
 }
 
-export function createWallApp({ canvas, container, onModel2dTransformChange, onViewportChange, onPassiveModelSelect, onActiveModelDelete } = {}) {
+export function createWallApp({
+  canvas,
+  container,
+  onModel2dTransformChange,
+  onViewportChange,
+  onPassiveModelSelect,
+  onPassiveModelSelectionChange,
+  onActiveModelDelete,
+} = {}) {
   installGlobalErrorHooksOnce();
 
   // Boot flag (used by standalone index.html to detect module load failures)
@@ -962,6 +970,7 @@ function clearGroupSelection() {
   selectedWallIds = [];
   selectedHiddenIds = [];
   selectedDimIds = [];
+  selectedPassiveModelIds = [];
 }
 
 function normalizeSelectionIds(ids) {
@@ -990,6 +999,12 @@ function setSingleOrMultiSelection(kind, ids) {
   if (kind === "dim") {
     selectedDimId = next.length === 1 ? next[0] : null;
     selectedDimIds = next.length > 1 ? next : [];
+    return;
+  }
+  if (kind === "passive_model") {
+    selectedPassiveModelId = next.length === 1 ? next[0] : null;
+    selectedPassiveModelIds = next.length > 1 ? next : [];
+    emitPassiveModelSelectionChange();
   }
 }
 
@@ -998,6 +1013,7 @@ function applySelectionSnapshot(snapshot) {
   setSingleOrMultiSelection("wall", next.wallIds);
   setSingleOrMultiSelection("hidden", next.hiddenIds);
   setSingleOrMultiSelection("dim", next.dimIds);
+  setSingleOrMultiSelection("passive_model", next.passiveModelIds);
   selectedModelOutline = !!next.hasModel;
 }
 
@@ -1007,15 +1023,18 @@ function mergeSelectionSnapshots(base, patch, mode = "replace") {
   const baseWallIds = normalizeSelectionIds(current.wallIds);
   const baseHiddenIds = normalizeSelectionIds(current.hiddenIds);
   const baseDimIds = normalizeSelectionIds(current.dimIds);
+  const basePassiveModelIds = normalizeSelectionIds(current.passiveModelIds);
   const hitWallIds = normalizeSelectionIds(incoming.wallIds);
   const hitHiddenIds = normalizeSelectionIds(incoming.hiddenIds);
   const hitDimIds = normalizeSelectionIds(incoming.dimIds);
+  const hitPassiveModelIds = normalizeSelectionIds(incoming.passiveModelIds);
 
   if (mode === "add") {
     return {
       wallIds: normalizeSelectionIds([...baseWallIds, ...hitWallIds]),
       hiddenIds: normalizeSelectionIds([...baseHiddenIds, ...hitHiddenIds]),
       dimIds: normalizeSelectionIds([...baseDimIds, ...hitDimIds]),
+      passiveModelIds: normalizeSelectionIds([...basePassiveModelIds, ...hitPassiveModelIds]),
       hasModel: !!current.hasModel || !!incoming.hasModel,
     };
   }
@@ -1024,10 +1043,12 @@ function mergeSelectionSnapshots(base, patch, mode = "replace") {
     const hitWalls = new Set(hitWallIds);
     const hitHiddens = new Set(hitHiddenIds);
     const hitDims = new Set(hitDimIds);
+    const hitPassiveModels = new Set(hitPassiveModelIds);
     return {
       wallIds: baseWallIds.filter((id) => !hitWalls.has(id)),
       hiddenIds: baseHiddenIds.filter((id) => !hitHiddens.has(id)),
       dimIds: baseDimIds.filter((id) => !hitDims.has(id)),
+      passiveModelIds: basePassiveModelIds.filter((id) => !hitPassiveModels.has(id)),
       hasModel: !!current.hasModel && !incoming.hasModel,
     };
   }
@@ -1036,6 +1057,7 @@ function mergeSelectionSnapshots(base, patch, mode = "replace") {
     wallIds: hitWallIds,
     hiddenIds: hitHiddenIds,
     dimIds: hitDimIds,
+    passiveModelIds: hitPassiveModelIds,
     hasModel: !!incoming.hasModel,
   };
 }
@@ -1046,9 +1068,11 @@ function hasAnySelection() {
     selectedHiddenId ||
     selectedDimId ||
     selectedModelOutline ||
+    selectedPassiveModelId ||
     selectedWallIds.length ||
     selectedHiddenIds.length ||
-    selectedDimIds.length
+    selectedDimIds.length ||
+    selectedPassiveModelIds.length
   );
 }
 
@@ -1193,6 +1217,18 @@ function removeDimSelection(dimId) {
   if (!dimId) return;
   const snap = buildSelectionSnapshotFromCurrentSelection();
   applySelectionSnapshot(mergeSelectionSnapshots(snap, { dimIds: [dimId] }, "remove"));
+}
+
+function addPassiveModelSelection(modelId) {
+  if (!modelId) return;
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  applySelectionSnapshot(mergeSelectionSnapshots(snap, { passiveModelIds: [modelId] }, "add"));
+}
+
+function removePassiveModelSelection(modelId) {
+  if (!modelId) return;
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  applySelectionSnapshot(mergeSelectionSnapshots(snap, { passiveModelIds: [modelId] }, "remove"));
 }
 
 function addModelSelection() {
@@ -2343,12 +2379,23 @@ const model2d = {
 let passiveModels = [];
 let hoverPassiveModelId = null;
 let selectedPassiveModelId = null;
+let selectedPassiveModelIds = [];
 let hoverModelOutline = false;
 let selectedModelOutline = false;
 let uiCursorMode = null; // null | "wall" | "hidden" | "dim" | "beam" | "clicker"
 let forcedChainMode = null; // null | "wall" | "beam" | "hidden"
 const cursorImgs = new Map();
 const wallHandleImgs = new Map();
+
+function emitPassiveModelSelectionChange() {
+  if (typeof onPassiveModelSelectionChange !== "function") return;
+  const ids = [];
+  if (selectedPassiveModelId) ids.push(selectedPassiveModelId);
+  for (const id of selectedPassiveModelIds) {
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  onPassiveModelSelectionChange(ids);
+}
 
 function _loadImgWithFallback(map, key, urls) {
   if (map.has(key)) return map.get(key);
@@ -2524,6 +2571,8 @@ function selectModelOutline() {
   if (!Array.isArray(model2d.outline) || model2d.outline.length < 3) return false;
   hoverPassiveModelId = null;
   selectedPassiveModelId = null;
+  selectedPassiveModelIds = [];
+  emitPassiveModelSelectionChange();
   hoverModelOutline = true;
   clearGroupSelection();
   selectedWallId = null;
@@ -2552,6 +2601,11 @@ function setPassiveModels(models = []) {
         id,
         lines,
         outline,
+        transform: {
+          x: Number.isFinite(Number(model?.transform?.x)) ? Number(model.transform.x) : 0,
+          y: Number.isFinite(Number(model?.transform?.y)) ? Number(model.transform.y) : 0,
+          rotRad: Number.isFinite(Number(model?.transform?.rotRad)) ? Number(model.transform.rotRad) : 0,
+        },
         color: typeof model.color === "string" ? model.color : model2d.color,
         outlineColor: typeof model.outlineColor === "string" ? model.outlineColor : model2d.outlineColor,
         outlineHoverColor: typeof model.outlineHoverColor === "string" ? model.outlineHoverColor : model2d.outlineSelectedColor,
@@ -2567,6 +2621,10 @@ function setPassiveModels(models = []) {
   if (!passiveModels.some((model) => String(model.id) === String(selectedPassiveModelId || ""))) {
     selectedPassiveModelId = null;
   }
+  selectedPassiveModelIds = selectedPassiveModelIds.filter((id) =>
+    passiveModels.some((model) => String(model.id) === String(id || ""))
+  );
+  emitPassiveModelSelectionChange();
 }
 
 function placeWallPresetAtClient(lines, clientX, clientY, recordUndo = true) {
@@ -2980,6 +3038,14 @@ function getSelectedObjectTargetInfo() {
   });
   if (dimTarget) targets.push({ type: "dim", ...dimTarget });
 
+  const passiveModelTarget = collectTargetForIds(collectIds(selectedPassiveModelId, selectedPassiveModelIds), (id, points) => {
+    const model = passiveModels.find((entry) => String(entry?.id || "") === String(id || ""));
+    if (!model?.outline?.length) return false;
+    for (const pt of model.outline) points.push({ x: pt.x, y: pt.y });
+    return true;
+  });
+  if (passiveModelTarget) targets.push({ type: "passive_model", ...passiveModelTarget });
+
   if (selectedModelOutline && Array.isArray(model2d.outline) && model2d.outline.length >= 1) {
     const modelPoints = model2d.outline.map((pt) => ({ x: pt.x, y: pt.y }));
     const modelCenter = getBoundsCenterWorld(modelPoints);
@@ -2998,6 +3064,7 @@ function getSelectedObjectTargetInfo() {
     wallIds: wallTarget ? wallTarget.ids : [],
     hiddenIds: hiddenTarget ? hiddenTarget.ids : [],
     dimIds: dimTarget ? dimTarget.ids : [],
+    passiveModelIds: passiveModelTarget ? passiveModelTarget.ids : [],
     hasModel: !!targets.find((t) => t.type === "model"),
   };
   for (const t of targets) {
@@ -3064,6 +3131,7 @@ function buildSelectionSnapshotFromCurrentSelection() {
     wallIds: collectIds(selectedWallId, selectedWallIds),
     hiddenIds: collectIds(selectedHiddenId, selectedHiddenIds),
     dimIds: collectIds(selectedDimId, selectedDimIds),
+    passiveModelIds: collectIds(selectedPassiveModelId, selectedPassiveModelIds),
     hasModel: !!selectedModelOutline,
   };
 }
@@ -3074,6 +3142,7 @@ function selectionSnapshotHasAny(snapshot) {
     (Array.isArray(snapshot.wallIds) && snapshot.wallIds.length > 0) ||
     (Array.isArray(snapshot.hiddenIds) && snapshot.hiddenIds.length > 0) ||
     (Array.isArray(snapshot.dimIds) && snapshot.dimIds.length > 0) ||
+    (Array.isArray(snapshot.passiveModelIds) && snapshot.passiveModelIds.length > 0) ||
     !!snapshot.hasModel
   );
 }
@@ -3119,6 +3188,23 @@ function applySelectionDelta(snapshot, delta, opts = null) {
     if (!d || !dimIdSet.has(d.id)) continue;
     if (d.a) { d.a.x += dx; d.a.y += dy; }
     if (d.b) { d.b.x += dx; d.b.y += dy; }
+  }
+
+  const passiveModelIdSet = new Set(normalizeIds(snapshot.passiveModelIds));
+  for (const model of passiveModels) {
+    if (!model || !passiveModelIdSet.has(model.id)) continue;
+    model.lines = (model.lines || []).map((line) => ({
+      ax: line.ax + dx,
+      ay: line.ay + dy,
+      bx: line.bx + dx,
+      by: line.by + dy,
+    }));
+    model.outline = (model.outline || []).map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));
+    model.transform = {
+      x: (Number(model.transform?.x) || 0) + dx,
+      y: (Number(model.transform?.y) || 0) + dy,
+      rotRad: Number(model.transform?.rotRad) || 0,
+    };
   }
 
   if (snapshot.hasModel) {
@@ -3211,6 +3297,15 @@ function getSelectionReferenceAngle(snapshot) {
     const dim = dimensions.find((d) => d && d.id === firstDimId);
     if (dim?.a && dim?.b) return Math.atan2(dim.b.y - dim.a.y, dim.b.x - dim.a.x);
   }
+  const firstPassiveModelId = Array.isArray(snapshot.passiveModelIds) ? snapshot.passiveModelIds[0] : null;
+  if (firstPassiveModelId) {
+    const passiveModel = passiveModels.find((model) => String(model?.id || "") === String(firstPassiveModelId));
+    if (Number.isFinite(Number(passiveModel?.transform?.rotRad))) {
+      return Number(passiveModel.transform.rotRad);
+    }
+    const modelAngle = dominantModelAngle(passiveModel?.lines || []);
+    if (Number.isFinite(modelAngle)) return modelAngle;
+  }
   if (snapshot.hasModel) {
     const modelAngle = dominantModelAngle(model2d.lines || []);
     if (Number.isFinite(modelAngle)) return modelAngle;
@@ -3269,6 +3364,26 @@ function applySelectionRotation(snapshot, pivot, angleRad) {
       dim.b.x = rotated.x;
       dim.b.y = rotated.y;
     }
+  }
+
+  const passiveModelIdSet = new Set(normalizeIds(snapshot.passiveModelIds));
+  for (const model of passiveModels) {
+    if (!model || !passiveModelIdSet.has(model.id)) continue;
+    model.lines = (model.lines || []).map((line) => {
+      const a = rotatePointAroundPivot({ x: line.ax, y: line.ay }, pivot, angleRad);
+      const b = rotatePointAroundPivot({ x: line.bx, y: line.by }, pivot, angleRad);
+      return { ax: a.x, ay: a.y, bx: b.x, by: b.y };
+    });
+    model.outline = (model.outline || []).map((pt) => rotatePointAroundPivot(pt, pivot, angleRad));
+    const rotatedOrigin = rotatePointAroundPivot({
+      x: Number(model.transform?.x) || 0,
+      y: Number(model.transform?.y) || 0,
+    }, pivot, angleRad);
+    model.transform = {
+      x: rotatedOrigin.x,
+      y: rotatedOrigin.y,
+      rotRad: wrapAnglePi((Number(model.transform?.rotRad) || 0) + angleRad),
+    };
   }
 
   if (snapshot.hasModel) {
@@ -3363,7 +3478,7 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
   const dx = Number(delta?.x) || 0;
   const dy = Number(delta?.y) || 0;
   if (!selectionSnapshotHasAny(snapshot) || (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9)) return null;
-  if (snapshot.hasModel) return null;
+  if (snapshot.hasModel || (Array.isArray(snapshot.passiveModelIds) && snapshot.passiveModelIds.length > 0)) return null;
 
   const fallbackPrefix = tool?.namePrefix || "Wall";
   const requestedWallNameSeed = Number.isFinite(Number(opts?.wallNameSeed)) ? Number(opts.wallNameSeed) : null;
@@ -3966,7 +4081,7 @@ function confirmCopyStep() {
 
   if (copyCommand.mode === "await_confirm_selection") {
     const snap = buildSelectionSnapshotFromCurrentSelection();
-    if (!selectionSnapshotHasAny(snap) || snap.hasModel) return false;
+    if (!selectionSnapshotHasAny(snap) || snap.hasModel || (Array.isArray(snap.passiveModelIds) && snap.passiveModelIds.length > 0)) return false;
     copyCommand.selectionSnapshot = snap;
     copyCommand.mode = "await_base_point";
     copyCommand.cursorPoint = null;
@@ -4745,7 +4860,9 @@ function drawPassiveModelOverlays() {
   for (const model of passiveModels) {
     if (!Array.isArray(model?.lines) || !Array.isArray(model?.outline) || model.outline.length < 3) continue;
     const isHover = String(hoverPassiveModelId || "") === String(model.id || "");
-    const isSelected = String(selectedPassiveModelId || "") === String(model.id || "");
+    const isSelected =
+      String(selectedPassiveModelId || "") === String(model.id || "") ||
+      selectedPassiveModelIds.includes(model.id);
 
     ctx.save();
     ctx.setLineDash(model.dash || model2d.dash || []);
@@ -5699,7 +5816,7 @@ function drawToolCursor() {
     !!hoverModelOutline ||
     !!hoverWallId || !!hoverHiddenId || !!hoverDimId ||
     !!selectedWallId || !!selectedHiddenId || !!selectedDimId || !!selectedModelOutline || !!selectedPassiveModelId ||
-    selectedWallIds.length > 0 || selectedHiddenIds.length > 0 || selectedDimIds.length > 0;
+    selectedWallIds.length > 0 || selectedHiddenIds.length > 0 || selectedDimIds.length > 0 || selectedPassiveModelIds.length > 0;
 
   // Priority: explicit UI cursor mode (from Vue) -> drawing tool -> hover -> idle.
   let key = null;
@@ -6229,6 +6346,15 @@ function hideContextMenu() {
 }
 
 function syncSelectionToHoverForContextMenu() {
+  if (hoverPassiveModelId) {
+    clearGroupSelection();
+    selectedWallId = null;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    selectedModelOutline = false;
+    setSingleOrMultiSelection("passive_model", [hoverPassiveModelId]);
+    return true;
+  }
   if (hoverModelOutline) {
     clearGroupSelection();
     selectedWallId = null;
@@ -6271,7 +6397,7 @@ function renderContextMenuItems() {
   const items = [
     { id: "extend", label: "ادغام", disabled: !extendSelection },
     { id: "move", label: "انتقال", disabled: !hasAnySelection() },
-    { id: "copy", label: "کپی", disabled: !hasAnySelection() || !!selectedModelOutline },
+    { id: "copy", label: "کپی", disabled: !hasAnySelection() || !!selectedModelOutline || !!selectedPassiveModelId || !!selectedPassiveModelIds.length },
     { id: "rotate", label: "چرخش", disabled: !hasAnySelection() },
     { id: "delete", label: "حذف", disabled: true },
   ];
@@ -6526,12 +6652,38 @@ function applyBoxSelection(x1, y1, x2, y2, mode = "replace") {
     }
   }
 
-  if (wallHits.length || hiddenHits.length || dimHits.length || modelHit) {
+  const passiveModelHits = [];
+  for (const model of passiveModels) {
+    const pts = Array.isArray(model?.outline) ? model.outline.map((p) => worldToScreen(p.x, p.y)) : [];
+    if (pts.length < 3) continue;
+    const allInside = pts.every((p) => pointInRect(p.x, p.y, r));
+    let hit = false;
+    if (!crossing) {
+      hit = allInside;
+    } else {
+      hit = allInside || pts.some((p) => pointInRect(p.x, p.y, r));
+      if (!hit) {
+        for (let i = 0; i < pts.length; i++) {
+          const a = pts[i];
+          const b = pts[(i + 1) % pts.length];
+          if (segmentIntersectsRectScreen(a.x, a.y, b.x, b.y, r)) {
+            hit = true;
+            break;
+          }
+        }
+      }
+      if (!hit) hit = pointInPolygonScreen(r.x + r.w / 2, r.y + r.h / 2, pts);
+    }
+    if (hit) passiveModelHits.push(model.id);
+  }
+
+  if (wallHits.length || hiddenHits.length || dimHits.length || passiveModelHits.length || modelHit) {
     const current = buildSelectionSnapshotFromCurrentSelection();
     applySelectionSnapshot(mergeSelectionSnapshots(current, {
       wallIds: wallHits.slice(),
       hiddenIds: hiddenHits.slice(),
       dimIds: dimHits.slice(),
+      passiveModelIds: passiveModelHits.slice(),
       hasModel: !!modelHit,
     }, mode));
     return true;
@@ -7068,7 +7220,9 @@ function onMouseDown(e) {
   }
 
   // 0) Axis hit => drag selected object on chosen axis.
-  const axisHit = hitTestObjectAxesScreen(e.offsetX, e.offsetY);
+  const axisHit = (!isAddSelectModifier && !isRemoveSelectModifier)
+    ? hitTestObjectAxesScreen(e.offsetX, e.offsetY)
+    : null;
   if (axisHit) {
     const started = beginAxisDrag(axisHit.axis, e.offsetX, e.offsetY, axisHit.geometry?.target || null);
     if (started) return;
@@ -7463,19 +7617,39 @@ function onMouseDown(e) {
   if (clickedPassiveModelId) {
     hoverPassiveModelId = clickedPassiveModelId;
     hoverModelOutline = false;
-    selectedPassiveModelId = clickedPassiveModelId;
+    if (isRemoveSelectModifier) {
+      removePassiveModelSelection(clickedPassiveModelId);
+      selectedModelOutline = false;
+      return;
+    }
+    if (isAddSelectModifier) {
+      addPassiveModelSelection(clickedPassiveModelId);
+      selectedModelOutline = false;
+      return;
+    }
+    const alreadyOnlySelected =
+      String(selectedPassiveModelId || "") === String(clickedPassiveModelId) &&
+      !selectedPassiveModelIds.length &&
+      !selectedWallId &&
+      !selectedHiddenId &&
+      !selectedDimId &&
+      !selectedWallIds.length &&
+      !selectedHiddenIds.length &&
+      !selectedDimIds.length &&
+      !selectedModelOutline;
     selectedWallId = null;
     selectedHiddenId = null;
     selectedDimId = null;
     clearGroupSelection();
     selectedModelOutline = false;
-    if (typeof onPassiveModelSelect === "function") onPassiveModelSelect(clickedPassiveModelId);
+    setSingleOrMultiSelection("passive_model", [clickedPassiveModelId]);
+    if (alreadyOnlySelected && typeof onPassiveModelSelect === "function") onPassiveModelSelect(clickedPassiveModelId);
     return;
   }
   const clickedModelOutline = hitTestModelFill(e.offsetX, e.offsetY) || hitTestModelOutline(e.offsetX, e.offsetY);
   if (clickedModelOutline) {
     hoverPassiveModelId = null;
-    selectedPassiveModelId = null;
+    setSingleOrMultiSelection("passive_model", []);
     hoverModelOutline = true;
     if (isRemoveSelectModifier) {
       removeModelSelection();
@@ -7494,7 +7668,7 @@ function onMouseDown(e) {
     return;
   }
   if (hoverWallId) {
-    selectedPassiveModelId = null;
+    setSingleOrMultiSelection("passive_model", []);
     if (isRemoveSelectModifier) {
       removeWallSelection(hoverWallId);
       return;
@@ -7511,7 +7685,7 @@ function onMouseDown(e) {
     return;
   }
   if (hoverHiddenId) {
-    selectedPassiveModelId = null;
+    setSingleOrMultiSelection("passive_model", []);
     if (isRemoveSelectModifier) {
       removeHiddenSelection(hoverHiddenId);
       return;
@@ -7528,7 +7702,7 @@ function onMouseDown(e) {
     return;
   }
   if (hoverDimId) {
-    selectedPassiveModelId = null;
+    setSingleOrMultiSelection("passive_model", []);
     if (isRemoveSelectModifier) {
       removeDimSelection(hoverDimId);
       return;
@@ -7560,7 +7734,7 @@ function onMouseDown(e) {
   }
 
   if (!isAddSelectModifier && !isRemoveSelectModifier) {
-    selectedPassiveModelId = null;
+    setSingleOrMultiSelection("passive_model", []);
     selectedWallId = null;
     selectedHiddenId = null;
     selectedDimId = null;
@@ -8831,6 +9005,14 @@ function getState() {
     model2d: {
       lines: model2d.lines.length,
     },
+    passiveModels: passiveModels.map((model) => ({
+      id: model.id,
+      transform: {
+        x: Number(model.transform?.x) || 0,
+        y: Number(model.transform?.y) || 0,
+        rotRad: Number(model.transform?.rotRad) || 0,
+      },
+    })),
     tools: {
       wall: tool?.getStatus?.() || null,
       hidden: hiddenTool?.getStatus?.() || null,
@@ -8881,6 +9063,8 @@ function getState() {
       selectedBeamIds: selectedWallIds.filter((id) => isBeamEdge(graph.getWall(id))),
       selectedDimId,
       selectedDimIds: selectedDimIds.slice(),
+      selectedPassiveModelId,
+      selectedPassiveModelIds: selectedPassiveModelIds.slice(),
       selectedModelOutline,
     },
     input: {
@@ -8902,6 +9086,29 @@ function hitTestPassiveModel(screenX, screenY) {
     const pts = Array.isArray(model?.outline) ? model.outline : [];
     if (pts.length < 3) continue;
     if (pointInPolygonWorld(world.x, world.y, pts)) {
+      return model.id;
+    }
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const pt of pts) {
+      if (!pt || !isFinite(pt.x) || !isFinite(pt.y)) continue;
+      if (pt.x < minX) minX = pt.x;
+      if (pt.y < minY) minY = pt.y;
+      if (pt.x > maxX) maxX = pt.x;
+      if (pt.y > maxY) maxY = pt.y;
+    }
+    if (
+      isFinite(minX) &&
+      isFinite(minY) &&
+      isFinite(maxX) &&
+      isFinite(maxY) &&
+      world.x >= minX - 1 &&
+      world.x <= maxX + 1 &&
+      world.y >= minY - 1 &&
+      world.y <= maxY + 1
+    ) {
       return model.id;
     }
     let prev = worldToScreen(pts[0].x, pts[0].y);
@@ -8938,7 +9145,7 @@ function restoreSnapshot(snap) {
   hoverDimId = null;
   selectedDimIds = [];
   hoverPassiveModelId = null;
-  selectedPassiveModelId = null;
+  setSingleOrMultiSelection("passive_model", []);
   selectedModelOutline = false;
   hoverModelOutline = false;
   moveCommand.mode = "idle";

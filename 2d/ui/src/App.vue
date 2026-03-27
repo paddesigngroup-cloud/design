@@ -1,7 +1,14 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { editorRef, model2dTransformRef, editorViewportRef, passiveModelSelectionHandlerRef, activeModelDeleteHandlerRef } from "./editor/editor_store.js";
+import {
+  editorRef,
+  model2dTransformRef,
+  editorViewportRef,
+  passiveModelSelectionHandlerRef,
+  passiveModelSelectionStateRef,
+  activeModelDeleteHandlerRef,
+} from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
 import { useDialogService } from "./dialog_service.js";
 import { WALL_READY_PRESETS, buildPresetLines, getPresetIconWalls } from "./features/wall_preset_drag.js";
@@ -179,10 +186,12 @@ const orderDesignCatalogLoadedForOrderId = ref("");
 const interiorLibraryOpen = ref(false);
 const orderDesignEditorOpen = ref(false);
 const orderDesignEditorDraft = ref(null);
-const orderDesignSavingId = ref("");
+const orderDesignSavingIds = ref([]);
 const orderDesignPlacements = ref([]);
 const stageCabinetPlaceholderBoxes = ref([]);
 const activeCabinetDesignId = ref(null);
+const activeStageOrderDesignSelected = ref(false);
+const selectedStageOrderDesignIds = ref([]);
 const hoveredCabinetDesignId = ref(null);
 const hoveredConstructionDesignId = ref(null);
 const cabinetDesignDropLoading = ref(false);
@@ -258,6 +267,11 @@ const constructionDeletedBaseFormulaIds = ref([]);
 const constructionDeletedPartFormulaIds = ref([]);
 const constructionImportInputEl = ref(null);
 const constructionParamsTableWrapEl = ref(null);
+
+function isOrderDesignSaving(designId) {
+  const key = String(designId || "").trim();
+  return !!key && orderDesignSavingIds.value.includes(key);
+}
 const paramGroupIconInputEl = ref(null);
 const constructionImportPreviewRows = ref([]);
 const constructionImportFileName = ref("");
@@ -2174,6 +2188,8 @@ async function loadOrderDesignCatalog(force = false) {
     orderDesignPlacements.value = [];
     stageCabinetPlaceholderBoxes.value = [];
     activeCabinetDesignId.value = null;
+    activeStageOrderDesignSelected.value = false;
+    selectedStageOrderDesignIds.value = [];
     return;
   }
   if (orderDesignCatalogLoading.value) return;
@@ -2322,51 +2338,75 @@ async function persistOrderDesignRecord(item, nextAttrValues = null) {
 }
 
 async function updateActiveOrderDesignAttr({ key, value }) {
-  const active = activeStageOrderDesign.value;
   const attrKey = String(key || "").trim();
-  if (!active?.id || !attrKey) return;
   const normalizedValue = value == null ? "" : String(value);
-  const currentValue = active?.order_attr_values?.[attrKey] == null
-    ? ""
-    : String(active.order_attr_values[attrKey]);
-  if (normalizedValue === currentValue) return;
-  if (String(orderDesignSavingId.value || "") === String(active.id)) return;
-  const activePlacement = activeStageOrderPlacement.value || getCurrentModel2dTransform();
-  const nextValues = {
-    ...(active.order_attr_values || {}),
-    [attrKey]: normalizedValue,
-  };
-  orderDesignCatalog.value = orderDesignCatalog.value.map((item) =>
-    String(item.id) === String(active.id)
-      ? { ...item, order_attr_values: nextValues }
-      : item
+  const targetIds = selectedOrderDesignIds.value.length
+    ? selectedOrderDesignIds.value.slice()
+    : (activeStageOrderDesign.value?.id ? [String(activeStageOrderDesign.value.id)] : []);
+  if (!attrKey || !targetIds.length) return;
+
+  const targets = targetIds
+    .map((id) => orderDesignCatalog.value.find((item) => String(item.id) === String(id)))
+    .filter(Boolean);
+  if (!targets.length) return;
+
+  const changedTargets = targets.filter((item) => {
+    const currentValue = item?.order_attr_values?.[attrKey] == null ? "" : String(item.order_attr_values[attrKey]);
+    return currentValue !== normalizedValue && !isOrderDesignSaving(item.id);
+  });
+  if (!changedTargets.length) return;
+
+  const placementById = new Map(
+    changedTargets.map((item) => [
+      String(item.id),
+      String(activeCabinetDesignId.value || "") === String(item.id)
+        ? (activeStageOrderPlacement.value || getCurrentModel2dTransform())
+        : getOrderDesignPlacement(item.id),
+    ])
   );
-  orderDesignSavingId.value = String(active.id);
+
+  const savingIds = changedTargets.map((item) => String(item.id));
+  orderDesignSavingIds.value = [...new Set([...orderDesignSavingIds.value, ...savingIds])];
+  const nextValuesById = new Map();
+  for (const item of changedTargets) {
+    nextValuesById.set(String(item.id), {
+      ...(item.order_attr_values || {}),
+      [attrKey]: normalizedValue,
+    });
+  }
+  orderDesignCatalog.value = orderDesignCatalog.value.map((item) => {
+    const nextValues = nextValuesById.get(String(item.id));
+    return nextValues ? { ...item, order_attr_values: nextValues } : item;
+  });
+
   const shouldToggleStageLoading = !cabinetDesignDropLoading.value;
   if (shouldToggleStageLoading) {
     cabinetDesignDropLoadingMode.value = "edit";
     cabinetDesignDropLoading.value = true;
-    cabinetDesignDropLoadingTitle.value = String(active.design_title || active.instance_code || "").trim();
+    cabinetDesignDropLoadingTitle.value =
+      changedTargets.length > 1
+        ? `${changedTargets.length} طرح سفارش`
+        : String(changedTargets[0]?.design_title || changedTargets[0]?.instance_code || "").trim();
   }
   try {
-    const fresh = await persistOrderDesignRecord(active, nextValues);
-    if (fresh) {
-      orderDesignCatalog.value = orderDesignCatalog.value.map((item) =>
-        String(item.id) === String(fresh.id) ? fresh : item
-      );
-      if (String(activeCabinetDesignId.value || "") === String(fresh.id)) {
-        stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
-        restoreActiveOrderDesignToEditor(fresh, activePlacement);
+    for (const item of changedTargets) {
+      const fresh = await persistOrderDesignRecord(item, nextValuesById.get(String(item.id)) || {});
+      if (fresh) {
+        orderDesignCatalog.value = orderDesignCatalog.value.map((row) =>
+          String(row.id) === String(fresh.id) ? fresh : row
+        );
+        if (String(activeCabinetDesignId.value || "") === String(fresh.id)) {
+          stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
+          restoreActiveOrderDesignToEditor(fresh, placementById.get(String(fresh.id)) || null);
+        }
       }
-      await saveActiveOrderDrawing();
     }
+    await saveActiveOrderDrawing();
   } catch (error) {
     showAlert(error?.message || "ذخیره صفات طرح سفارش انجام نشد.", { title: "خطا" });
     await loadOrderDesignCatalog(true);
   } finally {
-    if (String(orderDesignSavingId.value) === String(active.id)) {
-      orderDesignSavingId.value = "";
-    }
+    orderDesignSavingIds.value = orderDesignSavingIds.value.filter((id) => !savingIds.includes(id));
     if (shouldToggleStageLoading) {
       cabinetDesignDropLoading.value = false;
       cabinetDesignDropLoadingTitle.value = "";
@@ -2437,6 +2477,8 @@ async function deleteOrderDesign(item) {
     if (String(activeCabinetDesignId.value || "") === String(target.id)) {
       stageCabinetPlaceholderBoxes.value = [];
       activeCabinetDesignId.value = null;
+      activeStageOrderDesignSelected.value = false;
+      selectedStageOrderDesignIds.value = [];
       editorRef.value?.clearModel2dLines?.(false);
       saveActiveOrderDrawing().catch(() => {});
     }
@@ -2455,6 +2497,8 @@ async function deleteActiveOrderDesignFromStage() {
     removeOrderDesignPlacement(target.id);
     stageCabinetPlaceholderBoxes.value = [];
     activeCabinetDesignId.value = null;
+    activeStageOrderDesignSelected.value = false;
+    selectedStageOrderDesignIds.value = [];
     await loadOrderDesignCatalog(true);
     saveActiveOrderDrawing().catch(() => {});
   } catch (error) {
@@ -2535,24 +2579,37 @@ function getCurrentModel2dTransform() {
 function restoreActiveOrderDesignToEditor(item, placement = null) {
   const target = normalizeOrderDesignRecord(item);
   if (!target?.viewer_boxes?.length) return false;
-  const full = editorRef.value?.getState?.();
-  if (!full || !editorRef.value?.restoreSnapshot) return false;
   const nextPlacement = normalizeOrderDesignPlacement({
     orderDesignId: target.id,
     ...(placement || {}),
   }) || { orderDesignId: target.id, x: 0, y: 0, rotRad: 0 };
+  const worldLines = localDesignToWorld(buildModel2dLinesFromBoxes(target.viewer_boxes), nextPlacement, "lines");
+  const worldOutline = localDesignToWorld(buildModel2dOutlineFromBoxes(target.viewer_boxes), nextPlacement, "points");
+  const full = editorRef.value?.getState?.();
   const nextSnapshot = {
     ...full,
     model2dSnap: {
       ...(full.model2dSnap || {}),
-      lines: localDesignToWorld(buildModel2dLinesFromBoxes(target.viewer_boxes), nextPlacement, "lines"),
-      outline: localDesignToWorld(buildModel2dOutlineFromBoxes(target.viewer_boxes), nextPlacement, "points"),
+      lines: worldLines,
+      outline: worldOutline,
       offsetXmm: nextPlacement.x,
       offsetYmm: nextPlacement.y,
       rotationRad: nextPlacement.rotRad,
     },
   };
-  const restored = !!editorRef.value.restoreSnapshot(nextSnapshot);
+  let restored = false;
+  if (full && editorRef.value?.restoreSnapshot) {
+    restored = !!editorRef.value.restoreSnapshot(nextSnapshot);
+  }
+  if (!restored && editorRef.value?.setModel2dLines) {
+    editorRef.value.setModel2dLines(worldLines, null, false);
+    model2dTransformRef.value = {
+      x: nextPlacement.x,
+      y: nextPlacement.y,
+      rotRad: nextPlacement.rotRad,
+    };
+    restored = true;
+  }
   if (restored) {
     activeCabinetDesignId.value = target.id;
     upsertOrderDesignPlacement(nextPlacement);
@@ -2596,6 +2653,8 @@ function clearStageOrderDesignPlacement({ persist = true } = {}) {
   removeOrderDesignPlacement(activeCabinetDesignId.value);
   stageCabinetPlaceholderBoxes.value = [];
   activeCabinetDesignId.value = null;
+  activeStageOrderDesignSelected.value = false;
+  selectedStageOrderDesignIds.value = [];
   if (persist && activeOrder.value?.id) {
     saveActiveOrderDrawing().catch(() => {});
   }
@@ -5642,6 +5701,19 @@ function syncQuickStateFromEditor() {
   const full = editorRef.value?.getState?.();
   const s = full?.state;
   if (!s) return;
+  activeStageOrderDesignSelected.value = !!full?.selection?.selectedModelOutline;
+  {
+    const nextSelectedIds = [];
+    const pushSelectedId = (value) => {
+      const key = String(value || "").trim();
+      if (key && !nextSelectedIds.includes(key)) nextSelectedIds.push(key);
+    };
+    pushSelectedId(full?.selection?.selectedPassiveModelId);
+    if (Array.isArray(full?.selection?.selectedPassiveModelIds)) {
+      for (const id of full.selection.selectedPassiveModelIds) pushSelectedId(id);
+    }
+    selectedStageOrderDesignIds.value = nextSelectedIds;
+  }
   editorViewportState.value = {
     zoom: Number.isFinite(Number(s.zoom)) ? Number(s.zoom) : 1,
     offsetX: Number.isFinite(Number(s.offsetX)) ? Number(s.offsetX) : 0,
@@ -5655,6 +5727,18 @@ function syncQuickStateFromEditor() {
       orderDesignId: activeCabinetDesignId.value,
       ...getCurrentModel2dTransform(),
     });
+  }
+  if (Array.isArray(full?.passiveModels) && full.passiveModels.length) {
+    for (const model of full.passiveModels) {
+      const key = String(model?.id || "").trim();
+      if (!key) continue;
+      upsertOrderDesignPlacement({
+        orderDesignId: key,
+        x: Number.isFinite(Number(model?.transform?.x)) ? Number(model.transform.x) : 0,
+        y: Number.isFinite(Number(model?.transform?.y)) ? Number(model.transform.y) : 0,
+        rotRad: Number.isFinite(Number(model?.transform?.rotRad)) ? Number(model.transform.rotRad) : 0,
+      });
+    }
   }
   showDimensions.value = s.showDimensions !== false;
   showOffsetWalls.value = !!s.offsetWallEnabled;
@@ -6162,6 +6246,21 @@ const activeOrderStatusLabel = computed(() => orderStatusLabelMap[String(activeO
 const activeStageOrderDesign = computed(() =>
   orderDesignCatalog.value.find((item) => String(item.id) === String(activeCabinetDesignId.value || "")) || null
 );
+const selectedOrderDesignIds = computed(() => {
+  const ids = [];
+  const push = (value) => {
+    const key = String(value || "").trim();
+    if (key && !ids.includes(key)) ids.push(key);
+  };
+  if (activeStageOrderDesignSelected.value && activeCabinetDesignId.value) push(activeCabinetDesignId.value);
+  for (const id of selectedStageOrderDesignIds.value) push(id);
+  return ids;
+});
+const selectedOrderDesignSource = computed(() => {
+  const ids = selectedOrderDesignIds.value;
+  if (!ids.length) return activeStageOrderDesign.value;
+  return orderDesignCatalog.value.find((item) => String(item.id) === String(ids[0])) || activeStageOrderDesign.value;
+});
 const activeStageOrderPlacement = computed(() => getOrderDesignPlacement(activeCabinetDesignId.value));
 const draggedCabinetPreviewInstance = computed(() => {
   const drag = presetDrag.value;
@@ -6353,6 +6452,8 @@ function resetActiveOrderWorkspace({ clearEditor = true } = {}) {
   orderDesignPlacements.value = [];
   stageCabinetPlaceholderBoxes.value = [];
   activeCabinetDesignId.value = null;
+  activeStageOrderDesignSelected.value = false;
+  selectedStageOrderDesignIds.value = [];
   if (clearEditor) {
     editorRef.value?.clearAll?.();
     editorRef.value?.goOrigin?.();
@@ -6837,6 +6938,8 @@ watch(
       orderDesignPlacements.value = [];
       stageCabinetPlaceholderBoxes.value = [];
       activeCabinetDesignId.value = null;
+      activeStageOrderDesignSelected.value = false;
+      selectedStageOrderDesignIds.value = [];
     }
   }
 );
@@ -6890,6 +6993,16 @@ watch(
     editorRef.value?.setPassiveModels?.(models);
   },
   { deep: true, immediate: true }
+);
+
+watch(
+  passiveModelSelectionStateRef,
+  (ids) => {
+    selectedStageOrderDesignIds.value = Array.isArray(ids)
+      ? ids.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
+  },
+  { immediate: true }
 );
 
 function setMenu(menuId) {
@@ -7591,6 +7704,7 @@ onBeforeUnmount(() => {
     delete window.__designkpDrawLockRaf;
   }
   passiveModelSelectionHandlerRef.value = null;
+  passiveModelSelectionStateRef.value = [];
   activeModelDeleteHandlerRef.value = null;
   editorRef.value?.setPassiveModels?.([]);
 });
@@ -7798,6 +7912,7 @@ onBeforeUnmount(() => {
                     class="cabinetDesignCard"
                     :class="{
                       'is-active': activeCabinetDesignId === design.id,
+                      'is-selected': selectedOrderDesignIds.includes(String(design.id)),
                       'is-disabled': !design.preview?.viewer_boxes?.length,
                     }"
                     :title="design.design_title"
@@ -8118,7 +8233,8 @@ onBeforeUnmount(() => {
             src="/models/1_z1.glb"
             :model2d-transform="model2dTransformRef"
             :walls2d="walls3dSnapshot"
-            :order-design="activeStageOrderDesign"
+            :order-design="selectedOrderDesignSource"
+            :selected-order-design-ids="selectedOrderDesignIds"
             :order-param-groups="constructionParamGroups"
             :placeholder-instances="stageOrderDesignInstances"
             :placeholder-boxes="stageCabinetPlaceholderBoxes"
@@ -10634,7 +10750,10 @@ onBeforeUnmount(() => {
                   v-for="item in orderDesignCatalog"
                   :key="item.id"
                   class="orderEntry__designRow"
-                  :class="{ 'is-active': String(activeCabinetDesignId || '') === String(item.id) }"
+                  :class="{
+                    'is-active': String(activeCabinetDesignId || '') === String(item.id),
+                    'is-selected': selectedOrderDesignIds.includes(String(item.id)),
+                  }"
                 >
                   <td class="constructionDialog__col constructionDialog__col--code">{{ item.instance_code }}</td>
                   <td class="constructionDialog__col constructionDialog__col--code">{{ item.design_code }}</td>

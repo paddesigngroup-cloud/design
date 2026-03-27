@@ -1,6 +1,13 @@
 <script setup>
 import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from "vue";
-import { editorRef, model2dTransformRef, editorViewportRef, passiveModelSelectionHandlerRef, activeModelDeleteHandlerRef } from "../editor/editor_store.js";
+import {
+  editorRef,
+  model2dTransformRef,
+  editorViewportRef,
+  passiveModelSelectionHandlerRef,
+  passiveModelSelectionStateRef,
+  activeModelDeleteHandlerRef,
+} from "../editor/editor_store.js";
 import { createWallApp } from "../../../main.js";
 
 const hostEl = ref(null);
@@ -30,6 +37,9 @@ onMounted(() => {
       onPassiveModelSelect: (modelId) => {
         const handler = passiveModelSelectionHandlerRef.value;
         if (typeof handler === "function") handler(modelId);
+      },
+      onPassiveModelSelectionChange: (modelIds) => {
+        passiveModelSelectionStateRef.value = Array.isArray(modelIds) ? modelIds.slice() : [];
       },
       onActiveModelDelete: () => {
         const handler = activeModelDeleteHandlerRef.value;
