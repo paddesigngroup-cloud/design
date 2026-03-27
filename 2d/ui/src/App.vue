@@ -6339,6 +6339,26 @@ function closeOrderEntry(force = false) {
   orderEntryOpen.value = false;
 }
 
+function cancelPendingOrderDrawingSave() {
+  if (_orderDrawingSaveTimeout) {
+    clearTimeout(_orderDrawingSaveTimeout);
+    _orderDrawingSaveTimeout = 0;
+  }
+}
+
+function resetActiveOrderWorkspace({ clearEditor = true } = {}) {
+  cancelPendingOrderDrawingSave();
+  orderDesignCatalog.value = [];
+  orderDesignCatalogLoadedForOrderId.value = "";
+  orderDesignPlacements.value = [];
+  stageCabinetPlaceholderBoxes.value = [];
+  activeCabinetDesignId.value = null;
+  if (clearEditor) {
+    editorRef.value?.clearAll?.();
+    editorRef.value?.goOrigin?.();
+  }
+}
+
 async function ensureOrderGate() {
   if (!requiresOrderGate.value) return;
   if (!ordersCatalog.value.length && !ordersLoading.value) {
@@ -6386,12 +6406,8 @@ function openOrderEditor() {
 }
 
 async function handleMissingActiveOrder(message = "سفارش فعال دیگر در دیتابیس وجود ندارد. یکی از سفارش‌های موجود را دوباره انتخاب کنید.") {
+  resetActiveOrderWorkspace();
   activeOrder.value = null;
-  orderDesignCatalog.value = [];
-  orderDesignCatalogLoadedForOrderId.value = "";
-  orderDesignPlacements.value = [];
-  stageCabinetPlaceholderBoxes.value = [];
-  activeCabinetDesignId.value = null;
   orderDraftMode.value = "create";
   resetOrderDraft();
   await loadOrders();
@@ -6490,9 +6506,11 @@ async function createOrder() {
       throw new Error(detail || `create-order-failed-${res.status}`);
     }
     const created = normalizeOrderRecord(await res.json());
+    resetActiveOrderWorkspace();
     activeOrder.value = created;
     orderDraftMode.value = "edit";
     hydrateOrderDraftFromOrder(created);
+    await loadOrderDrawing(created.id, { clearWhenMissing: true });
     await loadOrders();
     await loadOrderDesignCatalog(true);
     closeOrderEntry(true);
@@ -6579,6 +6597,7 @@ async function saveActiveOrderDrawing() {
 }
 
 async function selectOrder(item) {
+  resetActiveOrderWorkspace();
   activeOrder.value = normalizeOrderRecord(item);
   orderDraftMode.value = "edit";
   hydrateOrderDraftFromOrder(activeOrder.value);
@@ -6598,12 +6617,8 @@ async function archiveOrder(item) {
     const res = await fetch(`/api/orders/${encodeURIComponent(target.id)}`, { method: "DELETE" });
     if (!res.ok) throw new Error("archive-order-failed");
     if (activeOrder.value?.id === target.id) {
+      resetActiveOrderWorkspace();
       activeOrder.value = null;
-      orderDesignCatalog.value = [];
-      orderDesignCatalogLoadedForOrderId.value = "";
-      orderDesignPlacements.value = [];
-      stageCabinetPlaceholderBoxes.value = [];
-      activeCabinetDesignId.value = null;
     }
     await loadOrders();
     await ensureOrderGate();

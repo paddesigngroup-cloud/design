@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -148,7 +148,12 @@ async def require_accessible_sub_category(
     admin_id: uuid.UUID | None,
     sub_category_id: uuid.UUID,
 ) -> SubCategory:
-    stmt = select(SubCategory).where(SubCategory.id == sub_category_id)
+    stmt = select(SubCategory).where(
+        and_(
+            SubCategory.id == sub_category_id,
+            SubCategory.deleted_at.is_(None),
+        )
+    )
     if admin_id is not None:
         stmt = stmt.where(or_(SubCategory.admin_id.is_(None), SubCategory.admin_id == admin_id))
     item = await session.scalar(stmt)

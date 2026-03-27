@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 
 from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import SubCategory, SubCategoryDesign, SubCategoryDesignInteriorInstance, SubCategoryDesignPart
-from designkp_backend.db.models.account import OrderDesign
 from designkp_backend.services.admin_access import require_admin_if_present
 from designkp_backend.services.sub_category_designs import (
     build_sub_category_param_display_snapshot,
@@ -265,7 +265,14 @@ async def _load_design(session: AsyncSession, design_uuid: uuid.UUID) -> SubCate
     )
     if await interior_instance_tables_ready(session):
         stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
-    item = await session.scalar(stmt.where(SubCategoryDesign.id == design_uuid))
+    item = await session.scalar(
+        stmt.where(
+            and_(
+                SubCategoryDesign.id == design_uuid,
+                SubCategoryDesign.deleted_at.is_(None),
+            )
+        )
+    )
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design not found.")
     return item
@@ -334,9 +341,19 @@ async def list_sub_category_designs(
     if include_interior:
         stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
     if admin_id is None:
-        stmt = stmt.where(SubCategoryDesign.admin_id.is_(None))
+        stmt = stmt.where(
+            and_(
+                SubCategoryDesign.admin_id.is_(None),
+                SubCategoryDesign.deleted_at.is_(None),
+            )
+        )
     else:
-        stmt = stmt.where(or_(SubCategoryDesign.admin_id.is_(None), SubCategoryDesign.admin_id == admin_id))
+        stmt = stmt.where(
+            and_(
+                or_(SubCategoryDesign.admin_id.is_(None), SubCategoryDesign.admin_id == admin_id),
+                SubCategoryDesign.deleted_at.is_(None),
+            )
+        )
     stmt = stmt.order_by(
         SubCategoryDesign.is_system.desc(),
         SubCategoryDesign.sort_order.asc(),
@@ -419,24 +436,18 @@ async def update_sub_category_design(
 @router.delete("/{design_uuid}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_sub_category_design(design_uuid: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
     item = await session.get(SubCategoryDesign, design_uuid)
-    if not item:
+    if not item or item.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design not found.")
-    linked_order_design = await session.scalar(
-        select(OrderDesign.id).where(
-            OrderDesign.sub_category_design_id == design_uuid,
-            OrderDesign.deleted_at.is_(None),
-        ).limit(1)
-    )
-    if linked_order_design:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This sub-category design is used in one or more order designs and cannot be deleted.",
-        )
     try:
+        deleted_at = datetime.now(timezone.utc)
+        item.deleted_at = deleted_at
+        await session.execute(
+            delete(SubCategoryDesignPart).where(SubCategoryDesignPart.design_id == design_uuid)
+        )
         if await interior_instance_tables_ready(session):
-            await session.delete(item)
-        else:
-            await session.execute(delete(SubCategoryDesign).where(SubCategoryDesign.id == design_uuid))
+            await session.execute(
+                delete(SubCategoryDesignInteriorInstance).where(SubCategoryDesignInteriorInstance.design_id == design_uuid)
+            )
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
@@ -483,7 +494,7 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
     item = await _load_design(session, design_uuid)
     include_interior = await interior_instance_tables_ready(session)
     sub_category = await session.get(SubCategory, item.sub_category_id)
-    if not sub_category:
+    if not sub_category or sub_category.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found for this design.")
     raw_params = {}
     resolved_base_formulas = {}

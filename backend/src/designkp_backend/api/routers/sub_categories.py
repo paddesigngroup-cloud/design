@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.catalog import Category, Param, SubCategory, SubCategoryParamDefault, Template
+from designkp_backend.db.models.catalog import Category, Param, SubCategory, SubCategoryDesign, SubCategoryParamDefault, Template
 from designkp_backend.services.admin_access import require_admin_if_present
 from designkp_backend.services.admin_storage import admin_icon_exists, finalize_param_group_icon, normalize_icon_file_name
 from designkp_backend.services.sub_category_defaults import get_params_for_scope, normalize_default_value, sync_defaults_for_sub_categories
@@ -243,7 +244,12 @@ async def list_sub_categories(
     items = (
         await session.scalars(
             select(SubCategory)
-            .where(or_(SubCategory.admin_id.is_(None), SubCategory.admin_id == admin_id))
+            .where(
+                and_(
+                    or_(SubCategory.admin_id.is_(None), SubCategory.admin_id == admin_id),
+                    SubCategory.deleted_at.is_(None),
+                )
+            )
             .order_by(SubCategory.sort_order.asc(), SubCategory.sub_cat_id.asc())
         )
     ).all()
@@ -283,7 +289,7 @@ async def update_sub_category(
     session: AsyncSession = Depends(get_db_session),
 ) -> SubCategoryItem:
     item = await session.get(SubCategory, sub_category_uuid)
-    if not item:
+    if not item or item.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found.")
     await require_admin_if_present(session, payload.admin_id)
     await _require_accessible_template(session, payload.temp_id, payload.admin_id)
@@ -307,8 +313,19 @@ async def update_sub_category(
 @router.delete("/{sub_category_uuid}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_sub_category(sub_category_uuid: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
     item = await session.get(SubCategory, sub_category_uuid)
-    if not item:
+    if not item or item.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found.")
-    await session.delete(item)
+    deleted_at = datetime.now(timezone.utc)
+    item.deleted_at = deleted_at
+    await session.execute(
+        update(SubCategoryDesign)
+        .where(
+            and_(
+                SubCategoryDesign.sub_category_id == sub_category_uuid,
+                SubCategoryDesign.deleted_at.is_(None),
+            )
+        )
+        .values(deleted_at=deleted_at)
+    )
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
