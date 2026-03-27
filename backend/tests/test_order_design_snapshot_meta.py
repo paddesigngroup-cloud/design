@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -7,6 +8,7 @@ from uuid import uuid4
 from designkp_backend.services.order_designs import (
     SNAPSHOT_META_KEY,
     build_order_design_snapshot_checksum,
+    next_order_design_instance_code,
     read_order_design_snapshot_checksum,
     strip_snapshot_state_from_meta,
     with_order_design_snapshot_checksum,
@@ -64,3 +66,45 @@ def test_checksum_is_stable_for_reordered_inputs() -> None:
     )
 
     assert checksum_1 == checksum_2
+
+
+class _FakeScalarResult:
+    def __init__(self, values: list[str]) -> None:
+        self._values = values
+
+    def all(self) -> list[str]:
+        return list(self._values)
+
+
+class _FakeSession:
+    def __init__(self, values: list[str]) -> None:
+        self._values = values
+
+    async def scalars(self, _stmt: object) -> _FakeScalarResult:
+        return _FakeScalarResult(self._values)
+
+
+def test_next_order_design_instance_code_uses_u_sequence() -> None:
+    session = _FakeSession(["U1", "legacy-01", "U2", "u10", "Z4", "Uxyz"])
+    result = asyncio.run(
+        next_order_design_instance_code(
+            session,
+            order_id=uuid4(),
+            design_code="z1",
+        )
+    )
+
+    assert result == "U11"
+
+
+def test_next_order_design_instance_code_starts_from_u1_when_no_matching_rows() -> None:
+    session = _FakeSession(["z1-01", "A2", ""])
+    result = asyncio.run(
+        next_order_design_instance_code(
+            session,
+            order_id=uuid4(),
+            design_code="z1",
+        )
+    )
+
+    assert result == "U1"

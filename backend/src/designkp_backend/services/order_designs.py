@@ -472,7 +472,6 @@ async def next_order_design_instance_code(
     order_id: uuid.UUID,
     design_code: str,
 ) -> str:
-    normalized_design_code = str(design_code or "").strip() or "design"
     rows = (
         await session.scalars(
             select(OrderDesign.instance_code)
@@ -480,15 +479,15 @@ async def next_order_design_instance_code(
             .order_by(OrderDesign.instance_code.asc())
         )
     ).all()
-    prefix = f"{normalized_design_code}-"
     max_seq = 0
     for value in rows:
         text = str(value or "").strip()
-        if text.startswith(prefix):
-            suffix = text[len(prefix) :]
-            if suffix.isdigit():
-                max_seq = max(max_seq, int(suffix))
-    return f"{normalized_design_code}-{max_seq + 1:02d}"
+        if not text or text[0].upper() != "U":
+            continue
+        suffix = text[1:]
+        if suffix.isdigit():
+            max_seq = max(max_seq, int(suffix))
+    return f"U{max_seq + 1}"
 
 
 async def next_order_design_sort_order(session: AsyncSession, *, order_id: uuid.UUID) -> int:
