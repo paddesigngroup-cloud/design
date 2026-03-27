@@ -1379,17 +1379,35 @@ textarea {
 .glbWallAttrs__objectTitle--design {
   padding: 8px 10px;
 }
+.glbWallAttrs__objectTitleTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 .glbWallAttrs__objectTitleMain {
   font-size: 13px;
   font-weight: 800;
   color: #1f3342;
 }
 .glbWallAttrs__objectTitleMeta {
-  margin-top: 3px;
   font-size: 11px;
   font-weight: 700;
   color: #64748b;
   direction: ltr;
+}
+.glbWallAttrs__objectTitleName {
+  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-align: right;
+}
+@media (max-width: 520px) {
+  .glbWallAttrs__objectTitleTop {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 .glbWallAttrs__attrGroup {
   width: 100%;

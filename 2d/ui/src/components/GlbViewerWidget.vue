@@ -233,8 +233,9 @@ const activeOrderDesignIdentity = computed(() => {
   if (!item) return null;
   const title = String(item.design_title || item.instance_code || "").trim();
   const code = String(item.design_code || "").trim();
-  if (!title && !code) return null;
-  return { title, code };
+  const name = String(item.instance_code || "").trim();
+  if (!title && !code && !name) return null;
+  return { title, code, name };
 });
 const hasModelOutlineSelection = computed(() => !!attrsSnapshot.value?.selection?.selectedModelOutline);
 const selectedOrderDesignCount = computed(() => {
@@ -1495,10 +1496,15 @@ watch(
 
     <template v-if="activeOrderDesignIdentity && hasOrderDesignSelection">
       <div class="glbWallAttrs__objectTitle glbWallAttrs__objectTitle--design">
-        <div class="glbWallAttrs__objectTitleMain">
-          {{ selectedOrderDesignCount > 1 ? `${selectedOrderDesignCount} طرح سفارش` : (activeOrderDesignIdentity.title || "طرح سفارش") }}
+        <div class="glbWallAttrs__objectTitleTop">
+          <div class="glbWallAttrs__objectTitleMain">
+            {{ selectedOrderDesignCount > 1 ? `${selectedOrderDesignCount} طرح سفارش` : (activeOrderDesignIdentity.title || "طرح سفارش") }}
+          </div>
+          <div v-if="activeOrderDesignIdentity.code" class="glbWallAttrs__objectTitleMeta">کد طرح: {{ activeOrderDesignIdentity.code }}</div>
         </div>
-        <div v-if="activeOrderDesignIdentity.code" class="glbWallAttrs__objectTitleMeta">کد طرح: {{ activeOrderDesignIdentity.code }}</div>
+        <div v-if="activeOrderDesignIdentity.name && selectedOrderDesignCount <= 1" class="glbWallAttrs__objectTitleName">
+          نام طرح: {{ activeOrderDesignIdentity.name }}
+        </div>
       </div>
       <div v-for="group in orderDesignAttrGroups" :key="group.key" class="glbWallAttrs__attrGroup">
         <button type="button" class="glbWallAttrs__groupToggle" @click="toggleOrderDesignGroup(group.key)">
