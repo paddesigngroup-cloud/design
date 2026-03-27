@@ -187,6 +187,7 @@ const hoveredCabinetDesignId = ref(null);
 const hoveredConstructionDesignId = ref(null);
 const cabinetDesignDropLoading = ref(false);
 const cabinetDesignDropLoadingTitle = ref("");
+const cabinetDesignDropLoadingMode = ref("add");
 const ORDER_DRAWING_AUTOSAVE_DEBOUNCE_MS = 900;
 let _orderDrawingSaveTimeout = 0;
 const editorViewportState = editorViewportRef;
@@ -2324,10 +2325,16 @@ async function updateActiveOrderDesignAttr({ key, value }) {
   const active = activeStageOrderDesign.value;
   const attrKey = String(key || "").trim();
   if (!active?.id || !attrKey) return;
+  const normalizedValue = value == null ? "" : String(value);
+  const currentValue = active?.order_attr_values?.[attrKey] == null
+    ? ""
+    : String(active.order_attr_values[attrKey]);
+  if (normalizedValue === currentValue) return;
+  if (String(orderDesignSavingId.value || "") === String(active.id)) return;
   const activePlacement = activeStageOrderPlacement.value || getCurrentModel2dTransform();
   const nextValues = {
     ...(active.order_attr_values || {}),
-    [attrKey]: value == null ? "" : String(value),
+    [attrKey]: normalizedValue,
   };
   orderDesignCatalog.value = orderDesignCatalog.value.map((item) =>
     String(item.id) === String(active.id)
@@ -2335,6 +2342,12 @@ async function updateActiveOrderDesignAttr({ key, value }) {
       : item
   );
   orderDesignSavingId.value = String(active.id);
+  const shouldToggleStageLoading = !cabinetDesignDropLoading.value;
+  if (shouldToggleStageLoading) {
+    cabinetDesignDropLoadingMode.value = "edit";
+    cabinetDesignDropLoading.value = true;
+    cabinetDesignDropLoadingTitle.value = String(active.design_title || active.instance_code || "").trim();
+  }
   try {
     const fresh = await persistOrderDesignRecord(active, nextValues);
     if (fresh) {
@@ -2354,12 +2367,17 @@ async function updateActiveOrderDesignAttr({ key, value }) {
     if (String(orderDesignSavingId.value) === String(active.id)) {
       orderDesignSavingId.value = "";
     }
+    if (shouldToggleStageLoading) {
+      cabinetDesignDropLoading.value = false;
+      cabinetDesignDropLoadingTitle.value = "";
+      cabinetDesignDropLoadingMode.value = "add";
+    }
   }
 }
 
 async function saveOrderDesignEditor() {
   const draft = orderDesignEditorDraft.value;
-  if (!draft?.id) return;
+  if (!draft?.id || cabinetDesignDropLoading.value) return;
   const designTitle = String(draft.design_title || "").trim();
   const instanceCode = String(draft.instance_code || "").trim();
   if (!designTitle) {
@@ -2370,6 +2388,10 @@ async function saveOrderDesignEditor() {
     showAlert("کد نمونه نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
     return;
   }
+  const activePlacement = getOrderDesignPlacement(draft.id) || getCurrentModel2dTransform();
+  cabinetDesignDropLoadingMode.value = "edit";
+  cabinetDesignDropLoading.value = true;
+  cabinetDesignDropLoadingTitle.value = designTitle || instanceCode;
   try {
     const fresh = await persistOrderDesignRecord({
       ...draft,
@@ -2380,6 +2402,11 @@ async function saveOrderDesignEditor() {
       orderDesignCatalog.value = orderDesignCatalog.value.map((item) =>
         String(item.id) === String(fresh.id) ? fresh : item
       );
+      if (String(activeCabinetDesignId.value || "") === String(fresh.id)) {
+        stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
+        restoreActiveOrderDesignToEditor(fresh, activePlacement);
+        await saveActiveOrderDrawing();
+      }
     } else {
       await loadOrderDesignCatalog(true);
     }
@@ -2387,6 +2414,10 @@ async function saveOrderDesignEditor() {
     showAlert("طرح سفارش ذخیره شد.", { title: "ذخیره طرح" });
   } catch (error) {
     showAlert(error?.message || "ذخیره طرح سفارش انجام نشد.", { title: "خطا" });
+  } finally {
+    cabinetDesignDropLoading.value = false;
+    cabinetDesignDropLoadingTitle.value = "";
+    cabinetDesignDropLoadingMode.value = "add";
   }
 }
 
@@ -7030,6 +7061,7 @@ async function onPresetPointerUp(ev) {
     if (presetDrag.value.type === "column") {
       editorRef.value?.placeColumnAtClient?.(ev.clientX, ev.clientY);
     } else if (presetDrag.value.type === "cabinetDesign" && presetDrag.value.design?.preview?.viewer_boxes?.length) {
+      cabinetDesignDropLoadingMode.value = "add";
       cabinetDesignDropLoading.value = true;
       cabinetDesignDropLoadingTitle.value = String(presetDrag.value.design.design_title || "").trim();
       try {
@@ -7056,6 +7088,7 @@ async function onPresetPointerUp(ev) {
       } finally {
         cabinetDesignDropLoading.value = false;
         cabinetDesignDropLoadingTitle.value = "";
+        cabinetDesignDropLoadingMode.value = "add";
       }
     } else if (presetDrag.value.preset) {
       const lines = buildPresetLines(presetDrag.value.preset.kind);
@@ -7878,7 +7911,7 @@ onBeforeUnmount(() => {
         <div v-if="cabinetDesignDropLoading" class="stageDropLoading" aria-live="polite">
           <div class="stageDropLoading__card">
             <span class="stageDropLoading__spinner" aria-hidden="true"></span>
-            <div class="stageDropLoading__title">در حال افزودن طرح به صحنه...</div>
+            <div class="stageDropLoading__title">{{ cabinetDesignDropLoadingMode === "edit" ? "در حال ویرایش طرح..." : "در حال افزودن طرح به صحنه..." }}</div>
             <div v-if="cabinetDesignDropLoadingTitle" class="stageDropLoading__caption">{{ cabinetDesignDropLoadingTitle }}</div>
           </div>
         </div>
