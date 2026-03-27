@@ -3124,9 +3124,28 @@ function toggleConstructionCategoryScope(item) {
   if (!item.__isNew) item.__dirty = true;
 }
 
+function hasSubCategoryScopeTitleConflict(item) {
+  const title = String(item?.sub_cat_title || "").trim().toLowerCase();
+  if (!title) return false;
+  return editableSubCategories.value.some((row) =>
+    String(row?.id) !== String(item?.id) &&
+    Number(row?.cat_id) === Number(item?.cat_id) &&
+    String(row?.admin_id || "system") === String(item?.admin_id || "system") &&
+    String(row?.sub_cat_title || "").trim().toLowerCase() === title
+  );
+}
+
 function toggleConstructionSubCategoryScope(item) {
+  const previousAdminId = item.admin_id;
+  const previousIsSystem = item.is_system;
   item.admin_id = item.admin_id === null ? currentAdminId.value : null;
   item.is_system = item.admin_id === null;
+  if (hasSubCategoryScopeTitleConflict(item)) {
+    item.admin_id = previousAdminId;
+    item.is_system = previousIsSystem;
+    showAlert("در نوع مالک انتخاب‌شده، ساب‌کت دیگری با همین عنوان و همین دسته وجود دارد.", { title: "اعتبارسنجی" });
+    return;
+  }
   if (!item.__isNew) item.__dirty = true;
 }
 
@@ -5104,7 +5123,7 @@ async function saveConstructionSubCategories(options = {}) {
   try {
     for (const id of constructionDeletedSubCategoryIds.value) {
       const res = await fetch(`/api/sub-categories/${encodeURIComponent(String(id))}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("delete-failed");
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف ساب‌کت انجام نشد."));
     }
     for (const item of editableSubCategories.value.filter((row) => row.__isNew)) {
       const res = await fetch("/api/sub-categories", {
@@ -5112,7 +5131,7 @@ async function saveConstructionSubCategories(options = {}) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(normalizeSubCategoryPayload(item)),
       });
-      if (!res.ok) throw new Error("create-failed");
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ایجاد ساب‌کت انجام نشد."));
     }
     for (const item of editableSubCategories.value.filter((row) => !row.__isNew && row.__dirty)) {
       const res = await fetch(`/api/sub-categories/${encodeURIComponent(String(item.id))}`, {
@@ -5120,14 +5139,14 @@ async function saveConstructionSubCategories(options = {}) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(normalizeSubCategoryPayload(item)),
       });
-      if (!res.ok) throw new Error("save-failed");
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره ساب‌کت انجام نشد."));
     }
     await loadConstructionSubCategories();
     showAlert(options.successMessage || "تغییرات جدول ساب‌کت‌ها با موفقیت ذخیره شد.", {
       title: options.successTitle || "ذخیره تغییرات",
     });
-  } catch (_) {
-    showAlert("ذخیره تغییرات جدول ساب‌کت‌ها در دیتابیس انجام نشد.", { title: "خطا" });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره تغییرات جدول ساب‌کت‌ها در دیتابیس انجام نشد.", { title: "خطا" });
     await loadConstructionSubCategories();
   } finally {
     constructionSavingIds.value = [];

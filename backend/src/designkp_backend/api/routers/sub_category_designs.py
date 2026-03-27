@@ -167,6 +167,23 @@ async def _next_design_id(session: AsyncSession) -> int:
     return int(max_id or 0) + 1
 
 
+async def _resolve_available_design_id(
+    session: AsyncSession,
+    requested_id: int | None,
+    *,
+    exclude_uuid: uuid.UUID | None = None,
+) -> int:
+    candidate = int(requested_id or 0)
+    if candidate >= 1:
+        stmt = select(SubCategoryDesign.id).where(SubCategoryDesign.design_id == candidate)
+        if exclude_uuid is not None:
+            stmt = stmt.where(SubCategoryDesign.id != exclude_uuid)
+        existing = await session.scalar(stmt.limit(1))
+        if not existing:
+            return candidate
+    return await _next_design_id(session)
+
+
 async def _ensure_unique_design_code(
     session: AsyncSession,
     *,
@@ -257,6 +274,13 @@ def _serialize_preview(
             for item in interior_instances
         ],
     )
+
+
+def _deleted_design_code(code: str, design_uuid: uuid.UUID) -> str:
+    suffix = f"__deleted__{str(design_uuid).replace('-', '')[:12]}"
+    base = (code or "design").strip() or "design"
+    max_base_len = max(1, 64 - len(suffix))
+    return f"{base[:max_base_len]}{suffix}"
 
 
 async def _load_design(session: AsyncSession, design_uuid: uuid.UUID) -> SubCategoryDesign:
@@ -369,7 +393,7 @@ async def list_sub_category_designs(
 async def create_sub_category_design(payload: SubCategoryDesignCreate, session: AsyncSession = Depends(get_db_session)) -> SubCategoryDesignItem:
     await require_admin_if_present(session, payload.admin_id)
     sub_category = await require_accessible_sub_category(session, admin_id=payload.admin_id, sub_category_id=payload.sub_category_id)
-    next_design_id = payload.design_id or await _next_design_id(session)
+    next_design_id = await _resolve_available_design_id(session, payload.design_id)
     title = payload.design_title.strip()
     code = payload.code.strip()
     if not code:
@@ -389,7 +413,11 @@ async def create_sub_category_design(payload: SubCategoryDesignCreate, session: 
         is_system=payload.is_system,
     )
     session.add(item)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Design ID or code is already used.") from exc
     await _replace_parts(session, design=item, sub_category=sub_category, parts=payload.parts)
     await session.flush()
     item = await _load_design(session, item.id)
@@ -408,6 +436,7 @@ async def update_sub_category_design(
     item = await _load_design(session, design_uuid)
     await require_admin_if_present(session, payload.admin_id)
     sub_category = await require_accessible_sub_category(session, admin_id=payload.admin_id, sub_category_id=payload.sub_category_id)
+    next_design_id = await _resolve_available_design_id(session, payload.design_id, exclude_uuid=item.id)
     title = payload.design_title.strip()
     code = payload.code.strip()
     if not code:
@@ -418,14 +447,18 @@ async def update_sub_category_design(
     item.temp_id = sub_category.temp_id
     item.cat_id = sub_category.cat_id
     item.sub_cat_id = sub_category.sub_cat_id
-    item.design_id = payload.design_id
+    item.design_id = next_design_id
     item.design_title = title
     item.code = code
     item.title = title
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     await _replace_parts(session, design=item, sub_category=sub_category, parts=payload.parts)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Design ID or code is already used.") from exc
     item = await _load_design(session, item.id)
     await rebuild_design_snapshots(session, item)
     await session.commit()
@@ -441,6 +474,8 @@ async def delete_sub_category_design(design_uuid: uuid.UUID, session: AsyncSessi
     try:
         deleted_at = datetime.now(timezone.utc)
         item.deleted_at = deleted_at
+        item.design_id = None
+        item.code = _deleted_design_code(item.code, item.id)
         await session.execute(
             delete(SubCategoryDesignPart).where(SubCategoryDesignPart.design_id == design_uuid)
         )

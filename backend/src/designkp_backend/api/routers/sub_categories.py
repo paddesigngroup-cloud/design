@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import Category, Param, SubCategory, SubCategoryDesign, SubCategoryParamDefault, Template
@@ -87,6 +88,77 @@ def _sub_category_code(sub_cat_id: int) -> str:
 async def _next_sub_cat_id(session: AsyncSession) -> int:
     max_id = await session.scalar(select(func.max(SubCategory.sub_cat_id)))
     return int(max_id or 0) + 1
+
+
+async def _resolve_available_sub_cat_id(
+    session: AsyncSession,
+    requested_id: int | None,
+    *,
+    exclude_uuid: uuid.UUID | None = None,
+) -> int:
+    candidate = int(requested_id or 0)
+    if candidate >= 1:
+        stmt = select(SubCategory.id).where(SubCategory.sub_cat_id == candidate)
+        if exclude_uuid is not None:
+            stmt = stmt.where(SubCategory.id != exclude_uuid)
+        existing = await session.scalar(stmt.limit(1))
+        if not existing:
+            return candidate
+    return await _next_sub_cat_id(session)
+
+
+def _deleted_sub_category_code(code: str, item_id: uuid.UUID) -> str:
+    suffix = f"__deleted__{str(item_id).replace('-', '')[:12]}"
+    base = (code or "sub_category").strip() or "sub_category"
+    max_base_len = max(1, 64 - len(suffix))
+    return f"{base[:max_base_len]}{suffix}"
+
+
+def _deleted_sub_category_title(title: str, item_id: uuid.UUID) -> str:
+    suffix = f" [deleted {str(item_id).replace('-', '')[:8]}]"
+    base = (title or "ساب‌کت حذف‌شده").strip() or "ساب‌کت حذف‌شده"
+    max_base_len = max(1, 255 - len(suffix))
+    return f"{base[:max_base_len]}{suffix}"
+
+
+def _sub_category_integrity_message(exc: IntegrityError) -> str:
+    text = str(getattr(exc, "orig", exc))
+    if "uq_sub_categories_sub_cat_id" in text:
+        return "شناسه ساب‌کت تکراری است."
+    if "uq_sub_categories_system_title" in text or "uq_sub_categories_admin_title" in text:
+        return "عنوان ساب‌کت در همین دسته و همین مالک تکراری است."
+    return "ذخیره ساب‌کت به‌دلیل تداخل داده انجام نشد."
+
+
+async def _release_deleted_sub_category_title_conflicts(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    cat_id: int,
+    title: str,
+    exclude_uuid: uuid.UUID | None = None,
+) -> None:
+    normalized_title = str(title or "").strip()
+    if not normalized_title:
+        return
+    stmt = select(SubCategory).where(
+        and_(
+            SubCategory.cat_id == cat_id,
+            SubCategory.sub_cat_title == normalized_title,
+            SubCategory.deleted_at.is_not(None),
+        )
+    )
+    if admin_id is None:
+        stmt = stmt.where(SubCategory.admin_id.is_(None))
+    else:
+        stmt = stmt.where(SubCategory.admin_id == admin_id)
+    if exclude_uuid is not None:
+        stmt = stmt.where(SubCategory.id != exclude_uuid)
+    items = (await session.scalars(stmt)).all()
+    for row in items:
+        next_title = _deleted_sub_category_title(row.sub_cat_title, row.id)
+        row.sub_cat_title = next_title
+        row.title = next_title
 
 
 async def _require_accessible_category(
@@ -261,8 +333,14 @@ async def create_sub_category(payload: SubCategoryCreate, session: AsyncSession 
     await require_admin_if_present(session, payload.admin_id)
     await _require_accessible_template(session, payload.temp_id, payload.admin_id)
     await _require_accessible_category(session, temp_id=payload.temp_id, cat_id=payload.cat_id, admin_id=payload.admin_id)
-    next_id = payload.sub_cat_id or await _next_sub_cat_id(session)
+    next_id = await _resolve_available_sub_cat_id(session, payload.sub_cat_id)
     title = payload.sub_cat_title.strip()
+    await _release_deleted_sub_category_title_conflicts(
+        session,
+        admin_id=payload.admin_id,
+        cat_id=payload.cat_id,
+        title=title,
+    )
     item = SubCategory(
         admin_id=payload.admin_id,
         temp_id=payload.temp_id,
@@ -275,9 +353,13 @@ async def create_sub_category(payload: SubCategoryCreate, session: AsyncSession 
         is_system=payload.is_system,
     )
     session.add(item)
-    await session.flush()
-    await _apply_param_defaults(session, item, payload.param_defaults, payload.param_overrides)
-    await session.commit()
+    try:
+        await session.flush()
+        await _apply_param_defaults(session, item, payload.param_defaults, payload.param_overrides)
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_sub_category_integrity_message(exc)) from exc
     await session.refresh(item)
     return (await _serialize_items(session, [item], payload.admin_id))[0]
 
@@ -294,18 +376,30 @@ async def update_sub_category(
     await require_admin_if_present(session, payload.admin_id)
     await _require_accessible_template(session, payload.temp_id, payload.admin_id)
     await _require_accessible_category(session, temp_id=payload.temp_id, cat_id=payload.cat_id, admin_id=payload.admin_id)
+    next_sub_cat_id = await _resolve_available_sub_cat_id(session, payload.sub_cat_id, exclude_uuid=item.id)
     title = payload.sub_cat_title.strip()
+    await _release_deleted_sub_category_title_conflicts(
+        session,
+        admin_id=payload.admin_id,
+        cat_id=payload.cat_id,
+        title=title,
+        exclude_uuid=item.id,
+    )
     item.admin_id = payload.admin_id
     item.temp_id = payload.temp_id
     item.cat_id = payload.cat_id
-    item.sub_cat_id = payload.sub_cat_id
+    item.sub_cat_id = next_sub_cat_id
     item.sub_cat_title = title
-    item.code = _sub_category_code(payload.sub_cat_id)
+    item.code = _sub_category_code(next_sub_cat_id)
     item.title = title
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
-    await _apply_param_defaults(session, item, payload.param_defaults, payload.param_overrides)
-    await session.commit()
+    try:
+        await _apply_param_defaults(session, item, payload.param_defaults, payload.param_overrides)
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_sub_category_integrity_message(exc)) from exc
     await session.refresh(item)
     return (await _serialize_items(session, [item], payload.admin_id))[0]
 
@@ -317,15 +411,24 @@ async def delete_sub_category(sub_category_uuid: uuid.UUID, session: AsyncSessio
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found.")
     deleted_at = datetime.now(timezone.utc)
     item.deleted_at = deleted_at
-    await session.execute(
-        update(SubCategoryDesign)
-        .where(
-            and_(
-                SubCategoryDesign.sub_category_id == sub_category_uuid,
-                SubCategoryDesign.deleted_at.is_(None),
+    item.sub_cat_id = None
+    item.code = _deleted_sub_category_code(item.code, item.id)
+    next_title = _deleted_sub_category_title(item.sub_cat_title, item.id)
+    item.sub_cat_title = next_title
+    item.title = next_title
+    designs = (
+        await session.scalars(
+            select(SubCategoryDesign).where(
+                and_(
+                    SubCategoryDesign.sub_category_id == sub_category_uuid,
+                    SubCategoryDesign.deleted_at.is_(None),
+                )
             )
         )
-        .values(deleted_at=deleted_at)
-    )
+    ).all()
+    for design in designs:
+        design.deleted_at = deleted_at
+        design.design_id = None
+        design.code = f"{(design.code or 'design')[:41]}__deleted__{str(design.id).replace('-', '')[:12]}"
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
