@@ -199,6 +199,7 @@ const cabinetDesignDropLoadingTitle = ref("");
 const cabinetDesignDropLoadingMode = ref("add");
 const ORDER_DRAWING_AUTOSAVE_DEBOUNCE_MS = 900;
 let _orderDrawingSaveTimeout = 0;
+let _orderDesignPlacementSyncPaused = false;
 const editorViewportState = editorViewportRef;
 const constructionWizardOpen = ref(false);
 const constructionStep = ref("templates");
@@ -2576,9 +2577,19 @@ function getCurrentModel2dTransform() {
   };
 }
 
+function persistCurrentActiveOrderDesignPlacement() {
+  const activeId = String(activeCabinetDesignId.value || "").trim();
+  if (!activeId) return;
+  upsertOrderDesignPlacement({
+    orderDesignId: activeId,
+    ...getCurrentModel2dTransform(),
+  });
+}
+
 function restoreActiveOrderDesignToEditor(item, placement = null) {
   const target = normalizeOrderDesignRecord(item);
   if (!target?.viewer_boxes?.length) return false;
+  persistCurrentActiveOrderDesignPlacement();
   const nextPlacement = normalizeOrderDesignPlacement({
     orderDesignId: target.id,
     ...(placement || {}),
@@ -2598,17 +2609,22 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
     },
   };
   let restored = false;
-  if (full && editorRef.value?.restoreSnapshot) {
-    restored = !!editorRef.value.restoreSnapshot(nextSnapshot);
-  }
-  if (!restored && editorRef.value?.setModel2dLines) {
-    editorRef.value.setModel2dLines(worldLines, null, false);
-    model2dTransformRef.value = {
-      x: nextPlacement.x,
-      y: nextPlacement.y,
-      rotRad: nextPlacement.rotRad,
-    };
-    restored = true;
+  _orderDesignPlacementSyncPaused = true;
+  try {
+    if (full && editorRef.value?.restoreSnapshot) {
+      restored = !!editorRef.value.restoreSnapshot(nextSnapshot);
+    }
+    if (!restored && editorRef.value?.setModel2dLines) {
+      editorRef.value.setModel2dLines(worldLines, null, false);
+      model2dTransformRef.value = {
+        x: nextPlacement.x,
+        y: nextPlacement.y,
+        rotRad: nextPlacement.rotRad,
+      };
+      restored = true;
+    }
+  } finally {
+    _orderDesignPlacementSyncPaused = false;
   }
   if (restored) {
     activeCabinetDesignId.value = target.id;
@@ -2622,7 +2638,6 @@ function placeOrderDesignOnStage(item) {
   const target = normalizeOrderDesignRecord(item);
   if (!target?.viewer_boxes?.length) return;
   stageCabinetPlaceholderBoxes.value = target.viewer_boxes.map(normalizeCabinetBox);
-  activeCabinetDesignId.value = target.id;
   restoreActiveOrderDesignToEditor(target, getOrderDesignPlacement(target.id));
   saveActiveOrderDrawing().catch(() => {});
 }
@@ -2634,7 +2649,6 @@ function activateOrderDesignFromStage(orderDesignId) {
   if (!target?.viewer_boxes?.length) return;
   const alreadyActive = String(activeCabinetDesignId.value || "") === key;
   stageCabinetPlaceholderBoxes.value = target.viewer_boxes.map(normalizeCabinetBox);
-  activeCabinetDesignId.value = target.id;
   const restored = restoreActiveOrderDesignToEditor(target, getOrderDesignPlacement(target.id));
   if (!restored && alreadyActive) {
     editorRef.value?.selectModelOutline?.();
@@ -5740,24 +5754,15 @@ function syncQuickStateFromEditor() {
   };
   const model2dLines = Array.isArray(full?.model2dSnap?.lines) ? full.model2dSnap.lines : [];
   if (!model2dLines.length) {
-    clearStageOrderDesignPlacement({ persist: !orderDrawingLoading.value });
+    stageCabinetPlaceholderBoxes.value = [];
+    activeCabinetDesignId.value = null;
+    activeStageOrderDesignSelected.value = false;
+    selectedStageOrderDesignIds.value = [];
   } else if (activeCabinetDesignId.value) {
     upsertOrderDesignPlacement({
       orderDesignId: activeCabinetDesignId.value,
       ...getCurrentModel2dTransform(),
     });
-  }
-  if (Array.isArray(full?.passiveModels) && full.passiveModels.length) {
-    for (const model of full.passiveModels) {
-      const key = String(model?.id || "").trim();
-      if (!key) continue;
-      upsertOrderDesignPlacement({
-        orderDesignId: key,
-        x: Number.isFinite(Number(model?.transform?.x)) ? Number(model.transform.x) : 0,
-        y: Number.isFinite(Number(model?.transform?.y)) ? Number(model.transform.y) : 0,
-        rotRad: Number.isFinite(Number(model?.transform?.rotRad)) ? Number(model.transform.rotRad) : 0,
-      });
-    }
   }
   showDimensions.value = s.showDimensions !== false;
   showOffsetWalls.value = !!s.offsetWallEnabled;
@@ -6994,6 +6999,7 @@ watch(
     rotRad: Number.isFinite(Number(model2dTransformRef.value?.rotRad)) ? Number(model2dTransformRef.value.rotRad) : 0,
   }),
   (transform) => {
+    if (_orderDesignPlacementSyncPaused) return;
     if (!activeCabinetDesignId.value) return;
     upsertOrderDesignPlacement({
       orderDesignId: activeCabinetDesignId.value,
@@ -7215,21 +7221,20 @@ async function onPresetPointerUp(ev) {
         const createdOrderDesign = await createOrderDesignFromSource(presetDrag.value.design);
         const localBoxes = (createdOrderDesign?.viewer_boxes || []).map(normalizeCabinetBox);
         const dropWorld = clientPointToStageWorld(ev.clientX, ev.clientY);
-        const placement = {
+        const placement = normalizeOrderDesignPlacement({
           orderDesignId: createdOrderDesign?.id || "",
           x: Number(dropWorld?.x) || 0,
           y: Number(dropWorld?.y) || 0,
           rotRad: 0,
-        };
+        }) || { orderDesignId: createdOrderDesign?.id || "", x: 0, y: 0, rotRad: 0 };
         stageCabinetPlaceholderBoxes.value = localBoxes;
-        activeCabinetDesignId.value = createdOrderDesign?.id || null;
+        if (createdOrderDesign?.id) {
+          upsertOrderDesignPlacement(placement);
+        }
         restoreActiveOrderDesignToEditor(createdOrderDesign, placement);
-        window.requestAnimationFrame(() => {
-          if (createdOrderDesign?.id) {
-            upsertOrderDesignPlacement(placement);
-          }
-          scheduleActiveOrderDrawingSave();
-        });
+        await nextTick();
+        syncQuickStateFromEditor();
+        scheduleActiveOrderDrawingSave({ debounceMs: 0 });
       } catch (error) {
         showAlert(error?.message || "افزودن طرح به سفارش انجام نشد.", { title: "خطا" });
       } finally {
