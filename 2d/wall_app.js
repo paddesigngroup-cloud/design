@@ -864,6 +864,12 @@ const wallHandleDrag = {
   shiftLockDir: null, // world unit vector for Shift lock in free handle drag
   moved: false,
 };
+const pendingPassiveActivation = {
+  id: null,
+  startX: 0,
+  startY: 0,
+  moved: false,
+};
 const freeDimDrag = {
   active: false,
   dimId: null,
@@ -2398,6 +2404,13 @@ function emitPassiveModelSelectionChange() {
     if (id && !ids.includes(id)) ids.push(id);
   }
   onPassiveModelSelectionChange(ids);
+}
+
+function clearPendingPassiveActivation() {
+  pendingPassiveActivation.id = null;
+  pendingPassiveActivation.startX = 0;
+  pendingPassiveActivation.startY = 0;
+  pendingPassiveActivation.moved = false;
 }
 
 function emitPassiveModelsTransformChange(modelIds = null) {
@@ -7662,11 +7675,13 @@ function onMouseDown(e) {
     hoverPassiveModelId = clickedPassiveModelId;
     hoverModelOutline = false;
     if (isRemoveSelectModifier) {
+      clearPendingPassiveActivation();
       removePassiveModelSelection(clickedPassiveModelId);
       selectedModelOutline = false;
       return;
     }
     if (isAddSelectModifier) {
+      clearPendingPassiveActivation();
       addPassiveModelSelection(clickedPassiveModelId);
       selectedModelOutline = false;
       return;
@@ -7677,13 +7692,15 @@ function onMouseDown(e) {
     clearGroupSelection();
     selectedModelOutline = false;
     setSingleOrMultiSelection("passive_model", [clickedPassiveModelId]);
-    // A plain click on a passive design should promote it immediately,
-    // matching wall selection behavior and keeping design-to-design switching one-click.
-    if (typeof onPassiveModelSelect === "function") onPassiveModelSelect(clickedPassiveModelId);
+    pendingPassiveActivation.id = clickedPassiveModelId;
+    pendingPassiveActivation.startX = e.offsetX;
+    pendingPassiveActivation.startY = e.offsetY;
+    pendingPassiveActivation.moved = false;
     return;
   }
   const clickedModelOutline = hitTestModelFill(e.offsetX, e.offsetY) || hitTestModelOutline(e.offsetX, e.offsetY);
   if (clickedModelOutline) {
+    clearPendingPassiveActivation();
     hoverPassiveModelId = null;
     setSingleOrMultiSelection("passive_model", []);
     hoverModelOutline = true;
@@ -7704,6 +7721,7 @@ function onMouseDown(e) {
     return;
   }
   if (hoverWallId) {
+    clearPendingPassiveActivation();
     setSingleOrMultiSelection("passive_model", []);
     if (isRemoveSelectModifier) {
       removeWallSelection(hoverWallId);
@@ -7721,6 +7739,7 @@ function onMouseDown(e) {
     return;
   }
   if (hoverHiddenId) {
+    clearPendingPassiveActivation();
     setSingleOrMultiSelection("passive_model", []);
     if (isRemoveSelectModifier) {
       removeHiddenSelection(hoverHiddenId);
@@ -7738,6 +7757,7 @@ function onMouseDown(e) {
     return;
   }
   if (hoverDimId) {
+    clearPendingPassiveActivation();
     setSingleOrMultiSelection("passive_model", []);
     if (isRemoveSelectModifier) {
       removeDimSelection(hoverDimId);
@@ -7770,6 +7790,7 @@ function onMouseDown(e) {
   }
 
   if (!isAddSelectModifier && !isRemoveSelectModifier) {
+    clearPendingPassiveActivation();
     setSingleOrMultiSelection("passive_model", []);
     selectedWallId = null;
     selectedHiddenId = null;
@@ -8057,6 +8078,14 @@ function onWindowMouseUp() {
       });
     }
   }
+  if (pendingPassiveActivation.id) {
+    const shouldActivate = !pendingPassiveActivation.moved;
+    const targetId = pendingPassiveActivation.id;
+    clearPendingPassiveActivation();
+    if (shouldActivate && typeof onPassiveModelSelect === "function") {
+      onPassiveModelSelect(targetId);
+    }
+  }
   isPanning = false;
 }
 
@@ -8100,6 +8129,10 @@ function onWindowMouseMove(e) {
 
   const ox = clamp(oxRaw, 0, rect.width);
   const oy = clamp(oyRaw, 0, rect.height);
+  if (pendingPassiveActivation.id && !pendingPassiveActivation.moved) {
+    const movedPx = Math.hypot(ox - pendingPassiveActivation.startX, oy - pendingPassiveActivation.startY);
+    if (movedPx >= 3) pendingPassiveActivation.moved = true;
+  }
   if (boxSelect.active) {
     boxSelect.curX = ox;
     boxSelect.curY = oy;
