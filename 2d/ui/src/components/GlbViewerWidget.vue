@@ -309,12 +309,18 @@ watch(
 
 const selectionSummary = computed(() => {
   const selection = attrsSnapshot.value?.selection || {};
-  const rawWallIds = normalizeIds(selection.selectedWallIds);
-  const beamIds = normalizeIds(selection.selectedBeamIds);
+  const collectIds = (singleValue, manyValues) => {
+    const next = normalizeIds(manyValues);
+    const single = String(singleValue || "").trim();
+    if (single && !next.includes(single)) next.unshift(single);
+    return next;
+  };
+  const rawWallIds = collectIds(selection.selectedWallId, selection.selectedWallIds);
+  const beamIds = collectIds(selection.selectedBeamId, selection.selectedBeamIds);
   const beamSet = new Set(beamIds);
   const wallIds = rawWallIds.filter((id) => !beamSet.has(id));
-  const hiddenIds = normalizeIds(selection.selectedHiddenIds);
-  const passiveDesignIds = normalizeIds(selection.selectedPassiveModelIds);
+  const hiddenIds = collectIds(selection.selectedHiddenId, selection.selectedHiddenIds);
+  const passiveDesignIds = collectIds(selection.selectedPassiveModelId, selection.selectedPassiveModelIds);
   const designIds = selectedOrderDesignIds.value.length
     ? selectedOrderDesignIds.value
     : (hasModelOutlineSelection.value && activeOrderDesign.value?.id ? [String(activeOrderDesign.value.id)] : passiveDesignIds);
@@ -338,13 +344,23 @@ const selectionSummary = computed(() => {
 const selectedEntityCount = computed(() => selectionSummary.value.totalCount);
 const isGroupEditMode = computed(() => selectedEntityCount.value > 1);
 const hasMixedSelection = computed(() => selectionSummary.value.hasMixedSelection);
+const hasNonDesignSelection = computed(() =>
+  selectionSummary.value.wallIds.length > 0
+  || selectionSummary.value.beamIds.length > 0
+  || selectionSummary.value.hiddenIds.length > 0
+);
 const selectedObjectTitle = computed(() => {
   if (hasMixedSelection.value) return `انتخاب ترکیبی (${selectedEntityCount.value} مورد)`;
   if (hasOrderDesignSelection.value && selectedOrderDesignCount.value > 1) return `${selectedOrderDesignCount.value} طرح سفارش`;
   const raw = props.selectedWallStyle?.name || props.selectedWallStyle?.id || wallMetrics.value?.id || "";
   return String(raw).trim();
 });
-const showOrderDesignAttrPanel = computed(() => !!activeOrderDesignIdentity.value && hasOrderDesignSelection.value && !hasMixedSelection.value);
+const showOrderDesignAttrPanel = computed(() =>
+  !!activeOrderDesignIdentity.value
+  && hasOrderDesignSelection.value
+  && !hasMixedSelection.value
+  && !hasNonDesignSelection.value
+);
 const showObjectStyleEditor = computed(() => !!wallMetrics.value && !hasOrderDesignSelection.value && !hasMixedSelection.value);
 const wallMoveDeltaCm = ref({ x: 0, y: 0 });
 const coordInputDrafts = ref({});

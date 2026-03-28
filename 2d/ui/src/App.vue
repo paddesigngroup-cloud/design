@@ -5843,12 +5843,18 @@ function normalizeSelectionIds(ids) {
 function getEditorSelectionSummary(full = null) {
   const state = full || editorRef.value?.getState?.() || null;
   const selection = state?.selection || {};
-  const wallIds = normalizeSelectionIds(selection.selectedWallIds);
-  const beamIds = normalizeSelectionIds(selection.selectedBeamIds);
+  const collectIds = (singleValue, manyValues) => {
+    const next = normalizeSelectionIds(manyValues);
+    const single = String(singleValue || "").trim();
+    if (single && !next.includes(single)) next.unshift(single);
+    return next;
+  };
+  const wallIds = collectIds(selection.selectedWallId, selection.selectedWallIds);
+  const beamIds = collectIds(selection.selectedBeamId, selection.selectedBeamIds);
   const beamSet = new Set(beamIds);
   const wallOnlyIds = wallIds.filter((id) => !beamSet.has(id));
-  const hiddenIds = normalizeSelectionIds(selection.selectedHiddenIds);
-  const passiveModelIds = normalizeSelectionIds(selection.selectedPassiveModelIds);
+  const hiddenIds = collectIds(selection.selectedHiddenId, selection.selectedHiddenIds);
+  const passiveModelIds = collectIds(selection.selectedPassiveModelId, selection.selectedPassiveModelIds);
   const designIds = normalizeSelectionIds(selectedOrderDesignIds.value);
   const hasActiveModel = !!selection.selectedModelOutline;
   const designCount = designIds.length > 0 ? designIds.length : (hasActiveModel && activeCabinetDesignId.value ? 1 : 0);
