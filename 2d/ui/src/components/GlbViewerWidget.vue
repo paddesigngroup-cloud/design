@@ -1424,6 +1424,10 @@ watch(
   { immediate: true }
 );
 
+defineExpose({
+  fitCameraToAll,
+});
+
 </script>
 
 <template>

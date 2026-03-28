@@ -21,3 +21,6 @@ export const passiveModelTransformStateRef = shallowRef([]);
 // Handler used by the 2D engine when the active saved design is deleted from canvas space.
 export const activeModelDeleteHandlerRef = shallowRef(null);
 
+// Handler used by the 2D engine whenever a canvas-level "fit all" action should sync to the 3D stage widget.
+export const fitAllHandlerRef = shallowRef(null);
+

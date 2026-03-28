@@ -77,6 +77,7 @@ export function createWallApp({
   onPassiveModelSelect,
   onPassiveModelSelectionChange,
   onActiveModelDelete,
+  onFitViewToAll,
 } = {}) {
   installGlobalErrorHooksOnce();
 
@@ -7845,7 +7846,7 @@ function onMouseDown(e) {
     if (now - lastMiddleClickMs <= 300) {
       lastMiddleClickMs = 0;
       if (isSceneEmpty()) resetCameraToOriginCenter();
-      else fitViewToBounds();
+      else fitViewToAll();
       return;
     }
     lastMiddleClickMs = now;
@@ -9596,7 +9597,7 @@ function onDblClick(e) {
     !!tool.getStatus()?.isDrawing;
   if (isDrawing) return;
   e.preventDefault();
-  fitViewToBounds();
+  fitViewToAll();
 }
 
 function zoomAtScreen(sx, sy, mul) {
@@ -9613,6 +9614,11 @@ function zoomIn() {
 
 function zoomOut() {
   zoomAtScreen(viewportW / 2, viewportH / 2, 1 / 1.12);
+}
+
+function fitViewToAll() {
+  fitViewToBounds();
+  if (typeof onFitViewToAll === "function") onFitViewToAll();
 }
 
 function fitViewToBounds() {
@@ -10614,7 +10620,7 @@ function bindStandaloneUiIfPresent() {
 
   // top buttons
   const resetZoomBtn = byId("resetZoom");
-  if (resetZoomBtn) resetZoomBtn.onclick = () => fitViewToBounds();
+  if (resetZoomBtn) resetZoomBtn.onclick = () => fitViewToAll();
 
   const goOriginBtn = byId("goOrigin");
   if (goOriginBtn) goOriginBtn.onclick = () => resetCameraToOriginCenter();
@@ -10689,7 +10695,7 @@ return {
   clearAll,
   zoomIn,
   zoomOut,
-  fitView: fitViewToBounds,
+  fitView: fitViewToAll,
   goOrigin: resetCameraToOriginCenter,
 
   getState,

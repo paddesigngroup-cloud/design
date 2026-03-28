@@ -9,6 +9,7 @@ import {
   passiveModelSelectionStateRef,
   passiveModelTransformStateRef,
   activeModelDeleteHandlerRef,
+  fitAllHandlerRef,
 } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
 import { useDialogService } from "./dialog_service.js";
@@ -61,6 +62,7 @@ const topbarEl = ref(null);
 const mainEl = ref(null);
 const stageEl = ref(null);
 const stageCardEl = ref(null);
+const stageGlbViewerRef = ref(null);
 const homeBtnEl = ref(null);
 const menuPanelEl = ref(null);
 const mainMenuBtnEl = ref(null);
@@ -69,6 +71,9 @@ const catalogBtnEl = ref(null);
 
 const route = useRoute();
 const router = useRouter();
+fitAllHandlerRef.value = () => {
+  stageGlbViewerRef.value?.fitCameraToAll?.();
+};
 const isSettings = computed(() => route.path === "/settings");
 const isHome = computed(() => route.path === "/");
 const showStageOverlays = computed(() => route.name === "floorplan");
@@ -6943,6 +6948,7 @@ function doZoomOut() {
 }
 function doSeeAll() {
   editorRef.value?.fitView?.();
+  stageGlbViewerRef.value?.fitCameraToAll?.();
 }
 function doSeeOrigin() {
   editorRef.value?.goOrigin?.();
@@ -7793,6 +7799,7 @@ onBeforeUnmount(() => {
     try { cancelAnimationFrame(window.__designkpDrawLockRaf); } catch (_) {}
     delete window.__designkpDrawLockRaf;
   }
+  fitAllHandlerRef.value = null;
   passiveModelSelectionHandlerRef.value = null;
   passiveModelSelectionStateRef.value = [];
   activeModelDeleteHandlerRef.value = null;
@@ -8319,6 +8326,7 @@ onBeforeUnmount(() => {
           </div>
 
           <GlbViewerWidget
+            ref="stageGlbViewerRef"
             v-if="showStageOverlays"
             src="/models/1_z1.glb"
             :model2d-transform="model2dTransformRef"

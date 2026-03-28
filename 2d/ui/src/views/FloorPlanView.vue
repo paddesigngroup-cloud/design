@@ -8,6 +8,7 @@ import {
   passiveModelSelectionStateRef,
   passiveModelTransformStateRef,
   activeModelDeleteHandlerRef,
+  fitAllHandlerRef,
 } from "../editor/editor_store.js";
 import { createWallApp } from "../../../main.js";
 
@@ -47,6 +48,10 @@ onMounted(() => {
       },
       onActiveModelDelete: () => {
         const handler = activeModelDeleteHandlerRef.value;
+        if (typeof handler === "function") handler();
+      },
+      onFitViewToAll: () => {
+        const handler = fitAllHandlerRef.value;
         if (typeof handler === "function") handler();
       },
     });
