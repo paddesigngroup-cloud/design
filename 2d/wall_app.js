@@ -9618,45 +9618,46 @@ function zoomOut() {
 function fitViewToBounds() {
   const pad = 48;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const extendBoundsWithPoint = (x, y) => {
+    if (!isFinite(x) || !isFinite(y)) return;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  };
+  const extendBoundsWithLine = (line) => {
+    if (!line) return;
+    extendBoundsWithPoint(line.ax, line.ay);
+    extendBoundsWithPoint(line.bx, line.by);
+  };
 
   for (const n of graph.nodes.values()) {
-    minX = Math.min(minX, n.x);
-    minY = Math.min(minY, n.y);
-    maxX = Math.max(maxX, n.x);
-    maxY = Math.max(maxY, n.y);
+    extendBoundsWithPoint(n.x, n.y);
   }
   for (const n of hiddenGraph.nodes.values()) {
-    minX = Math.min(minX, n.x);
-    minY = Math.min(minY, n.y);
-    maxX = Math.max(maxX, n.x);
-    maxY = Math.max(maxY, n.y);
+    extendBoundsWithPoint(n.x, n.y);
   }
   for (const g of guides) {
-    minX = Math.min(minX, g.x1, g.x2);
-    minY = Math.min(minY, g.y1, g.y2);
-    maxX = Math.max(maxX, g.x1, g.x2);
-    maxY = Math.max(maxY, g.y1, g.y2);
+    extendBoundsWithPoint(g.x1, g.y1);
+    extendBoundsWithPoint(g.x2, g.y2);
   }
   for (const d of dimensions) {
     if (!d || !d.a || !d.b) continue;
-    minX = Math.min(minX, d.a.x, d.b.x);
-    minY = Math.min(minY, d.a.y, d.b.y);
-    maxX = Math.max(maxX, d.a.x, d.b.x);
-    maxY = Math.max(maxY, d.a.y, d.b.y);
+    extendBoundsWithPoint(d.a.x, d.a.y);
+    extendBoundsWithPoint(d.b.x, d.b.y);
   }
   for (const l of model2d.lines || []) {
-    if (!l) continue;
-    minX = Math.min(minX, l.ax, l.bx);
-    minY = Math.min(minY, l.ay, l.by);
-    maxX = Math.max(maxX, l.ax, l.bx);
-    maxY = Math.max(maxY, l.ay, l.by);
+    extendBoundsWithLine(l);
   }
   for (const p of model2d.outline || []) {
-    if (!p) continue;
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
+    extendBoundsWithPoint(p.x, p.y);
+  }
+  for (const model of passiveModels || []) {
+    if (!model) continue;
+    for (const line of model.lines || []) extendBoundsWithLine(line);
+    for (const point of model.outline || []) {
+      extendBoundsWithPoint(point?.x, point?.y);
+    }
   }
 
   if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
