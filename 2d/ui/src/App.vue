@@ -197,6 +197,8 @@ const orderEntryTab = ref("create");
 const orderDraftMode = ref("create");
 const orderDraft = ref({ order_name: "", notes: "", status: "draft" });
 const orderDrawingLoading = ref(false);
+const orderOpening = ref(false);
+const orderOpeningLabel = ref("");
 const cabinetDesignCatalog = ref([]);
 const cabinetDesignCatalogLoading = ref(false);
 const cabinetDesignCatalogLoadedForAdmin = ref("");
@@ -6592,6 +6594,7 @@ const orderEntrySubmitLabel = computed(() =>
       ? "ذخیره تغییرات سفارش"
       : "ثبت و ورود به طراحی"
 );
+const isActiveOrderHydrating = computed(() => orderOpening.value || orderDrawingLoading.value);
 
 function normalizeOrderRecord(item) {
   if (!item) return null;
@@ -6912,6 +6915,9 @@ async function updateOrder() {
 }
 
 async function saveActiveOrderDrawing() {
+  if (orderOpening.value || orderDrawingLoading.value) {
+    return false;
+  }
   const target = normalizeOrderRecord(activeOrder.value);
   if (!target?.id) {
     openOrderEntry();
@@ -6939,14 +6945,23 @@ async function saveActiveOrderDrawing() {
 }
 
 async function selectOrder(item) {
-  resetActiveOrderWorkspace();
-  activeOrder.value = normalizeOrderRecord(item);
-  orderDraftMode.value = "edit";
-  hydrateOrderDraftFromOrder(activeOrder.value);
-  await loadOrderDrawing(activeOrder.value?.id, { clearWhenMissing: true });
-  await loadOrderDesignCatalog(true);
-  reconcileActiveOrderDesignSelection();
-  closeOrderEntry(true);
+  orderOpening.value = true;
+  orderOpeningLabel.value = String(item?.order_name || item?.order_number || "سفارش").trim() || "سفارش";
+  try {
+    resetActiveOrderWorkspace();
+    activeOrder.value = normalizeOrderRecord(item);
+    orderDraftMode.value = "edit";
+    hydrateOrderDraftFromOrder(activeOrder.value);
+    await Promise.all([
+      loadOrderDrawing(activeOrder.value?.id, { clearWhenMissing: true }),
+      loadOrderDesignCatalog(true),
+    ]);
+    reconcileActiveOrderDesignSelection();
+    closeOrderEntry(true);
+  } finally {
+    orderOpening.value = false;
+    orderOpeningLabel.value = "";
+  }
 }
 
 async function archiveOrder(item) {
@@ -11077,7 +11092,9 @@ onBeforeUnmount(() => {
                   </td>
                   <td class="constructionDialog__col constructionDialog__col--actions">
                     <div class="constructionDialog__actionsCell">
-                      <button type="button" class="constructionDialog__textBtn" @click="selectOrder(item)">انتخاب</button>
+                      <button type="button" class="constructionDialog__textBtn" :disabled="isActiveOrderHydrating" @click="selectOrder(item)">
+                        {{ isActiveOrderHydrating ? "در حال بارگیری..." : "انتخاب" }}
+                      </button>
                       <button type="button" class="constructionDialog__iconBtn" title="آرشیو" @click="archiveOrder(item)">×</button>
                     </div>
                   </td>
@@ -11086,6 +11103,16 @@ onBeforeUnmount(() => {
             </table>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="isActiveOrderHydrating" class="orderHydrationOverlay" role="status" aria-live="polite" aria-busy="true">
+    <div class="orderHydrationOverlay__card">
+      <span class="orderHydrationOverlay__spinner" aria-hidden="true"></span>
+      <div class="orderHydrationOverlay__title">در حال بارگیری کامل سفارش</div>
+      <div class="orderHydrationOverlay__subtitle">
+        {{ orderOpeningLabel ? `در حال دریافت ترسیمات و طرح های «${orderOpeningLabel}» از دیتابیس...` : "در حال دریافت ترسیمات و طرح های سفارش از دیتابیس..." }}
       </div>
     </div>
   </div>

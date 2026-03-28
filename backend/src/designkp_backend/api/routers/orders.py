@@ -63,6 +63,37 @@ class OrderDrawingItem(OrderDrawingPayload):
     updated_at: datetime
 
 
+def _payload_has_persistable_content(payload: dict[str, object] | None) -> bool:
+    data = dict(payload or {})
+    editor_state = data.get("editorState")
+    if isinstance(editor_state, dict):
+        graph = dict(editor_state.get("graphSnap") or {})
+        hidden_graph = dict(editor_state.get("hiddenGraphSnap") or {})
+        model_2d = dict(editor_state.get("model2dSnap") or {})
+        dimensions = list(editor_state.get("dimensionsSnap") or [])
+        if graph.get("walls") or graph.get("nodes"):
+            return True
+        if hidden_graph.get("walls") or hidden_graph.get("nodes"):
+            return True
+        if dimensions:
+            return True
+        if model_2d.get("lines") or model_2d.get("outline"):
+            return True
+
+    objects_2d = data.get("objects2d")
+    if isinstance(objects_2d, dict):
+        for key in ("walls", "beams", "columns", "hiddenWalls"):
+            if list(objects_2d.get(key) or []):
+                return True
+
+    counts = data.get("counts")
+    if isinstance(counts, dict):
+        for key in ("walls", "beams", "columns", "hiddenWalls", "dimensions"):
+            if int(counts.get(key) or 0) > 0:
+                return True
+    return False
+
+
 def _display_name(full_name: str | None, email: str, fallback: str) -> str:
     text = str(full_name or "").strip()
     if text:
@@ -276,12 +307,19 @@ async def upsert_order_drawing(
     drawing.admin_id = item.admin_id
     drawing.user_id = item.user_id
     drawing.deleted_at = None
-    drawing.drawing_payload = payload.drawing_payload
-    drawing.walls_count = payload.walls_count
-    drawing.hidden_walls_count = payload.hidden_walls_count
-    drawing.dimensions_count = payload.dimensions_count
-    drawing.beams_count = payload.beams_count
-    drawing.columns_count = payload.columns_count
+    incoming_payload = dict(payload.drawing_payload or {})
+    incoming_has_content = _payload_has_persistable_content(incoming_payload)
+    existing_payload = dict(drawing.drawing_payload or {})
+    existing_has_content = _payload_has_persistable_content(existing_payload)
+
+    # Guard against accidental empty overwrites after client-side resets or refresh races.
+    if incoming_has_content or not existing_has_content:
+        drawing.drawing_payload = incoming_payload
+        drawing.walls_count = payload.walls_count
+        drawing.hidden_walls_count = payload.hidden_walls_count
+        drawing.dimensions_count = payload.dimensions_count
+        drawing.beams_count = payload.beams_count
+        drawing.columns_count = payload.columns_count
     await session.commit()
     await session.refresh(drawing)
     return _to_drawing_response(drawing)
