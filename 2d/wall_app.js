@@ -1180,6 +1180,7 @@ function applyOverlapSelectionHit(hit, opts = {}) {
   const mode = opts.mode === "add" || opts.mode === "remove" ? opts.mode : "replace";
   const offsetX = Number.isFinite(Number(opts.offsetX)) ? Number(opts.offsetX) : 0;
   const offsetY = Number.isFinite(Number(opts.offsetY)) ? Number(opts.offsetY) : 0;
+  const armPassiveDrag = opts.armPassiveDrag !== false;
 
   if (hit.type === "passive_model") {
     hoverPassiveModelId = hit.id;
@@ -1202,10 +1203,14 @@ function applyOverlapSelectionHit(hit, opts = {}) {
     clearGroupSelection();
     selectedModelOutline = false;
     setSingleOrMultiSelection("passive_model", [hit.id]);
-    pendingPassiveActivation.id = hit.id;
-    pendingPassiveActivation.startX = offsetX;
-    pendingPassiveActivation.startY = offsetY;
-    pendingPassiveActivation.moved = false;
+    if (armPassiveDrag) {
+      pendingPassiveActivation.id = hit.id;
+      pendingPassiveActivation.startX = offsetX;
+      pendingPassiveActivation.startY = offsetY;
+      pendingPassiveActivation.moved = false;
+    } else {
+      clearPendingPassiveActivation();
+    }
     return true;
   }
 
@@ -6849,6 +6854,7 @@ function renderOverlapPickerItems() {
         mode: overlapPickerState.modifierMode,
         offsetX: overlapPickerState.offsetX,
         offsetY: overlapPickerState.offsetY,
+        armPassiveDrag: item?.type === "passive_model" ? false : true,
       });
     };
     const primary = document.createElement("div");
