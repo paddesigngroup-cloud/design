@@ -985,6 +985,7 @@ const overlapPickerState = {
   el: null,
   items: [],
   modifierMode: "replace", // replace | add | remove
+  previewHit: null,
 };
 
 function clearGroupSelection() {
@@ -1045,7 +1046,8 @@ function getOverlapHitKindPriority(kind) {
 function getOverlapHitLabel(hit) {
   if (!hit) return "";
   if (hit.kind === "passive_model") {
-    return `طرح - ${getPassiveModelDisplayName(hit.model) || String(hit.id || "").trim() || "بدون نام"}`;
+    const title = String(hit?.model?.designTitle || hit?.model?.displayName || hit?.name || hit?.id || "").trim() || "بدون نام";
+    return `طرح - ${title}`;
   }
   if (hit.kind === "beam") {
     return `تیر - ${String(hit.name || hit.id || "").trim() || "بدون نام"}`;
@@ -1057,6 +1059,15 @@ function getOverlapHitLabel(hit) {
     return `خط راهنما - ${String(hit.name || hit.id || "").trim() || "بدون نام"}`;
   }
   return `دیوار - ${String(hit.name || hit.id || "").trim() || "بدون نام"}`;
+}
+
+function getOverlapHitSecondaryLabel(hit) {
+  if (!hit || hit.kind !== "passive_model") return "";
+  const code = String(hit?.model?.instanceCode || "").trim();
+  const id = String(hit?.id || "").trim();
+  if (code) return `کد: ${code}`;
+  if (id) return `شناسه: ${id}`;
+  return "";
 }
 
 function sortOverlapHits(hits) {
@@ -1231,6 +1242,32 @@ function applyOverlapSelectionHit(hit, opts = {}) {
     return true;
   }
   return false;
+}
+
+function clearOverlapPickerPreview() {
+  overlapPickerState.previewHit = null;
+  hoverWallId = null;
+  hoverHiddenId = null;
+  hoverPassiveModelId = null;
+  hoverModelOutline = false;
+}
+
+function setOverlapPickerPreview(hit) {
+  clearOverlapPickerPreview();
+  if (!hit) return;
+  overlapPickerState.previewHit = hit;
+  if (hit.type === "passive_model") {
+    hoverPassiveModelId = hit.id;
+    hoverModelOutline = false;
+    return;
+  }
+  if (hit.type === "hidden") {
+    hoverHiddenId = hit.id;
+    return;
+  }
+  if (hit.type === "wall") {
+    hoverWallId = hit.id;
+  }
 }
 
 function applySelectionSnapshot(snapshot) {
@@ -6760,6 +6797,7 @@ function hideContextMenu() {
 function hideOverlapPicker() {
   overlapPickerState.visible = false;
   overlapPickerState.items = [];
+  clearOverlapPickerPreview();
   if (overlapPickerState.el) overlapPickerState.el.style.display = "none";
 }
 
@@ -6779,7 +6817,6 @@ function renderOverlapPickerItems() {
   for (const item of items) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = getOverlapHitLabel(item);
     btn.style.display = "block";
     btn.style.width = "100%";
     btn.style.border = "0";
@@ -6791,11 +6828,14 @@ function renderOverlapPickerItems() {
     btn.style.textAlign = "right";
     btn.style.cursor = "pointer";
     btn.style.font = `13px ${state.fontFamily || "Tahoma"}`;
-    btn.style.whiteSpace = "nowrap";
-    btn.style.overflow = "hidden";
-    btn.style.textOverflow = "ellipsis";
-    btn.onmouseenter = () => { btn.style.background = "#f5eaf0"; };
-    btn.onmouseleave = () => { btn.style.background = "#fff"; };
+    btn.onmouseenter = () => {
+      btn.style.background = "#f5eaf0";
+      setOverlapPickerPreview(item);
+    };
+    btn.onmouseleave = () => {
+      btn.style.background = "#fff";
+      clearOverlapPickerPreview();
+    };
     btn.onclick = () => {
       hideOverlapPicker();
       applyOverlapSelectionHit(item, {
@@ -6804,12 +6844,33 @@ function renderOverlapPickerItems() {
         offsetY: overlapPickerState.offsetY,
       });
     };
+    const primary = document.createElement("div");
+    primary.textContent = getOverlapHitLabel(item);
+    primary.style.whiteSpace = "nowrap";
+    primary.style.overflow = "hidden";
+    primary.style.textOverflow = "ellipsis";
+    primary.style.font = `600 13px ${state.fontFamily || "Tahoma"}`;
+    btn.appendChild(primary);
+
+    const secondaryText = getOverlapHitSecondaryLabel(item);
+    if (secondaryText) {
+      const secondary = document.createElement("div");
+      secondary.textContent = secondaryText;
+      secondary.style.marginTop = "4px";
+      secondary.style.font = `11px ${state.fontFamily || "Tahoma"}`;
+      secondary.style.color = "#7c3f57";
+      secondary.style.whiteSpace = "nowrap";
+      secondary.style.overflow = "hidden";
+      secondary.style.textOverflow = "ellipsis";
+      btn.appendChild(secondary);
+    }
     menu.appendChild(btn);
   }
 }
 
 function showOverlapPicker(clientX, clientY, items, opts = {}) {
   hideContextMenu();
+  clearOverlapPickerPreview();
   overlapPickerState.items = sortOverlapHits(items);
   overlapPickerState.clientX = clientX;
   overlapPickerState.clientY = clientY;
@@ -8534,6 +8595,10 @@ function onWindowMouseMove(e) {
   if (inside) {
     lastMouseX = oxRaw;
     lastMouseY = oyRaw;
+  }
+
+  if (overlapPickerState.visible) {
+    return;
   }
 
   const isDrawing =
