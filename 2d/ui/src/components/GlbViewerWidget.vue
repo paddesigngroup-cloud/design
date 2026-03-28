@@ -816,6 +816,8 @@ function rebuildPlaceholderBoxes() {
 
     const instanceRoot = new THREE.Group();
     instanceRoot.name = `placeholder-instance-${String(instance?.orderDesignId || "item")}`;
+    instanceRoot.userData.orderDesignId = String(instance?.orderDesignId || "item").trim() || "item";
+    instanceRoot.userData.isActivePlaceholderInstance = !!instance?.active;
     instanceRoot.position.set(tx * 0.001, 0, -ty * 0.001);
     instanceRoot.rotation.y = rotRad;
 
@@ -963,6 +965,7 @@ function rebuildWalls3d(snapshot) {
     for (const w of walls) {
       const mesh = buildLinearMemberMesh(w, byId, jointGammaMap, fallbackFillColor);
       if (!mesh) continue;
+      mesh.userData.wallId = String(w?.id || "").trim() || null;
       root.add(mesh);
     }
 
@@ -1029,6 +1032,67 @@ function fitCameraToBounds(bounds, viewDir = null) {
 
 function fitCameraToAll(viewDir = null) {
   fitCameraToBounds(computeRenderableSceneBounds(), viewDir);
+}
+
+function computeSelectionBounds() {
+  if (!scene) return null;
+
+  const bounds = new THREE.Box3();
+  let hasSelection = false;
+  const selection = props.walls2d?.selection || {};
+  const selectedWallIds = new Set();
+  const addWallId = (id) => {
+    const key = String(id || "").trim();
+    if (key) selectedWallIds.add(key);
+  };
+
+  addWallId(selection.selectedWallId);
+  if (Array.isArray(selection.selectedWallIds)) {
+    for (const id of selection.selectedWallIds) addWallId(id);
+  }
+  addWallId(selection.selectedBeamId);
+  if (Array.isArray(selection.selectedBeamIds)) {
+    for (const id of selection.selectedBeamIds) addWallId(id);
+  }
+
+  if (wallsRoot && selectedWallIds.size > 0) {
+    wallsRoot.traverse((obj) => {
+      if (!obj?.isMesh) return;
+      const wallId = String(obj.userData?.wallId || "").trim();
+      if (!wallId || !selectedWallIds.has(wallId)) return;
+      bounds.expandByObject(obj);
+      hasSelection = true;
+    });
+  }
+
+  const selectedOrderDesignIds = new Set(
+    (Array.isArray(props.selectedOrderDesignIds) ? props.selectedOrderDesignIds : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean)
+  );
+  const hasActiveModelSelection = !!selection.selectedModelOutline;
+
+  if (placeholderBoxesRoot) {
+    const hasInstances = Array.isArray(props.placeholderInstances) && props.placeholderInstances.length > 0;
+    if (hasInstances) {
+      for (const child of placeholderBoxesRoot.children) {
+        const orderDesignId = String(child?.userData?.orderDesignId || "").trim();
+        const isActive = !!child?.userData?.isActivePlaceholderInstance;
+        if (!selectedOrderDesignIds.has(orderDesignId) && !(hasActiveModelSelection && isActive)) continue;
+        bounds.expandByObject(child);
+        hasSelection = true;
+      }
+    } else if (hasActiveModelSelection) {
+      bounds.expandByObject(placeholderBoxesRoot);
+      hasSelection = true;
+    }
+  }
+
+  return hasSelection && !bounds.isEmpty() ? bounds : null;
+}
+
+function fitCameraToSelectionOrAll(viewDir = null) {
+  fitCameraToBounds(computeSelectionBounds() || computeRenderableSceneBounds(), viewDir);
 }
 
 const isMax = ref(false);
@@ -1426,6 +1490,7 @@ watch(
 
 defineExpose({
   fitCameraToAll,
+  fitCameraToSelectionOrAll,
 });
 
 </script>

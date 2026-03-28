@@ -6947,8 +6947,8 @@ function doZoomOut() {
   editorRef.value?.zoomOut?.();
 }
 function doSeeAll() {
-  editorRef.value?.fitView?.();
-  stageGlbViewerRef.value?.fitCameraToAll?.();
+  editorRef.value?.fitSelectionOrAll?.();
+  stageGlbViewerRef.value?.fitCameraToSelectionOrAll?.();
 }
 function doSeeOrigin() {
   editorRef.value?.goOrigin?.();

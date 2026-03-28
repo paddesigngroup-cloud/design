@@ -9616,6 +9616,108 @@ function zoomOut() {
   zoomAtScreen(viewportW / 2, viewportH / 2, 1 / 1.12);
 }
 
+function buildWorldBoundsFromPoints(points = []) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const pt of points) {
+    const x = Number(pt?.x);
+    const y = Number(pt?.y);
+    if (!isFinite(x) || !isFinite(y)) continue;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) return null;
+  return { minX, minY, maxX, maxY };
+}
+
+function applyViewToWorldBounds(bounds, pad = 48) {
+  if (!bounds) return false;
+  const minX = Number(bounds.minX);
+  const minY = Number(bounds.minY);
+  const maxX = Number(bounds.maxX);
+  const maxY = Number(bounds.maxY);
+  if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) return false;
+
+  const worldW = Math.max(1, maxX - minX);
+  const worldH = Math.max(1, maxY - minY);
+  const w = viewportW;
+  const h = viewportH;
+  const zoomX = (w - pad * 2) / worldW;
+  const zoomY = (h - pad * 2) / worldH;
+  state.zoom = clamp(Math.min(zoomX, zoomY), 0.05, 20);
+
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  state.offsetX = w / 2 - cx * state.zoom;
+  state.offsetY = h / 2 + cy * state.zoom;
+  return true;
+}
+
+function collectSelectionWorldPoints(snapshot = null) {
+  const snap = snapshot || buildSelectionSnapshotFromCurrentSelection();
+  if (!selectionSnapshotHasAny(snap)) return [];
+
+  const points = [];
+  const pushPoint = (x, y) => {
+    if (!isFinite(x) || !isFinite(y)) return;
+    points.push({ x, y });
+  };
+
+  for (const id of Array.isArray(snap.wallIds) ? snap.wallIds : []) {
+    const w = graph.getWall(id);
+    if (!w) continue;
+    const a = graph.getNode(w.a);
+    const b = graph.getNode(w.b);
+    if (a) pushPoint(a.x, a.y);
+    if (b) pushPoint(b.x, b.y);
+  }
+
+  for (const id of Array.isArray(snap.hiddenIds) ? snap.hiddenIds : []) {
+    const w = hiddenGraph.getWall(id);
+    if (!w) continue;
+    const a = hiddenGraph.getNode(w.a);
+    const b = hiddenGraph.getNode(w.b);
+    if (a) pushPoint(a.x, a.y);
+    if (b) pushPoint(b.x, b.y);
+  }
+
+  for (const id of Array.isArray(snap.dimIds) ? snap.dimIds : []) {
+    const d = dimensions.find((item) => item && item.id === id);
+    if (!d) continue;
+    if (d.a) pushPoint(d.a.x, d.a.y);
+    if (d.b) pushPoint(d.b.x, d.b.y);
+  }
+
+  for (const id of Array.isArray(snap.passiveModelIds) ? snap.passiveModelIds : []) {
+    const model = passiveModels.find((entry) => String(entry?.id || "") === String(id || ""));
+    if (!model?.outline?.length) continue;
+    for (const pt of model.outline) pushPoint(pt?.x, pt?.y);
+  }
+
+  if (snap.hasModel && Array.isArray(model2d.outline)) {
+    for (const pt of model2d.outline) pushPoint(pt?.x, pt?.y);
+  }
+
+  return points;
+}
+
+function fitViewToSelection() {
+  const points = collectSelectionWorldPoints();
+  const bounds = buildWorldBoundsFromPoints(points);
+  if (!bounds) return false;
+  return applyViewToWorldBounds(bounds, 56);
+}
+
+function fitSelectionOrAll() {
+  if (fitViewToSelection()) return true;
+  fitViewToAll();
+  return false;
+}
+
 function fitViewToAll() {
   fitViewToBounds();
   if (typeof onFitViewToAll === "function") onFitViewToAll();
@@ -9672,19 +9774,7 @@ function fitViewToBounds() {
     return;
   }
 
-  const worldW = Math.max(1, maxX - minX);
-  const worldH = Math.max(1, maxY - minY);
-  const w = viewportW;
-  const h = viewportH;
-  const zoomX = (w - pad * 2) / worldW;
-  const zoomY = (h - pad * 2) / worldH;
-  state.zoom = clamp(Math.min(zoomX, zoomY), 0.05, 20);
-
-  // Center-to-center fit (double middle click).
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-  state.offsetX = w / 2 - cx * state.zoom;
-  state.offsetY = h / 2 + cy * state.zoom;
+  applyViewToWorldBounds({ minX, minY, maxX, maxY }, pad);
 }
 
 // Click outside canvas closes inline dimension editor (important when embedded in Vue UI).
@@ -10696,6 +10786,7 @@ return {
   zoomIn,
   zoomOut,
   fitView: fitViewToAll,
+  fitSelectionOrAll,
   goOrigin: resetCameraToOriginCenter,
 
   getState,
