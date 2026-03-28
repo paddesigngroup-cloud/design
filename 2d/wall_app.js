@@ -1092,6 +1092,46 @@ function collectOverlapHits(screenX, screenY) {
   const hits = [];
   let passiveVisualOrder = 0;
   const world = screenToWorld(screenX, screenY);
+  const activePts = Array.isArray(model2d.outline) ? model2d.outline : [];
+  if (activePts.length >= 3) {
+    let matched = pointInPolygonWorld(world.x, world.y, activePts);
+    let bestDistance = 0;
+    if (!matched) {
+      let prev = worldToScreen(activePts[0].x, activePts[0].y);
+      let minDistPx = Infinity;
+      for (let i = 1; i < activePts.length; i++) {
+        const cur = worldToScreen(activePts[i].x, activePts[i].y);
+        minDistPx = Math.min(minDistPx, pointToSegmentDistancePx(screenX, screenY, prev.x, prev.y, cur.x, cur.y));
+        prev = cur;
+      }
+      const first = worldToScreen(activePts[0].x, activePts[0].y);
+      const last = worldToScreen(activePts[activePts.length - 1].x, activePts[activePts.length - 1].y);
+      minDistPx = Math.min(minDistPx, pointToSegmentDistancePx(screenX, screenY, last.x, last.y, first.x, first.y));
+      matched = minDistPx <= 7;
+      bestDistance = minDistPx;
+    }
+    if (matched) {
+      hits.push({
+        type: "active_model",
+        kind: "passive_model",
+        id: String(model2d.designId || "active_model").trim() || "active_model",
+        name: String(model2d.displayName || model2d.designTitle || model2d.instanceCode || "").trim(),
+        model: {
+          id: String(model2d.designId || "active_model").trim() || "active_model",
+          designCode: String(model2d.designCode || "").trim() || null,
+          designTitle: String(model2d.designTitle || "").trim() || null,
+          instanceCode: String(model2d.instanceCode || "").trim() || null,
+          displayName:
+            String(model2d.displayName || "").trim() ||
+            String(model2d.designTitle || "").trim() ||
+            String(model2d.instanceCode || "").trim() ||
+            String(model2d.designId || "active_model").trim(),
+        },
+        distance: bestDistance,
+        visualOrder: passiveVisualOrder++,
+      });
+    }
+  }
   for (let idx = passiveModels.length - 1; idx >= 0; idx--) {
     const model = passiveModels[idx];
     const pts = Array.isArray(model?.outline) ? model.outline : [];
@@ -1213,6 +1253,18 @@ function applyOverlapSelectionHit(hit, opts = {}) {
     }
     return true;
   }
+  if (hit.type === "active_model") {
+    clearPendingPassiveActivation();
+    setSingleOrMultiSelection("passive_model", []);
+    clearGroupSelection();
+    selectedWallId = null;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    hoverPassiveModelId = null;
+    hoverModelOutline = true;
+    selectedModelOutline = true;
+    return true;
+  }
 
   clearPendingPassiveActivation();
   setSingleOrMultiSelection("passive_model", []);
@@ -1265,6 +1317,10 @@ function setOverlapPickerPreview(hit) {
   clearOverlapPickerPreview();
   if (!hit) return;
   overlapPickerState.previewHit = hit;
+  if (hit.type === "active_model") {
+    hoverModelOutline = true;
+    return;
+  }
   if (hit.type === "passive_model") {
     hoverPassiveModelId = hit.id;
     hoverModelOutline = false;
@@ -2415,6 +2471,11 @@ function snapshotModel2d(model) {
   return {
     lines: (model?.lines || []).map((l) => ({ ax: l.ax, ay: l.ay, bx: l.bx, by: l.by })),
     outline: (model?.outline || []).map((p) => ({ x: p.x, y: p.y })),
+    designId: String(model?.designId || "").trim() || null,
+    designCode: String(model?.designCode || "").trim() || null,
+    designTitle: String(model?.designTitle || "").trim() || null,
+    instanceCode: String(model?.instanceCode || "").trim() || null,
+    displayName: String(model?.displayName || "").trim() || null,
     offsetXmm: (typeof model?.offsetXmm === "number" && isFinite(model.offsetXmm)) ? model.offsetXmm : 0,
     offsetYmm: (typeof model?.offsetYmm === "number" && isFinite(model.offsetYmm)) ? model.offsetYmm : 0,
     rotationRad: (typeof model?.rotationRad === "number" && isFinite(model.rotationRad)) ? model.rotationRad : 0,
@@ -2448,6 +2509,16 @@ function restoreModel2d(model, snap) {
   if (!model) return;
   model.lines = (snap?.lines || []).map((l) => ({ ax: l.ax, ay: l.ay, bx: l.bx, by: l.by }));
   model.outline = (snap?.outline || []).map((p) => ({ x: p.x, y: p.y }));
+  model.designId = String(snap?.designId || "").trim() || null;
+  model.designCode = String(snap?.designCode || "").trim() || null;
+  model.designTitle = String(snap?.designTitle || "").trim() || null;
+  model.instanceCode = String(snap?.instanceCode || "").trim() || null;
+  model.displayName =
+    String(snap?.displayName || "").trim() ||
+    String(snap?.designTitle || "").trim() ||
+    String(snap?.instanceCode || "").trim() ||
+    String(snap?.designId || "").trim() ||
+    null;
   model.offsetXmm = (typeof snap?.offsetXmm === "number" && isFinite(snap.offsetXmm)) ? snap.offsetXmm : 0;
   model.offsetYmm = (typeof snap?.offsetYmm === "number" && isFinite(snap.offsetYmm)) ? snap.offsetYmm : 0;
   model.rotationRad = (typeof snap?.rotationRad === "number" && isFinite(snap.rotationRad)) ? snap.rotationRad : 0;
@@ -2717,6 +2788,11 @@ const guides = [];
 const model2d = {
   lines: [], // [{ax,ay,bx,by}]
   outline: [], // [{x,y}] in world mm, closed polyline is implied
+  designId: null,
+  designCode: null,
+  designTitle: null,
+  instanceCode: null,
+  displayName: null,
   color: "#7a8792",
   outlineColor: "#7A4A2B", // brown (default as requested)
   outlineHoverColor: "#9B6B3A",
@@ -2898,12 +2974,27 @@ function _applyModel2dLines(lines, opts = null) {
     .filter((l) => l && isFinite(l.ax) && isFinite(l.ay) && isFinite(l.bx) && isFinite(l.by))
     .map((l) => ({ ax: +l.ax, ay: +l.ay, bx: +l.bx, by: +l.by }));
   recomputeModel2dOutline();
+  model2d.designId = null;
+  model2d.designCode = null;
+  model2d.designTitle = null;
+  model2d.instanceCode = null;
+  model2d.displayName = null;
   model2d.offsetXmm = 0;
   model2d.offsetYmm = 0;
   model2d.rotationRad = 0;
   hoverModelOutline = false;
   selectedModelOutline = false;
   if (opts && typeof opts === "object") {
+    model2d.designId = String(opts.designId || "").trim() || null;
+    model2d.designCode = String(opts.designCode || "").trim() || null;
+    model2d.designTitle = String(opts.designTitle || "").trim() || null;
+    model2d.instanceCode = String(opts.instanceCode || "").trim() || null;
+    model2d.displayName =
+      String(opts.displayName || "").trim() ||
+      String(opts.designTitle || "").trim() ||
+      String(opts.instanceCode || "").trim() ||
+      String(opts.designId || "").trim() ||
+      null;
     if (typeof opts.color === "string") model2d.color = opts.color;
     if (typeof opts.lineWidthPx === "number" && isFinite(opts.lineWidthPx) && opts.lineWidthPx > 0) model2d.lineWidthPx = opts.lineWidthPx;
     if (Array.isArray(opts.dash) && opts.dash.length >= 2) model2d.dash = opts.dash.slice(0, 2).map((n) => +n);
@@ -2928,6 +3019,11 @@ function _clearModel2dLines() {
   stopModelDrag(true);
   model2d.lines.length = 0;
   model2d.outline.length = 0;
+  model2d.designId = null;
+  model2d.designCode = null;
+  model2d.designTitle = null;
+  model2d.instanceCode = null;
+  model2d.displayName = null;
   model2d.offsetXmm = 0;
   model2d.offsetYmm = 0;
   model2d.rotationRad = 0;

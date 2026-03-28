@@ -2617,6 +2617,15 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
       ...(full.model2dSnap || {}),
       lines: worldLines,
       outline: worldOutline,
+      designId: target.id,
+      designCode: String(target.design_code || "").trim() || null,
+      designTitle: String(target.design_title || "").trim() || null,
+      instanceCode: String(target.instance_code || "").trim() || null,
+      displayName:
+        String(target.design_title || "").trim() ||
+        String(target.instance_code || "").trim() ||
+        String(target.id || "").trim() ||
+        null,
       offsetXmm: nextPlacement.x,
       offsetYmm: nextPlacement.y,
       rotationRad: nextPlacement.rotRad,
@@ -2630,7 +2639,17 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
       restored = !!editorRef.value.restoreSnapshot(nextSnapshot);
     }
     if (!restored && editorRef.value?.setModel2dLines) {
-      editorRef.value.setModel2dLines(worldLines, null, false);
+      editorRef.value.setModel2dLines(worldLines, {
+        designId: target.id,
+        designCode: String(target.design_code || "").trim() || null,
+        designTitle: String(target.design_title || "").trim() || null,
+        instanceCode: String(target.instance_code || "").trim() || null,
+        displayName:
+          String(target.design_title || "").trim() ||
+          String(target.instance_code || "").trim() ||
+          String(target.id || "").trim() ||
+          null,
+      }, false);
       model2dTransformRef.value = {
         x: nextPlacement.x,
         y: nextPlacement.y,
