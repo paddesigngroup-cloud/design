@@ -1046,8 +1046,7 @@ function getOverlapHitKindPriority(kind) {
 function getOverlapHitLabel(hit) {
   if (!hit) return "";
   if (hit.kind === "passive_model") {
-    const title = String(hit?.model?.designTitle || hit?.model?.displayName || hit?.name || hit?.id || "").trim() || "بدون نام";
-    return `طرح - ${title}`;
+    return String(hit?.model?.designTitle || hit?.model?.displayName || hit?.name || hit?.id || "").trim() || "بدون نام";
   }
   if (hit.kind === "beam") {
     return `تیر - ${String(hit.name || hit.id || "").trim() || "بدون نام"}`;
@@ -1062,12 +1061,17 @@ function getOverlapHitLabel(hit) {
 }
 
 function getOverlapHitSecondaryLabel(hit) {
-  if (!hit || hit.kind !== "passive_model") return "";
-  const code = String(hit?.model?.instanceCode || "").trim();
-  const id = String(hit?.id || "").trim();
-  if (code) return `کد: ${code}`;
-  if (id) return `شناسه: ${id}`;
   return "";
+}
+
+function getOverlapHitMetaRows(hit) {
+  if (!hit || hit.kind !== "passive_model") return [];
+  const rows = [];
+  const instanceCode = String(hit?.model?.instanceCode || "").trim();
+  const designCode = String(hit?.model?.designCode || "").trim();
+  if (instanceCode) rows.push(`نام طرح: ${instanceCode}`);
+  if (designCode) rows.push(`کد طرح: ${designCode}`);
+  return rows;
 }
 
 function sortOverlapHits(hits) {
@@ -2415,6 +2419,7 @@ function snapshotModel2d(model) {
 function snapshotPassiveModels(models) {
   return (Array.isArray(models) ? models : []).map((model) => ({
     id: String(model?.id || "").trim(),
+    designCode: String(model?.designCode || "").trim() || null,
     designTitle: String(model?.designTitle || "").trim() || null,
     instanceCode: String(model?.instanceCode || "").trim() || null,
     displayName: String(model?.displayName || "").trim() || null,
@@ -2447,6 +2452,7 @@ function restorePassiveModels(snap) {
   passiveModels = (Array.isArray(snap) ? snap : [])
     .map((model) => ({
       id: String(model?.id || "").trim(),
+      designCode: String(model?.designCode || "").trim() || null,
       designTitle: String(model?.designTitle || "").trim() || null,
       instanceCode: String(model?.instanceCode || "").trim() || null,
       displayName:
@@ -2983,6 +2989,7 @@ function setPassiveModels(models = []) {
         id,
         lines,
         outline,
+        designCode: String(model?.designCode || "").trim() || null,
         designTitle: String(model?.designTitle || "").trim() || null,
         instanceCode: String(model?.instanceCode || "").trim() || null,
         displayName:
@@ -6863,6 +6870,17 @@ function renderOverlapPickerItems() {
       secondary.style.overflow = "hidden";
       secondary.style.textOverflow = "ellipsis";
       btn.appendChild(secondary);
+    }
+    for (const rowText of getOverlapHitMetaRows(item)) {
+      const row = document.createElement("div");
+      row.textContent = rowText;
+      row.style.marginTop = "4px";
+      row.style.font = `11px ${state.fontFamily || "Tahoma"}`;
+      row.style.color = "#7c3f57";
+      row.style.whiteSpace = "nowrap";
+      row.style.overflow = "hidden";
+      row.style.textOverflow = "ellipsis";
+      btn.appendChild(row);
     }
     menu.appendChild(btn);
   }
