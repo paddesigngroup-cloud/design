@@ -1241,13 +1241,11 @@ function applyOverlapSelectionHit(hit, opts = {}) {
     if (mode === "remove") {
       clearPendingPassiveActivation();
       removePassiveModelSelection(hit.id);
-      selectedModelOutline = false;
       return true;
     }
     if (mode === "add") {
       clearPendingPassiveActivation();
       addPassiveModelSelection(hit.id);
-      selectedModelOutline = false;
       return true;
     }
     selectedWallId = null;
@@ -1268,6 +1266,15 @@ function applyOverlapSelectionHit(hit, opts = {}) {
   }
   if (hit.type === "active_model") {
     clearPendingPassiveActivation();
+    if (mode === "remove") {
+      removeModelSelection();
+      return true;
+    }
+    if (mode === "add") {
+      addModelSelection();
+      hoverModelOutline = true;
+      return true;
+    }
     setSingleOrMultiSelection("passive_model", []);
     clearGroupSelection();
     selectedWallId = null;
@@ -1280,7 +1287,6 @@ function applyOverlapSelectionHit(hit, opts = {}) {
   }
 
   clearPendingPassiveActivation();
-  setSingleOrMultiSelection("passive_model", []);
   if (hit.type === "hidden") {
     hoverHiddenId = hit.id;
     if (mode === "remove") {
@@ -1291,6 +1297,7 @@ function applyOverlapSelectionHit(hit, opts = {}) {
       addHiddenSelection(hit.id);
       return true;
     }
+    setSingleOrMultiSelection("passive_model", []);
     clearGroupSelection();
     selectedWallId = null;
     selectedHiddenId = hit.id;
@@ -1308,6 +1315,7 @@ function applyOverlapSelectionHit(hit, opts = {}) {
       addWallSelection(hit.id);
       return true;
     }
+    setSingleOrMultiSelection("passive_model", []);
     clearGroupSelection();
     selectedHiddenId = null;
     selectedWallId = hit.id;
@@ -8383,7 +8391,6 @@ function onMouseDown(e) {
   if (clickedModelOutline) {
     clearPendingPassiveActivation();
     hoverPassiveModelId = null;
-    setSingleOrMultiSelection("passive_model", []);
     hoverModelOutline = true;
     if (isRemoveSelectModifier) {
       removeModelSelection();
@@ -8393,6 +8400,7 @@ function onMouseDown(e) {
       addModelSelection();
       return;
     }
+    setSingleOrMultiSelection("passive_model", []);
     clearGroupSelection();
     selectedModelOutline = true;
     selectedWallId = null;
@@ -8403,7 +8411,6 @@ function onMouseDown(e) {
   }
   if (hoverWallId) {
     clearPendingPassiveActivation();
-    setSingleOrMultiSelection("passive_model", []);
     if (isRemoveSelectModifier) {
       removeWallSelection(hoverWallId);
       return;
@@ -8412,6 +8419,7 @@ function onMouseDown(e) {
       addWallSelection(hoverWallId);
       return;
     }
+    setSingleOrMultiSelection("passive_model", []);
     clearGroupSelection();
     selectedHiddenId = null;
     selectedWallId = hoverWallId;
@@ -8421,7 +8429,6 @@ function onMouseDown(e) {
   }
   if (hoverHiddenId) {
     clearPendingPassiveActivation();
-    setSingleOrMultiSelection("passive_model", []);
     if (isRemoveSelectModifier) {
       removeHiddenSelection(hoverHiddenId);
       return;
@@ -8430,6 +8437,7 @@ function onMouseDown(e) {
       addHiddenSelection(hoverHiddenId);
       return;
     }
+    setSingleOrMultiSelection("passive_model", []);
     clearGroupSelection();
     selectedWallId = null;
     selectedHiddenId = hoverHiddenId;
@@ -8439,7 +8447,6 @@ function onMouseDown(e) {
   }
   if (hoverDimId) {
     clearPendingPassiveActivation();
-    setSingleOrMultiSelection("passive_model", []);
     if (isRemoveSelectModifier) {
       removeDimSelection(hoverDimId);
       return;
@@ -8448,6 +8455,7 @@ function onMouseDown(e) {
       addDimSelection(hoverDimId);
       return;
     }
+    setSingleOrMultiSelection("passive_model", []);
     clearGroupSelection();
     selectedWallId = null;
     selectedHiddenId = null;
