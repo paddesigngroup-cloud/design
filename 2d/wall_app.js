@@ -9245,7 +9245,21 @@ function performRedo() {
   undo.redo();
 }
 
-function onWindowKeyDown(e) {
+async function confirmActiveModelDelete() {
+  try {
+    const dialogs = (typeof window !== "undefined") ? window.__designkpDialogs : null;
+    if (dialogs && typeof dialogs.confirm === "function") {
+      return await dialogs.confirm("طرح انتخاب‌شده حذف شود؟", {
+        title: "حذف طرح سفارش",
+        confirmText: "حذف",
+        cancelText: "انصراف",
+      });
+    }
+  } catch (_) {}
+  return true;
+}
+
+async function onWindowKeyDown(e) {
   if (!inputEnabled) return;
   const effectiveMode = getEffectiveDrawingMode();
   const key = String(e.key || "");
@@ -9422,25 +9436,37 @@ function onWindowKeyDown(e) {
       const hiddenIds = selectedHiddenIds.slice();
       const dimIds = new Set(selectedDimIds);
       const deleteModel = !!selectedModelOutline;
-      undo.runAction(() => {
-        for (const wallId of wallIds) {
-          const w = graph.getWall(wallId);
-          if (!w) continue;
-          graph.deleteWall(wallId);
-        }
-        for (const wallId of hiddenIds) {
-          const w = hiddenGraph.getWall(wallId);
-          if (!w) continue;
-          hiddenGraph.deleteWall(wallId);
-        }
-        if (dimIds.size) {
-          for (let i = dimensions.length - 1; i >= 0; i--) {
-            const d = dimensions[i];
-            if (!d || !dimIds.has(d.id)) continue;
-            dimensions.splice(i, 1);
+      let deletedModel = false;
+      if (wallIds.length > 0 || hiddenIds.length > 0 || dimIds.size > 0) {
+        undo.runAction(() => {
+          for (const wallId of wallIds) {
+            const w = graph.getWall(wallId);
+            if (!w) continue;
+            graph.deleteWall(wallId);
           }
-        }
-        if (deleteModel) {
+          for (const wallId of hiddenIds) {
+            const w = hiddenGraph.getWall(wallId);
+            if (!w) continue;
+            hiddenGraph.deleteWall(wallId);
+          }
+          if (dimIds.size) {
+            for (let i = dimensions.length - 1; i >= 0; i--) {
+              const d = dimensions[i];
+              if (!d || !dimIds.has(d.id)) continue;
+              dimensions.splice(i, 1);
+            }
+          }
+          deleteOrphanNodes(graph, tool.pendingStartNodeId ? new Set([tool.pendingStartNodeId]) : null);
+          if (tool.pendingStartNodeId && !graph.getNode(tool.pendingStartNodeId)) tool.stopChaining();
+          deleteOrphanNodes(hiddenGraph, hiddenTool.pendingStartNodeId ? new Set([hiddenTool.pendingStartNodeId]) : null);
+          if (hiddenTool.pendingStartNodeId && !hiddenGraph.getNode(hiddenTool.pendingStartNodeId)) hiddenTool.stopChaining();
+          enforceLockedInsideLengths();
+          syncCreationCountersFromScene();
+        });
+      }
+      if (deleteModel) {
+        const confirmed = await confirmActiveModelDelete();
+        if (confirmed) {
           model2d.lines = [];
           model2d.outline = [];
           model2d.name = "";
@@ -9449,24 +9475,20 @@ function onWindowKeyDown(e) {
           model2d.offsetYmm = 0;
           model2d.rotationRad = 0;
           emitModel2dTransform();
-          if (typeof onActiveModelDelete === "function") onActiveModelDelete();
+          deletedModel = true;
+          if (typeof onActiveModelDelete === "function") await onActiveModelDelete();
         }
-        deleteOrphanNodes(graph, tool.pendingStartNodeId ? new Set([tool.pendingStartNodeId]) : null);
-        if (tool.pendingStartNodeId && !graph.getNode(tool.pendingStartNodeId)) tool.stopChaining();
-        deleteOrphanNodes(hiddenGraph, hiddenTool.pendingStartNodeId ? new Set([hiddenTool.pendingStartNodeId]) : null);
-        if (hiddenTool.pendingStartNodeId && !hiddenGraph.getNode(hiddenTool.pendingStartNodeId)) hiddenTool.stopChaining();
-        enforceLockedInsideLengths();
-        syncCreationCountersFromScene();
-      });
+      }
       hoverWallId = null;
       selectedWallId = null;
       selectedHiddenId = null;
       hoverHiddenId = null;
       selectedDimId = null;
       hoverDimId = null;
-      hoverModelOutline = false;
-      selectedModelOutline = false;
+      hoverModelOutline = deleteModel ? !deletedModel : false;
+      selectedModelOutline = deleteModel ? !deletedModel : false;
       clearGroupSelection();
+      if (deleteModel && !deletedModel) selectedModelOutline = true;
     } else if (selectedWallId) {
       e.preventDefault();
       const wallId = selectedWallId;
