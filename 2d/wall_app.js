@@ -946,6 +946,7 @@ const rotateCommand = {
 const copyCommand = {
   mode: "idle", // idle | await_confirm_selection | await_base_point | await_target_point
   selectionSnapshot: null,
+  startSelectionSnapshot: null,
   basePoint: null,
   cursorPoint: null,
   shiftLockDir: null,
@@ -4124,6 +4125,24 @@ function stopAxisDrag() {
   axisDrag.moved = false;
 }
 
+function cancelAxisDrag(restoreGeometry = true) {
+  const hasPreview =
+    axisDrag.startGraphSnap &&
+    axisDrag.startHiddenGraphSnap &&
+    axisDrag.startDimensionsSnap &&
+    axisDrag.startModelSnap &&
+    axisDrag.startPassiveModelsSnap;
+  if (restoreGeometry && hasPreview) {
+    restoreGraph(graph, axisDrag.startGraphSnap);
+    restoreGraph(hiddenGraph, axisDrag.startHiddenGraphSnap);
+    restoreDimensions(dimensions, axisDrag.startDimensionsSnap);
+    restoreModel2d(model2d, axisDrag.startModelSnap);
+    restorePassiveModels(axisDrag.startPassiveModelsSnap);
+    emitModel2dTransform();
+  }
+  stopAxisDrag();
+}
+
 function applyAxisDrag(targetWorld) {
   if (!axisDrag.active || !axisDrag.startMouseWorld) return;
   const start = axisDrag.startMouseWorld;
@@ -4556,6 +4575,7 @@ function updateRotateCommandCursor(worldPoint) {
 
 function stopCopyCommandRuntime() {
   copyCommand.selectionSnapshot = null;
+  copyCommand.startSelectionSnapshot = null;
   copyCommand.basePoint = null;
   copyCommand.cursorPoint = null;
   copyCommand.shiftLockDir = null;
@@ -4584,6 +4604,7 @@ function _startCopyTargetPhase(basePoint) {
   copyCommand.basePoint = { x: basePoint.x, y: basePoint.y };
   copyCommand.cursorPoint = { x: basePoint.x, y: basePoint.y };
   copyCommand.shiftLockDir = null;
+  copyCommand.startSelectionSnapshot = buildSelectionSnapshotFromCurrentSelection();
   copyCommand.startGraphSnap = snapshotGraph(graph);
   copyCommand.startHiddenGraphSnap = snapshotGraph(hiddenGraph);
   copyCommand.startDimensionsSnap = snapshotDimensions(dimensions);
@@ -4654,6 +4675,7 @@ function confirmCopyStep() {
     const startModelSnap = copyCommand.startModelSnap;
     const startToolSnap = copyCommand.startToolSnap;
     const startHiddenToolSnap = copyCommand.startHiddenToolSnap;
+    const startSelectionSnapshot = copyCommand.startSelectionSnapshot;
     cancelCopyCommand(false);
     if (!moved) return true;
     restoreGraph(graph, startGraphSnap);
@@ -4662,6 +4684,7 @@ function confirmCopyStep() {
     restoreModel2d(model2d, startModelSnap);
     restoreTool(tool, graph, startToolSnap);
     restoreHiddenTool(hiddenTool, hiddenGraph, startHiddenToolSnap);
+    applySelectionSnapshot(startSelectionSnapshot);
     emitModel2dTransform();
     undo.runAction(() => {
       restoreGraph(graph, endGraphSnap);
@@ -9162,6 +9185,38 @@ function isEditableTarget(el) {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
+function cancelActiveHistoryPreview() {
+  if (axisDrag.active) {
+    cancelAxisDrag(true);
+    return true;
+  }
+  if (copyCommand.mode !== "idle") {
+    cancelCopyCommand(true);
+    return true;
+  }
+  if (moveCommand.mode !== "idle") {
+    cancelMoveCommand(true);
+    return true;
+  }
+  if (rotateCommand.mode !== "idle") {
+    cancelRotateCommand(true);
+    return true;
+  }
+  return false;
+}
+
+function performUndo() {
+  if (dimEditor.active) closeDimEditor(true);
+  if (cancelActiveHistoryPreview()) return;
+  undo.undo();
+}
+
+function performRedo() {
+  if (dimEditor.active) closeDimEditor(true);
+  if (cancelActiveHistoryPreview()) return;
+  undo.redo();
+}
+
 function onWindowKeyDown(e) {
   if (!inputEnabled) return;
   const effectiveMode = getEffectiveDrawingMode();
@@ -9184,8 +9239,7 @@ function onWindowKeyDown(e) {
   if (ctrl && !e.shiftKey && (code === "KeyZ" || key.toLowerCase() === "z")) {
     if (isEditableTarget(e.target)) return;
     e.preventDefault();
-    if (dimEditor.active) closeDimEditor(true);
-    undo.undo();
+    performUndo();
     return;
   }
 
@@ -9193,15 +9247,13 @@ function onWindowKeyDown(e) {
   if (ctrl && !e.shiftKey && (code === "KeyY" || key.toLowerCase() === "y")) {
     if (isEditableTarget(e.target)) return;
     e.preventDefault();
-    if (dimEditor.active) closeDimEditor(true);
-    undo.redo();
+    performRedo();
     return;
   }
   if (ctrl && e.shiftKey && (code === "KeyZ" || key.toLowerCase() === "z")) {
     if (isEditableTarget(e.target)) return;
     e.preventDefault();
-    if (dimEditor.active) closeDimEditor(true);
-    undo.redo();
+    performRedo();
     return;
   }
 
@@ -10612,8 +10664,8 @@ return {
   placeColumnAtClient,
   setUiCursorMode,
 
-  undo: () => { if (dimEditor.active) closeDimEditor(true); undo.undo(); },
-  redo: () => { if (dimEditor.active) closeDimEditor(true); undo.redo(); },
+  undo: () => { performUndo(); },
+  redo: () => { performRedo(); },
   clearAll,
   zoomIn,
   zoomOut,
