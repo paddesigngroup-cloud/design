@@ -1035,6 +1035,17 @@ function getPassiveModelDisplayName(model) {
   return String(model.displayName || model.designTitle || model.instanceCode || model.id || "").trim();
 }
 
+function isOverlapHitCurrentlySelected(hit) {
+  if (!hit) return false;
+  if (hit.type === "active_model") return !!selectedModelOutline;
+  if (hit.type === "passive_model") {
+    const key = String(hit.id || "").trim();
+    if (!key) return false;
+    return String(selectedPassiveModelId || "").trim() === key || selectedPassiveModelIds.includes(hit.id);
+  }
+  return false;
+}
+
 function getOverlapHitKindPriority(kind) {
   if (kind === "passive_model") return 0;
   if (kind === "column" || kind === "beam") return 1;
@@ -8281,6 +8292,31 @@ function onMouseDown(e) {
 
   const overlapHits = collectOverlapHits(e.offsetX, e.offsetY);
   if (overlapHits.length > 1) {
+    const selectedOverlapHit = (!isAddSelectModifier && !isRemoveSelectModifier)
+      ? overlapHits.find((hit) => isOverlapHitCurrentlySelected(hit))
+      : null;
+    if (selectedOverlapHit) {
+      if (selectedOverlapHit.type === "active_model") {
+        clearPendingPassiveActivation();
+        setSingleOrMultiSelection("passive_model", []);
+        clearGroupSelection();
+        selectedWallId = null;
+        selectedHiddenId = null;
+        selectedDimId = null;
+        hoverPassiveModelId = null;
+        hoverModelOutline = true;
+        selectedModelOutline = true;
+        startModelDrag(e.offsetX, e.offsetY);
+        return;
+      }
+      const selected = applyOverlapSelectionHit(selectedOverlapHit, {
+        mode: "replace",
+        offsetX: e.offsetX,
+        offsetY: e.offsetY,
+        armPassiveDrag: true,
+      });
+      if (selected) return;
+    }
     showOverlapPicker(e.clientX, e.clientY, overlapHits, {
       mode: isRemoveSelectModifier ? "remove" : (isAddSelectModifier ? "add" : "replace"),
       offsetX: e.offsetX,
