@@ -6,6 +6,7 @@ import {
   editorViewportRef,
   passiveModelSelectionHandlerRef,
   passiveModelSelectionStateRef,
+  passiveModelTransformStateRef,
   activeModelDeleteHandlerRef,
 } from "../editor/editor_store.js";
 import { createWallApp } from "../../../main.js";
@@ -40,6 +41,9 @@ onMounted(() => {
       },
       onPassiveModelSelectionChange: (modelIds) => {
         passiveModelSelectionStateRef.value = Array.isArray(modelIds) ? modelIds.slice() : [];
+      },
+      onPassiveModelsTransformChange: (models) => {
+        passiveModelTransformStateRef.value = Array.isArray(models) ? models.slice() : [];
       },
       onActiveModelDelete: () => {
         const handler = activeModelDeleteHandlerRef.value;

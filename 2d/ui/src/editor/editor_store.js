@@ -15,6 +15,9 @@ export const passiveModelSelectionHandlerRef = shallowRef(null);
 // Latest passive saved-design selection reported by the 2D engine.
 export const passiveModelSelectionStateRef = shallowRef([]);
 
+// Latest passive saved-design transforms reported by the 2D engine.
+export const passiveModelTransformStateRef = shallowRef([]);
+
 // Handler used by the 2D engine when the active saved design is deleted from canvas space.
 export const activeModelDeleteHandlerRef = shallowRef(null);
 

@@ -72,6 +72,7 @@ export function createWallApp({
   canvas,
   container,
   onModel2dTransformChange,
+  onPassiveModelsTransformChange,
   onViewportChange,
   onPassiveModelSelect,
   onPassiveModelSelectionChange,
@@ -2295,6 +2296,7 @@ class UndoManager {
       selectedModelOutline: !!snap.selectedModelOutline,
       hoverModelOutline: !!snap.hoverModelOutline,
     });
+    emitPassiveModelsTransformChange();
   }
 
   redo() {
@@ -2353,6 +2355,7 @@ class UndoManager {
       selectedModelOutline: !!snap.selectedModelOutline,
       hoverModelOutline: !!snap.hoverModelOutline,
     });
+    emitPassiveModelsTransformChange();
   }
 }
 
@@ -2395,6 +2398,25 @@ function emitPassiveModelSelectionChange() {
     if (id && !ids.includes(id)) ids.push(id);
   }
   onPassiveModelSelectionChange(ids);
+}
+
+function emitPassiveModelsTransformChange(modelIds = null) {
+  if (typeof onPassiveModelsTransformChange !== "function") return;
+  const wanted = Array.isArray(modelIds) && modelIds.length
+    ? new Set(modelIds.map((id) => String(id || "")).filter(Boolean))
+    : null;
+  const payload = passiveModels
+    .filter((model) => {
+      const id = String(model?.id || "").trim();
+      return !!id && (!wanted || wanted.has(id));
+    })
+    .map((model) => ({
+      id: String(model.id || "").trim(),
+      x: Number(model.transform?.x) || 0,
+      y: Number(model.transform?.y) || 0,
+      rotRad: Number(model.transform?.rotRad) || 0,
+    }));
+  onPassiveModelsTransformChange(payload);
 }
 
 function _loadImgWithFallback(map, key, urls) {
@@ -2583,6 +2605,19 @@ function selectModelOutline() {
 }
 
 function setPassiveModels(models = []) {
+  const prevTransformById = new Map(
+    passiveModels
+      .map((model) => {
+        const id = String(model?.id || "").trim();
+        if (!id) return null;
+        return [id, {
+          x: Number(model.transform?.x) || 0,
+          y: Number(model.transform?.y) || 0,
+          rotRad: Number(model.transform?.rotRad) || 0,
+        }];
+      })
+      .filter(Boolean)
+  );
   passiveModels = (Array.isArray(models) ? models : [])
     .map((model) => {
       const id = String(model?.id || "").trim();
@@ -2597,14 +2632,21 @@ function setPassiveModels(models = []) {
             .map((l) => ({ ax: +l.ax, ay: +l.ay, bx: +l.bx, by: +l.by }))
         : [];
       if (!id || outline.length < 3 || lines.length < 1) return null;
+      const prevTransform = prevTransformById.get(id) || null;
       return {
         id,
         lines,
         outline,
         transform: {
-          x: Number.isFinite(Number(model?.transform?.x)) ? Number(model.transform.x) : 0,
-          y: Number.isFinite(Number(model?.transform?.y)) ? Number(model.transform.y) : 0,
-          rotRad: Number.isFinite(Number(model?.transform?.rotRad)) ? Number(model.transform.rotRad) : 0,
+          x: Number.isFinite(Number(model?.transform?.x))
+            ? Number(model.transform.x)
+            : (prevTransform?.x || 0),
+          y: Number.isFinite(Number(model?.transform?.y))
+            ? Number(model.transform.y)
+            : (prevTransform?.y || 0),
+          rotRad: Number.isFinite(Number(model?.transform?.rotRad))
+            ? Number(model.transform.rotRad)
+            : (prevTransform?.rotRad || 0),
         },
         color: typeof model.color === "string" ? model.color : model2d.color,
         outlineColor: typeof model.outlineColor === "string" ? model.outlineColor : model2d.outlineColor,
@@ -3206,6 +3248,7 @@ function applySelectionDelta(snapshot, delta, opts = null) {
       rotRad: Number(model.transform?.rotRad) || 0,
     };
   }
+  if (passiveModelIdSet.size > 0) emitPassiveModelsTransformChange([...passiveModelIdSet]);
 
   if (snapshot.hasModel) {
     const lines = Array.isArray(model2d.lines) ? model2d.lines : [];
@@ -3385,6 +3428,7 @@ function applySelectionRotation(snapshot, pivot, angleRad) {
       rotRad: wrapAnglePi((Number(model.transform?.rotRad) || 0) + angleRad),
     };
   }
+  if (passiveModelIdSet.size > 0) emitPassiveModelsTransformChange([...passiveModelIdSet]);
 
   if (snapshot.hasModel) {
     model2d.lines = (model2d.lines || []).map((line) => {
@@ -9149,6 +9193,7 @@ function restoreSnapshot(snap) {
     y: model2d.offsetYmm || 0,
     rotRad: model2d.rotationRad || 0,
   });
+  emitPassiveModelsTransformChange();
   emitViewportChange(true);
   _ui.updateToolButtons();
   _ui.updateSnapButton();

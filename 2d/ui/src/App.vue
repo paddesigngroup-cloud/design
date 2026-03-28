@@ -7,6 +7,7 @@ import {
   editorViewportRef,
   passiveModelSelectionHandlerRef,
   passiveModelSelectionStateRef,
+  passiveModelTransformStateRef,
   activeModelDeleteHandlerRef,
 } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
@@ -2577,12 +2578,25 @@ function getCurrentModel2dTransform() {
   };
 }
 
+function getCurrentEditorModelPlacement() {
+  const full = editorRef.value?.getState?.();
+  const snap = full?.model2dSnap || null;
+  if (snap) {
+    return {
+      x: Number.isFinite(Number(snap.offsetXmm)) ? Number(snap.offsetXmm) : 0,
+      y: Number.isFinite(Number(snap.offsetYmm)) ? Number(snap.offsetYmm) : 0,
+      rotRad: Number.isFinite(Number(snap.rotationRad)) ? Number(snap.rotationRad) : 0,
+    };
+  }
+  return getCurrentModel2dTransform();
+}
+
 function persistCurrentActiveOrderDesignPlacement() {
   const activeId = String(activeCabinetDesignId.value || "").trim();
   if (!activeId) return;
   upsertOrderDesignPlacement({
     orderDesignId: activeId,
-    ...getCurrentModel2dTransform(),
+    ...getCurrentEditorModelPlacement(),
   });
 }
 
@@ -2611,6 +2625,7 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
   let restored = false;
   _orderDesignPlacementSyncPaused = true;
   try {
+    activeCabinetDesignId.value = target.id;
     if (full && editorRef.value?.restoreSnapshot) {
       restored = !!editorRef.value.restoreSnapshot(nextSnapshot);
     }
@@ -2627,7 +2642,6 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
     _orderDesignPlacementSyncPaused = false;
   }
   if (restored) {
-    activeCabinetDesignId.value = target.id;
     upsertOrderDesignPlacement(nextPlacement);
     editorRef.value?.selectModelOutline?.();
   }
@@ -5761,7 +5775,9 @@ function syncQuickStateFromEditor() {
   } else if (activeCabinetDesignId.value) {
     upsertOrderDesignPlacement({
       orderDesignId: activeCabinetDesignId.value,
-      ...getCurrentModel2dTransform(),
+      x: Number.isFinite(Number(full?.model2dSnap?.offsetXmm)) ? Number(full.model2dSnap.offsetXmm) : 0,
+      y: Number.isFinite(Number(full?.model2dSnap?.offsetYmm)) ? Number(full.model2dSnap.offsetYmm) : 0,
+      rotRad: Number.isFinite(Number(full?.model2dSnap?.rotationRad)) ? Number(full.model2dSnap.rotationRad) : 0,
     });
   }
   showDimensions.value = s.showDimensions !== false;
@@ -6351,6 +6367,11 @@ const passiveStageOrderDesignModels = computed(() =>
         id: placement.orderDesignId,
         lines: worldLines,
         outline: worldOutline,
+        transform: {
+          x: placement.x,
+          y: placement.y,
+          rotRad: placement.rotRad,
+        },
       };
     })
     .filter((item) => item && item.outline.length >= 3 && item.lines.length >= 1)
@@ -6581,7 +6602,7 @@ async function loadOrderDrawing(orderId, { clearWhenMissing = true } = {}) {
     if (!orderDesignPlacements.value.length && activeCabinetDesignId.value) {
       upsertOrderDesignPlacement({
         orderDesignId: activeCabinetDesignId.value,
-        ...getCurrentModel2dTransform(),
+        ...getCurrentEditorModelPlacement(),
       });
     }
     syncQuickStateFromEditor();
@@ -7028,6 +7049,24 @@ watch(
       : [];
   },
   { immediate: true }
+);
+
+watch(
+  passiveModelTransformStateRef,
+  (models) => {
+    if (!Array.isArray(models) || !models.length) return;
+    for (const model of models) {
+      const orderDesignId = String(model?.id || "").trim();
+      if (!orderDesignId) continue;
+      upsertOrderDesignPlacement({
+        orderDesignId,
+        x: Number.isFinite(Number(model?.x)) ? Number(model.x) : 0,
+        y: Number.isFinite(Number(model?.y)) ? Number(model.y) : 0,
+        rotRad: Number.isFinite(Number(model?.rotRad)) ? Number(model.rotRad) : 0,
+      });
+    }
+  },
+  { immediate: true, deep: true }
 );
 
 function setMenu(menuId) {
