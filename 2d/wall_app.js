@@ -8131,7 +8131,17 @@ function onWindowMouseMove(e) {
   const oy = clamp(oyRaw, 0, rect.height);
   if (pendingPassiveActivation.id && !pendingPassiveActivation.moved) {
     const movedPx = Math.hypot(ox - pendingPassiveActivation.startX, oy - pendingPassiveActivation.startY);
-    if (movedPx >= 3) pendingPassiveActivation.moved = true;
+    if (movedPx >= 3) {
+      const targetId = pendingPassiveActivation.id;
+      const startX = pendingPassiveActivation.startX;
+      const startY = pendingPassiveActivation.startY;
+      pendingPassiveActivation.moved = true;
+      clearPendingPassiveActivation();
+      if (typeof onPassiveModelSelect === "function") {
+        onPassiveModelSelect(targetId);
+      }
+      startModelDrag(startX, startY);
+    }
   }
   if (boxSelect.active) {
     boxSelect.curX = ox;
