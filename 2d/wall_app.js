@@ -7627,23 +7627,15 @@ function onMouseDown(e) {
       selectedModelOutline = false;
       return;
     }
-    const alreadyOnlySelected =
-      String(selectedPassiveModelId || "") === String(clickedPassiveModelId) &&
-      !selectedPassiveModelIds.length &&
-      !selectedWallId &&
-      !selectedHiddenId &&
-      !selectedDimId &&
-      !selectedWallIds.length &&
-      !selectedHiddenIds.length &&
-      !selectedDimIds.length &&
-      !selectedModelOutline;
     selectedWallId = null;
     selectedHiddenId = null;
     selectedDimId = null;
     clearGroupSelection();
     selectedModelOutline = false;
     setSingleOrMultiSelection("passive_model", [clickedPassiveModelId]);
-    if (alreadyOnlySelected && typeof onPassiveModelSelect === "function") onPassiveModelSelect(clickedPassiveModelId);
+    // A plain click on a passive design should promote it immediately,
+    // matching wall selection behavior and keeping design-to-design switching one-click.
+    if (typeof onPassiveModelSelect === "function") onPassiveModelSelect(clickedPassiveModelId);
     return;
   }
   const clickedModelOutline = hitTestModelFill(e.offsetX, e.offsetY) || hitTestModelOutline(e.offsetX, e.offsetY);
