@@ -3965,6 +3965,18 @@ function getNextNameSeedForPrefix(prefix = "Wall") {
   return maxIdx + 1;
 }
 
+function getNextColumnNameSeed() {
+  let maxIdx = 0;
+  for (const wall of graph.walls.values()) {
+    if (!isColumnEdge(wall)) continue;
+    const m = String(wall?.name || "").trim().match(/^C(\d+)$/i);
+    if (!m) continue;
+    const idx = Number(m[1]);
+    if (Number.isFinite(idx) && idx > maxIdx) maxIdx = idx;
+  }
+  return maxIdx + 1;
+}
+
 function getEntityPrefixFromName(name, fallbackPrefix = "Wall") {
   const m = String(name || "").trim().match(/^([^\s]+)\s+[A-Z](?:-\d+)?$/i);
   return m?.[1] || fallbackPrefix;
@@ -3998,13 +4010,12 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
   if (snapshot.hasModel || (Array.isArray(snapshot.passiveModelIds) && snapshot.passiveModelIds.length > 0)) return null;
 
   const fallbackPrefix = tool?.namePrefix || "Wall";
-  const requestedWallNameSeed = Number.isFinite(Number(opts?.wallNameSeed)) ? Number(opts.wallNameSeed) : null;
+  const shouldUpdateCreationCounters = opts?.updateCreationCounters !== false;
   const prefixToSeed = new Map();
+  let nextColumnSeed = null;
   function ensurePrefixSeed(prefix) {
     if (prefixToSeed.has(prefix)) return;
-    const sceneSeed = getNextNameSeedForPrefix(prefix);
-    const seed = (requestedWallNameSeed == null) ? sceneSeed : Math.max(sceneSeed, requestedWallNameSeed);
-    prefixToSeed.set(prefix, seed);
+    prefixToSeed.set(prefix, getNextNameSeedForPrefix(prefix));
   }
   let nextDimId = Number.isFinite(Number(dimTool?._did)) ? Number(dimTool._did) : 1;
 
@@ -4019,24 +4030,32 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
     const a = wall ? graph.getNode(wall.a) : null;
     const b = wall ? graph.getNode(wall.b) : null;
     if (!wall || !a || !b) continue;
-    const namePrefix = getEntityPrefixFromName(wall?.name, fallbackPrefix);
-    ensurePrefixSeed(namePrefix);
-    const nextNameIdx = prefixToSeed.get(namePrefix) || 0;
+    let nextName = "";
+    if (isColumnEdge(wall)) {
+      if (nextColumnSeed == null) nextColumnSeed = getNextColumnNameSeed();
+      nextName = `C${nextColumnSeed++}`;
+    } else {
+      const namePrefix = getEntityPrefixFromName(wall?.name, fallbackPrefix);
+      ensurePrefixSeed(namePrefix);
+      const nextNameIdx = prefixToSeed.get(namePrefix) || 0;
+      nextName = entityNameFromIndexLocal(nextNameIdx, namePrefix);
+      prefixToSeed.set(namePrefix, nextNameIdx + 1);
+    }
     const copied = graph.addWallByPoints(
       a.x + dx,
       a.y + dy,
       b.x + dx,
       b.y + dy,
       wall.thickness,
-      entityNameFromIndexLocal(nextNameIdx, namePrefix),
+      nextName,
       1
     );
-    prefixToSeed.set(namePrefix, nextNameIdx + 1);
     if (!copied) continue;
     copied.heightMm = (typeof wall.heightMm === "number" && isFinite(wall.heightMm)) ? wall.heightMm : copied.heightMm;
     copied.floorOffsetMm = (typeof wall.floorOffsetMm === "number" && isFinite(wall.floorOffsetMm)) ? wall.floorOffsetMm : (copied.floorOffsetMm ?? 0);
     copied.fillColor = wall.fillColor ?? null;
     copied.color3d = wall.color3d ?? null;
+    copied.elementType = wall.elementType ?? copied.elementType ?? null;
     copied.dimSide = wall.dimSide ?? "auto";
     copied.offsetSide = wall.offsetSide ?? "auto";
     copied.offsetSideManual = !!wall.offsetSideManual;
@@ -4084,8 +4103,7 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
     result.dimIds.push(copied.id);
   }
   dimTool._did = nextDimId;
-  const activePrefix = tool?.namePrefix || "Wall";
-  tool.wallIndex = prefixToSeed.get(activePrefix) ?? getNextNameSeedForPrefix(activePrefix);
+  if (shouldUpdateCreationCounters) syncCreationCountersFromScene();
   return result;
 }
 
@@ -4654,6 +4672,7 @@ function confirmCopyStep() {
 
   if (copyCommand.mode === "await_target_point") {
     const moved = !!copyCommand.moved;
+    if (moved) syncCreationCountersFromScene();
     const endGraphSnap = snapshotGraph(graph);
     const endHiddenGraphSnap = snapshotGraph(hiddenGraph);
     const endDimensionsSnap = snapshotDimensions(dimensions);
@@ -4724,7 +4743,7 @@ function updateCopyCommandCursor(worldPoint, shiftKey = false) {
     x: lock.target.x - copyCommand.basePoint.x,
     y: lock.target.y - copyCommand.basePoint.y,
   }, {
-    wallNameSeed: tool.wallIndex,
+    updateCreationCounters: false,
   });
   selectedWallId = (result?.wallIds?.length === 1) ? result.wallIds[0] : null;
   selectedWallIds = result?.wallIds?.length > 1 ? result.wallIds.slice() : [];
