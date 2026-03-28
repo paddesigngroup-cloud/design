@@ -908,6 +908,7 @@ const axisDrag = {
   startHiddenGraphSnap: null,
   startDimensionsSnap: null,
   startModelSnap: null,
+  startPassiveModelsSnap: null,
   moved: false,
 };
 let hoverObjectAxis = null; // "x" | "y" | null
@@ -921,6 +922,7 @@ const moveCommand = {
   startHiddenGraphSnap: null,
   startDimensionsSnap: null,
   startModelSnap: null,
+  startPassiveModelsSnap: null,
   moved: false,
 };
 const rotateCommand = {
@@ -937,6 +939,7 @@ const rotateCommand = {
   startHiddenGraphSnap: null,
   startDimensionsSnap: null,
   startModelSnap: null,
+  startPassiveModelsSnap: null,
   moved: false,
 };
 const copyCommand = {
@@ -2156,6 +2159,25 @@ function snapshotModel2d(model) {
   };
 }
 
+function snapshotPassiveModels(models) {
+  return (Array.isArray(models) ? models : []).map((model) => ({
+    id: String(model?.id || "").trim(),
+    lines: (model?.lines || []).map((l) => ({ ax: l.ax, ay: l.ay, bx: l.bx, by: l.by })),
+    outline: (model?.outline || []).map((p) => ({ x: p.x, y: p.y })),
+    transform: {
+      x: Number(model?.transform?.x) || 0,
+      y: Number(model?.transform?.y) || 0,
+      rotRad: Number(model?.transform?.rotRad) || 0,
+    },
+    color: model?.color ?? null,
+    outlineColor: model?.outlineColor ?? null,
+    outlineHoverColor: model?.outlineHoverColor ?? null,
+    lineWidthPx: Number(model?.lineWidthPx) || 0,
+    dash: Array.isArray(model?.dash) ? model.dash.slice() : [],
+    alpha: Number(model?.alpha) || 0,
+  }));
+}
+
 function restoreModel2d(model, snap) {
   if (!model) return;
   model.lines = (snap?.lines || []).map((l) => ({ ax: l.ax, ay: l.ay, bx: l.bx, by: l.by }));
@@ -2163,6 +2185,27 @@ function restoreModel2d(model, snap) {
   model.offsetXmm = (typeof snap?.offsetXmm === "number" && isFinite(snap.offsetXmm)) ? snap.offsetXmm : 0;
   model.offsetYmm = (typeof snap?.offsetYmm === "number" && isFinite(snap.offsetYmm)) ? snap.offsetYmm : 0;
   model.rotationRad = (typeof snap?.rotationRad === "number" && isFinite(snap.rotationRad)) ? snap.rotationRad : 0;
+}
+
+function restorePassiveModels(snap) {
+  passiveModels = (Array.isArray(snap) ? snap : [])
+    .map((model) => ({
+      id: String(model?.id || "").trim(),
+      lines: (model?.lines || []).map((l) => ({ ax: l.ax, ay: l.ay, bx: l.bx, by: l.by })),
+      outline: (model?.outline || []).map((p) => ({ x: p.x, y: p.y })),
+      transform: {
+        x: Number(model?.transform?.x) || 0,
+        y: Number(model?.transform?.y) || 0,
+        rotRad: Number(model?.transform?.rotRad) || 0,
+      },
+      color: typeof model?.color === "string" ? model.color : model2d.color,
+      outlineColor: typeof model?.outlineColor === "string" ? model.outlineColor : model2d.outlineColor,
+      outlineHoverColor: typeof model?.outlineHoverColor === "string" ? model.outlineHoverColor : model2d.outlineSelectedColor,
+      lineWidthPx: Number.isFinite(Number(model?.lineWidthPx)) ? Number(model.lineWidthPx) : model2d.lineWidthPx,
+      dash: Array.isArray(model?.dash) ? model.dash.slice(0, 2).map((n) => +n) : (model2d.dash || []).slice(),
+      alpha: Number.isFinite(Number(model?.alpha)) ? Number(model.alpha) : model2d.alpha,
+    }))
+    .filter((model) => model.id && model.outline.length >= 3 && model.lines.length >= 1);
 }
 
 function _stateSignature(snap) {
@@ -2176,6 +2219,7 @@ function _stateSignature(snap) {
     dimTool: snap.dimToolSnap,
     dimensions: snap.dimensionsSnap,
     model2d: snap.model2dSnap,
+    passiveModels: snap.passiveModelsSnap,
   });
 }
 
@@ -2207,6 +2251,7 @@ class UndoManager {
     const dimToolSnap = snapshotDimTool(this.dimTool);
     const dimensionsSnap = snapshotDimensions(this.dimensions);
     const model2dSnap = snapshotModel2d(this.model2d);
+    const passiveModelsSnap = snapshotPassiveModels(passiveModels);
     return {
       graphSnap,
       hiddenGraphSnap,
@@ -2216,6 +2261,7 @@ class UndoManager {
       dimToolSnap,
       dimensionsSnap,
       model2dSnap,
+      passiveModelsSnap,
       selectedWallId: sel.selectedWallId,
       hoverWallId: sel.hoverWallId,
       selectedHiddenId: sel.selectedHiddenId,
@@ -2225,6 +2271,8 @@ class UndoManager {
       selectedWallIds: Array.isArray(sel.selectedWallIds) ? sel.selectedWallIds.slice() : [],
       selectedHiddenIds: Array.isArray(sel.selectedHiddenIds) ? sel.selectedHiddenIds.slice() : [],
       selectedDimIds: Array.isArray(sel.selectedDimIds) ? sel.selectedDimIds.slice() : [],
+      selectedPassiveModelId: sel.selectedPassiveModelId ?? null,
+      selectedPassiveModelIds: Array.isArray(sel.selectedPassiveModelIds) ? sel.selectedPassiveModelIds.slice() : [],
       selectedModelOutline: !!sel.selectedModelOutline,
       hoverModelOutline: !!sel.hoverModelOutline,
     };
@@ -2261,6 +2309,7 @@ class UndoManager {
     restoreDimTool(this.dimTool, snap.dimToolSnap);
     restoreDimensions(this.dimensions, snap.dimensionsSnap);
     restoreModel2d(this.model2d, snap.model2dSnap);
+    restorePassiveModels(snap.passiveModelsSnap);
     this.onModel2dRestore?.();
 
     // Validate selection/hover IDs against restored walls
@@ -2288,6 +2337,13 @@ class UndoManager {
     const nextSelectedDims = Array.isArray(snap.selectedDimIds)
       ? snap.selectedDimIds.filter((id) => hasDim(id))
       : [];
+    const validPassiveIds = new Set(passiveModels.map((model) => String(model?.id || "")));
+    const nextSelectedPassiveModelId = validPassiveIds.has(String(snap.selectedPassiveModelId || ""))
+      ? snap.selectedPassiveModelId
+      : null;
+    const nextSelectedPassiveModelIds = Array.isArray(snap.selectedPassiveModelIds)
+      ? snap.selectedPassiveModelIds.filter((id) => validPassiveIds.has(String(id || "")))
+      : [];
 
     this.setSelection({
       selectedWallId: nextSelected,
@@ -2299,9 +2355,12 @@ class UndoManager {
       selectedWallIds: nextSelectedWalls,
       selectedHiddenIds: nextSelectedHiddens,
       selectedDimIds: nextSelectedDims,
+      selectedPassiveModelId: nextSelectedPassiveModelId,
+      selectedPassiveModelIds: nextSelectedPassiveModelIds,
       selectedModelOutline: !!snap.selectedModelOutline,
       hoverModelOutline: !!snap.hoverModelOutline,
     });
+    emitPassiveModelSelectionChange();
     emitPassiveModelsTransformChange();
   }
 
@@ -2321,6 +2380,7 @@ class UndoManager {
     restoreDimTool(this.dimTool, snap.dimToolSnap);
     restoreDimensions(this.dimensions, snap.dimensionsSnap);
     restoreModel2d(this.model2d, snap.model2dSnap);
+    restorePassiveModels(snap.passiveModelsSnap);
     this.onModel2dRestore?.();
 
     let nextSelected = snap.selectedWallId ?? null;
@@ -2347,6 +2407,13 @@ class UndoManager {
     const nextSelectedDims = Array.isArray(snap.selectedDimIds)
       ? snap.selectedDimIds.filter((id) => hasDim(id))
       : [];
+    const validPassiveIds = new Set(passiveModels.map((model) => String(model?.id || "")));
+    const nextSelectedPassiveModelId = validPassiveIds.has(String(snap.selectedPassiveModelId || ""))
+      ? snap.selectedPassiveModelId
+      : null;
+    const nextSelectedPassiveModelIds = Array.isArray(snap.selectedPassiveModelIds)
+      ? snap.selectedPassiveModelIds.filter((id) => validPassiveIds.has(String(id || "")))
+      : [];
 
     this.setSelection({
       selectedWallId: nextSelected,
@@ -2358,9 +2425,12 @@ class UndoManager {
       selectedWallIds: nextSelectedWalls,
       selectedHiddenIds: nextSelectedHiddens,
       selectedDimIds: nextSelectedDims,
+      selectedPassiveModelId: nextSelectedPassiveModelId,
+      selectedPassiveModelIds: nextSelectedPassiveModelIds,
       selectedModelOutline: !!snap.selectedModelOutline,
       hoverModelOutline: !!snap.hoverModelOutline,
     });
+    emitPassiveModelSelectionChange();
     emitPassiveModelsTransformChange();
   }
 }
@@ -3645,6 +3715,7 @@ function beginAxisDrag(axis, offsetX, offsetY) {
   axisDrag.startHiddenGraphSnap = snapshotGraph(hiddenGraph);
   axisDrag.startDimensionsSnap = snapshotDimensions(dimensions);
   axisDrag.startModelSnap = snapshotModel2d(model2d);
+  axisDrag.startPassiveModelsSnap = snapshotPassiveModels(passiveModels);
   axisDrag.moved = false;
   hoverObjectAxis = axisDrag.axis;
   return true;
@@ -3660,6 +3731,7 @@ function stopAxisDrag() {
   axisDrag.startHiddenGraphSnap = null;
   axisDrag.startDimensionsSnap = null;
   axisDrag.startModelSnap = null;
+  axisDrag.startPassiveModelsSnap = null;
   axisDrag.moved = false;
 }
 
@@ -3675,6 +3747,7 @@ function applyAxisDrag(targetWorld) {
   restoreGraph(hiddenGraph, axisDrag.startHiddenGraphSnap);
   restoreDimensions(dimensions, axisDrag.startDimensionsSnap);
   restoreModel2d(model2d, axisDrag.startModelSnap);
+  restorePassiveModels(axisDrag.startPassiveModelsSnap);
   const snap = axisDrag.selectionSnapshot || buildSelectionSnapshotFromCurrentSelection();
   applySelectionDelta(snap, delta, { merge: false });
 
@@ -3690,6 +3763,7 @@ function stopMoveCommandRuntime() {
   moveCommand.startHiddenGraphSnap = null;
   moveCommand.startDimensionsSnap = null;
   moveCommand.startModelSnap = null;
+  moveCommand.startPassiveModelsSnap = null;
   moveCommand.moved = false;
 }
 
@@ -3713,6 +3787,7 @@ function _startMoveTargetPhase(basePoint) {
   moveCommand.startHiddenGraphSnap = snapshotGraph(hiddenGraph);
   moveCommand.startDimensionsSnap = snapshotDimensions(dimensions);
   moveCommand.startModelSnap = snapshotModel2d(model2d);
+  moveCommand.startPassiveModelsSnap = snapshotPassiveModels(passiveModels);
   moveCommand.moved = false;
 }
 
@@ -3741,6 +3816,7 @@ function cancelMoveCommand(restoreGeometry = true) {
     restoreGraph(hiddenGraph, moveCommand.startHiddenGraphSnap);
     restoreDimensions(dimensions, moveCommand.startDimensionsSnap);
     restoreModel2d(model2d, moveCommand.startModelSnap);
+    restorePassiveModels(moveCommand.startPassiveModelsSnap);
     emitModel2dTransform();
   }
   moveCommand.mode = "idle";
@@ -3772,25 +3848,29 @@ function confirmMoveStep() {
     const endHiddenGraphSnap = snapshotGraph(hiddenGraph);
     const endDimensionsSnap = snapshotDimensions(dimensions);
     const endModelSnap = snapshotModel2d(model2d);
+    const endPassiveModelsSnap = snapshotPassiveModels(passiveModels);
     const moved = !!moveCommand.moved;
     const startGraphSnap = moveCommand.startGraphSnap;
     const startHiddenGraphSnap = moveCommand.startHiddenGraphSnap;
     const startDimensionsSnap = moveCommand.startDimensionsSnap;
     const startModelSnap = moveCommand.startModelSnap;
+    const startPassiveModelsSnap = moveCommand.startPassiveModelsSnap;
     cancelMoveCommand(false);
-    if (!moved || !startGraphSnap || !startHiddenGraphSnap || !startDimensionsSnap || !startModelSnap) {
+    if (!moved || !startGraphSnap || !startHiddenGraphSnap || !startDimensionsSnap || !startModelSnap || !startPassiveModelsSnap) {
       return true;
     }
     restoreGraph(graph, startGraphSnap);
     restoreGraph(hiddenGraph, startHiddenGraphSnap);
     restoreDimensions(dimensions, startDimensionsSnap);
     restoreModel2d(model2d, startModelSnap);
+    restorePassiveModels(startPassiveModelsSnap);
     emitModel2dTransform();
     undo.runAction(() => {
       restoreGraph(graph, endGraphSnap);
       restoreGraph(hiddenGraph, endHiddenGraphSnap);
       restoreDimensions(dimensions, endDimensionsSnap);
       restoreModel2d(model2d, endModelSnap);
+      restorePassiveModels(endPassiveModelsSnap);
       emitModel2dTransform();
     });
     return true;
@@ -3819,6 +3899,7 @@ function updateMoveCommandCursor(worldPoint, shiftKey = false) {
     restoreGraph(hiddenGraph, moveCommand.startHiddenGraphSnap);
     restoreDimensions(dimensions, moveCommand.startDimensionsSnap);
     restoreModel2d(model2d, moveCommand.startModelSnap);
+    restorePassiveModels(moveCommand.startPassiveModelsSnap);
     applySelectionDelta(moveCommand.selectionSnapshot, {
       x: lock.target.x - moveCommand.basePoint.x,
       y: lock.target.y - moveCommand.basePoint.y,
@@ -3840,6 +3921,7 @@ function stopRotateCommandRuntime() {
   rotateCommand.startHiddenGraphSnap = null;
   rotateCommand.startDimensionsSnap = null;
   rotateCommand.startModelSnap = null;
+  rotateCommand.startPassiveModelsSnap = null;
   rotateCommand.moved = false;
 }
 
@@ -3869,6 +3951,7 @@ function _startRotatePreview(pivot, mode = null) {
   rotateCommand.startHiddenGraphSnap = snapshotGraph(hiddenGraph);
   rotateCommand.startDimensionsSnap = snapshotDimensions(dimensions);
   rotateCommand.startModelSnap = snapshotModel2d(model2d);
+  rotateCommand.startPassiveModelsSnap = snapshotPassiveModels(passiveModels);
   rotateCommand.moved = false;
   if (mode === "3point") {
     rotateCommand.inputMode = "3point";
@@ -3902,6 +3985,7 @@ function setRotateMode(mode) {
   restoreGraph(hiddenGraph, rotateCommand.startHiddenGraphSnap);
   restoreDimensions(dimensions, rotateCommand.startDimensionsSnap);
   restoreModel2d(model2d, rotateCommand.startModelSnap);
+  restorePassiveModels(rotateCommand.startPassiveModelsSnap);
   emitModel2dTransform();
   rotateCommand.referencePoint = null;
   rotateCommand.cursorPoint = { x: rotateCommand.pivot.x, y: rotateCommand.pivot.y };
@@ -3923,6 +4007,7 @@ function setRotateInputValue(value) {
   restoreGraph(hiddenGraph, rotateCommand.startHiddenGraphSnap);
   restoreDimensions(dimensions, rotateCommand.startDimensionsSnap);
   restoreModel2d(model2d, rotateCommand.startModelSnap);
+  restorePassiveModels(rotateCommand.startPassiveModelsSnap);
   if (Number.isFinite(angleRad)) {
     applySelectionRotation(rotateCommand.selectionSnapshot, rotateCommand.pivot, angleRad);
     rotateCommand.previewAngleRad = angleRad;
@@ -3945,6 +4030,7 @@ function cancelRotateCommand(restoreGeometry = true) {
     restoreGraph(hiddenGraph, rotateCommand.startHiddenGraphSnap);
     restoreDimensions(dimensions, rotateCommand.startDimensionsSnap);
     restoreModel2d(model2d, rotateCommand.startModelSnap);
+    restorePassiveModels(rotateCommand.startPassiveModelsSnap);
     emitModel2dTransform();
   }
   rotateCommand.mode = "idle";
@@ -3957,23 +4043,27 @@ function _commitRotatePreview() {
   const endHiddenGraphSnap = snapshotGraph(hiddenGraph);
   const endDimensionsSnap = snapshotDimensions(dimensions);
   const endModelSnap = snapshotModel2d(model2d);
+  const endPassiveModelsSnap = snapshotPassiveModels(passiveModels);
   const moved = !!rotateCommand.moved;
   const startGraphSnap = rotateCommand.startGraphSnap;
   const startHiddenGraphSnap = rotateCommand.startHiddenGraphSnap;
   const startDimensionsSnap = rotateCommand.startDimensionsSnap;
   const startModelSnap = rotateCommand.startModelSnap;
+  const startPassiveModelsSnap = rotateCommand.startPassiveModelsSnap;
   cancelRotateCommand(false);
-  if (!moved || !startGraphSnap || !startHiddenGraphSnap || !startDimensionsSnap || !startModelSnap) return true;
+  if (!moved || !startGraphSnap || !startHiddenGraphSnap || !startDimensionsSnap || !startModelSnap || !startPassiveModelsSnap) return true;
   restoreGraph(graph, startGraphSnap);
   restoreGraph(hiddenGraph, startHiddenGraphSnap);
   restoreDimensions(dimensions, startDimensionsSnap);
   restoreModel2d(model2d, startModelSnap);
+  restorePassiveModels(startPassiveModelsSnap);
   emitModel2dTransform();
   undo.runAction(() => {
     restoreGraph(graph, endGraphSnap);
     restoreGraph(hiddenGraph, endHiddenGraphSnap);
     restoreDimensions(dimensions, endDimensionsSnap);
     restoreModel2d(model2d, endModelSnap);
+    restorePassiveModels(endPassiveModelsSnap);
     emitModel2dTransform();
   });
   return true;
@@ -4068,6 +4158,7 @@ function updateRotateCommandCursor(worldPoint) {
   restoreGraph(hiddenGraph, rotateCommand.startHiddenGraphSnap);
   restoreDimensions(dimensions, rotateCommand.startDimensionsSnap);
   restoreModel2d(model2d, rotateCommand.startModelSnap);
+  restorePassiveModels(rotateCommand.startPassiveModelsSnap);
   applySelectionRotation(rotateCommand.selectionSnapshot, rotateCommand.pivot, angleRad);
   rotateCommand.previewAngleRad = angleRad;
   rotateCommand.moved = Math.abs(angleRad) > 1e-6;
@@ -6217,6 +6308,8 @@ const undo = new UndoManager({
     selectedWallIds,
     selectedHiddenIds,
     selectedDimIds,
+    selectedPassiveModelId,
+    selectedPassiveModelIds,
     selectedModelOutline,
     hoverModelOutline,
   }),
@@ -6230,6 +6323,8 @@ const undo = new UndoManager({
     selectedWallIds = Array.isArray(v.selectedWallIds) ? v.selectedWallIds.slice() : [];
     selectedHiddenIds = Array.isArray(v.selectedHiddenIds) ? v.selectedHiddenIds.slice() : [];
     selectedDimIds = Array.isArray(v.selectedDimIds) ? v.selectedDimIds.slice() : [];
+    selectedPassiveModelId = v.selectedPassiveModelId ?? null;
+    selectedPassiveModelIds = Array.isArray(v.selectedPassiveModelIds) ? v.selectedPassiveModelIds.slice() : [];
     selectedModelOutline = !!v.selectedModelOutline;
     hoverModelOutline = !!v.hoverModelOutline;
   },
@@ -7923,22 +8018,26 @@ function onWindowMouseUp() {
     const endHiddenGraphSnap = snapshotGraph(hiddenGraph);
     const endDimensionsSnap = snapshotDimensions(dimensions);
     const endModelSnap = snapshotModel2d(model2d);
+    const endPassiveModelsSnap = snapshotPassiveModels(passiveModels);
     const startGraphSnap = moveCommand.startGraphSnap;
     const startHiddenGraphSnap = moveCommand.startHiddenGraphSnap;
     const startDimensionsSnap = moveCommand.startDimensionsSnap;
     const startModelSnap = moveCommand.startModelSnap;
+    const startPassiveModelsSnap = moveCommand.startPassiveModelsSnap;
     cancelMoveCommand(false);
-    if (moved && startGraphSnap && startHiddenGraphSnap && startDimensionsSnap && startModelSnap) {
+    if (moved && startGraphSnap && startHiddenGraphSnap && startDimensionsSnap && startModelSnap && startPassiveModelsSnap) {
       restoreGraph(graph, startGraphSnap);
       restoreGraph(hiddenGraph, startHiddenGraphSnap);
       restoreDimensions(dimensions, startDimensionsSnap);
       restoreModel2d(model2d, startModelSnap);
+      restorePassiveModels(startPassiveModelsSnap);
       emitModel2dTransform();
       undo.runAction(() => {
         restoreGraph(graph, endGraphSnap);
         restoreGraph(hiddenGraph, endHiddenGraphSnap);
         restoreDimensions(dimensions, endDimensionsSnap);
         restoreModel2d(model2d, endModelSnap);
+        restorePassiveModels(endPassiveModelsSnap);
         emitModel2dTransform();
       });
     }
@@ -8058,22 +8157,26 @@ function onWindowMouseUp() {
     const endHiddenGraphSnap = snapshotGraph(hiddenGraph);
     const endDimensionsSnap = snapshotDimensions(dimensions);
     const endModelSnap = snapshotModel2d(model2d);
+    const endPassiveModelsSnap = snapshotPassiveModels(passiveModels);
     const startGraphSnap = axisDrag.startGraphSnap;
     const startHiddenGraphSnap = axisDrag.startHiddenGraphSnap;
     const startDimensionsSnap = axisDrag.startDimensionsSnap;
     const startModelSnap = axisDrag.startModelSnap;
+    const startPassiveModelsSnap = axisDrag.startPassiveModelsSnap;
     stopAxisDrag();
-    if (moved && startGraphSnap && startHiddenGraphSnap && startDimensionsSnap && startModelSnap) {
+    if (moved && startGraphSnap && startHiddenGraphSnap && startDimensionsSnap && startModelSnap && startPassiveModelsSnap) {
       restoreGraph(graph, startGraphSnap);
       restoreGraph(hiddenGraph, startHiddenGraphSnap);
       restoreDimensions(dimensions, startDimensionsSnap);
       restoreModel2d(model2d, startModelSnap);
+      restorePassiveModels(startPassiveModelsSnap);
       emitModel2dTransform();
       undo.runAction(() => {
         restoreGraph(graph, endGraphSnap);
         restoreGraph(hiddenGraph, endHiddenGraphSnap);
         restoreDimensions(dimensions, endDimensionsSnap);
         restoreModel2d(model2d, endModelSnap);
+        restorePassiveModels(endPassiveModelsSnap);
         emitModel2dTransform();
       });
     }
