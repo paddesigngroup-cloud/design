@@ -237,13 +237,53 @@ const activeOrderDesignIdentity = computed(() => {
   if (!title && !code && !name) return null;
   return { title, code, name };
 });
+const mmToCm = (v) => Math.round((Number(v || 0) * 0.1) * 10) / 10;
+const cmToMm = (v) => Number(v) * 10;
+function normalizeIds(ids) {
+  return Array.isArray(ids)
+    ? ids.map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
+}
+function getBoxBoundsMm(boxes) {
+  const normalized = Array.isArray(boxes) ? boxes : [];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const raw of normalized) {
+    const width = Math.max(1, Number(raw?.width) || 0);
+    const depth = Math.max(1, Number(raw?.depth) || 0);
+    const cx = Number(raw?.cx) || 0;
+    const cy = Number(raw?.cy) || 0;
+    const halfW = width * 0.5;
+    const halfD = depth * 0.5;
+    minX = Math.min(minX, cx - halfW);
+    maxX = Math.max(maxX, cx + halfW);
+    minY = Math.min(minY, cy - halfD);
+    maxY = Math.max(maxY, cy + halfD);
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
+  return { minX, minY, maxX, maxY };
+}
+function mapLocalPointToWorld(point, transform = null) {
+  const tx = Number.isFinite(Number(transform?.x)) ? Number(transform.x) : 0;
+  const ty = Number.isFinite(Number(transform?.y)) ? Number(transform.y) : 0;
+  const rotRad = Number.isFinite(Number(transform?.rotRad)) ? Number(transform.rotRad) : 0;
+  const cos = Math.cos(rotRad);
+  const sin = Math.sin(rotRad);
+  return {
+    x: (Number(point?.x) * cos - Number(point?.y) * sin) + tx,
+    y: (Number(point?.x) * sin + Number(point?.y) * cos) + ty,
+  };
+}
 const hasModelOutlineSelection = computed(() => !!attrsSnapshot.value?.selection?.selectedModelOutline);
-const selectedOrderDesignCount = computed(() => {
-  const ids = Array.isArray(props.selectedOrderDesignIds) ? props.selectedOrderDesignIds.filter(Boolean) : [];
-  return ids.length;
-});
+const selectedOrderDesignIds = computed(() => normalizeIds(props.selectedOrderDesignIds));
+const selectedOrderDesignCount = computed(() =>
+  selectedOrderDesignIds.value.length > 0
+    ? selectedOrderDesignIds.value.length
+    : (hasModelOutlineSelection.value && activeOrderDesign.value?.id ? 1 : 0)
+);
 const hasOrderDesignSelection = computed(() => selectedOrderDesignCount.value > 0 || hasModelOutlineSelection.value);
-const hasAnyAttrSelection = computed(() => !!wallMetrics.value || hasModelOutlineSelection.value);
 const openOrderDesignGroupKey = ref("");
 
 watch(
@@ -267,23 +307,49 @@ watch(
   { immediate: true }
 );
 
-const selectedWallCount = computed(() => {
-  const selectedIds = Array.isArray(attrsSnapshot.value?.selection?.selectedWallIds)
-    ? attrsSnapshot.value.selection.selectedWallIds.filter(Boolean)
-    : [];
-  if (selectedIds.length > 0) return selectedIds.length;
-  return attrsSnapshot.value?.selection?.selectedWallId ? 1 : 0;
+const selectionSummary = computed(() => {
+  const selection = attrsSnapshot.value?.selection || {};
+  const rawWallIds = normalizeIds(selection.selectedWallIds);
+  const beamIds = normalizeIds(selection.selectedBeamIds);
+  const beamSet = new Set(beamIds);
+  const wallIds = rawWallIds.filter((id) => !beamSet.has(id));
+  const hiddenIds = normalizeIds(selection.selectedHiddenIds);
+  const passiveDesignIds = normalizeIds(selection.selectedPassiveModelIds);
+  const designIds = selectedOrderDesignIds.value.length
+    ? selectedOrderDesignIds.value
+    : (hasModelOutlineSelection.value && activeOrderDesign.value?.id ? [String(activeOrderDesign.value.id)] : passiveDesignIds);
+  const categoryCount = [
+    wallIds.length > 0,
+    beamIds.length > 0,
+    hiddenIds.length > 0,
+    designIds.length > 0,
+  ].filter(Boolean).length;
+  return {
+    wallIds,
+    beamIds,
+    hiddenIds,
+    passiveDesignIds,
+    designIds,
+    totalCount: wallIds.length + beamIds.length + hiddenIds.length + designIds.length,
+    categoryCount,
+    hasMixedSelection: categoryCount > 1,
+  };
 });
-const isGroupEditMode = computed(() => selectedWallCount.value > 1);
+const selectedEntityCount = computed(() => selectionSummary.value.totalCount);
+const isGroupEditMode = computed(() => selectedEntityCount.value > 1);
+const hasMixedSelection = computed(() => selectionSummary.value.hasMixedSelection);
 const selectedObjectTitle = computed(() => {
+  if (hasMixedSelection.value) return `انتخاب ترکیبی (${selectedEntityCount.value} مورد)`;
+  if (hasOrderDesignSelection.value && selectedOrderDesignCount.value > 1) return `${selectedOrderDesignCount.value} طرح سفارش`;
   const raw = props.selectedWallStyle?.name || props.selectedWallStyle?.id || wallMetrics.value?.id || "";
   return String(raw).trim();
 });
+const showOrderDesignAttrPanel = computed(() => !!activeOrderDesignIdentity.value && hasOrderDesignSelection.value && !hasMixedSelection.value);
+const showObjectStyleEditor = computed(() => !!wallMetrics.value && !hasOrderDesignSelection.value && !hasMixedSelection.value);
 const wallMoveDeltaCm = ref({ x: 0, y: 0 });
 const coordInputDrafts = ref({});
 const showPlaceholderEdges = ref(true);
 const placeholderOpacity = ref(100);
-
 
 const wallMetrics = computed(() => {
   const snapshot = attrsSnapshot.value || {};
@@ -314,8 +380,6 @@ const wallMetrics = computed(() => {
     ? Number(wall.floorOffsetMm)
     : 0;
 
-  const mmToCm = (v) => (Math.round((v * 0.1) * 10) / 10);
-
   return {
     id: wall.id,
     thicknessCm: mmToCm(thicknessMm),
@@ -327,10 +391,8 @@ const wallMetrics = computed(() => {
   };
 });
 
-const wallCoordPoints = computed(() => {
-  if (!wallMetrics.value) return null;
-  const a = wallMetrics.value.a;
-  const b = wallMetrics.value.b;
+function buildCornerMetrics(a, b) {
+  if (!a || !b) return null;
 
   const aIsBottomLeft =
     (a.y < b.y) ||
@@ -351,7 +413,63 @@ const wallCoordPoints = computed(() => {
       y: Math.round(((a.y + b.y) * 0.5) * 10) / 10,
     },
   };
+}
+
+const singleSelectedOrderDesignInstance = computed(() => {
+  if (hasMixedSelection.value || selectedOrderDesignCount.value !== 1) return null;
+  const designId = String(selectedOrderDesignIds.value[0] || activeOrderDesign.value?.id || "").trim();
+  if (!designId) return null;
+  const instances = Array.isArray(props.placeholderInstances) ? props.placeholderInstances : [];
+  const passive = instances.find((instance) => String(instance?.orderDesignId || "").trim() === designId);
+  if (passive) return passive;
+  if (hasModelOutlineSelection.value && String(activeOrderDesign.value?.id || "").trim() === designId) {
+    return {
+      orderDesignId: designId,
+      boxes: Array.isArray(props.placeholderBoxes) ? props.placeholderBoxes : [],
+      transform: props.model2dTransform,
+      active: true,
+    };
+  }
+  return null;
 });
+
+const orderDesignMetrics = computed(() => {
+  const instance = singleSelectedOrderDesignInstance.value;
+  const bounds = getBoxBoundsMm(instance?.boxes);
+  if (!bounds) return null;
+  const worldCorners = [
+    mapLocalPointToWorld({ x: bounds.minX, y: bounds.minY }, instance?.transform),
+    mapLocalPointToWorld({ x: bounds.maxX, y: bounds.minY }, instance?.transform),
+    mapLocalPointToWorld({ x: bounds.maxX, y: bounds.maxY }, instance?.transform),
+    mapLocalPointToWorld({ x: bounds.minX, y: bounds.maxY }, instance?.transform),
+  ];
+  const xs = worldCorners.map((point) => Number(point.x) || 0);
+  const ys = worldCorners.map((point) => Number(point.y) || 0);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return {
+    id: String(instance?.orderDesignId || activeOrderDesign.value?.id || "").trim() || "design",
+    bottomLeft: { x: mmToCm(minX), y: mmToCm(minY) },
+    topRight: { x: mmToCm(maxX), y: mmToCm(maxY) },
+    center: { x: mmToCm((minX + maxX) * 0.5), y: mmToCm((minY + maxY) * 0.5) },
+    bottomLeftKey: "a",
+    topRightKey: "b",
+    kind: "design",
+  };
+});
+
+const wallCoordPoints = computed(() => {
+  if (orderDesignMetrics.value) return orderDesignMetrics.value;
+  if (!wallMetrics.value) return null;
+  return {
+    ...buildCornerMetrics(wallMetrics.value.a, wallMetrics.value.b),
+    kind: "wall",
+  };
+});
+const hasAnyAttrSelection = computed(() => selectedEntityCount.value > 0 || !!wallMetrics.value);
+const showCoordsEditor = computed(() => selectedEntityCount.value > 0);
 
 const axisTagStyles = computed(() => {
   const st = props.walls2d?.state || {};
@@ -465,7 +583,6 @@ function toggleOrderDesignGroup(groupKey) {
 }
 
 function patchCenterCoord(axis, value) {
-  if (!wallMetrics.value) return;
   const num = Number(value);
   if (!Number.isFinite(num)) return;
 
@@ -476,6 +593,17 @@ function patchCenterCoord(axis, value) {
   const dy = (axis === "y") ? (num - curCenter.y) : 0;
   if (dx === 0 && dy === 0) return;
 
+  if (wallCoordPoints.value?.kind === "design") {
+    patchSelectedWallCoords({
+      axCm: wallCoordPoints.value.bottomLeft.x + dx,
+      ayCm: wallCoordPoints.value.bottomLeft.y + dy,
+      bxCm: wallCoordPoints.value.topRight.x + dx,
+      byCm: wallCoordPoints.value.topRight.y + dy,
+    });
+    return;
+  }
+
+  if (!wallMetrics.value) return;
   patchSelectedWallCoords({
     axCm: wallMetrics.value.a.x + dx,
     ayCm: wallMetrics.value.a.y + dy,
@@ -498,7 +626,7 @@ function moveWallByAxis(axis) {
   const delta = Number(wallMoveDeltaCm.value?.[axis]);
   if (!Number.isFinite(delta) || delta === 0) return;
 
-  if (isGroupEditMode.value) {
+  if (isGroupEditMode.value || wallCoordPoints.value?.kind === "design") {
     patchSelectedWallCoords(axis === "x" ? { dxCm: delta } : { dyCm: delta });
     wallMoveDeltaCm.value = {
       ...wallMoveDeltaCm.value,
@@ -584,7 +712,7 @@ function commitPointCoordInput(pointKey, axis, key) {
 }
 
 watch(
-  [() => wallMetrics.value?.id, () => selectedWallCount.value, () => isGroupEditMode.value],
+  [() => wallMetrics.value?.id, () => orderDesignMetrics.value?.id, () => selectedEntityCount.value, () => isGroupEditMode.value],
   () => {
     coordInputDrafts.value = {};
   }
@@ -1563,7 +1691,7 @@ defineExpose({
       <div class="glbWallAttrs__sep"></div>
     </div>
 
-    <template v-if="activeOrderDesignIdentity && hasOrderDesignSelection">
+    <template v-if="showOrderDesignAttrPanel">
       <div class="glbWallAttrs__objectTitle glbWallAttrs__objectTitle--design">
         <div class="glbWallAttrs__objectTitleTop">
           <div class="glbWallAttrs__objectTitleMain">
@@ -1651,7 +1779,7 @@ defineExpose({
       <div v-if="!hasOrderDesignAttrs" class="menuPanel__hint glbWallAttrs__hint--soft">برای این طرح هنوز صفتی تعریف نشده است.</div>
     </template>
 
-    <template v-else-if="wallMetrics">
+    <template v-if="showObjectStyleEditor">
       <div v-if="selectedObjectTitle" class="glbWallAttrs__objectTitle">{{ selectedObjectTitle }}</div>
       <div class="glbWallAttrs__editor glbWallAttrs__editor--attrs">
         <label v-if="showLengthField" class="glbWallAttrs__editRow">
@@ -1721,7 +1849,11 @@ defineExpose({
       </div>
 
       <div class="glbWallAttrs__sep"></div>
+    </template>
 
+    <div v-else-if="!showOrderDesignAttrPanel && selectedObjectTitle && hasAnyAttrSelection" class="glbWallAttrs__objectTitle">{{ selectedObjectTitle }}</div>
+
+    <template v-if="showCoordsEditor">
       <div class="menuPanel__title glbWallAttrs__title glbWallAttrs__title--secondary">مختصات</div>
       <div class="glbWallAttrs__editor">
         <div class="glbWallAttrs__pointTitle">جابجایی محوری</div>
@@ -1731,7 +1863,7 @@ defineExpose({
               class="glbWallAttrs__input glbWallAttrs__moveInput glbWallAttrs__moveInput--axis"
               type="text"
               inputmode="decimal"
-              :disabled="selectedWallCount === 0"
+              :disabled="selectedEntityCount === 0"
               :value="getCoordFieldValue('moveY', wallMoveDeltaCm.y)"
               @input="setCoordFieldDraft('moveY', $event.target.value)"
               @blur="commitMoveDeltaInput('y', 'moveY')"
@@ -1744,7 +1876,7 @@ defineExpose({
               class="glbWallAttrs__input glbWallAttrs__moveInput glbWallAttrs__moveInput--axis"
               type="text"
               inputmode="decimal"
-              :disabled="selectedWallCount === 0"
+              :disabled="selectedEntityCount === 0"
               :value="getCoordFieldValue('moveX', wallMoveDeltaCm.x)"
               @input="setCoordFieldDraft('moveX', $event.target.value)"
               @blur="commitMoveDeltaInput('x', 'moveX')"

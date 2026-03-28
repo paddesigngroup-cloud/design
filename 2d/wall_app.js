@@ -10538,6 +10538,26 @@ function moveSelectedBeamsBy(delta = {}) {
   return moveSelectedWallsBy(delta);
 }
 
+function moveSelectionBy(delta = {}) {
+  const dx = Number.isFinite(Number(delta.dxMm)) ? Number(delta.dxMm) : 0;
+  const dy = Number.isFinite(Number(delta.dyMm)) ? Number(delta.dyMm) : 0;
+  if (dx === 0 && dy === 0) return false;
+
+  const snap = buildSelectionSnapshotFromCurrentSelection();
+  if (!selectionSnapshotHasAny(snap)) return false;
+
+  let changed = false;
+  undo.runAction(() => {
+    changed = applySelectionDelta(snap, { x: dx, y: dy }, { merge: false });
+  });
+
+  if (changed) {
+    saveSettings();
+    return true;
+  }
+  return false;
+}
+
 function bindStandaloneUiIfPresent() {
   if (_standaloneUiBound) return;
 
@@ -10805,5 +10825,6 @@ return {
   setSelectedBeamLength,
   setSelectedBeamCoords,
   moveSelectedBeamsBy,
+  moveSelectionBy,
 };
 }

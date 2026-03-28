@@ -24,11 +24,25 @@ const showObjectAxes = ref(false);
 const walls3dSnapshot = ref({
   nodes: [],
   walls: [],
-  selection: { selectedWallId: null, selectedWallIds: [], selectedHiddenId: null, selectedHiddenIds: [] },
+  selection: {
+    selectedWallId: null,
+    selectedWallIds: [],
+    selectedHiddenId: null,
+    selectedHiddenIds: [],
+    selectedPassiveModelId: null,
+    selectedPassiveModelIds: [],
+    selectedModelOutline: false,
+  },
   metrics: {
     nodes: [],
     walls: [],
-    selection: { selectedWallId: null, selectedWallIds: [] },
+    selection: {
+      selectedWallId: null,
+      selectedWallIds: [],
+      selectedPassiveModelId: null,
+      selectedPassiveModelIds: [],
+      selectedModelOutline: false,
+    },
     entityType: "wall",
   },
   state: { wallHeightMm: 2800, axisXColor: "#9CC9B4", axisYColor: "#BCC8EB", axisZColor: "#0000FF" },
@@ -2594,6 +2608,58 @@ function getCurrentEditorModelPlacement() {
     };
   }
   return getCurrentModel2dTransform();
+}
+
+function getOrderDesignPlacementForId(orderDesignId) {
+  const key = String(orderDesignId || "").trim();
+  if (!key) return null;
+  if (String(activeCabinetDesignId.value || "") === key) {
+    return {
+      orderDesignId: key,
+      ...getCurrentEditorModelPlacement(),
+    };
+  }
+  return getOrderDesignPlacement(key);
+}
+
+function computeOrderDesignBounds(boxes, placement = null) {
+  const bounds = getCabinetBoxesBounds(boxes);
+  if (!bounds) return null;
+  const outline = localDesignToWorld([
+    { x: bounds.minX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.maxY },
+    { x: bounds.minX, y: bounds.maxY },
+  ], placement, "points");
+  if (!outline.length) return null;
+  const xs = outline.map((pt) => Number(pt.x) || 0);
+  const ys = outline.map((pt) => Number(pt.y) || 0);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    centerX: (minX + maxX) * 0.5,
+    centerY: (minY + maxY) * 0.5,
+  };
+}
+
+function getSingleSelectedOrderDesignContext() {
+  const summary = getEditorSelectionSummary();
+  if (!summary.isSingleDesign || summary.isMixed || summary.totalCount !== 1) return null;
+  const designId = String(summary.designIds[0] || activeCabinetDesignId.value || "").trim();
+  if (!designId) return null;
+  const design = orderDesignCatalog.value.find((item) => String(item.id) === designId) || selectedOrderDesignSource.value || null;
+  if (!design?.viewer_boxes?.length) return null;
+  const placement = getOrderDesignPlacementForId(designId);
+  if (!placement) return null;
+  const bounds = computeOrderDesignBounds(design.viewer_boxes, placement);
+  if (!bounds) return null;
+  return { designId, design, placement, bounds, summary };
 }
 
 function persistCurrentActiveOrderDesignPlacement() {
@@ -5768,6 +5834,46 @@ function getSolidEntityType(entity) {
   return "wall";
 }
 
+function normalizeSelectionIds(ids) {
+  return Array.isArray(ids)
+    ? ids.map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
+}
+
+function getEditorSelectionSummary(full = null) {
+  const state = full || editorRef.value?.getState?.() || null;
+  const selection = state?.selection || {};
+  const wallIds = normalizeSelectionIds(selection.selectedWallIds);
+  const beamIds = normalizeSelectionIds(selection.selectedBeamIds);
+  const beamSet = new Set(beamIds);
+  const wallOnlyIds = wallIds.filter((id) => !beamSet.has(id));
+  const hiddenIds = normalizeSelectionIds(selection.selectedHiddenIds);
+  const passiveModelIds = normalizeSelectionIds(selection.selectedPassiveModelIds);
+  const designIds = normalizeSelectionIds(selectedOrderDesignIds.value);
+  const hasActiveModel = !!selection.selectedModelOutline;
+  const designCount = designIds.length > 0 ? designIds.length : (hasActiveModel && activeCabinetDesignId.value ? 1 : 0);
+  const categoryCount = [
+    wallOnlyIds.length > 0,
+    beamIds.length > 0,
+    hiddenIds.length > 0,
+    designCount > 0,
+  ].filter(Boolean).length;
+  return {
+    wallIds,
+    wallOnlyIds,
+    beamIds,
+    hiddenIds,
+    passiveModelIds,
+    designIds,
+    hasActiveModel,
+    designCount,
+    totalCount: wallOnlyIds.length + beamIds.length + hiddenIds.length + designCount,
+    categoryCount,
+    isMixed: categoryCount > 1,
+    isSingleDesign: designCount === 1 && categoryCount === 1,
+  };
+}
+
 function syncQuickStateFromEditor() {
   const full = editorRef.value?.getState?.();
   const s = full?.state;
@@ -5813,8 +5919,10 @@ function syncQuickStateFromEditor() {
   const hiddenWalls = Array.isArray(full?.hiddenGraphSnap?.walls) ? full.hiddenGraphSnap.walls : [];
   const selectedWallIds = Array.isArray(full?.selection?.selectedWallIds) ? full.selection.selectedWallIds : [];
   const selectedHiddenIds = Array.isArray(full?.selection?.selectedHiddenIds) ? full.selection.selectedHiddenIds : [];
+  const selectedPassiveModelIds = Array.isArray(full?.selection?.selectedPassiveModelIds) ? full.selection.selectedPassiveModelIds : [];
   const selectedWallId = full?.selection?.selectedWallId || selectedWallIds[0] || null;
   const selectedHiddenId = full?.selection?.selectedHiddenId || selectedHiddenIds[0] || null;
+  const selectedPassiveModelId = full?.selection?.selectedPassiveModelId || selectedPassiveModelIds[0] || null;
   const beamNodes = Array.isArray(full?.beamGraphSnap?.nodes) ? full.beamGraphSnap.nodes : [];
   const beams = Array.isArray(full?.beamGraphSnap?.walls) ? full.beamGraphSnap.walls : [];
   const selectedBeamIds = Array.isArray(full?.selection?.selectedBeamIds) ? full.selection.selectedBeamIds : [];
@@ -5828,11 +5936,24 @@ function syncQuickStateFromEditor() {
   const hasWallSelection = !!(selectedWall || selectedWallIds.length > 0);
   const hasHiddenSelection = !!(selectedHidden || selectedHiddenIds.length > 0);
   const hasBeamSelection = !!(selectedBeam || selectedBeamIds.length > 0);
+  const hasDesignSelection = !!(selectedOrderDesignIds.value.length > 0 || full?.selection?.selectedModelOutline);
   const selectedSolidEntityType = selectedWall ? getSolidEntityType(selectedWall) : "wall";
-  const metricsEntityType = hasBeamSelection ? "beam" : hasWallSelection ? selectedSolidEntityType : hasHiddenSelection ? "hidden" : "wall";
+  const metricsEntityType =
+    getEditorSelectionSummary(full).categoryCount > 1
+      ? "mixed"
+      : hasBeamSelection
+        ? "beam"
+        : hasWallSelection
+          ? selectedSolidEntityType
+          : hasHiddenSelection
+            ? "hidden"
+            : hasDesignSelection
+              ? "design"
+              : "wall";
   const selectedCount =
     (metricsEntityType === "hidden") ? selectedHiddenCount
       : (metricsEntityType === "beam") ? selectedBeamCount
+        : (metricsEntityType === "design") ? (selectedOrderDesignIds.value.length > 0 ? selectedOrderDesignIds.value.length : (full?.selection?.selectedModelOutline ? 1 : 0))
         : selectedWallCount;
 
   walls3dSnapshot.value = {
@@ -5845,6 +5966,8 @@ function syncQuickStateFromEditor() {
       selectedHiddenIds,
       selectedBeamId: full?.selection?.selectedBeamId || null,
       selectedBeamIds,
+      selectedPassiveModelId,
+      selectedPassiveModelIds,
       selectedModelOutline: !!full?.selection?.selectedModelOutline,
     },
     metrics: {
@@ -5853,6 +5976,8 @@ function syncQuickStateFromEditor() {
       selection: {
         selectedWallId: metricsEntityType === "hidden" ? selectedHiddenId : metricsEntityType === "beam" ? selectedBeamId : selectedWallId,
         selectedWallIds: metricsEntityType === "hidden" ? selectedHiddenIds : metricsEntityType === "beam" ? selectedBeamIds : selectedWallIds,
+        selectedPassiveModelId,
+        selectedPassiveModelIds,
         selectedModelOutline: !!full?.selection?.selectedModelOutline,
       },
       entityType: metricsEntityType,
@@ -5922,7 +6047,7 @@ function syncQuickStateFromEditor() {
   }
 
   const selectedEntity = (metricsEntityType === "hidden") ? selectedHidden : (metricsEntityType === "beam") ? selectedBeam : selectedWall;
-  if (selectedEntity) {
+  if (selectedEntity && metricsEntityType !== "mixed") {
     const srcNodes = (metricsEntityType === "hidden") ? hiddenNodes : (metricsEntityType === "beam") ? beamNodes : wallNodes;
     const byId = new Map(srcNodes.map((n) => [n.id, n]));
     const na = byId.get(selectedEntity.a);
@@ -6066,11 +6191,17 @@ function updateWallStyleDraft(next) {
 
 function updateSelectedWallCoords(patch) {
   const toMm = (v) => Number(v) * 10;
-  const entityType = selectedWallStyle.value?.entityType || "wall";
+  const selectionSummary = getEditorSelectionSummary();
+  const entityType = selectedWallStyle.value?.entityType || (selectionSummary.isMixed ? "mixed" : "wall");
   const dxMm = Number.isFinite(Number(patch?.dxCm)) ? toMm(patch.dxCm) : null;
   const dyMm = Number.isFinite(Number(patch?.dyCm)) ? toMm(patch.dyCm) : null;
   if (dxMm !== null || dyMm !== null) {
-    if (entityType === "hidden") {
+    if (editorRef.value?.moveSelectionBy) {
+      editorRef.value.moveSelectionBy({
+        dxMm: dxMm ?? 0,
+        dyMm: dyMm ?? 0,
+      });
+    } else if (entityType === "hidden") {
       editorRef.value?.moveSelectedHiddenWallsBy?.({
         dxMm: dxMm ?? 0,
         dyMm: dyMm ?? 0,
@@ -6085,6 +6216,33 @@ function updateSelectedWallCoords(patch) {
       editorRef.value?.moveSelectedWallsBy?.({
         dxMm: dxMm ?? 0,
         dyMm: dyMm ?? 0,
+      });
+    }
+    return;
+  }
+
+  const designContext = getSingleSelectedOrderDesignContext();
+  if (designContext) {
+    const axMm = Number.isFinite(Number(patch?.axCm)) ? toMm(patch.axCm) : null;
+    const ayMm = Number.isFinite(Number(patch?.ayCm)) ? toMm(patch.ayCm) : null;
+    const bxMm = Number.isFinite(Number(patch?.bxCm)) ? toMm(patch.bxCm) : null;
+    const byMm = Number.isFinite(Number(patch?.byCm)) ? toMm(patch.byCm) : null;
+    const dxCandidates = [];
+    const dyCandidates = [];
+    if (axMm !== null) dxCandidates.push(axMm - designContext.bounds.minX);
+    if (bxMm !== null) dxCandidates.push(bxMm - designContext.bounds.maxX);
+    if (ayMm !== null) dyCandidates.push(ayMm - designContext.bounds.minY);
+    if (byMm !== null) dyCandidates.push(byMm - designContext.bounds.maxY);
+    const nextDxMm = dxCandidates.length
+      ? dxCandidates.reduce((sum, value) => sum + value, 0) / dxCandidates.length
+      : 0;
+    const nextDyMm = dyCandidates.length
+      ? dyCandidates.reduce((sum, value) => sum + value, 0) / dyCandidates.length
+      : 0;
+    if (Math.abs(nextDxMm) > 1e-9 || Math.abs(nextDyMm) > 1e-9) {
+      editorRef.value?.moveSelectionBy?.({
+        dxMm: nextDxMm,
+        dyMm: nextDyMm,
       });
     }
     return;
