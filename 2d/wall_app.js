@@ -111,6 +111,7 @@ export function createWallApp({
     inputEnabled = !!v;
     if (!inputEnabled) {
       isPanning = false;
+      hideOverlapPicker();
       clearTransientHoverState();
     }
   }
@@ -975,6 +976,16 @@ const contextMenuState = {
   clientY: 0,
   el: null,
 };
+const overlapPickerState = {
+  visible: false,
+  clientX: 0,
+  clientY: 0,
+  offsetX: 0,
+  offsetY: 0,
+  el: null,
+  items: [],
+  modifierMode: "replace", // replace | add | remove
+};
 
 function clearGroupSelection() {
   selectedWallIds = [];
@@ -1016,6 +1027,210 @@ function setSingleOrMultiSelection(kind, ids) {
     selectedPassiveModelIds = next.length > 1 ? next : [];
     emitPassiveModelSelectionChange();
   }
+}
+
+function getPassiveModelDisplayName(model) {
+  if (!model) return "";
+  return String(model.displayName || model.designTitle || model.instanceCode || model.id || "").trim();
+}
+
+function getOverlapHitKindPriority(kind) {
+  if (kind === "passive_model") return 0;
+  if (kind === "column" || kind === "beam") return 1;
+  if (kind === "wall") return 2;
+  if (kind === "hidden") return 3;
+  return 9;
+}
+
+function getOverlapHitLabel(hit) {
+  if (!hit) return "";
+  if (hit.kind === "passive_model") {
+    return `طرح - ${getPassiveModelDisplayName(hit.model) || String(hit.id || "").trim() || "بدون نام"}`;
+  }
+  if (hit.kind === "beam") {
+    return `تیر - ${String(hit.name || hit.id || "").trim() || "بدون نام"}`;
+  }
+  if (hit.kind === "column") {
+    return `ستون - ${String(hit.name || hit.id || "").trim() || "بدون نام"}`;
+  }
+  if (hit.kind === "hidden") {
+    return `خط راهنما - ${String(hit.name || hit.id || "").trim() || "بدون نام"}`;
+  }
+  return `دیوار - ${String(hit.name || hit.id || "").trim() || "بدون نام"}`;
+}
+
+function sortOverlapHits(hits) {
+  return (Array.isArray(hits) ? hits.slice() : []).sort((a, b) => {
+    const pa = getOverlapHitKindPriority(a?.kind);
+    const pb = getOverlapHitKindPriority(b?.kind);
+    if (pa !== pb) return pa - pb;
+    const da = Number.isFinite(Number(a?.distance)) ? Number(a.distance) : Infinity;
+    const db = Number.isFinite(Number(b?.distance)) ? Number(b.distance) : Infinity;
+    if (Math.abs(da - db) > 1e-6) return da - db;
+    const va = Number.isFinite(Number(a?.visualOrder)) ? Number(a.visualOrder) : 0;
+    const vb = Number.isFinite(Number(b?.visualOrder)) ? Number(b.visualOrder) : 0;
+    return vb - va;
+  });
+}
+
+function collectOverlapHits(screenX, screenY) {
+  const hits = [];
+  let passiveVisualOrder = 0;
+  const world = screenToWorld(screenX, screenY);
+  for (let idx = passiveModels.length - 1; idx >= 0; idx--) {
+    const model = passiveModels[idx];
+    const pts = Array.isArray(model?.outline) ? model.outline : [];
+    if (pts.length < 3) continue;
+    let matched = pointInPolygonWorld(world.x, world.y, pts);
+    let bestDistance = 0;
+    if (!matched) {
+      let prev = worldToScreen(pts[0].x, pts[0].y);
+      let minDistPx = Infinity;
+      for (let i = 1; i < pts.length; i++) {
+        const cur = worldToScreen(pts[i].x, pts[i].y);
+        minDistPx = Math.min(minDistPx, pointToSegmentDistancePx(screenX, screenY, prev.x, prev.y, cur.x, cur.y));
+        prev = cur;
+      }
+      const first = worldToScreen(pts[0].x, pts[0].y);
+      const last = worldToScreen(pts[pts.length - 1].x, pts[pts.length - 1].y);
+      minDistPx = Math.min(minDistPx, pointToSegmentDistancePx(screenX, screenY, last.x, last.y, first.x, first.y));
+      matched = minDistPx <= 7;
+      bestDistance = minDistPx;
+    }
+    if (!matched) continue;
+    hits.push({
+      type: "passive_model",
+      kind: "passive_model",
+      id: model.id,
+      name: getPassiveModelDisplayName(model),
+      model,
+      distance: bestDistance,
+      visualOrder: passiveVisualOrder++,
+    });
+  }
+
+  const solidTolMm = 40;
+  let solidVisualOrder = 0;
+  for (const edge of graph.walls.values()) {
+    const A = graph.getNode(edge.a);
+    const B = graph.getNode(edge.b);
+    if (!A || !B) continue;
+    const d = pointToSegmentDistance(world.x, world.y, A.x, A.y, B.x, B.y);
+    const thickness = Number.isFinite(Number(edge?.thickness)) ? Number(edge.thickness) : Math.max(1, Number(state.wallThicknessMm) || 120);
+    if (d > (thickness / 2 + solidTolMm)) {
+      solidVisualOrder += 1;
+      continue;
+    }
+    const kind = getEdgeKind(edge, "wall");
+    hits.push({
+      type: "wall",
+      kind,
+      id: edge.id,
+      name: String(edge?.name || edge?.id || "").trim(),
+      edge,
+      graphType: "wall",
+      distance: d,
+      visualOrder: solidVisualOrder++,
+    });
+  }
+
+  const hiddenTolMm = 40;
+  let hiddenVisualOrder = 0;
+  for (const edge of hiddenGraph.walls.values()) {
+    const A = hiddenGraph.getNode(edge.a);
+    const B = hiddenGraph.getNode(edge.b);
+    if (!A || !B) continue;
+    const d = pointToSegmentDistance(world.x, world.y, A.x, A.y, B.x, B.y);
+    if (d > hiddenTolMm) {
+      hiddenVisualOrder += 1;
+      continue;
+    }
+    hits.push({
+      type: "hidden",
+      kind: "hidden",
+      id: edge.id,
+      name: String(edge?.name || edge?.id || "").trim(),
+      edge,
+      graphType: "hidden",
+      distance: d,
+      visualOrder: hiddenVisualOrder++,
+    });
+  }
+
+  return sortOverlapHits(hits);
+}
+
+function applyOverlapSelectionHit(hit, opts = {}) {
+  if (!hit) return false;
+  const mode = opts.mode === "add" || opts.mode === "remove" ? opts.mode : "replace";
+  const offsetX = Number.isFinite(Number(opts.offsetX)) ? Number(opts.offsetX) : 0;
+  const offsetY = Number.isFinite(Number(opts.offsetY)) ? Number(opts.offsetY) : 0;
+
+  if (hit.type === "passive_model") {
+    hoverPassiveModelId = hit.id;
+    hoverModelOutline = false;
+    if (mode === "remove") {
+      clearPendingPassiveActivation();
+      removePassiveModelSelection(hit.id);
+      selectedModelOutline = false;
+      return true;
+    }
+    if (mode === "add") {
+      clearPendingPassiveActivation();
+      addPassiveModelSelection(hit.id);
+      selectedModelOutline = false;
+      return true;
+    }
+    selectedWallId = null;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    clearGroupSelection();
+    selectedModelOutline = false;
+    setSingleOrMultiSelection("passive_model", [hit.id]);
+    pendingPassiveActivation.id = hit.id;
+    pendingPassiveActivation.startX = offsetX;
+    pendingPassiveActivation.startY = offsetY;
+    pendingPassiveActivation.moved = false;
+    return true;
+  }
+
+  clearPendingPassiveActivation();
+  setSingleOrMultiSelection("passive_model", []);
+  if (hit.type === "hidden") {
+    hoverHiddenId = hit.id;
+    if (mode === "remove") {
+      removeHiddenSelection(hit.id);
+      return true;
+    }
+    if (mode === "add") {
+      addHiddenSelection(hit.id);
+      return true;
+    }
+    clearGroupSelection();
+    selectedWallId = null;
+    selectedHiddenId = hit.id;
+    selectedDimId = null;
+    selectedModelOutline = false;
+    return true;
+  }
+  if (hit.type === "wall") {
+    hoverWallId = hit.id;
+    if (mode === "remove") {
+      removeWallSelection(hit.id);
+      return true;
+    }
+    if (mode === "add") {
+      addWallSelection(hit.id);
+      return true;
+    }
+    clearGroupSelection();
+    selectedHiddenId = null;
+    selectedWallId = hit.id;
+    selectedDimId = null;
+    selectedModelOutline = false;
+    return true;
+  }
+  return false;
 }
 
 function applySelectionSnapshot(snapshot) {
@@ -1452,6 +1667,7 @@ function beginExtendCommand() {
   const sel = getExtendSelectionInfo();
   if (!sel) return false;
   if (dimEditor.active) closeDimEditor(true);
+  hideOverlapPicker();
   hideContextMenu();
   if (copyCommand.mode !== "idle") cancelCopyCommand(true);
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);
@@ -2162,6 +2378,9 @@ function snapshotModel2d(model) {
 function snapshotPassiveModels(models) {
   return (Array.isArray(models) ? models : []).map((model) => ({
     id: String(model?.id || "").trim(),
+    designTitle: String(model?.designTitle || "").trim() || null,
+    instanceCode: String(model?.instanceCode || "").trim() || null,
+    displayName: String(model?.displayName || "").trim() || null,
     lines: (model?.lines || []).map((l) => ({ ax: l.ax, ay: l.ay, bx: l.bx, by: l.by })),
     outline: (model?.outline || []).map((p) => ({ x: p.x, y: p.y })),
     transform: {
@@ -2191,6 +2410,13 @@ function restorePassiveModels(snap) {
   passiveModels = (Array.isArray(snap) ? snap : [])
     .map((model) => ({
       id: String(model?.id || "").trim(),
+      designTitle: String(model?.designTitle || "").trim() || null,
+      instanceCode: String(model?.instanceCode || "").trim() || null,
+      displayName:
+        String(model?.displayName || "").trim() ||
+        String(model?.designTitle || "").trim() ||
+        String(model?.instanceCode || "").trim() ||
+        String(model?.id || "").trim(),
       lines: (model?.lines || []).map((l) => ({ ax: l.ax, ay: l.ay, bx: l.bx, by: l.by })),
       outline: (model?.outline || []).map((p) => ({ x: p.x, y: p.y })),
       transform: {
@@ -2720,6 +2946,13 @@ function setPassiveModels(models = []) {
         id,
         lines,
         outline,
+        designTitle: String(model?.designTitle || "").trim() || null,
+        instanceCode: String(model?.instanceCode || "").trim() || null,
+        displayName:
+          String(model?.displayName || "").trim() ||
+          String(model?.designTitle || "").trim() ||
+          String(model?.instanceCode || "").trim() ||
+          id,
         transform: {
           x: Number.isFinite(Number(model?.transform?.x))
             ? Number(model.transform.x)
@@ -6459,6 +6692,10 @@ function destroy() {
     try { contextMenuState.el.remove(); } catch (_) {}
     contextMenuState.el = null;
   }
+  if (overlapPickerState.el) {
+    try { overlapPickerState.el.remove(); } catch (_) {}
+    overlapPickerState.el = null;
+  }
 }
 
 function onMouseEnter() { isMouseOverCanvas = true; }
@@ -6492,9 +6729,105 @@ function ensureContextMenuElement() {
   return el;
 }
 
+function ensureOverlapPickerElement() {
+  if (overlapPickerState.el) return overlapPickerState.el;
+  if (typeof document === "undefined") return null;
+  const el = document.createElement("div");
+  el.style.position = "fixed";
+  el.style.minWidth = "220px";
+  el.style.maxWidth = "320px";
+  el.style.padding = "8px";
+  el.style.borderRadius = "14px";
+  el.style.background = "rgba(255,255,255,0.985)";
+  el.style.border = "1px solid rgba(118,45,71,0.16)";
+  el.style.boxShadow = "0 22px 44px rgba(15,23,42,0.22)";
+  el.style.backdropFilter = "blur(10px)";
+  el.style.zIndex = "10000";
+  el.style.display = "none";
+  el.style.direction = "rtl";
+  el.style.fontFamily = state.fontFamily || "Tahoma";
+  el.addEventListener("mousedown", (ev) => ev.stopPropagation());
+  document.body.appendChild(el);
+  overlapPickerState.el = el;
+  return el;
+}
+
 function hideContextMenu() {
   contextMenuState.visible = false;
   if (contextMenuState.el) contextMenuState.el.style.display = "none";
+}
+
+function hideOverlapPicker() {
+  overlapPickerState.visible = false;
+  overlapPickerState.items = [];
+  if (overlapPickerState.el) overlapPickerState.el.style.display = "none";
+}
+
+function renderOverlapPickerItems() {
+  const menu = ensureOverlapPickerElement();
+  if (!menu) return;
+  const items = Array.isArray(overlapPickerState.items) ? overlapPickerState.items : [];
+  menu.innerHTML = "";
+
+  const title = document.createElement("div");
+  title.textContent = "آبجکت‌های روی‌هم";
+  title.style.font = `700 12px ${state.fontFamily || "Tahoma"}`;
+  title.style.color = "#762D47";
+  title.style.padding = "2px 8px 8px";
+  menu.appendChild(title);
+
+  for (const item of items) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = getOverlapHitLabel(item);
+    btn.style.display = "block";
+    btn.style.width = "100%";
+    btn.style.border = "0";
+    btn.style.background = "#fff";
+    btn.style.color = "#0f172a";
+    btn.style.padding = "10px 12px";
+    btn.style.margin = "2px 0";
+    btn.style.borderRadius = "10px";
+    btn.style.textAlign = "right";
+    btn.style.cursor = "pointer";
+    btn.style.font = `13px ${state.fontFamily || "Tahoma"}`;
+    btn.style.whiteSpace = "nowrap";
+    btn.style.overflow = "hidden";
+    btn.style.textOverflow = "ellipsis";
+    btn.onmouseenter = () => { btn.style.background = "#f5eaf0"; };
+    btn.onmouseleave = () => { btn.style.background = "#fff"; };
+    btn.onclick = () => {
+      hideOverlapPicker();
+      applyOverlapSelectionHit(item, {
+        mode: overlapPickerState.modifierMode,
+        offsetX: overlapPickerState.offsetX,
+        offsetY: overlapPickerState.offsetY,
+      });
+    };
+    menu.appendChild(btn);
+  }
+}
+
+function showOverlapPicker(clientX, clientY, items, opts = {}) {
+  hideContextMenu();
+  overlapPickerState.items = sortOverlapHits(items);
+  overlapPickerState.clientX = clientX;
+  overlapPickerState.clientY = clientY;
+  overlapPickerState.offsetX = Number.isFinite(Number(opts.offsetX)) ? Number(opts.offsetX) : 0;
+  overlapPickerState.offsetY = Number.isFinite(Number(opts.offsetY)) ? Number(opts.offsetY) : 0;
+  overlapPickerState.modifierMode = opts.mode === "add" || opts.mode === "remove" ? opts.mode : "replace";
+  renderOverlapPickerItems();
+  const menu = ensureOverlapPickerElement();
+  if (!menu) return;
+  menu.style.display = "block";
+  const vw = (typeof window !== "undefined") ? window.innerWidth : 0;
+  const vh = (typeof window !== "undefined") ? window.innerHeight : 0;
+  const rect = menu.getBoundingClientRect();
+  const left = Math.max(8, Math.min(clientX + 10, vw - rect.width - 8));
+  const top = Math.max(8, Math.min(clientY + 10, vh - rect.height - 8));
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+  overlapPickerState.visible = true;
 }
 
 function syncSelectionToHoverForContextMenu() {
@@ -6597,6 +6930,7 @@ function renderContextMenuItems() {
 }
 
 function showContextMenu(clientX, clientY) {
+  hideOverlapPicker();
   renderContextMenuItems();
   const menu = ensureContextMenuElement();
   if (!menu) return;
@@ -6616,6 +6950,7 @@ function showContextMenu(clientX, clientY) {
 function onContextMenu(e) {
   e.preventDefault();
   if (!inputEnabled) return;
+  if (overlapPickerState.visible) hideOverlapPicker();
   if (contextMenuState.visible) hideContextMenu();
   if (dimEditor.active) closeDimEditor(true);
   const isDrawing =
@@ -7230,6 +7565,7 @@ function deleteOrphanNodes(g, keepNodeIds = null) {
 
 function onMouseDown(e) {
   if (!inputEnabled) return;
+  if (overlapPickerState.visible) hideOverlapPicker();
   const effectiveMode = getEffectiveDrawingMode();
   const isAddSelectModifier = !!(e.ctrlKey || e.metaKey);
   const isRemoveSelectModifier = !!e.altKey;
@@ -7762,36 +8098,26 @@ function onMouseDown(e) {
     return;
   }
 
+  const overlapHits = collectOverlapHits(e.offsetX, e.offsetY);
+  if (overlapHits.length > 1) {
+    showOverlapPicker(e.clientX, e.clientY, overlapHits, {
+      mode: isRemoveSelectModifier ? "remove" : (isAddSelectModifier ? "add" : "replace"),
+      offsetX: e.offsetX,
+      offsetY: e.offsetY,
+    });
+    return;
+  }
+
   // 3) Object hit => select and STOP.
   // Clicking a passive saved design should fully activate it on the first click.
   // Hit-testing resolves from the full filled outline, not only its edges.
-  const clickedPassiveModelId = hitTestPassiveModel(e.offsetX, e.offsetY);
-  if (clickedPassiveModelId) {
-    hoverPassiveModelId = clickedPassiveModelId;
-    hoverModelOutline = false;
-    if (isRemoveSelectModifier) {
-      clearPendingPassiveActivation();
-      removePassiveModelSelection(clickedPassiveModelId);
-      selectedModelOutline = false;
-      return;
-    }
-    if (isAddSelectModifier) {
-      clearPendingPassiveActivation();
-      addPassiveModelSelection(clickedPassiveModelId);
-      selectedModelOutline = false;
-      return;
-    }
-    selectedWallId = null;
-    selectedHiddenId = null;
-    selectedDimId = null;
-    clearGroupSelection();
-    selectedModelOutline = false;
-    setSingleOrMultiSelection("passive_model", [clickedPassiveModelId]);
-    pendingPassiveActivation.id = clickedPassiveModelId;
-    pendingPassiveActivation.startX = e.offsetX;
-    pendingPassiveActivation.startY = e.offsetY;
-    pendingPassiveActivation.moved = false;
-    return;
+  if (overlapHits.length === 1) {
+    const selected = applyOverlapSelectionHit(overlapHits[0], {
+      mode: isRemoveSelectModifier ? "remove" : (isAddSelectModifier ? "add" : "replace"),
+      offsetX: e.offsetX,
+      offsetY: e.offsetY,
+    });
+    if (selected) return;
   }
   const clickedModelOutline = hitTestModelFill(e.offsetX, e.offsetY) || hitTestModelOutline(e.offsetX, e.offsetY);
   if (clickedModelOutline) {
@@ -8622,6 +8948,11 @@ function onWindowKeyDown(e) {
   const code = String(e.code || "");
   const ctrl = !!(e.ctrlKey || e.metaKey);
 
+  if (key === "Escape" && overlapPickerState.visible) {
+    e.preventDefault();
+    hideOverlapPicker();
+    return;
+  }
   if (key === "Escape" && contextMenuState.visible) {
     e.preventDefault();
     hideContextMenu();
@@ -9059,6 +9390,10 @@ function fitViewToBounds() {
 
 // Click outside canvas closes inline dimension editor (important when embedded in Vue UI).
 function onWindowMouseDown(e) {
+  if (overlapPickerState.visible) {
+    const picker = overlapPickerState.el;
+    if (!picker || !picker.contains(e.target)) hideOverlapPicker();
+  }
   if (contextMenuState.visible) {
     const menu = contextMenuState.el;
     if (!menu || !menu.contains(e.target)) hideContextMenu();
@@ -9085,6 +9420,7 @@ function setActiveTool(name) {
 
   // Cancel other tools when switching modes.
   if (dimEditor.active) closeDimEditor(true);
+  hideOverlapPicker();
   hideContextMenu();
   if (copyCommand.mode !== "idle") cancelCopyCommand(true);
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);
@@ -9115,6 +9451,7 @@ function setSnapOn(v) {
 
 function clearAll() {
   if (dimEditor.active) closeDimEditor(true);
+  hideOverlapPicker();
   hideContextMenu();
   if (copyCommand.mode !== "idle") cancelCopyCommand(true);
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);

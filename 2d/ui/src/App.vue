@@ -6372,6 +6372,13 @@ const passiveStageOrderDesignModels = computed(() =>
           y: placement.y,
           rotRad: placement.rotRad,
         },
+        designTitle: String(item.design_title || "").trim() || null,
+        instanceCode: String(item.instance_code || "").trim() || null,
+        displayName:
+          String(item.design_title || "").trim() ||
+          String(item.instance_code || "").trim() ||
+          String(placement.orderDesignId || "").trim() ||
+          null,
       };
     })
     .filter((item) => item && item.outline.length >= 3 && item.lines.length >= 1)
