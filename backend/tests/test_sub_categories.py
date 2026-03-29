@@ -64,7 +64,6 @@ def test_create_sub_category_accepts_defaults(monkeypatch: pytest.MonkeyPatch) -
         cat_id=1,
         sub_cat_id=2,
         sub_cat_title="مدل جدید",
-        design_outline_color="#123ABC",
         sort_order=2,
         is_system=True,
         param_defaults={"w": 720},
@@ -73,5 +72,4 @@ def test_create_sub_category_accepts_defaults(monkeypatch: pytest.MonkeyPatch) -
     result = asyncio.run(create_sub_category(payload, session))
 
     assert result.sub_cat_title == "مدل جدید"
-    assert result.design_outline_color == "#123ABC"
     assert result.param_defaults["w"] in {"720", None}

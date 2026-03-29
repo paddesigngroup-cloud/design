@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.catalog import SubCategory, SubCategoryDesign, SubCategoryDesignInteriorInstance, SubCategoryDesignPart
+from designkp_backend.db.models.catalog import Category, SubCategory, SubCategoryDesign, SubCategoryDesignInteriorInstance, SubCategoryDesignPart
 from designkp_backend.services.admin_access import require_admin_if_present
 from designkp_backend.services.sub_category_designs import (
     build_sub_category_param_display_snapshot,
@@ -288,9 +288,15 @@ def _deleted_design_code(code: str, design_uuid: uuid.UUID) -> str:
     return f"{base[:max_base_len]}{suffix}"
 
 
+async def _category_outline_color(session: AsyncSession, cat_id: int) -> str:
+    value = await session.scalar(select(Category.design_outline_color).where(Category.cat_id == cat_id).limit(1))
+    return str(value or "#7A4A2B").strip() or "#7A4A2B"
+
+
 async def _load_design(session: AsyncSession, design_uuid: uuid.UUID) -> SubCategoryDesign:
     stmt = select(SubCategoryDesign).options(
         selectinload(SubCategoryDesign.parts).selectinload(SubCategoryDesignPart.snapshots),
+        selectinload(SubCategoryDesign.sub_category).selectinload(SubCategory.category),
     )
     if await interior_instance_tables_ready(session):
         stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
@@ -368,7 +374,7 @@ async def list_sub_category_designs(
     include_interior = await interior_instance_tables_ready(session)
     stmt = select(SubCategoryDesign).options(
         selectinload(SubCategoryDesign.parts),
-        selectinload(SubCategoryDesign.sub_category),
+        selectinload(SubCategoryDesign.sub_category).selectinload(SubCategory.category),
     )
     if include_interior:
         stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
@@ -398,7 +404,7 @@ async def list_sub_category_designs(
         _serialize_design(
             item,
             include_interior=include_interior,
-            design_outline_color=getattr(item.sub_category, "design_outline_color", "#7A4A2B"),
+            design_outline_color=getattr(getattr(item.sub_category, "category", None), "design_outline_color", "#7A4A2B"),
         )
         for item in items
     ]
@@ -442,7 +448,7 @@ async def create_sub_category_design(payload: SubCategoryDesignCreate, session: 
     return _serialize_design(
         item,
         include_interior=await interior_instance_tables_ready(session),
-        design_outline_color=getattr(sub_category, "design_outline_color", "#7A4A2B"),
+        design_outline_color=await _category_outline_color(session, sub_category.cat_id),
     )
 
 
@@ -485,7 +491,7 @@ async def update_sub_category_design(
     return _serialize_design(
         item,
         include_interior=await interior_instance_tables_ready(session),
-        design_outline_color=getattr(sub_category, "design_outline_color", "#7A4A2B"),
+        design_outline_color=await _category_outline_color(session, sub_category.cat_id),
     )
 
 
@@ -532,7 +538,7 @@ async def preview_sub_category_design_draft(
     return _serialize_preview(
         design_id=None,
         sub_category_id=sub_category.id,
-        design_outline_color=str(getattr(sub_category, "design_outline_color", "#7A4A2B") or "#7A4A2B"),
+        design_outline_color=await _category_outline_color(session, sub_category.cat_id),
         raw_params=raw_params,
         resolved_base_formulas=resolved_base_formulas,
         snapshots=snapshots,
@@ -585,7 +591,7 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
     return SubCategoryDesignPreviewResponse(
         design_id=item.id,
         sub_category_id=sub_category.id,
-        design_outline_color=str(getattr(sub_category, "design_outline_color", "#7A4A2B") or "#7A4A2B"),
+        design_outline_color=await _category_outline_color(session, sub_category.cat_id),
         resolved_params=raw_params,
         resolved_base_formulas=resolved_base_formulas,
         viewer_boxes=viewer_boxes + ([

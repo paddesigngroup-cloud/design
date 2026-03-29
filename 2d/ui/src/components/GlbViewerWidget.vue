@@ -38,6 +38,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  placeholderOutlineColor: {
+    type: String,
+    default: "#7A4A2B",
+  },
   placeholderInstances: {
     type: Array,
     default: () => [],
@@ -1001,6 +1005,18 @@ function clearPlaceholderBoxes() {
   placeholderBoxesRoot = null;
 }
 
+function normalizePlaceholderColor(value, fallback = "#7A4A2B") {
+  const raw = String(value || "").trim();
+  const normalized = raw.startsWith("#") ? raw : `#${raw}`;
+  return /^#[0-9A-Fa-f]{6}$/.test(normalized) ? normalized.toUpperCase() : fallback;
+}
+
+function buildPlaceholderPalette(outlineColor) {
+  const fill = new THREE.Color(normalizePlaceholderColor(outlineColor)).lerp(new THREE.Color("#FFFFFF"), 0.76);
+  const edge = new THREE.Color("#5F5A52");
+  return { edge, fill };
+}
+
 function rebuildPlaceholderBoxes() {
   if (!scene) return;
   clearPlaceholderBoxes();
@@ -1019,6 +1035,9 @@ function rebuildPlaceholderBoxes() {
   for (const instance of instances) {
     const specs = Array.isArray(instance?.boxes) ? instance.boxes : [];
     if (!specs.length) continue;
+    const palette = buildPlaceholderPalette(
+      instance?.outlineColor || props.orderDesign?.design_outline_color || props.placeholderOutlineColor
+    );
     const tx = Number.isFinite(Number(instance?.transform?.x)) ? Number(instance.transform.x) : 0;
     const ty = Number.isFinite(Number(instance?.transform?.y)) ? Number(instance.transform.y) : 0;
     const rotRad = Number.isFinite(Number(instance?.transform?.rotRad)) ? Number(instance.transform.rotRad) : 0;
@@ -1040,7 +1059,7 @@ function rebuildPlaceholderBoxes() {
 
       const geometry = new THREE.BoxGeometry(widthM, heightM, depthM);
       const material = new THREE.MeshStandardMaterial({
-        color: new THREE.Color("#D9D4CB"),
+        color: palette.fill.clone(),
         roughness: 0.82,
         metalness: 0.04,
         transparent: true,
@@ -1052,7 +1071,7 @@ function rebuildPlaceholderBoxes() {
       const edgeLines = new THREE.LineSegments(
         edges,
         new THREE.LineBasicMaterial({
-          color: new THREE.Color("#5F5A52"),
+          color: palette.edge.clone(),
           transparent: true,
           opacity: 0.95,
           depthTest: true,

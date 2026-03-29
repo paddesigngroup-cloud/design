@@ -16,18 +16,6 @@ from designkp_backend.services.admin_storage import admin_icon_exists, finalize_
 from designkp_backend.services.sub_category_defaults import get_params_for_scope, normalize_default_value, sync_defaults_for_sub_categories
 
 router = APIRouter(prefix="/sub-categories", tags=["sub_categories"])
-
-
-def _normalize_hex_color(value: str | None, fallback: str = "#7A4A2B") -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        return fallback
-    normalized = raw if raw.startswith("#") else f"#{raw}"
-    if len(normalized) == 7 and normalized.startswith("#") and all(ch in "0123456789ABCDEFabcdef" for ch in normalized[1:]):
-        return normalized.upper()
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sub-category design outline color must be a HEX value like #7A4A2B.")
-
-
 class SubCategoryItem(BaseModel):
     id: uuid.UUID
     admin_id: uuid.UUID | None
@@ -35,7 +23,6 @@ class SubCategoryItem(BaseModel):
     cat_id: int
     sub_cat_id: int
     sub_cat_title: str
-    design_outline_color: str
     code: str
     title: str
     sort_order: int
@@ -63,7 +50,6 @@ class SubCategoryCreate(BaseModel):
     cat_id: int = Field(ge=1)
     sub_cat_id: int | None = Field(default=None, ge=1)
     sub_cat_title: str = Field(min_length=1, max_length=255)
-    design_outline_color: str = Field(default="#7A4A2B", min_length=7, max_length=7)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
     param_defaults: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
@@ -76,7 +62,6 @@ class SubCategoryUpdate(BaseModel):
     cat_id: int = Field(ge=1)
     sub_cat_id: int = Field(ge=1)
     sub_cat_title: str = Field(min_length=1, max_length=255)
-    design_outline_color: str = Field(default="#7A4A2B", min_length=7, max_length=7)
     sort_order: int = Field(ge=0)
     is_system: bool
     param_defaults: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
@@ -309,7 +294,6 @@ async def _serialize_items(session: AsyncSession, items: list[SubCategory], admi
             cat_id=item.cat_id,
             sub_cat_id=item.sub_cat_id,
             sub_cat_title=item.sub_cat_title,
-            design_outline_color=_normalize_hex_color(item.design_outline_color),
             code=item.code,
             title=item.title,
             sort_order=item.sort_order,
@@ -361,7 +345,6 @@ async def create_sub_category(payload: SubCategoryCreate, session: AsyncSession 
         cat_id=payload.cat_id,
         sub_cat_id=next_id,
         sub_cat_title=title,
-        design_outline_color=_normalize_hex_color(payload.design_outline_color),
         code=_sub_category_code(next_id),
         title=title,
         sort_order=payload.sort_order if payload.sort_order is not None else next_id,
@@ -405,7 +388,6 @@ async def update_sub_category(
     item.cat_id = payload.cat_id
     item.sub_cat_id = next_sub_cat_id
     item.sub_cat_title = title
-    item.design_outline_color = _normalize_hex_color(payload.design_outline_color)
     item.code = _sub_category_code(next_sub_cat_id)
     item.title = title
     item.sort_order = payload.sort_order

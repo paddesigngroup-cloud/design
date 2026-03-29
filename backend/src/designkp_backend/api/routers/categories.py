@@ -14,12 +14,23 @@ from designkp_backend.services.admin_access import require_admin_if_present
 router = APIRouter(prefix="/categories", tags=["categories"])
 
 
+def _normalize_hex_color(value: str | None, fallback: str = "#7A4A2B") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return fallback
+    normalized = raw if raw.startswith("#") else f"#{raw}"
+    if len(normalized) == 7 and normalized.startswith("#") and all(ch in "0123456789ABCDEFabcdef" for ch in normalized[1:]):
+        return normalized.upper()
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category design outline color must be a HEX value like #7A4A2B.")
+
+
 class CategoryItem(BaseModel):
     id: uuid.UUID
     admin_id: uuid.UUID | None
     temp_id: int
     cat_id: int
     cat_title: str
+    design_outline_color: str
     code: str
     title: str
     sort_order: int
@@ -33,6 +44,7 @@ class CategoryCreate(BaseModel):
     temp_id: int = Field(ge=1)
     cat_id: int | None = Field(default=None, ge=1)
     cat_title: str = Field(min_length=1, max_length=255)
+    design_outline_color: str = Field(default="#7A4A2B", min_length=7, max_length=7)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
 
@@ -42,12 +54,24 @@ class CategoryUpdate(BaseModel):
     temp_id: int = Field(ge=1)
     cat_id: int = Field(ge=1)
     cat_title: str = Field(min_length=1, max_length=255)
+    design_outline_color: str = Field(default="#7A4A2B", min_length=7, max_length=7)
     sort_order: int = Field(ge=0)
     is_system: bool
 
 
 def _to_response(item: Category) -> CategoryItem:
-    return CategoryItem.model_validate(item)
+    return CategoryItem(
+        id=item.id,
+        admin_id=item.admin_id,
+        temp_id=item.temp_id,
+        cat_id=int(item.cat_id or 0),
+        cat_title=item.cat_title,
+        design_outline_color=_normalize_hex_color(item.design_outline_color),
+        code=item.code,
+        title=item.title,
+        sort_order=int(item.sort_order or 0),
+        is_system=bool(item.is_system),
+    )
 
 
 def _category_code(cat_id: int) -> str:
@@ -100,6 +124,7 @@ async def create_category(payload: CategoryCreate, session: AsyncSession = Depen
         temp_id=payload.temp_id,
         cat_id=next_id,
         cat_title=title,
+        design_outline_color=_normalize_hex_color(payload.design_outline_color),
         code=_category_code(next_id),
         title=title,
         sort_order=payload.sort_order if payload.sort_order is not None else next_id,
@@ -128,6 +153,7 @@ async def update_category(
     item.temp_id = payload.temp_id
     item.cat_id = payload.cat_id
     item.cat_title = title
+    item.design_outline_color = _normalize_hex_color(payload.design_outline_color)
     item.code = _category_code(payload.cat_id)
     item.title = title
     item.sort_order = payload.sort_order

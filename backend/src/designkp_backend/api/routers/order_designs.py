@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.account import OrderDesign, OrderDesignInteriorInstance
-from designkp_backend.db.models.catalog import SubCategoryDesign
+from designkp_backend.db.models.catalog import SubCategory, SubCategoryDesign
 from designkp_backend.services.order_designs import (
     SNAPSHOT_META_KEY,
     build_order_design_snapshot,
@@ -80,6 +80,7 @@ class OrderDesignInteriorInstanceUpdate(BaseModel):
 
 
 def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> OrderDesignItem:
+    category = getattr(getattr(item.sub_category_design, "sub_category", None), "category", None)
     return OrderDesignItem(
         id=item.id,
         order_id=item.order_id,
@@ -87,7 +88,7 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
         user_id=item.user_id,
         sub_category_design_id=item.sub_category_design_id,
         sub_category_id=item.sub_category_id,
-        design_outline_color=str(getattr(getattr(item.sub_category_design, "sub_category", None), "design_outline_color", "#7A4A2B") or "#7A4A2B"),
+        design_outline_color=str(getattr(category, "design_outline_color", "#7A4A2B") or "#7A4A2B"),
         design_code=str(item.design_code or "").strip(),
         design_title=str(item.design_title or "").strip(),
         instance_code=str(item.instance_code or "").strip(),
@@ -133,7 +134,7 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
 
 async def _require_item(session: AsyncSession, item_id: uuid.UUID) -> OrderDesign:
     stmt = select(OrderDesign).options(
-        selectinload(OrderDesign.sub_category_design).selectinload(SubCategoryDesign.sub_category)
+        selectinload(OrderDesign.sub_category_design).selectinload(SubCategoryDesign.sub_category).selectinload(SubCategory.category)
     )
     if await interior_instance_tables_ready(session):
         stmt = stmt.options(selectinload(OrderDesign.interior_instances))
@@ -148,7 +149,7 @@ async def _require_item(session: AsyncSession, item_id: uuid.UUID) -> OrderDesig
 
 async def _require_item_any_status(session: AsyncSession, item_id: uuid.UUID) -> OrderDesign:
     stmt = select(OrderDesign).options(
-        selectinload(OrderDesign.sub_category_design).selectinload(SubCategoryDesign.sub_category)
+        selectinload(OrderDesign.sub_category_design).selectinload(SubCategoryDesign.sub_category).selectinload(SubCategory.category)
     )
     if await interior_instance_tables_ready(session):
         stmt = stmt.options(selectinload(OrderDesign.interior_instances))
@@ -306,7 +307,7 @@ async def list_order_designs(
     items = (
         await session.scalars(
             (select(OrderDesign).options(selectinload(OrderDesign.interior_instances)) if include_interior else select(OrderDesign))
-            .options(selectinload(OrderDesign.sub_category_design).selectinload(SubCategoryDesign.sub_category))
+            .options(selectinload(OrderDesign.sub_category_design).selectinload(SubCategoryDesign.sub_category).selectinload(SubCategory.category))
             .where(and_(OrderDesign.order_id == order_id, OrderDesign.deleted_at.is_(None)))
             .order_by(OrderDesign.sort_order.asc(), OrderDesign.instance_code.asc())
         )

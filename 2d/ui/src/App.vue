@@ -1020,6 +1020,7 @@ function normalizeCategoryPayload(item) {
     temp_id: Number(item.temp_id),
     cat_id: Number(item.cat_id),
     cat_title: String(item.cat_title || "").trim(),
+    design_outline_color: normalizeHexColor(item.design_outline_color),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.cat_id),
     is_system: !!item.is_system,
   };
@@ -1039,7 +1040,6 @@ function normalizeSubCategoryPayload(item) {
     cat_id: Number(item.cat_id),
     sub_cat_id: Number(item.sub_cat_id),
     sub_cat_title: String(item.sub_cat_title || "").trim(),
-    design_outline_color: normalizeHexColor(item.design_outline_color),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.sub_cat_id),
     is_system: !!item.is_system,
     param_defaults: Object.fromEntries(
@@ -3690,6 +3690,10 @@ function validateConstructionCategories() {
       showAlert("عنوان دسته نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
       return false;
     }
+    if (normalizeHexColor(item.design_outline_color) !== String(item.design_outline_color || "").trim().toUpperCase()) {
+      showAlert("رنگ بدنه سه‌بعدی دسته باید با فرمت HEX مثل #7A4A2B وارد شود.", { title: "اعتبارسنجی" });
+      return false;
+    }
   }
   const ids = editableCategories.value.map((item) => Number(item.cat_id));
   if (new Set(ids).size !== ids.length) {
@@ -3714,7 +3718,6 @@ function getConstructionCategoryOptions(tempId) {
 }
 
 function ensureSubCategoryParamDefaults(item) {
-  item.design_outline_color = normalizeHexColor(item.design_outline_color);
   if (!item.param_defaults || typeof item.param_defaults !== "object") {
     item.param_defaults = {};
   }
@@ -3755,7 +3758,6 @@ function ensureSubCategoryParamDefaults(item) {
 
 function cloneSubCategoryDefaultsSeed(source) {
   const seeded = ensureSubCategoryParamDefaults({
-    design_outline_color: normalizeHexColor(source?.design_outline_color),
     param_defaults: Object.fromEntries(
       constructionSubCategoryParamColumns.value.map((column) => [
         column.key,
@@ -3780,7 +3782,6 @@ function cloneSubCategoryDefaultsSeed(source) {
     ),
   });
   return {
-    design_outline_color: normalizeHexColor(source?.design_outline_color),
     param_defaults: { ...(seeded.param_defaults || {}) },
     param_overrides: Object.fromEntries(
       Object.entries(seeded.param_overrides || {}).map(([key, value]) => [key, { ...(value || {}) }])
@@ -4062,10 +4063,6 @@ function validateConstructionSubCategories() {
       showAlert("عنوان ساب‌کت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
       return false;
     }
-    if (normalizeHexColor(item.design_outline_color) !== String(item.design_outline_color || "").trim().toUpperCase()) {
-      showAlert("رنگ خط بیرونی طرح باید با فرمت HEX مثل #7A4A2B وارد شود.", { title: "اعتبارسنجی" });
-      return false;
-    }
   }
   const ids = editableSubCategories.value.map((item) => Number(item.sub_cat_id));
   if (new Set(ids).size !== ids.length) {
@@ -4216,7 +4213,7 @@ function getConstructionCsvHeaders() {
     return ["temp_id", "temp_title", "admin_mode"];
   }
   if (constructionStep.value === "categories") {
-    return ["temp_id", "cat_id", "cat_title", "admin_mode"];
+    return ["temp_id", "cat_id", "cat_title", "design_outline_color", "admin_mode"];
   }
   if (constructionStep.value === "sub_categories") {
     return [
@@ -4224,7 +4221,6 @@ function getConstructionCsvHeaders() {
       "cat_id",
       "sub_cat_id",
       "sub_cat_title",
-      "design_outline_color",
       ...constructionSubCategoryParamColumns.value.flatMap((item) => [
         item.key,
         `${item.key}__display_title`,
@@ -4269,6 +4265,7 @@ function getConstructionCsvRows(items = null) {
       Number(item.temp_id) || "",
       Number(item.cat_id) || "",
       String(item.cat_title || "").trim(),
+      normalizeHexColor(item.design_outline_color),
       item.admin_id === null ? "system" : "admin",
     ]);
   }
@@ -4279,7 +4276,6 @@ function getConstructionCsvRows(items = null) {
       Number(item.cat_id) || "",
       Number(item.sub_cat_id) || "",
       String(item.sub_cat_title || "").trim(),
-      normalizeHexColor(item.design_outline_color),
       ...constructionSubCategoryParamColumns.value.flatMap((column) => {
         const override = item.param_overrides?.[column.key] || {};
         return [
@@ -4532,17 +4528,19 @@ async function onConstructionImportFileChange(event) {
         const tempId = Number(row[0]);
         const catId = Number(row[1]);
         const catTitle = String(row[2] || "").trim();
-        const adminMode = String(row[3] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const designOutlineColor = normalizeHexColor(row[3]);
+        const adminMode = String(row[4] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         return {
           lineNo: index + 2,
           temp_id: tempId,
           cat_id: catId,
           cat_title: catTitle,
+          design_outline_color: designOutlineColor,
           admin_mode: adminMode,
         };
       });
     } else if (constructionStep.value === "sub_categories") {
-      const fixedColumnCount = 5;
+      const fixedColumnCount = 4;
       const perParamColumnCount = 9;
       const adminModeIndex = fixedColumnCount + (constructionSubCategoryParamColumns.value.length * perParamColumnCount);
       previewRows = rows.slice(1).map((row, index) => {
@@ -4568,7 +4566,6 @@ async function onConstructionImportFileChange(event) {
           cat_id: Number(row[1]),
           sub_cat_id: Number(row[2]),
           sub_cat_title: String(row[3] || "").trim(),
-          design_outline_color: normalizeHexColor(row[4]),
           param_defaults: paramDefaults,
           param_overrides: paramOverrides,
           admin_mode: String(row[adminModeIndex] || "admin").trim().toLowerCase() === "system" ? "system" : "admin",
@@ -5069,6 +5066,7 @@ function buildImportedConstructionCategoryDrafts(rows) {
       temp_id: Number(row.temp_id),
       cat_id: Number(row.cat_id),
       cat_title: String(row.cat_title || "").trim(),
+      design_outline_color: normalizeHexColor(row.design_outline_color),
       code: `category_${Number(row.cat_id)}`,
       title: String(row.cat_title || "").trim(),
       sort_order: index + 1,
@@ -5086,6 +5084,7 @@ function buildImportedConstructionCategoryDrafts(rows) {
       Number(existing.temp_id) !== nextPayload.temp_id ||
       Number(existing.cat_id) !== nextPayload.cat_id ||
       String(existing.cat_title || "").trim() !== nextPayload.cat_title ||
+      normalizeHexColor(existing.design_outline_color) !== nextPayload.design_outline_color ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system;
     return buildPartKindDraft(existing, {
@@ -5112,7 +5111,6 @@ function buildImportedConstructionSubCategoryDrafts(rows) {
       cat_id: Number(row.cat_id),
       sub_cat_id: Number(row.sub_cat_id),
       sub_cat_title: String(row.sub_cat_title || "").trim(),
-      design_outline_color: normalizeHexColor(row.design_outline_color),
       code: `sub_category_${Number(row.sub_cat_id)}`,
       title: String(row.sub_cat_title || "").trim(),
       sort_order: index + 1,
@@ -5135,7 +5133,6 @@ function buildImportedConstructionSubCategoryDrafts(rows) {
       Number(existing.cat_id) !== nextPayload.cat_id ||
       Number(existing.sub_cat_id) !== nextPayload.sub_cat_id ||
       String(existing.sub_cat_title || "").trim() !== nextPayload.sub_cat_title ||
-      normalizeHexColor(existing.design_outline_color) !== nextPayload.design_outline_color ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system ||
       constructionSubCategoryParamColumns.value.some((column) => {
@@ -5184,7 +5181,10 @@ async function loadConstructionCategories() {
     const url = `/api/categories?admin_id=${encodeURIComponent(currentAdminId.value)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error("load-failed");
-    editableCategories.value = (await res.json()).map(withConstructionDraftState);
+    editableCategories.value = (await res.json()).map((item) => withConstructionDraftState({
+      ...item,
+      design_outline_color: normalizeHexColor(item.design_outline_color),
+    }));
     constructionDeletedCategoryIds.value = [];
   } catch (_) {
     showAlert("خواندن جدول دسته‌بندی‌ها از دیتابیس انجام نشد.", { title: "خطا" });
@@ -5310,6 +5310,7 @@ function addConstructionCategory() {
       temp_id: fallbackTemplateId,
       cat_id: nextId,
       cat_title: `دسته ${toPersianDigits(nextId)}`,
+      design_outline_color: DEFAULT_SUB_CATEGORY_DESIGN_OUTLINE_COLOR,
       code: `category_${nextId}`,
       title: `دسته ${toPersianDigits(nextId)}`,
       sort_order: nextId,
@@ -5334,7 +5335,6 @@ function addConstructionSubCategory() {
       cat_id: Number(fallbackCategory?.cat_id) || 1,
       sub_cat_id: nextId,
       sub_cat_title: `ساب‌کت ${toPersianDigits(nextId)}`,
-      design_outline_color: clonedDefaults.design_outline_color,
       code: `sub_category_${nextId}`,
       title: `ساب‌کت ${toPersianDigits(nextId)}`,
       sort_order: nextId,
@@ -5602,6 +5602,8 @@ async function saveConstructionCategories(options = {}) {
     }
     await loadConstructionCategories();
     await loadConstructionSubCategories();
+    await loadCabinetDesignCatalog(true);
+    if (activeOrder.value?.id) await loadOrderDesignCatalog(true);
     showAlert(options.successMessage || "تغییرات جدول دسته‌بندی‌ها با موفقیت ذخیره شد.", {
       title: options.successTitle || "ذخیره تغییرات",
     });
@@ -5609,6 +5611,8 @@ async function saveConstructionCategories(options = {}) {
     showAlert("ذخیره تغییرات جدول دسته‌بندی‌ها در دیتابیس انجام نشد.", { title: "خطا" });
     await loadConstructionCategories();
     await loadConstructionSubCategories();
+    await loadCabinetDesignCatalog(true);
+    if (activeOrder.value?.id) await loadOrderDesignCatalog(true);
   } finally {
     constructionSavingIds.value = [];
   }
@@ -6937,6 +6941,7 @@ const draggedCabinetPreviewInstance = computed(() => {
   return {
     orderDesignId: `drag-preview-${String(drag.design.id || "cabinet")}`,
     boxes: drag.design.preview.viewer_boxes.map(normalizeCabinetBox),
+    outlineColor: normalizeHexColor(drag.design.design_outline_color || drag.design.preview?.design_outline_color),
     transform: {
       x: Number(dropWorld.x) || 0,
       y: Number(dropWorld.y) || 0,
@@ -6956,6 +6961,7 @@ const stageOrderDesignInstances = computed(() =>
         return {
           orderDesignId: item.id,
           boxes: item.viewer_boxes.map(normalizeCabinetBox),
+          outlineColor: normalizeHexColor(item.design_outline_color),
           transform: isActive
             ? {
                 x: liveTransform.x,
@@ -8658,6 +8664,7 @@ onBeforeUnmount(() => {
                       <GlbViewerWidget
                         src="/models/1_z1.glb"
                         :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                        :placeholder-outline-color="normalizeHexColor(design.design_outline_color || design.preview?.design_outline_color)"
                         :placeholder-boxes="design.preview.viewer_boxes"
                         :display-unit="currentEditorDisplayUnit"
                         :show-attrs-panel="false"
@@ -8969,6 +8976,7 @@ onBeforeUnmount(() => {
             :selected-order-design-ids="selectedOrderDesignIds"
             :order-param-groups="constructionParamGroups"
             :placeholder-instances="stageOrderDesignInstances"
+            :placeholder-outline-color="normalizeHexColor(selectedOrderDesignSource?.design_outline_color)"
             :placeholder-boxes="stageCabinetPlaceholderBoxes"
             :wall-style-draft="wallStyleDraft"
             :selected-wall-style="selectedWallStyle"
@@ -9355,6 +9363,7 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--id">تمپلیت</th>
                       <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                       <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
+                      <th class="constructionDialog__col constructionDialog__col--outlineColor">رنگ بدنه سه‌بعدی</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
                   </thead>
@@ -9363,6 +9372,12 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.temp_id }}</td>
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.cat_id }}</td>
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.cat_title }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--outlineColor">
+                        <div class="constructionDialog__colorField">
+                          <span class="constructionDialog__colorSwatch" :style="{ backgroundColor: normalizeHexColor(row.design_outline_color) }"></span>
+                          <span class="constructionDialog__colorValue">{{ normalizeHexColor(row.design_outline_color) }}</span>
+                        </div>
+                      </td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
                     </tr>
                   </tbody>
@@ -9392,6 +9407,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">تمپلیت</th>
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان دسته</th>
+                    <th class="constructionDialog__col constructionDialog__col--outlineColor">رنگ بدنه سه‌بعدی</th>
                     <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
                     <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
                     <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
@@ -9409,6 +9425,25 @@ onBeforeUnmount(() => {
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--title">
                       <input v-model="item.cat_title" class="constructionDialog__input" type="text" @input="markConstructionCategoryDirty(item)" />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--outlineColor">
+                      <div class="constructionDialog__colorEditor">
+                        <input
+                          v-model="item.design_outline_color"
+                          class="constructionDialog__colorInput"
+                          type="color"
+                          @input="item.design_outline_color = normalizeHexColor(item.design_outline_color); markConstructionCategoryDirty(item)"
+                        />
+                        <input
+                          v-model="item.design_outline_color"
+                          class="constructionDialog__input constructionDialog__input--mono constructionDialog__colorHex"
+                          type="text"
+                          dir="ltr"
+                          maxlength="7"
+                          placeholder="#7A4A2B"
+                          @change="item.design_outline_color = normalizeHexColor(item.design_outline_color); markConstructionCategoryDirty(item)"
+                        />
+                      </div>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--owner">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.admin_id || "SYSTEM" }}</span>
@@ -10012,7 +10047,6 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--id">دسته</th>
                       <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                       <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
-                      <th class="constructionDialog__col constructionDialog__col--outlineColor">خط بیرونی طرح</th>
                       <th class="constructionDialog__col constructionDialog__col--title">پارامترهای مقداردهی‌شده</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
@@ -10023,12 +10057,6 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.cat_id }}</td>
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.sub_cat_id }}</td>
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.sub_cat_title }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--outlineColor">
-                        <div class="constructionDialog__colorField">
-                          <span class="constructionDialog__colorSwatch" :style="{ backgroundColor: normalizeHexColor(row.design_outline_color) }"></span>
-                          <span class="constructionDialog__colorValue">{{ normalizeHexColor(row.design_outline_color) }}</span>
-                        </div>
-                      </td>
                       <td class="constructionDialog__col constructionDialog__col--title">
                         {{ Object.values(row.param_defaults || {}).filter((value) => String(value || "").trim()).length }}
                       </td>
@@ -10062,7 +10090,6 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">دسته</th>
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان ساب‌کت</th>
-                    <th class="constructionDialog__col constructionDialog__col--outlineColor">خط بیرونی طرح</th>
                     <th class="constructionDialog__col constructionDialog__col--defaults">پیش‌فرض‌ها</th>
                     <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
                     <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
@@ -10090,25 +10117,6 @@ onBeforeUnmount(() => {
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--title">
                       <input v-model="item.sub_cat_title" class="constructionDialog__input" type="text" @input="markConstructionSubCategoryDirty(item)" />
-                    </td>
-                    <td class="constructionDialog__col constructionDialog__col--outlineColor">
-                      <div class="constructionDialog__colorEditor">
-                        <input
-                          v-model="item.design_outline_color"
-                          class="constructionDialog__colorInput"
-                          type="color"
-                          @input="item.design_outline_color = normalizeHexColor(item.design_outline_color); markConstructionSubCategoryDirty(item)"
-                        />
-                        <input
-                          v-model="item.design_outline_color"
-                          class="constructionDialog__input constructionDialog__input--mono constructionDialog__colorHex"
-                          type="text"
-                          dir="ltr"
-                          maxlength="7"
-                          placeholder="#7A4A2B"
-                          @change="item.design_outline_color = normalizeHexColor(item.design_outline_color); markConstructionSubCategoryDirty(item)"
-                        />
-                      </div>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--defaults">
                       <div class="constructionDialog__defaultsActions">
@@ -10235,6 +10243,7 @@ onBeforeUnmount(() => {
                         <GlbViewerWidget
                           src="/models/1_z1.glb"
                           :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                          :placeholder-outline-color="normalizeHexColor(item.design_outline_color || item.preview?.design_outline_color)"
                           :placeholder-boxes="item.preview.viewer_boxes"
                           :display-unit="currentEditorDisplayUnit"
                           :show-attrs-panel="false"
@@ -10725,6 +10734,7 @@ onBeforeUnmount(() => {
                 <GlbViewerWidget
                   src="/models/1_z1.glb"
                   :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                  :placeholder-outline-color="normalizeHexColor(subCategoryDesignEditorPreview?.design_outline_color)"
                   :placeholder-boxes="subCategoryDesignEditorPreview.viewer_boxes"
                   :display-unit="currentEditorDisplayUnit"
                   :show-attrs-panel="false"
@@ -11524,6 +11534,7 @@ onBeforeUnmount(() => {
                       <GlbViewerWidget
                         src="/models/1_z1.glb"
                         :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                        :placeholder-outline-color="normalizeHexColor(item.design_outline_color)"
                         :placeholder-boxes="item.viewer_boxes"
                         :display-unit="currentEditorDisplayUnit"
                         :show-attrs-panel="false"

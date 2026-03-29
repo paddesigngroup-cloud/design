@@ -96,6 +96,7 @@ def _category_headers() -> list[str]:
         "temp_id",
         "cat_id",
         "cat_title",
+        "design_outline_color",
         "admin_mode",
     ]
 
@@ -120,7 +121,6 @@ async def _sub_category_headers(session: AsyncSession, admin_id: uuid.UUID) -> l
         "cat_id",
         "sub_cat_id",
         "sub_cat_title",
-        "design_outline_color",
         *param_headers,
         "admin_mode",
     ]
@@ -271,6 +271,7 @@ async def _category_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[lis
             row.temp_id,
             row.cat_id,
             row.cat_title,
+            row.design_outline_color or "#7A4A2B",
             "system" if row.admin_id is None else "admin",
         ]
         for row in rows
@@ -317,7 +318,6 @@ async def _sub_category_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
             row.cat_id,
             row.sub_cat_id,
             row.sub_cat_title,
-            row.design_outline_color or "#7A4A2B",
             *[
                 value
                 for param in params
