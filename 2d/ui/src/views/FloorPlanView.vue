@@ -10,10 +10,46 @@ import {
   activeModelDeleteHandlerRef,
   fitAllHandlerRef,
 } from "../editor/editor_store.js";
+import {
+  editorSettingsPayloadToState,
+  editorSettingsStateToPayload,
+  fetchPersistedEditorSettings,
+  savePersistedEditorSettings,
+} from "../editor/editor_settings.js";
+import { CURRENT_ADMIN_ID, CURRENT_BOOTSTRAP_USER_ID } from "../features/part_kinds_catalog.js";
 import { createWallApp } from "../../../main.js";
 
 const hostEl = ref(null);
 const canvasEl = ref(null);
+let settingsSaveTimeout = 0;
+let lastSettingsSignature = "";
+
+function editorHasRenderableContent() {
+  const snapshot = editorRef.value?.getState?.();
+  if (!snapshot) return false;
+  const counts = snapshot.counts || {};
+  const model2d = snapshot.model2d || {};
+  return (
+    Number(counts.solidWalls || 0) > 0 ||
+    Number(counts.hiddenWalls || 0) > 0 ||
+    Number(counts.dimensions || 0) > 0 ||
+    Number(model2d.lines || 0) > 0
+  );
+}
+
+function queueSettingsPersist(state) {
+  const payload = editorSettingsStateToPayload(state || {});
+  const signature = JSON.stringify(payload);
+  if (signature === lastSettingsSignature) return;
+  if (settingsSaveTimeout) window.clearTimeout(settingsSaveTimeout);
+  settingsSaveTimeout = window.setTimeout(async () => {
+    settingsSaveTimeout = 0;
+    try {
+      await savePersistedEditorSettings(CURRENT_ADMIN_ID, CURRENT_BOOTSTRAP_USER_ID, payload);
+      lastSettingsSignature = signature;
+    } catch (_) {}
+  }, 500);
+}
 
 onMounted(() => {
   if (!hostEl.value || !canvasEl.value) return;
@@ -54,10 +90,28 @@ onMounted(() => {
         const handler = fitAllHandlerRef.value;
         if (typeof handler === "function") handler();
       },
+      onSettingsChange: (state) => {
+        queueSettingsPersist(state);
+      },
     });
-    // Vue shell starts in "no drawing" mode.
-    editorRef.value.setActiveTool?.("select");
-    editorRef.value.setUiCursorMode?.(null);
+    editorRef.value.setInputEnabled?.(false);
+    fetchPersistedEditorSettings(CURRENT_ADMIN_ID, CURRENT_BOOTSTRAP_USER_ID)
+      .then((payload) => {
+        const patch = editorSettingsPayloadToState(payload);
+        lastSettingsSignature = JSON.stringify(editorSettingsStateToPayload(patch));
+        if (!editorHasRenderableContent()) {
+          editorRef.value?.setState?.(patch);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        // Vue shell starts in "no drawing" mode.
+        editorRef.value?.setActiveTool?.("select");
+        editorRef.value?.setUiCursorMode?.(null);
+        editorRef.value?.setInputEnabled?.(true);
+      });
+  } else {
+    editorRef.value.setInputEnabled?.(true);
   }
   editorRef.value.attach();
 });
@@ -71,6 +125,8 @@ onDeactivated(() => {
 });
 
 onBeforeUnmount(() => {
+  if (settingsSaveTimeout) window.clearTimeout(settingsSaveTimeout);
+  settingsSaveTimeout = 0;
   editorRef.value?.destroy?.();
   editorRef.value = null;
 });

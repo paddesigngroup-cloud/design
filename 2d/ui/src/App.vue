@@ -170,7 +170,7 @@ const designMenuTools = [
   { id: "wall", icon: "/icons/drawing_wall.png", title: "دیوار", mapsToTool: "wall" },
   { id: "hidden", icon: "/icons/drawing_hidden_wall.png", title: "خط راهنما", mapsToTool: "hidden" },
   { id: "dimension", icon: "/icons/drawing_dimension.png", title: "اندازه گذاری", mapsToTool: "dimension" },
-  { id: "beam", icon: "/icons/beam.png", title: "تیر", mapsToTool: "wall" },
+  { id: "beam", icon: "/icons/beam.png", title: "تیر", mapsToTool: "beam" },
   { id: "column", icon: "/icons/column.png", title: "ستون", mapsToTool: null },
 ];
 
@@ -6014,6 +6014,7 @@ function syncQuickStateFromEditor() {
     const defaultBeamThicknessCm = (Number.isFinite(Number(s?.beamThicknessMm)) ? Number(s.beamThicknessMm) : 400) / 10;
     const defaultBeamHeightCm = (Number.isFinite(Number(s?.beamHeightMm)) ? Number(s.beamHeightMm) : 200) / 10;
     const defaultBeamFloorOffsetCm = (Number.isFinite(Number(s?.beamFloorOffsetMm)) ? Number(s.beamFloorOffsetMm) : 2600) / 10;
+    const defaultHiddenThicknessCm = (Number.isFinite(Number(s?.hiddenWallThicknessMm)) ? Number(s.hiddenWallThicknessMm) : 1) / 10;
     const defaultWallColor = (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1";
     const defaultBeamColor = (typeof s?.beam3dColor === "string" && s.beam3dColor) ? s.beam3dColor : "#C7CCD1";
     const defaultColumnColor = (typeof s?.column3dColor === "string" && s.column3dColor) ? s.column3dColor : "#C7CCD1";
@@ -6021,7 +6022,10 @@ function syncQuickStateFromEditor() {
     const defaultColumnDepthCm = (Number.isFinite(Number(s?.columnDepthMm)) ? Number(s.columnDepthMm) : 400) / 10;
     const defaultColumnHeightCm = (Number.isFinite(Number(s?.columnHeightMm)) ? Number(s.columnHeightMm) : 2800) / 10;
 
-    const selectedObj = (metricsEntityType === "hidden") ? selectedHidden : selectedWall;
+    const selectedObj =
+      (metricsEntityType === "hidden") ? selectedHidden
+        : (metricsEntityType === "beam") ? selectedBeam
+          : selectedWall;
     const selectedSolidType = getSolidEntityType(selectedObj);
     const fallbackThicknessCm =
       selectedSolidType === "beam" ? defaultBeamThicknessCm :
@@ -6046,11 +6050,21 @@ function syncQuickStateFromEditor() {
           color: (typeof selectedObj.color3d === "string" && selectedObj.color3d) ? selectedObj.color3d : fallbackColor,
         }
       : {
-          thicknessCm: designMenuTool.value === "column" ? defaultColumnDepthCm : defaultThicknessCm,
-          heightCm: designMenuTool.value === "column" ? defaultColumnHeightCm : defaultHeightCm,
+          thicknessCm:
+            designMenuTool.value === "column" ? defaultColumnDepthCm
+              : designMenuTool.value === "beam" ? defaultBeamThicknessCm
+                : designMenuTool.value === "hidden" ? defaultHiddenThicknessCm
+                  : defaultThicknessCm,
+          heightCm:
+            designMenuTool.value === "column" ? defaultColumnHeightCm
+              : designMenuTool.value === "beam" ? defaultBeamHeightCm
+                : defaultHeightCm,
           lengthCm: designMenuTool.value === "column" ? defaultColumnWidthCm : null,
-          floorOffsetCm: 0,
-          color: designMenuTool.value === "column" ? defaultColumnColor : defaultWallColor,
+          floorOffsetCm: designMenuTool.value === "beam" ? defaultBeamFloorOffsetCm : 0,
+          color:
+            designMenuTool.value === "column" ? defaultColumnColor
+              : designMenuTool.value === "beam" ? defaultBeamColor
+                : defaultWallColor,
         };
   }
 
@@ -6067,7 +6081,11 @@ function syncQuickStateFromEditor() {
       entityType: metricsEntityType,
       thicknessCm: (Number(selectedEntity.thickness) || 120) / 10,
       heightCm: (Number(selectedEntity.heightMm)
-        || (metricsEntityType === "column" ? Number(s?.columnHeightMm) : Number(s?.wallHeightMm))
+        || (
+          metricsEntityType === "beam" ? Number(s?.beamHeightMm)
+            : metricsEntityType === "column" ? Number(s?.columnHeightMm)
+              : Number(s?.wallHeightMm)
+        )
         || 3000) / 10,
       floorOffsetCm: (Number(selectedEntity.floorOffsetMm) || 0) / 10,
       lengthCm: lenMm / 10,

@@ -1,93 +1,43 @@
 <script setup>
-import { computed, reactive, ref, watchEffect } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { editorRef } from "../editor/editor_store.js";
+import {
+  EDITOR_SETTINGS_DEFAULTS,
+  editorSettingsStateToPayload,
+  editorSettingsPayloadToState,
+  fetchPersistedEditorSettings,
+  savePersistedEditorSettings,
+  settingsViewStateFromEditorState,
+} from "../editor/editor_settings.js";
+import { CURRENT_ADMIN_ID, CURRENT_BOOTSTRAP_USER_ID } from "../features/part_kinds_catalog.js";
 
 const hasEditor = computed(() => !!editorRef.value);
 const router = useRouter();
-const baseState = ref(null);
-const isHydrating = ref(true);
-
-const model = reactive({
-  unit: "cm",
-  wallThicknessMm: 120,
-  wallHeightMm: 3000,
-  hiddenWallThicknessMm: 1,
-  beamThicknessMm: 400,
-  beamHeightMm: 200,
-  beamOffsetFromFloorMm: 2600,
-  columnWidthMm: 500,
-  columnDepthMm: 400,
-  columnHeightMm: 2800,
-
-  dimOffsetMm: 150,
-  dimFontPx: 15,
-  dimLineWidthPx: 2,
-
-  meterDivisions: 10,
-  majorEvery: 10,
-
-  fontFamily: "Tahoma",
-  wallNameFontPx: 15,
-  angleFontPx: 12,
-
-  snapOn: true,
-  showDimensions: true,
-  stepDrawEnabled: true,
-  stepLineCm: 5,
-  stepAngleDeg: 10,
-  snapCornerEnabled: true,
-  snapMidEnabled: true,
-  snapCenterEnabled: true,
-  snapEdgeEnabled: true,
-  wallMagnetEnabled: true,
-
-  // Colors
-  bgColor: "#FFFFFF",
-  minorColor: "#E6E6E6",
-  majorColor: "#A3A3A3",
-  axisXColor: "#9CC9B4",
-  axisYColor: "#BCC8EB",
-  axisZColor: "#0000FF",
-
-  wallFillColor: "#A6A6A6",
-  wallEdgeColor: "#000000",
-  wallTextColor: "#FFFFFF",
-  wall3dColor: "#C7CCD1",
-  beamFillColor: "#A6A6A6",
-  beamEdgeColor: "#000000",
-  beamTextColor: "#FFFFFF",
-  beam3dColor: "#C7CCD1",
-  columnFillColor: "#A6A6A6",
-  columnEdgeColor: "#000000",
-  columnTextColor: "#FFFFFF",
-  column3dColor: "#C7CCD1",
-
-  dimColor: "#E8A559",
-  hiddenWallColor: "#D8D4D4",
-
-  offsetWallEnabled: true,
-  offsetWallDistanceMm: 600,
-});
+const defaultViewState = settingsViewStateFromEditorState(EDITOR_SETTINGS_DEFAULTS);
+const baseState = ref({ ...defaultViewState });
+const baseEditorState = ref({ ...EDITOR_SETTINGS_DEFAULTS });
+const model = reactive({ ...defaultViewState });
 
 function positiveOrFallback(value, fallback, min = 0.0001) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > min ? parsed : fallback;
 }
 
-watchEffect(() => {
-  // Hydrate once from editor state; do not overwrite local unsaved edits.
-  const st = editorRef.value?.getState?.()?.state;
-  if (!st) return;
-  if (!isHydrating.value) return;
+function hydrateModelFromFlatState(flatState) {
+  const nextModel = settingsViewStateFromEditorState(flatState);
+  for (const k of Object.keys(model)) model[k] = nextModel[k];
+  baseState.value = { ...nextModel };
+  baseEditorState.value = { ...flatState };
+}
 
-  const nextBase = {};
-  for (const k of Object.keys(model)) {
-    if (k in st) model[k] = st[k];
-    nextBase[k] = (k in st) ? st[k] : model[k];
+onMounted(async () => {
+  try {
+    const payload = await fetchPersistedEditorSettings(CURRENT_ADMIN_ID, CURRENT_BOOTSTRAP_USER_ID);
+    hydrateModelFromFlatState(editorSettingsPayloadToState(payload));
+  } catch (_) {
+    hydrateModelFromFlatState(EDITOR_SETTINGS_DEFAULTS);
   }
-  baseState.value = nextBase;
-  isHydrating.value = false;
 });
 
 function applyPatch(patch) {
@@ -107,10 +57,6 @@ async function handleSaveSettings() {
   const dialogs = getDialogApi();
   const ok = await dialogs.confirm("آیا از تغییرات اطمینان دارید؟", { title: "ذخیره تنظیمات" });
   if (!ok) return;
-  if (!editorRef.value) {
-    await dialogs.alert("ابتدا وارد صفحه پلان شوید تا موتور 2D فعال شود.", { title: "تنظیمات" });
-    return;
-  }
 
   const base = baseState.value || {};
   const patch = {};
@@ -150,14 +96,28 @@ async function handleSaveSettings() {
     patch.columnHeightMm = positiveOrFallback(patch.columnHeightMm, base.columnHeightMm ?? 2800);
     model.columnHeightMm = patch.columnHeightMm;
   }
-  if ("beamOffsetFromFloorMm" in patch) {
-    patch.beamOffsetFromFloorMm = positiveOrFallback(patch.beamOffsetFromFloorMm, base.beamOffsetFromFloorMm ?? 2600, 0);
-    model.beamOffsetFromFloorMm = patch.beamOffsetFromFloorMm;
+  if ("beamFloorOffsetMm" in patch) {
+    patch.beamFloorOffsetMm = positiveOrFallback(patch.beamFloorOffsetMm, base.beamFloorOffsetMm ?? 2600, 0);
+    model.beamFloorOffsetMm = patch.beamFloorOffsetMm;
+  }
+
+  const nextEditorState = { ...baseEditorState.value, ...patch };
+
+  try {
+    await savePersistedEditorSettings(
+      CURRENT_ADMIN_ID,
+      CURRENT_BOOTSTRAP_USER_ID,
+      editorSettingsStateToPayload(nextEditorState)
+    );
+  } catch (_) {
+    await dialogs.alert("ذخیره تنظیمات در دیتابیس انجام نشد.", { title: "خطا" });
+    return;
   }
 
   if (Object.keys(patch).length > 0) {
     editorRef.value?.setState?.(patch);
     baseState.value = { ...base, ...patch };
+    baseEditorState.value = nextEditorState;
   }
   router.push("/");
 }
@@ -250,8 +210,8 @@ async function handleSaveSettings() {
           type="number"
           min="0"
           step="1"
-          :value="(model.beamOffsetFromFloorMm || 2600) / 10"
-          @change="applyPatch({ beamOffsetFromFloorMm: Math.max(0, (+$event.target.value || 260) * 10) })"
+          :value="(model.beamFloorOffsetMm || 2600) / 10"
+          @change="applyPatch({ beamFloorOffsetMm: Math.max(0, (+$event.target.value || 260) * 10) })"
         />
       </div>
       <div class="row">

@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from designkp_backend.api.routers.admin_storage import router as admin_storage_router
 from designkp_backend.api.routers.base_formulas import router as base_formulas_router
 from designkp_backend.api.routers.categories import router as categories_router
+from designkp_backend.api.routers.editor_settings import router as editor_settings_router
 from designkp_backend.api.routers.internal_part_groups import router as internal_part_groups_router
 from designkp_backend.api.routers.orders import router as orders_router
 from designkp_backend.api.routers.order_designs import router as order_designs_router
@@ -41,6 +42,7 @@ def health() -> dict[str, str]:
 
 
 app.include_router(admin_storage_router, prefix="/api")
+app.include_router(editor_settings_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
 app.include_router(order_designs_router, prefix="/api")
 app.include_router(part_kinds_router, prefix="/api")

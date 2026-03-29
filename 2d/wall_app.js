@@ -78,6 +78,7 @@ export function createWallApp({
   onPassiveModelSelectionChange,
   onActiveModelDelete,
   onFitViewToAll,
+  onSettingsChange,
 } = {}) {
   installGlobalErrorHooksOnce();
 
@@ -277,6 +278,9 @@ function saveSettings() {
     const obj = {};
     for (const k of Object.keys(state)) obj[k] = state[k];
     localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+  } catch (_) {}
+  try {
+    if (typeof onSettingsChange === "function") onSettingsChange({ ...state });
   } catch (_) {}
 }
 loadSettings();
@@ -1030,6 +1034,47 @@ function setSingleOrMultiSelection(kind, ids) {
     selectedPassiveModelIds = next.length > 1 ? next : [];
     emitPassiveModelSelectionChange();
   }
+}
+
+function getBeamDefaultThicknessMm() {
+  return Math.max(1, Number(state.beamThicknessMm) || 400);
+}
+
+function getBeamDefaultHeightMm() {
+  return Math.max(1, Number(state.beamHeightMm) || 200);
+}
+
+function getBeamDefaultFloorOffsetMm() {
+  const mm = Number(state.beamFloorOffsetMm);
+  return Number.isFinite(mm) && mm >= 0 ? Math.max(0, mm) : 2600;
+}
+
+function syncWallToolDefaults() {
+  tool.defaultThickness = Math.max(1, Number(state.wallThicknessMm) || 120);
+  tool.defaultHeightMm = Math.max(1, Number(state.wallHeightMm) || 3000);
+  tool.defaultFloorOffsetMm = 0;
+  tool.defaultColor = (typeof state.wall3dColor === "string" && state.wall3dColor)
+    ? state.wall3dColor
+    : "#C7CCD1";
+}
+
+function syncBeamToolDefaults() {
+  beamTool.defaultThickness = getBeamDefaultThicknessMm();
+  beamTool.defaultHeightMm = getBeamDefaultHeightMm();
+  beamTool.defaultFloorOffsetMm = getBeamDefaultFloorOffsetMm();
+  beamTool.defaultColor = (typeof state.beam3dColor === "string" && state.beam3dColor)
+    ? state.beam3dColor
+    : "#C7CCD1";
+}
+
+function applyBeamDefaultsToEdge(edge) {
+  if (!edge) return;
+  edge.thickness = Math.max(1, Number(edge.thickness) || getBeamDefaultThicknessMm());
+  edge.fillColor = state.beamFillColor || edge.fillColor || null;
+  edge.color3d = state.beam3dColor || edge.color3d || "#C7CCD1";
+  edge.heightMm = getBeamDefaultHeightMm();
+  edge.floorOffsetMm = getBeamDefaultFloorOffsetMm();
+  edge.elementType = "beam";
 }
 
 function getPassiveModelDisplayName(model) {
@@ -6696,8 +6741,9 @@ tool.snapEnabled = state.orthoEnabled !== false;
 const beamTool = new BeamTool({
   graph,
   view,
-  defaultThickness: state.beamThicknessMm || 120,
-  defaultHeightMm: state.beamHeightMm || 3000,
+  defaultThickness: Math.max(1, Number(state.beamThicknessMm) || 400),
+  defaultHeightMm: Math.max(1, Number(state.beamHeightMm) || 200),
+  defaultFloorOffsetMm: Number.isFinite(Number(state.beamFloorOffsetMm)) ? Math.max(0, Number(state.beamFloorOffsetMm)) : 2600,
   defaultColor: state.beam3dColor || "#C7CCD1",
   snapTolMm: 30,
   startIndex: 0,
@@ -7990,6 +8036,7 @@ function onMouseDown(e) {
       if (effectiveMode === "beam") {
         const beforeBeamIds = new Set(graph.walls.keys());
         undo.runAction(() => {
+          syncBeamToolDefaults();
           beamTool.onPointerDown(
             { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
             {
@@ -8008,11 +8055,7 @@ function onMouseDown(e) {
             if (beforeBeamIds.has(id)) continue;
             const w = graph.getWall(id);
             if (!w) continue;
-            w.fillColor = state.beamFillColor || w.fillColor || null;
-            w.color3d = state.beam3dColor || w.color3d || null;
-            w.heightMm = Math.max(1, Number(state.beamHeightMm) || 3000);
-            w.floorOffsetMm = Number.isFinite(Number(state.beamFloorOffsetMm)) ? Number(state.beamFloorOffsetMm) : 0;
-            w.elementType = "beam";
+            applyBeamDefaultsToEdge(w);
           }
         });
         selectLatestDrawnWall({ graphType: "wall", beforeIds: beforeBeamIds });
@@ -8071,17 +8114,20 @@ function onMouseDown(e) {
       const nodeId = (t.type === "wall_chain_a") ? w.a : w.b;
       const n = graph.getNode(nodeId);
       if (!n) return;
+      const wantsBeamChain =
+        isBeamEdge(w) ||
+        state.activeTool === "beam" ||
+        uiCursorMode === "beam" ||
+        forcedChainMode === "beam";
       selectedHiddenId = null;
       selectedDimId = null;
-      selectedWallId = w.id;
-      if (isBeamEdge(w)) {
+      selectedWallId = wantsBeamChain && !isBeamEdge(w) ? null : w.id;
+      if (wantsBeamChain) {
         setUiCursorMode("beam");
         setActiveTool("beam");
         setForcedChainMode("beam");
         tool.stopChaining();
-        beamTool.defaultThickness = Math.max(1, Number(state.beamThicknessMm) || 400);
-        beamTool.defaultHeightMm = Math.max(1, Number(state.beamHeightMm) || 200);
-        beamTool.defaultFloorOffsetMm = Math.max(0, Number(state.beamFloorOffsetMm) || 2600);
+        syncBeamToolDefaults();
         beamTool.syncBeamIndexFromGraph?.();
         beamTool.pendingStartNodeId = nodeId;
         beamTool.pendingStartPos = { x: n.x, y: n.y };
@@ -8092,9 +8138,7 @@ function onMouseDown(e) {
         setForcedChainMode("wall");
         beamTool.stopChaining();
         tool.namePrefix = "Wall";
-        tool.defaultThickness = Math.max(1, Number(state.wallThicknessMm) || 120);
-        tool.defaultHeightMm = Math.max(1, Number(state.wallHeightMm) || 3000);
-        tool.defaultFloorOffsetMm = 0;
+        syncWallToolDefaults();
         tool.syncWallIndexFromGraph?.();
         tool.pendingStartNodeId = nodeId;
         tool.pendingStartPos = { x: n.x, y: n.y };
@@ -8287,6 +8331,7 @@ function onMouseDown(e) {
   if (effectiveMode === "beam" && beamTool.getStatus()?.isDrawing) {
     const beforeBeamIds = new Set(graph.walls.keys());
     undo.runAction(() => {
+      syncBeamToolDefaults();
       beamTool.onPointerDown(
         { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
         {
@@ -8305,11 +8350,7 @@ function onMouseDown(e) {
         if (beforeBeamIds.has(id)) continue;
         const w = graph.getWall(id);
         if (!w) continue;
-        w.fillColor = state.beamFillColor || w.fillColor || null;
-        w.color3d = state.beam3dColor || w.color3d || null;
-        w.heightMm = Math.max(1, Number(state.beamHeightMm) || 3000);
-        w.floorOffsetMm = Number.isFinite(Number(state.beamFloorOffsetMm)) ? Number(state.beamFloorOffsetMm) : 0;
-        w.elementType = "beam";
+        applyBeamDefaultsToEdge(w);
       }
     });
     setForcedChainMode(beamTool.getStatus()?.isDrawing ? "beam" : null);
@@ -8530,6 +8571,7 @@ function onMouseDown(e) {
   } else if (effectiveMode === "beam") {
     const beforeBeamIds = new Set(graph.walls.keys());
     undo.runAction(() => {
+      syncBeamToolDefaults();
       beamTool.onPointerDown(
         { button: 0, offsetX: e.offsetX, offsetY: e.offsetY, shiftKey: e.shiftKey },
         {
@@ -8548,11 +8590,7 @@ function onMouseDown(e) {
         if (beforeBeamIds.has(id)) continue;
         const w = graph.getWall(id);
         if (!w) continue;
-        w.fillColor = state.beamFillColor || w.fillColor || null;
-        w.color3d = state.beam3dColor || w.color3d || null;
-        w.heightMm = Math.max(1, Number(state.beamHeightMm) || 3000);
-        w.floorOffsetMm = Number.isFinite(Number(state.beamFloorOffsetMm)) ? Number(state.beamFloorOffsetMm) : 0;
-        w.elementType = "beam";
+        applyBeamDefaultsToEdge(w);
       }
       enforceLockedInsideLengths();
     });
@@ -8564,13 +8602,14 @@ function onMouseDown(e) {
       tool.syncWallIndexFromGraph?.();
     }
     if (nextPrefix === "Beam") {
-      tool.defaultThickness = Math.max(1, Number(state.beamThicknessMm) || 400);
-      tool.defaultHeightMm = Math.max(1, Number(state.beamHeightMm) || 200);
-      tool.defaultFloorOffsetMm = Math.max(0, Number(state.beamFloorOffsetMm) || 2600);
+      tool.defaultThickness = getBeamDefaultThicknessMm();
+      tool.defaultHeightMm = getBeamDefaultHeightMm();
+      tool.defaultFloorOffsetMm = getBeamDefaultFloorOffsetMm();
+      tool.defaultColor = (typeof state.beam3dColor === "string" && state.beam3dColor)
+        ? state.beam3dColor
+        : "#C7CCD1";
     } else {
-      tool.defaultThickness = Math.max(1, Number(state.wallThicknessMm) || 120);
-      tool.defaultHeightMm = Math.max(1, Number(state.wallHeightMm) || 3000);
-      tool.defaultFloorOffsetMm = 0;
+      syncWallToolDefaults();
     }
     const beforeWallIds = new Set(graph.walls.keys());
     undo.runAction(() => {
@@ -8589,6 +8628,14 @@ function onMouseDown(e) {
           stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
         }
       );
+      if (nextPrefix === "Beam") {
+        for (const id of graph.walls.keys()) {
+          if (beforeWallIds.has(id)) continue;
+          const w = graph.getWall(id);
+          if (!w) continue;
+          applyBeamDefaultsToEdge(w);
+        }
+      }
       if (graph.walls.size !== beforeWalls) enforceLockedInsideLengths();
     });
     selectLatestDrawnWall({ graphType: "wall", beforeIds: beforeWallIds });

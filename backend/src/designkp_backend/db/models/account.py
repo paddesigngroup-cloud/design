@@ -42,6 +42,11 @@ class Admin(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
         back_populates="admin",
         foreign_keys="OrderDrawing.admin_id",
     )
+    editor_settings: Mapped[list["EditorSetting"]] = relationship(
+        back_populates="admin",
+        foreign_keys="EditorSetting.admin_id",
+        cascade="all, delete-orphan",
+    )
     order_designs: Mapped[list["OrderDesign"]] = relationship(
         back_populates="admin",
         foreign_keys="OrderDesign.admin_id",
@@ -96,6 +101,11 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, B
     order_drawings: Mapped[list["OrderDrawing"]] = relationship(
         back_populates="user",
         foreign_keys="OrderDrawing.user_id",
+    )
+    editor_settings: Mapped[list["EditorSetting"]] = relationship(
+        back_populates="user",
+        foreign_keys="EditorSetting.user_id",
+        cascade="all, delete-orphan",
     )
     order_designs: Mapped[list["OrderDesign"]] = relationship(
         back_populates="user",
@@ -184,6 +194,40 @@ class OrderDrawing(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Version
     order: Mapped[Order] = relationship(back_populates="drawing")
     admin: Mapped[Admin] = relationship(back_populates="order_drawings", foreign_keys=[admin_id])
     user: Mapped[User] = relationship(back_populates="order_drawings", foreign_keys=[user_id])
+
+
+class EditorSetting(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "editor_settings"
+    __table_args__ = (
+        UniqueConstraint("admin_id", "user_id", name="uq_editor_settings_admin_user"),
+    )
+
+    admin_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    general_settings: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    grid_settings: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    snap_settings: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    drafting_settings: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    wall_defaults: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    beam_defaults: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    column_defaults: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    hidden_defaults: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    dimension_defaults: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    angle_defaults: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    offset_wall_settings: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+
+    admin: Mapped[Admin] = relationship(back_populates="editor_settings", foreign_keys=[admin_id])
+    user: Mapped[User] = relationship(back_populates="editor_settings", foreign_keys=[user_id])
 
 
 class OrderDesign(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
