@@ -128,10 +128,6 @@ const menuIcons = {
   sheet: "/icons/sheet.png",
   profile: "/icons/profile.png",
 };
-const PARAM_INTERIOR_VALUE_MODE_OPTIONS = [
-  { value: "formula", label: "محاسبه‌ای" },
-  { value: "auto", label: "اتوماتیک" },
-];
 const openMenuTitle = computed(() => (openMenuPanel.value ? menuTitles[openMenuPanel.value] || "" : ""));
 const openMenuIcon = computed(() => (openMenuPanel.value ? menuIcons[openMenuPanel.value] || "" : ""));
 const isMenuPanelOpen = computed(() => !!openMenuPanel.value);
@@ -297,6 +293,7 @@ const subCategoryDesignPreviewError = ref("");
 const subCategoryDesignPreviewRequestSeq = ref(0);
 const internalPartGroupEditorOpen = ref(false);
 const internalPartGroupEditorDraft = ref(null);
+const internalPartGroupParamGroupsOpen = ref(false);
 const baseFormulaBuilderOpen = ref(false);
 const baseFormulaBuilderMode = ref("create");
 const baseFormulaBuilderEntity = ref("base_formulas");
@@ -648,6 +645,18 @@ const constructionInteriorPartFormulaOptions = computed(() =>
         partKindTitle: String(partKind?.org_part_kind_title || partKind?.title || "").trim(),
       };
     })
+);
+const constructionInternalParamGroupOptions = computed(() =>
+  constructionParamGroups.value
+    .map((item) => ({
+      id: Number(item.param_group_id),
+      title: String(item.org_param_group_title || item.title || item.param_group_code || "").trim(),
+      code: String(item.param_group_code || item.code || "").trim(),
+      iconPath: normalizeIconFileName(item.param_group_icon_path) || "",
+      uiOrder: Number(item.ui_order) || Number(item.param_group_id) || 0,
+    }))
+    .filter((item) => item.id > 0 && item.title)
+    .sort((a, b) => a.uiOrder - b.uiOrder || a.id - b.id)
 );
 const activeInteriorLibrarySubCategory = computed(() => {
   const subCategoryId = String(subCategoryDesignEditorDraft.value?.sub_category_id || "").trim();
@@ -1113,6 +1122,13 @@ function normalizeInternalPartGroupPayload(item) {
         enabled: part.enabled !== false,
         ui_order: Number.isFinite(Number(part.ui_order)) ? Number(part.ui_order) : index,
       })),
+    param_groups: (Array.isArray(item.param_groups) ? item.param_groups : [])
+      .filter((group) => Number(group?.param_group_id) > 0)
+      .map((group, index) => ({
+        param_group_id: Number(group.param_group_id),
+        enabled: group.enabled !== false,
+        ui_order: Number.isFinite(Number(group.ui_order)) ? Number(group.ui_order) : index,
+      })),
   };
 }
 
@@ -1170,6 +1186,12 @@ function getParamGroupIconTooltip(item) {
   const fileName = normalizeIconFileName(item?.param_group_icon_path);
   if (!fileName) return "آیکون خالی است. برای آپلود کلیک کنید.";
   return `آیکون بارگذاری شده: ${fileName}`;
+}
+
+function getParamGroupOptionIconUrl(fileName) {
+  const normalized = normalizeIconFileName(fileName);
+  if (!normalized) return "";
+  return `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/icons/${encodeURIComponent(normalized)}`;
 }
 
 function isUploadingParamGroupIcon(item) {
@@ -1975,6 +1997,7 @@ function buildNewInternalPartGroupDraft() {
     sort_order: nextId,
     is_system: true,
     parts: [],
+    param_groups: [],
   };
 }
 
@@ -1989,6 +2012,7 @@ function closeSubCategoryDesignEditor() {
 function closeInternalPartGroupEditor() {
   internalPartGroupEditorOpen.value = false;
   internalPartGroupEditorDraft.value = null;
+  internalPartGroupParamGroupsOpen.value = false;
 }
 
 
@@ -2296,6 +2320,15 @@ async function loadConstructionInternalPartGroups() {
     editableInternalPartGroups.value = (await res.json()).map((item) =>
       withConstructionDraftState({
         ...item,
+        param_groups: Array.isArray(item.param_groups) ? item.param_groups.map((group) => ({
+          ...group,
+          param_group_id: Number(group.param_group_id),
+          param_group_code: String(group.param_group_code || "").trim(),
+          param_group_title: String(group.param_group_title || "").trim(),
+          param_group_icon_path: normalizeIconFileName(group.param_group_icon_path) || "",
+          enabled: group.enabled !== false,
+          ui_order: Number(group.ui_order) || 0,
+        })) : [],
       })
     );
   } catch (_) {
@@ -3201,8 +3234,17 @@ function openInternalPartGroupEditor(item = null) {
           enabled: part.enabled !== false,
           ui_order: Number(part.ui_order) || 0,
         })) : [],
+        param_groups: Array.isArray(item.param_groups) ? item.param_groups.map((group) => ({
+          param_group_id: Number(group.param_group_id),
+          param_group_code: String(group.param_group_code || "").trim(),
+          param_group_title: String(group.param_group_title || "").trim(),
+          param_group_icon_path: normalizeIconFileName(group.param_group_icon_path) || "",
+          enabled: group.enabled !== false,
+          ui_order: Number(group.ui_order) || 0,
+        })) : [],
       }
     : buildNewInternalPartGroupDraft();
+  internalPartGroupParamGroupsOpen.value = false;
   internalPartGroupEditorOpen.value = true;
 }
 
@@ -3528,15 +3570,11 @@ function normalizeParamPayload(item) {
     param_title_en: String(item.param_title_en || "").trim(),
     param_title_fa: String(item.param_title_fa || "").trim(),
     param_group_id: Number(item.param_group_id),
-    interior_value_mode: String(item.interior_value_mode || "").trim().toLowerCase() === "auto" ? "auto" : "formula",
+    interior_value_mode: "formula",
     ui_order: Number.isFinite(Number(item.ui_order)) ? Number(item.ui_order) : 0,
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.param_id),
     is_system: !!item.is_system,
   };
-}
-
-function getParamInteriorValueModeLabel(value) {
-  return String(value || "").trim().toLowerCase() === "auto" ? "اتوماتیک" : "محاسبه‌ای";
 }
 
 function normalizeBaseFormulaPayload(item) {
@@ -4092,7 +4130,6 @@ function validateConstructionParams() {
     const paramCode = String(item.param_code || "").trim();
     const titleEn = String(item.param_title_en || "").trim();
     const titleFa = String(item.param_title_fa || "").trim();
-    const interiorValueMode = String(item.interior_value_mode || "").trim().toLowerCase();
     if (!Number.isInteger(paramId) || paramId < 1) {
       showAlert("برای همه پارامترها شناسه معتبر و بزرگ‌تر از صفر وارد کنید.", { title: "اعتبارسنجی" });
       return false;
@@ -4111,10 +4148,6 @@ function validateConstructionParams() {
     }
     if (!Number.isInteger(sortOrder) || sortOrder < 0) {
       showAlert("برای همه پارامترها ترتیب مرتب‌سازی معتبر و صفر یا بزرگ‌تر وارد کنید.", { title: "اعتبارسنجی" });
-      return false;
-    }
-    if (!["formula", "auto"].includes(interiorValueMode)) {
-      showAlert("برای همه پارامترها حالت فضای داخلی را از بین «محاسبه‌ای» یا «اتوماتیک» انتخاب کنید.", { title: "اعتبارسنجی" });
       return false;
     }
   }
@@ -4242,7 +4275,7 @@ function getConstructionCsvHeaders() {
     return ["fo_id", "param_formula", "formula", "admin_mode"];
   }
   if (constructionStep.value === "params") {
-    return ["param_id", "part_kind_id", "param_code", "param_title_en", "param_title_fa", "param_group_id", "interior_value_mode", "ui_order", "admin_mode"];
+    return ["param_id", "part_kind_id", "param_code", "param_title_en", "param_title_fa", "param_group_id", "ui_order", "admin_mode"];
   }
   if (constructionStep.value === "param_groups") {
     return ["param_group_id", "param_group_code", "org_param_group_title", "param_group_icon_path", "ui_order", "show_in_order_attrs", "admin_mode"];
@@ -4323,7 +4356,6 @@ function getConstructionCsvRows(items = null) {
       String(item.param_title_en || "").trim(),
       String(item.param_title_fa || "").trim(),
       Number(item.param_group_id) || "",
-      String(item.interior_value_mode || "").trim().toLowerCase() === "auto" ? "auto" : "formula",
       Number(item.ui_order) || 0,
       item.admin_id === null ? "system" : "admin",
     ]);
@@ -4595,7 +4627,7 @@ async function onConstructionImportFileChange(event) {
       });
     } else if (constructionStep.value === "params") {
       previewRows = rows.slice(1).map((row, index) => {
-        const adminMode = String(row[8] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const adminMode = String(row[7] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         return {
           lineNo: index + 2,
           param_id: Number(row[0]),
@@ -4604,8 +4636,8 @@ async function onConstructionImportFileChange(event) {
           param_title_en: String(row[3] || "").trim(),
           param_title_fa: String(row[4] || "").trim(),
           param_group_id: Number(row[5]),
-          interior_value_mode: String(row[6] || "").trim().toLowerCase() === "auto" ? "auto" : "formula",
-          ui_order: Number(row[7]),
+          interior_value_mode: "formula",
+          ui_order: Number(row[6]),
           admin_mode: adminMode,
         };
       });
@@ -4924,7 +4956,7 @@ function buildImportedConstructionParamDrafts(rows) {
       param_title_en: String(row.param_title_en || "").trim(),
       param_title_fa: String(row.param_title_fa || "").trim(),
       param_group_id: Number(row.param_group_id),
-      interior_value_mode: String(row.interior_value_mode || "").trim().toLowerCase() === "auto" ? "auto" : "formula",
+      interior_value_mode: "formula",
       ui_order: Number(row.ui_order),
       code: String(row.param_code || "").trim(),
       title: String(row.param_title_fa || "").trim(),
@@ -4946,7 +4978,6 @@ function buildImportedConstructionParamDrafts(rows) {
       String(existing.param_title_en || "").trim() !== nextPayload.param_title_en ||
       String(existing.param_title_fa || "").trim() !== nextPayload.param_title_fa ||
       Number(existing.param_group_id) !== nextPayload.param_group_id ||
-      String(existing.interior_value_mode || "").trim() !== nextPayload.interior_value_mode ||
       Number(existing.ui_order) !== nextPayload.ui_order ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system;
@@ -5235,7 +5266,7 @@ async function loadConstructionParams() {
     editableParams.value = (await res.json()).map((item) =>
       withConstructionDraftState({
         ...item,
-        interior_value_mode: String(item.interior_value_mode || "").trim().toLowerCase() === "auto" ? "auto" : "formula",
+        interior_value_mode: "formula",
       })
     );
     constructionDeletedParamIds.value = [];
@@ -7398,6 +7429,36 @@ async function selectOrder(item) {
   } finally {
     orderOpening.value = false;
     orderOpeningLabel.value = "";
+  }
+}
+
+function toggleInternalPartGroupParamGroupsPanel() {
+  internalPartGroupParamGroupsOpen.value = !internalPartGroupParamGroupsOpen.value;
+}
+
+function isParamGroupSelectedInInternalGroup(paramGroupId) {
+  return !!internalPartGroupEditorDraft.value?.param_groups?.some((group) => Number(group.param_group_id) === Number(paramGroupId) && group.enabled !== false);
+}
+
+function toggleParamGroupInInternalGroup(paramGroupId) {
+  const draft = internalPartGroupEditorDraft.value;
+  if (!draft) return;
+  const existing = draft.param_groups.find((group) => Number(group.param_group_id) === Number(paramGroupId));
+  if (existing) {
+    draft.param_groups = draft.param_groups.filter((group) => Number(group.param_group_id) !== Number(paramGroupId));
+  } else {
+    const option = constructionInternalParamGroupOptions.value.find((item) => Number(item.id) === Number(paramGroupId));
+    draft.param_groups = [
+      ...draft.param_groups,
+      {
+        param_group_id: Number(paramGroupId),
+        param_group_code: String(option?.code || "").trim(),
+        param_group_title: String(option?.title || "").trim(),
+        param_group_icon_path: normalizeIconFileName(option?.iconPath) || "",
+        enabled: true,
+        ui_order: draft.param_groups.length || Number(option?.uiOrder) || 0,
+      },
+    ];
   }
 }
 
@@ -9875,7 +9936,6 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--title">عنوان EN</th>
                       <th class="constructionDialog__col constructionDialog__col--title">عنوان FA</th>
                       <th class="constructionDialog__col constructionDialog__col--id">گروه</th>
-                      <th class="constructionDialog__col constructionDialog__col--scope">فضای داخلی</th>
                       <th class="constructionDialog__col constructionDialog__col--uiOrder">ترتیب UI</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
@@ -9888,7 +9948,6 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.param_title_en }}</td>
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.param_title_fa }}</td>
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.param_group_id }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--scope">{{ getParamInteriorValueModeLabel(row.interior_value_mode) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--uiOrder">{{ row.ui_order }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
                     </tr>
@@ -9922,7 +9981,6 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان EN</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان FA</th>
                     <th class="constructionDialog__col constructionDialog__col--id">گروه</th>
-                    <th class="constructionDialog__col constructionDialog__col--scope">فضای داخلی</th>
                     <th class="constructionDialog__col constructionDialog__col--uiOrder">ترتیب UI</th>
                     <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
                     <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
@@ -9957,11 +10015,6 @@ onBeforeUnmount(() => {
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--id">
                       <input v-model.number="item.param_group_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionParamDirty(item)" />
-                    </td>
-                    <td class="constructionDialog__col constructionDialog__col--scope">
-                      <select v-model="item.interior_value_mode" class="constructionDialog__input" @change="markConstructionParamDirty(item)">
-                        <option v-for="mode in PARAM_INTERIOR_VALUE_MODE_OPTIONS" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
-                      </select>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--uiOrder">
                       <input v-model.number="item.ui_order" class="constructionDialog__input" type="number" min="0" step="1" @input="markConstructionParamDirty(item)" />
@@ -10766,7 +10819,7 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeInternalPartGroupEditor">×</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        در این پنجره از بین قطعات داخلی سمت راست، گروه موردنظر را می‌سازید. فقط فرمول‌هایی که نوع قطعه‌شان داخلی است قابل انتخاب هستند.
+        در این پنجره از بین قطعات داخلی سمت راست، گروه موردنظر را می‌سازید. همچنین از دکمه گروه پارامترها می‌توانید لیست گروه‌های پارامتر را باز کرده و چند مورد را به این گروه نسبت دهید.
       </div>
 
       <div v-if="internalPartGroupEditorDraft" class="subCategoryDesignEditor">
@@ -10784,9 +10837,14 @@ onBeforeUnmount(() => {
             <input v-model="internalPartGroupEditorDraft.code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
           </label>
           <div class="subCategoryDesignEditor__metaActions">
-            <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': interiorLibraryOpen }" title="قطعات داخلی" @click="openInteriorLibrary">
-              <img src="/icons/enternal.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-              <span>داخلی</span>
+            <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': internalPartGroupParamGroupsOpen }" title="گروه پارامترها" @click="toggleInternalPartGroupParamGroupsPanel">
+              <svg viewBox="0 0 24 24" class="subCategoryDesignEditor__metaIcon subCategoryDesignEditor__metaIcon--glyph" aria-hidden="true">
+                <rect x="3" y="4" width="8" height="6" rx="2" fill="currentColor" opacity="0.9" />
+                <rect x="13" y="4" width="8" height="6" rx="2" fill="currentColor" opacity="0.7" />
+                <rect x="3" y="14" width="8" height="6" rx="2" fill="currentColor" opacity="0.7" />
+                <rect x="13" y="14" width="8" height="6" rx="2" fill="currentColor" opacity="0.9" />
+              </svg>
+              <span>گروه پارامترها</span>
             </button>
           </div>
         </div>
@@ -10833,6 +10891,44 @@ onBeforeUnmount(() => {
       <div class="appDialog__actions">
         <button type="button" class="constructionDialog__textBtn" @click="closeInternalPartGroupEditor">انصراف</button>
         <button type="button" class="constructionDialog__textBtn is-primary" @click="saveInternalPartGroupEditor">ذخیره گروه</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="internalPartGroupEditorOpen && internalPartGroupParamGroupsOpen && internalPartGroupEditorDraft" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="toggleInternalPartGroupParamGroupsPanel"></div>
+    <div class="appDialog__card appDialog__card--paramGroups" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">انتخاب گروه‌های پارامتر</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="toggleInternalPartGroupParamGroupsPanel">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        از این پنجره یک یا چند گروه پارامتر را برای این گروه قطعات داخلی انتخاب کنید.
+      </div>
+      <div class="constructionDialog__summary">
+        <div class="constructionDialog__summaryItem">
+          <span class="constructionDialog__summaryValue">{{ toPersianDigits(internalPartGroupEditorDraft.param_groups?.length || 0) }}</span>
+          <span class="constructionDialog__summaryLabel">گروه انتخاب‌شده</span>
+        </div>
+      </div>
+      <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__modalPanel">
+        <div class="subCategoryDesignEditor__panelTitle">گروه‌های پارامتر قابل انتخاب</div>
+        <div class="subCategoryDesignEditor__partList">
+          <label v-for="item in constructionInternalParamGroupOptions" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--paramGroup">
+            <span class="subCategoryDesignEditor__partMeta">
+              <img v-if="item.iconPath" :src="getParamGroupOptionIconUrl(item.iconPath)" alt="" class="subCategoryDesignEditor__partIcon" />
+              <span class="subCategoryDesignEditor__partText">
+                <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
+                <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+              </span>
+            </span>
+            <input :checked="isParamGroupSelectedInInternalGroup(item.id)" type="checkbox" @change="toggleParamGroupInInternalGroup(item.id)" />
+          </label>
+          <div v-if="!constructionInternalParamGroupOptions.length" class="designMenu__cabinetState">هنوز گروه پارامتری برای انتخاب ثبت نشده است.</div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="toggleInternalPartGroupParamGroupsPanel">بستن</button>
       </div>
     </div>
   </div>

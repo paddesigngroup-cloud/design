@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.catalog import InternalPartGroup, InternalPartGroupItem, PartFormula, PartKind
+from designkp_backend.db.models.catalog import InternalPartGroup, InternalPartGroupItem, InternalPartGroupParamGroup, ParamGroup, PartFormula, PartKind
 from designkp_backend.services.admin_access import require_admin_if_present
 
 router = APIRouter(prefix="/internal-part-groups", tags=["internal_part_groups"])
@@ -33,6 +33,24 @@ class InternalPartGroupPartItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class InternalPartGroupParamGroupSelectionPayload(BaseModel):
+    param_group_id: int = Field(ge=1)
+    enabled: bool = True
+    ui_order: int = Field(default=0, ge=0)
+
+
+class InternalPartGroupParamGroupItem(BaseModel):
+    id: uuid.UUID
+    param_group_id: int
+    param_group_code: str
+    param_group_title: str
+    param_group_icon_path: str | None = None
+    enabled: bool
+    ui_order: int
+
+    model_config = {"from_attributes": True}
+
+
 class InternalPartGroupItemResponse(BaseModel):
     id: uuid.UUID
     admin_id: uuid.UUID | None
@@ -43,6 +61,7 @@ class InternalPartGroupItemResponse(BaseModel):
     sort_order: int
     is_system: bool
     parts: list[InternalPartGroupPartItem]
+    param_groups: list[InternalPartGroupParamGroupItem]
 
     model_config = {"from_attributes": True}
 
@@ -55,6 +74,7 @@ class InternalPartGroupCreate(BaseModel):
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
     parts: list[InternalPartGroupPartSelectionPayload] = Field(default_factory=list)
+    param_groups: list[InternalPartGroupParamGroupSelectionPayload] = Field(default_factory=list)
 
 
 class InternalPartGroupUpdate(BaseModel):
@@ -65,11 +85,17 @@ class InternalPartGroupUpdate(BaseModel):
     sort_order: int = Field(ge=0)
     is_system: bool
     parts: list[InternalPartGroupPartSelectionPayload] = Field(default_factory=list)
+    param_groups: list[InternalPartGroupParamGroupSelectionPayload] = Field(default_factory=list)
 
 
 async def _next_group_id(session: AsyncSession) -> int:
     max_id = await session.scalar(select(func.max(InternalPartGroup.group_id)))
     return int(max_id or 0) + 1
+
+
+async def internal_part_group_param_groups_table_ready(session: AsyncSession) -> bool:
+    result = await session.execute(select(func.to_regclass("internal_part_group_param_groups")))
+    return bool(result.one()[0])
 
 
 async def _ensure_unique_group_code(session: AsyncSession, *, code: str, exclude_id: uuid.UUID | None = None) -> None:
@@ -81,18 +107,19 @@ async def _ensure_unique_group_code(session: AsyncSession, *, code: str, exclude
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Internal part group code is already used.")
 
 
-async def _load_group(session: AsyncSession, group_uuid: uuid.UUID) -> InternalPartGroup:
-    item = await session.scalar(
-        select(InternalPartGroup)
-        .options(selectinload(InternalPartGroup.parts))
-        .where(InternalPartGroup.id == group_uuid)
-    )
+async def _load_group(session: AsyncSession, group_uuid: uuid.UUID, *, include_param_groups: bool | None = None) -> InternalPartGroup:
+    if include_param_groups is None:
+        include_param_groups = await internal_part_group_param_groups_table_ready(session)
+    stmt = select(InternalPartGroup).options(selectinload(InternalPartGroup.parts))
+    if include_param_groups:
+        stmt = stmt.options(selectinload(InternalPartGroup.param_groups))
+    item = await session.scalar(stmt.where(InternalPartGroup.id == group_uuid))
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Internal part group not found.")
     return item
 
 
-def _serialize_group(item: InternalPartGroup) -> InternalPartGroupItemResponse:
+def _serialize_group(item: InternalPartGroup, *, include_param_groups: bool = True) -> InternalPartGroupItemResponse:
     return InternalPartGroupItemResponse(
         id=item.id,
         admin_id=item.admin_id,
@@ -106,6 +133,10 @@ def _serialize_group(item: InternalPartGroup) -> InternalPartGroupItemResponse:
             InternalPartGroupPartItem.model_validate(part)
             for part in sorted(item.parts, key=lambda part: (int(part.ui_order), int(part.part_formula_id)))
         ],
+        param_groups=[
+            InternalPartGroupParamGroupItem.model_validate(param_group)
+            for param_group in sorted(item.param_groups, key=lambda row: (int(row.ui_order), int(row.param_group_id)))
+        ] if include_param_groups else [],
     )
 
 
@@ -183,13 +214,88 @@ async def _replace_group_parts(
             existing.ui_order = int(selection.ui_order)
 
 
+async def _require_accessible_param_groups(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    param_group_ids: list[int],
+) -> list[ParamGroup]:
+    if not param_group_ids:
+        return []
+    stmt = select(ParamGroup).where(ParamGroup.param_group_id.in_(param_group_ids))
+    if admin_id is not None:
+        stmt = stmt.where(or_(ParamGroup.admin_id.is_(None), ParamGroup.admin_id == admin_id))
+    items = (await session.scalars(stmt.order_by(ParamGroup.ui_order.asc(), ParamGroup.param_group_id.asc()))).all()
+    found_ids = {int(item.param_group_id) for item in items if item.param_group_id is not None}
+    missing = [str(item) for item in param_group_ids if int(item) not in found_ids]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown param groups for this admin scope: {', '.join(missing)}",
+        )
+    return items
+
+
+async def _replace_group_param_groups(
+    session: AsyncSession,
+    *,
+    group: InternalPartGroup,
+    param_groups: list[InternalPartGroupParamGroupSelectionPayload],
+) -> None:
+    next_groups = await _require_accessible_param_groups(
+        session,
+        admin_id=group.admin_id,
+        param_group_ids=[int(item.param_group_id) for item in param_groups if item.enabled],
+    )
+    by_param_group_id = {int(item.param_group_id): item for item in next_groups if item.param_group_id is not None}
+    existing_rows = list(group.__dict__.get("param_groups") or [])
+    existing_by_param_group_id = {int(item.param_group_id): item for item in existing_rows}
+    next_param_group_ids = {int(item.param_group_id) for item in param_groups}
+    for param_group_id, row in list(existing_by_param_group_id.items()):
+        if param_group_id not in next_param_group_ids:
+            await session.delete(row)
+
+    for selection in param_groups:
+        param_group_id = int(selection.param_group_id)
+        param_group = by_param_group_id.get(param_group_id)
+        existing = existing_by_param_group_id.get(param_group_id)
+        if not param_group:
+            if existing is not None:
+                existing.enabled = False
+                existing.ui_order = int(selection.ui_order)
+            continue
+        title = str(param_group.org_param_group_title or param_group.title or param_group.param_group_code or "").strip()
+        code = str(param_group.param_group_code or param_group.code or "").strip()
+        icon_path = str(param_group.param_group_icon_path or "").strip() or None
+        if existing is None:
+            existing = InternalPartGroupParamGroup(
+                group=group,
+                param_group_id=param_group_id,
+                param_group_code=code,
+                param_group_title=title,
+                param_group_icon_path=icon_path,
+                enabled=selection.enabled,
+                ui_order=int(selection.ui_order),
+            )
+            session.add(existing)
+        else:
+            existing.param_group_code = code
+            existing.param_group_title = title
+            existing.param_group_icon_path = icon_path
+            existing.enabled = selection.enabled
+            existing.ui_order = int(selection.ui_order)
+
+
 @router.get("", response_model=list[InternalPartGroupItemResponse])
 async def list_internal_part_groups(
     admin_id: uuid.UUID | None = Query(default=None),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[InternalPartGroupItemResponse]:
     await require_admin_if_present(session, admin_id)
+    include_param_groups = await internal_part_group_param_groups_table_ready(session)
     stmt = select(InternalPartGroup).options(selectinload(InternalPartGroup.parts))
+    if include_param_groups:
+        stmt = stmt.options(selectinload(InternalPartGroup.param_groups))
     if admin_id is None:
         stmt = stmt.where(InternalPartGroup.admin_id.is_(None))
     else:
@@ -200,12 +306,13 @@ async def list_internal_part_groups(
         InternalPartGroup.group_id.asc(),
     )
     items = (await session.scalars(stmt)).all()
-    return [_serialize_group(item) for item in items]
+    return [_serialize_group(item, include_param_groups=include_param_groups) for item in items]
 
 
 @router.post("", response_model=InternalPartGroupItemResponse, status_code=status.HTTP_201_CREATED)
 async def create_internal_part_group(payload: InternalPartGroupCreate, session: AsyncSession = Depends(get_db_session)) -> InternalPartGroupItemResponse:
     await require_admin_if_present(session, payload.admin_id)
+    include_param_groups = await internal_part_group_param_groups_table_ready(session)
     next_group_id = payload.group_id or await _next_group_id(session)
     title = payload.group_title.strip()
     code = payload.code.strip()
@@ -224,9 +331,13 @@ async def create_internal_part_group(payload: InternalPartGroupCreate, session: 
     session.add(item)
     await session.flush()
     await _replace_group_parts(session, group=item, parts=payload.parts)
+    if payload.param_groups and not include_param_groups:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Param-group links table is not available yet. Run database migrations first.")
+    if include_param_groups:
+        await _replace_group_param_groups(session, group=item, param_groups=payload.param_groups)
     await session.commit()
-    item = await _load_group(session, item.id)
-    return _serialize_group(item)
+    item = await _load_group(session, item.id, include_param_groups=include_param_groups)
+    return _serialize_group(item, include_param_groups=include_param_groups)
 
 
 @router.patch("/{group_uuid}", response_model=InternalPartGroupItemResponse)
@@ -235,7 +346,8 @@ async def update_internal_part_group(
     payload: InternalPartGroupUpdate,
     session: AsyncSession = Depends(get_db_session),
 ) -> InternalPartGroupItemResponse:
-    item = await _load_group(session, group_uuid)
+    include_param_groups = await internal_part_group_param_groups_table_ready(session)
+    item = await _load_group(session, group_uuid, include_param_groups=include_param_groups)
     await require_admin_if_present(session, payload.admin_id)
     title = payload.group_title.strip()
     code = payload.code.strip()
@@ -250,9 +362,13 @@ async def update_internal_part_group(
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     await _replace_group_parts(session, group=item, parts=payload.parts)
+    if payload.param_groups and not include_param_groups:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Param-group links table is not available yet. Run database migrations first.")
+    if include_param_groups:
+        await _replace_group_param_groups(session, group=item, param_groups=payload.param_groups)
     await session.commit()
-    item = await _load_group(session, item.id)
-    return _serialize_group(item)
+    item = await _load_group(session, item.id, include_param_groups=include_param_groups)
+    return _serialize_group(item, include_param_groups=include_param_groups)
 
 
 @router.delete("/{group_uuid}", status_code=status.HTTP_204_NO_CONTENT)

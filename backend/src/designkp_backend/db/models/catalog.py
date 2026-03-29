@@ -58,6 +58,7 @@ class ParamGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMi
 
     admin: Mapped["Admin | None"] = relationship(back_populates="param_groups")
     params: Mapped[list["Param"]] = relationship(back_populates="param_group")
+    internal_part_group_links: Mapped[list["InternalPartGroupParamGroup"]] = relationship(back_populates="param_group")
 
 
 class Param(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -360,6 +361,10 @@ class InternalPartGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
         back_populates="group",
         cascade="all, delete-orphan",
     )
+    param_groups: Mapped[list["InternalPartGroupParamGroup"]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )
 
 
 class InternalPartGroupItem(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -388,6 +393,30 @@ class InternalPartGroupItem(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin
 
     group: Mapped["InternalPartGroup"] = relationship(back_populates="parts")
     part_formula: Mapped["PartFormula"] = relationship()
+
+
+class InternalPartGroupParamGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "internal_part_group_param_groups"
+
+    group_ref_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("internal_part_groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    param_group_id: Mapped[int] = mapped_column(
+        ForeignKey("param_groups.param_group_id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    param_group_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    param_group_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    param_group_icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+    group: Mapped["InternalPartGroup"] = relationship(back_populates="param_groups")
+    param_group: Mapped["ParamGroup"] = relationship(back_populates="internal_part_group_links")
 
 
 class SubCategoryDesignInteriorInstance(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):

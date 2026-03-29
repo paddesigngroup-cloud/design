@@ -49,7 +49,6 @@ def _param_headers() -> list[str]:
         "param_title_en",
         "param_title_fa",
         "param_group_id",
-        "interior_value_mode",
         "ui_order",
         "admin_mode",
     ]
@@ -184,7 +183,6 @@ async def _param_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[list[o
             row.param_title_en,
             row.param_title_fa,
             row.param_group_id,
-            row.interior_value_mode,
             row.ui_order,
             "system" if row.admin_id is None else "admin",
         ]
