@@ -20,6 +20,7 @@ from designkp_backend.services.order_designs import (
     next_order_design_instance_code,
     next_order_design_sort_order,
     normalize_order_attr_value,
+    read_order_design_snapshot_checksum,
     require_accessible_order,
     require_accessible_sub_category_design,
     strip_snapshot_state_from_meta,
@@ -210,6 +211,84 @@ def _normalize_attr_values(
     return normalized
 
 
+def _clone_order_design_json(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(key): _clone_order_design_json(inner) for key, inner in value.items()}
+    if isinstance(value, list):
+        return [_clone_order_design_json(inner) for inner in value]
+    return value
+
+
+async def _duplicate_order_design_record(
+    session: AsyncSession,
+    *,
+    source_item: OrderDesign,
+) -> OrderDesign:
+    include_interior = await interior_instance_tables_ready(session)
+    order = await require_accessible_order(session, order_id=source_item.order_id)
+    next_instance_code = await next_order_design_instance_code(
+        session,
+        order_id=order.id,
+        design_code=str(source_item.design_code or "").strip(),
+    )
+    await _ensure_unique_instance_code(session, order_id=order.id, instance_code=next_instance_code)
+    checksum = (
+        str(source_item.snapshot_checksum or "").strip()
+        or read_order_design_snapshot_checksum(dict(source_item.order_attr_meta or {}))
+        or build_order_design_snapshot_checksum(
+            source_design=await require_accessible_sub_category_design(
+                session,
+                admin_id=order.admin_id,
+                design_id=source_item.sub_category_design_id,
+            ),
+            order_attr_values=dict(source_item.order_attr_values or {}),
+            interior_instances=list(source_item.interior_instances or []) if include_interior else [],
+        )
+    )
+    duplicated = OrderDesign(
+        order_id=source_item.order_id,
+        admin_id=source_item.admin_id,
+        user_id=source_item.user_id,
+        sub_category_design_id=source_item.sub_category_design_id,
+        sub_category_id=source_item.sub_category_id,
+        design_code=str(source_item.design_code or "").strip(),
+        design_title=str(source_item.design_title or "").strip(),
+        instance_code=next_instance_code,
+        sort_order=await next_order_design_sort_order(session, order_id=source_item.order_id),
+        status=str(source_item.status or "draft").strip() or "draft",
+        order_attr_values=_clone_order_design_json(dict(source_item.order_attr_values or {})),
+        order_attr_meta=with_order_design_snapshot_checksum(
+            strip_snapshot_state_from_meta(dict(source_item.order_attr_meta or {})),
+            checksum=checksum,
+        ),
+        part_snapshots=_clone_order_design_json(list(source_item.part_snapshots or [])),
+        viewer_boxes=_clone_order_design_json(list(source_item.viewer_boxes or [])),
+        snapshot_checksum=checksum,
+    )
+    session.add(duplicated)
+    await session.flush()
+    if include_interior:
+        for interior in list(source_item.interior_instances or []):
+            session.add(
+                OrderDesignInteriorInstance(
+                    order_design_id=duplicated.id,
+                    source_instance_id=interior.source_instance_id,
+                    internal_part_group_id=interior.internal_part_group_id,
+                    instance_code=str(interior.instance_code or "").strip(),
+                    ui_order=int(interior.ui_order or 0),
+                    placement_z=float(interior.placement_z or 0),
+                    interior_box_snapshot=_clone_order_design_json(dict(interior.interior_box_snapshot or {})),
+                    param_values=_clone_order_design_json(dict(interior.param_values or {})),
+                    param_meta=_clone_order_design_json(dict(interior.param_meta or {})),
+                    part_snapshots=_clone_order_design_json(list(interior.part_snapshots or [])),
+                    viewer_boxes=_clone_order_design_json(list(interior.viewer_boxes or [])),
+                    status=str(interior.status or "draft").strip() or "draft",
+                )
+            )
+    await session.commit()
+    return await _require_item(session, duplicated.id)
+
+
 @router.get("", response_model=list[OrderDesignItem])
 async def list_order_designs(
     order_id: uuid.UUID = Query(...),
@@ -357,6 +436,20 @@ async def update_order_design(
     await session.commit()
     item = await _require_item(session, item.id)
     return _serialize_item(item, include_interior=include_interior)
+
+
+@router.post("/{item_id}/duplicate", response_model=OrderDesignItem, status_code=status.HTTP_201_CREATED)
+async def duplicate_order_design(
+    item_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> OrderDesignItem:
+    source_item = await _require_item(session, item_id)
+    include_interior = await interior_instance_tables_ready(session)
+    duplicated = await _duplicate_order_design_record(
+        session,
+        source_item=source_item,
+    )
+    return _serialize_item(duplicated, include_interior=include_interior)
 
 
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)

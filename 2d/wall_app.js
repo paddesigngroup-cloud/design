@@ -78,6 +78,7 @@ export function createWallApp({
   onPassiveModelSelectionChange,
   onActiveModelDelete,
   onOrderDesignDeleteRequest,
+  onOrderDesignDuplicateRequest,
   captureExternalHistoryState,
   restoreExternalHistoryState,
   onFitViewToAll,
@@ -971,6 +972,7 @@ const copyCommand = {
   startHiddenGraphSnap: null,
   startDimensionsSnap: null,
   startModelSnap: null,
+  startPassiveModelsSnap: null,
   startToolSnap: null,
   startHiddenToolSnap: null,
   moved: false,
@@ -2972,6 +2974,7 @@ const model2d = {
   rotationRad: 0,
 };
 let passiveModels = [];
+const COPY_PREVIEW_MODEL_PREFIX = "__copy_preview__";
 let hoverPassiveModelId = null;
 let selectedPassiveModelId = null;
 let selectedPassiveModelIds = [];
@@ -3016,6 +3019,10 @@ function emitPassiveModelsTransformChange(modelIds = null) {
       rotRad: Number(model.transform?.rotRad) || 0,
     }));
   onPassiveModelsTransformChange(payload);
+}
+
+function isCopyPreviewModelId(id) {
+  return String(id || "").startsWith(COPY_PREVIEW_MODEL_PREFIX);
 }
 
 function _loadImgWithFallback(map, key, urls) {
@@ -3816,6 +3823,47 @@ function selectionSnapshotHasAny(snapshot) {
   );
 }
 
+function selectionSnapshotHasDesign(snapshot) {
+  if (!snapshot) return false;
+  return !!snapshot.hasModel || (Array.isArray(snapshot.passiveModelIds) && snapshot.passiveModelIds.length > 0);
+}
+
+function buildPassiveModelCopyPreview(source, previewId, dx, dy) {
+  const transform = source?.transform || {};
+  return {
+    id: previewId,
+    designCode: String(source?.designCode || "").trim() || null,
+    designTitle: String(source?.designTitle || "").trim() || null,
+    instanceCode: String(source?.instanceCode || "").trim() || null,
+    displayName:
+      String(source?.displayName || "").trim() ||
+      String(source?.designTitle || "").trim() ||
+      String(source?.instanceCode || "").trim() ||
+      previewId,
+    lines: (source?.lines || []).map((line) => ({
+      ax: (Number(line?.ax) || 0) + dx,
+      ay: (Number(line?.ay) || 0) + dy,
+      bx: (Number(line?.bx) || 0) + dx,
+      by: (Number(line?.by) || 0) + dy,
+    })),
+    outline: (source?.outline || []).map((pt) => ({
+      x: (Number(pt?.x) || 0) + dx,
+      y: (Number(pt?.y) || 0) + dy,
+    })),
+    transform: {
+      x: (Number(transform?.x) || 0) + dx,
+      y: (Number(transform?.y) || 0) + dy,
+      rotRad: Number(transform?.rotRad) || 0,
+    },
+    color: source?.color ?? model2d.color,
+    outlineColor: source?.outlineColor ?? model2d.outlineColor,
+    outlineHoverColor: source?.outlineHoverColor ?? model2d.outlineSelectedColor,
+    lineWidthPx: Number.isFinite(Number(source?.lineWidthPx)) ? Number(source.lineWidthPx) : model2d.lineWidthPx,
+    dash: Array.isArray(source?.dash) ? source.dash.slice() : (model2d.dash || []).slice(),
+    alpha: Number.isFinite(Number(source?.alpha)) ? Number(source.alpha) : model2d.alpha,
+  };
+}
+
 function applySelectionDelta(snapshot, delta, opts = null) {
   if (!selectionSnapshotHasAny(snapshot)) return false;
   const dx = Number(delta?.x) || 0;
@@ -4161,7 +4209,6 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
   const dx = Number(delta?.x) || 0;
   const dy = Number(delta?.y) || 0;
   if (!selectionSnapshotHasAny(snapshot) || (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9)) return null;
-  if (snapshot.hasModel || (Array.isArray(snapshot.passiveModelIds) && snapshot.passiveModelIds.length > 0)) return null;
 
   const fallbackPrefix = tool?.namePrefix || "Wall";
   const shouldUpdateCreationCounters = opts?.updateCreationCounters !== false;
@@ -4177,7 +4224,49 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
     wallIds: [],
     hiddenIds: [],
     dimIds: [],
+    passiveModelIds: [],
+    sourceOrderDesignIds: [],
   };
+
+  if (selectionSnapshotHasDesign(snapshot)) {
+    const previewModels = passiveModels.filter((model) => !isCopyPreviewModelId(model?.id));
+    if (snapshot.hasModel && model2d.designId && Array.isArray(model2d.outline) && model2d.outline.length >= 3 && Array.isArray(model2d.lines) && model2d.lines.length >= 1) {
+      const sourceId = String(model2d.designId || "").trim();
+      const previewId = `${COPY_PREVIEW_MODEL_PREFIX}active-${sourceId}`;
+      previewModels.push(buildPassiveModelCopyPreview({
+        id: sourceId,
+        designCode: model2d.designCode,
+        designTitle: model2d.designTitle,
+        instanceCode: model2d.instanceCode,
+        displayName: model2d.displayName,
+        lines: model2d.lines,
+        outline: model2d.outline,
+        transform: {
+          x: Number(model2d.offsetXmm) || 0,
+          y: Number(model2d.offsetYmm) || 0,
+          rotRad: Number(model2d.rotationRad) || 0,
+        },
+        color: model2d.color,
+        outlineColor: model2d.outlineColor,
+        outlineHoverColor: model2d.outlineSelectedColor,
+        lineWidthPx: model2d.lineWidthPx,
+        dash: model2d.dash,
+        alpha: model2d.alpha,
+      }, previewId, dx, dy));
+      result.passiveModelIds.push(previewId);
+      result.sourceOrderDesignIds.push(sourceId);
+    }
+    for (const modelId of snapshot.passiveModelIds || []) {
+      const model = passiveModels.find((entry) => String(entry?.id || "") === String(modelId || ""));
+      if (!model) continue;
+      const sourceId = String(model.id || "").trim();
+      const previewId = `${COPY_PREVIEW_MODEL_PREFIX}passive-${sourceId}`;
+      previewModels.push(buildPassiveModelCopyPreview(model, previewId, dx, dy));
+      result.passiveModelIds.push(previewId);
+      result.sourceOrderDesignIds.push(sourceId);
+    }
+    passiveModels = previewModels;
+  }
 
   for (const wallId of snapshot.wallIds || []) {
     const wall = graph.getWall(wallId);
@@ -4778,6 +4867,7 @@ function stopCopyCommandRuntime() {
   copyCommand.startHiddenGraphSnap = null;
   copyCommand.startDimensionsSnap = null;
   copyCommand.startModelSnap = null;
+  copyCommand.startPassiveModelsSnap = null;
   copyCommand.startToolSnap = null;
   copyCommand.startHiddenToolSnap = null;
   copyCommand.moved = false;
@@ -4804,6 +4894,7 @@ function _startCopyTargetPhase(basePoint) {
   copyCommand.startHiddenGraphSnap = snapshotGraph(hiddenGraph);
   copyCommand.startDimensionsSnap = snapshotDimensions(dimensions);
   copyCommand.startModelSnap = snapshotModel2d(model2d);
+  copyCommand.startPassiveModelsSnap = snapshotPassiveModels(passiveModels);
   copyCommand.startToolSnap = snapshotTool(tool);
   copyCommand.startHiddenToolSnap = snapshotHiddenTool(hiddenTool);
   copyCommand.moved = false;
@@ -4815,12 +4906,14 @@ function cancelCopyCommand(restoreGeometry = true) {
     copyCommand.startGraphSnap &&
     copyCommand.startHiddenGraphSnap &&
     copyCommand.startDimensionsSnap &&
-    copyCommand.startModelSnap;
+    copyCommand.startModelSnap &&
+    copyCommand.startPassiveModelsSnap;
   if (restoreGeometry && hasPreview) {
     restoreGraph(graph, copyCommand.startGraphSnap);
     restoreGraph(hiddenGraph, copyCommand.startHiddenGraphSnap);
     restoreDimensions(dimensions, copyCommand.startDimensionsSnap);
     restoreModel2d(model2d, copyCommand.startModelSnap);
+    restorePassiveModels(copyCommand.startPassiveModelsSnap);
     restoreTool(tool, graph, copyCommand.startToolSnap);
     restoreHiddenTool(hiddenTool, hiddenGraph, copyCommand.startHiddenToolSnap);
     emitModel2dTransform();
@@ -4829,12 +4922,22 @@ function cancelCopyCommand(restoreGeometry = true) {
   stopCopyCommandRuntime();
 }
 
-function confirmCopyStep() {
+async function confirmCopyStep() {
   if (copyCommand.mode === "idle") return false;
 
   if (copyCommand.mode === "await_confirm_selection") {
     const snap = buildSelectionSnapshotFromCurrentSelection();
-    if (!selectionSnapshotHasAny(snap) || snap.hasModel || (Array.isArray(snap.passiveModelIds) && snap.passiveModelIds.length > 0)) return false;
+    if (!selectionSnapshotHasAny(snap)) return false;
+    if (
+      selectionSnapshotHasDesign(snap) &&
+      (
+        (Array.isArray(snap.wallIds) && snap.wallIds.length > 0) ||
+        (Array.isArray(snap.hiddenIds) && snap.hiddenIds.length > 0) ||
+        (Array.isArray(snap.dimIds) && snap.dimIds.length > 0)
+      )
+    ) {
+      return false;
+    }
     copyCommand.selectionSnapshot = snap;
     copyCommand.mode = "await_base_point";
     copyCommand.cursorPoint = null;
@@ -4849,11 +4952,13 @@ function confirmCopyStep() {
 
   if (copyCommand.mode === "await_target_point") {
     const moved = !!copyCommand.moved;
-    if (moved) syncCreationCountersFromScene();
+    const hasDesignSelection = selectionSnapshotHasDesign(copyCommand.selectionSnapshot);
+    if (moved && !hasDesignSelection) syncCreationCountersFromScene();
     const endGraphSnap = snapshotGraph(graph);
     const endHiddenGraphSnap = snapshotGraph(hiddenGraph);
     const endDimensionsSnap = snapshotDimensions(dimensions);
     const endModelSnap = snapshotModel2d(model2d);
+    const endPassiveModelsSnap = snapshotPassiveModels(passiveModels);
     const endToolSnap = snapshotTool(tool);
     const endHiddenToolSnap = snapshotHiddenTool(hiddenTool);
     const endSelection = {
@@ -4863,30 +4968,69 @@ function confirmCopyStep() {
       selectedHiddenIds: selectedHiddenIds.slice(),
       selectedDimId,
       selectedDimIds: selectedDimIds.slice(),
+      selectedPassiveModelId,
+      selectedPassiveModelIds: selectedPassiveModelIds.slice(),
       selectedModelOutline,
     };
     const startGraphSnap = copyCommand.startGraphSnap;
     const startHiddenGraphSnap = copyCommand.startHiddenGraphSnap;
     const startDimensionsSnap = copyCommand.startDimensionsSnap;
     const startModelSnap = copyCommand.startModelSnap;
+    const startPassiveModelsSnap = copyCommand.startPassiveModelsSnap;
     const startToolSnap = copyCommand.startToolSnap;
     const startHiddenToolSnap = copyCommand.startHiddenToolSnap;
     const startSelectionSnapshot = copyCommand.startSelectionSnapshot;
+    const sourceSelectionSnapshot = copyCommand.selectionSnapshot;
+    const delta = copyCommand.basePoint && copyCommand.cursorPoint
+      ? {
+          x: copyCommand.cursorPoint.x - copyCommand.basePoint.x,
+          y: copyCommand.cursorPoint.y - copyCommand.basePoint.y,
+        }
+      : { x: 0, y: 0 };
     cancelCopyCommand(false);
     if (!moved) return true;
     restoreGraph(graph, startGraphSnap);
     restoreGraph(hiddenGraph, startHiddenGraphSnap);
     restoreDimensions(dimensions, startDimensionsSnap);
     restoreModel2d(model2d, startModelSnap);
+    restorePassiveModels(startPassiveModelsSnap);
     restoreTool(tool, graph, startToolSnap);
     restoreHiddenTool(hiddenTool, hiddenGraph, startHiddenToolSnap);
     applySelectionSnapshot(startSelectionSnapshot);
     emitModel2dTransform();
+    if (hasDesignSelection) {
+      if (typeof onOrderDesignDuplicateRequest !== "function") return false;
+      try {
+        await undo.runAction(async () => {
+          const response = await onOrderDesignDuplicateRequest({
+            activeDesignSelected: !!sourceSelectionSnapshot?.hasModel,
+            passiveDesignIds: Array.isArray(sourceSelectionSnapshot?.passiveModelIds) ? sourceSelectionSnapshot.passiveModelIds.slice() : [],
+            delta,
+          });
+          const createdIds = normalizeSelectionIds(response?.createdIds);
+          selectedWallId = null;
+          selectedWallIds = [];
+          selectedHiddenId = null;
+          selectedHiddenIds = [];
+          selectedDimId = null;
+          selectedDimIds = [];
+          selectedModelOutline = false;
+          selectedPassiveModelId = createdIds.length === 1 ? createdIds[0] : null;
+          selectedPassiveModelIds = createdIds.length > 1 ? createdIds.slice() : [];
+          emitPassiveModelSelectionChange();
+        });
+      } catch (err) {
+        console.error("[wall_app] duplicate order design copy failed", err);
+        return false;
+      }
+      return true;
+    }
     undo.runAction(() => {
       restoreGraph(graph, endGraphSnap);
       restoreGraph(hiddenGraph, endHiddenGraphSnap);
       restoreDimensions(dimensions, endDimensionsSnap);
       restoreModel2d(model2d, endModelSnap);
+      restorePassiveModels(endPassiveModelsSnap);
       restoreTool(tool, graph, endToolSnap);
       restoreHiddenTool(hiddenTool, hiddenGraph, endHiddenToolSnap);
       selectedWallId = endSelection.selectedWallId;
@@ -4895,7 +5039,10 @@ function confirmCopyStep() {
       selectedHiddenIds = endSelection.selectedHiddenIds.slice();
       selectedDimId = endSelection.selectedDimId;
       selectedDimIds = endSelection.selectedDimIds.slice();
+      selectedPassiveModelId = endSelection.selectedPassiveModelId;
+      selectedPassiveModelIds = endSelection.selectedPassiveModelIds.slice();
       selectedModelOutline = !!endSelection.selectedModelOutline;
+      emitPassiveModelSelectionChange();
       emitModel2dTransform();
     });
     return true;
@@ -4914,6 +5061,7 @@ function updateCopyCommandCursor(worldPoint, shiftKey = false) {
   restoreGraph(hiddenGraph, copyCommand.startHiddenGraphSnap);
   restoreDimensions(dimensions, copyCommand.startDimensionsSnap);
   restoreModel2d(model2d, copyCommand.startModelSnap);
+  restorePassiveModels(copyCommand.startPassiveModelsSnap);
   restoreTool(tool, graph, copyCommand.startToolSnap);
   restoreHiddenTool(hiddenTool, hiddenGraph, copyCommand.startHiddenToolSnap);
   const result = duplicateSelectionByDelta(copyCommand.selectionSnapshot, {
@@ -4928,7 +5076,10 @@ function updateCopyCommandCursor(worldPoint, shiftKey = false) {
   selectedHiddenIds = result?.hiddenIds?.length > 1 ? result.hiddenIds.slice() : [];
   selectedDimId = (result?.dimIds?.length === 1) ? result.dimIds[0] : null;
   selectedDimIds = result?.dimIds?.length > 1 ? result.dimIds.slice() : [];
+  selectedPassiveModelId = (result?.passiveModelIds?.length === 1) ? result.passiveModelIds[0] : null;
+  selectedPassiveModelIds = result?.passiveModelIds?.length > 1 ? result.passiveModelIds.slice() : [];
   selectedModelOutline = false;
+  emitPassiveModelSelectionChange();
   copyCommand.moved = !!result && Math.hypot(lock.target.x - copyCommand.basePoint.x, lock.target.y - copyCommand.basePoint.y) > 0.5;
   return true;
 }
@@ -7317,7 +7468,7 @@ function renderContextMenuItems() {
   const items = [
     { id: "extend", label: "ادغام", disabled: !extendSelection },
     { id: "move", label: "انتقال", disabled: !hasAnySelection() },
-    { id: "copy", label: "کپی", disabled: !hasAnySelection() || !!selectedModelOutline || !!selectedPassiveModelId || !!selectedPassiveModelIds.length },
+    { id: "copy", label: "کپی", disabled: !hasAnySelection() },
     { id: "rotate", label: "چرخش", disabled: !hasAnySelection() },
     { id: "delete", label: "حذف", disabled: true },
   ];

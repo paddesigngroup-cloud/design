@@ -10,6 +10,7 @@ import {
   passiveModelTransformStateRef,
   activeModelDeleteHandlerRef,
   orderDesignDeleteHandlerRef,
+  orderDesignDuplicateHandlerRef,
   externalHistoryCaptureHandlerRef,
   externalHistoryRestoreHandlerRef,
   fitAllHandlerRef,
@@ -2832,10 +2833,21 @@ async function restoreOrderDesignById(orderDesignId) {
   return normalizeOrderDesignRecord(await res.json());
 }
 
+async function duplicateOrderDesignById(orderDesignId) {
+  const key = String(orderDesignId || "").trim();
+  if (!key) return null;
+  const res = await fetch(`/api/order-designs/${encodeURIComponent(key)}/duplicate`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, "کپی طرح سفارش انجام نشد."));
+  return normalizeOrderDesignRecord(await res.json());
+}
+
 function captureOrderDesignHistoryState() {
   return {
     orderId: String(activeOrder.value?.id || "").trim() || null,
     orderDesignIds: orderDesignCatalog.value.map((item) => String(item.id || "").trim()).filter(Boolean),
+    orderDesignPlacements: orderDesignPlacements.value.map((item) => ({ ...(item || {}) })),
   };
 }
 
@@ -2861,7 +2873,55 @@ async function restoreOrderDesignHistoryState(snapshot = null) {
   }
 
   await loadOrderDesignCatalog(true);
+  const nextPlacements = Array.isArray(snapshot?.orderDesignPlacements)
+    ? snapshot.orderDesignPlacements
+        .map(normalizeOrderDesignPlacement)
+        .filter((item) => item && targetIdSet.has(String(item.orderDesignId || "")))
+    : [];
+  orderDesignPlacements.value = nextPlacements;
   syncQuickStateFromEditor();
+}
+
+async function handleStageOrderDesignDuplicateRequest(payload = null) {
+  const activeId = payload?.activeDesignSelected ? String(activeCabinetDesignId.value || "").trim() : "";
+  const passiveIds = normalizeSelectionIds(payload?.passiveDesignIds);
+  const sourceIds = [...new Set([activeId, ...passiveIds].filter(Boolean))];
+  const delta = {
+    x: Number.isFinite(Number(payload?.delta?.x)) ? Number(payload.delta.x) : 0,
+    y: Number.isFinite(Number(payload?.delta?.y)) ? Number(payload.delta.y) : 0,
+    rotRad: 0,
+  };
+  if (!sourceIds.length) return { createdIds: [] };
+
+  persistCurrentActiveOrderDesignPlacement();
+  const createdItems = [];
+  try {
+    for (const sourceId of sourceIds) {
+      const created = await duplicateOrderDesignById(sourceId);
+      if (!created?.id) continue;
+      createdItems.push(created);
+      const sourcePlacement = getOrderDesignPlacementForId(sourceId) || { x: 0, y: 0, rotRad: 0 };
+      upsertOrderDesignPlacement({
+        orderDesignId: created.id,
+        x: (Number(sourcePlacement.x) || 0) + delta.x,
+        y: (Number(sourcePlacement.y) || 0) + delta.y,
+        rotRad: Number(sourcePlacement.rotRad) || 0,
+      });
+    }
+    if (createdItems.length) {
+      const byId = new Map(orderDesignCatalog.value.map((item) => [String(item.id), item]));
+      for (const item of createdItems) byId.set(String(item.id), item);
+      orderDesignCatalog.value = sortOrderDesignCatalogRecords([...byId.values()]);
+      await nextTick();
+      await saveActiveOrderDrawing();
+    }
+    return {
+      createdIds: createdItems.map((item) => String(item.id || "").trim()).filter(Boolean),
+    };
+  } catch (error) {
+    await loadOrderDesignCatalog(true).catch(() => {});
+    throw error;
+  }
 }
 
 async function handleStageOrderDesignDeleteRequest(payload = null) {
@@ -3032,6 +3092,7 @@ function activateOrderDesignFromStage(orderDesignId) {
 passiveModelSelectionHandlerRef.value = activateOrderDesignFromStage;
 activeModelDeleteHandlerRef.value = deleteActiveOrderDesignFromStage;
 orderDesignDeleteHandlerRef.value = handleStageOrderDesignDeleteRequest;
+orderDesignDuplicateHandlerRef.value = handleStageOrderDesignDuplicateRequest;
 externalHistoryCaptureHandlerRef.value = captureOrderDesignHistoryState;
 externalHistoryRestoreHandlerRef.value = restoreOrderDesignHistoryState;
 
@@ -7565,8 +7626,9 @@ watch(
 watch(
   passiveModelSelectionStateRef,
   (ids) => {
+    const validIds = new Set(orderDesignCatalog.value.map((item) => String(item.id || "").trim()).filter(Boolean));
     selectedStageOrderDesignIds.value = Array.isArray(ids)
-      ? ids.map((id) => String(id || "").trim()).filter(Boolean)
+      ? ids.map((id) => String(id || "").trim()).filter((id) => validIds.has(id))
       : [];
   },
   { immediate: true }
@@ -7576,9 +7638,10 @@ watch(
   passiveModelTransformStateRef,
   (models) => {
     if (!Array.isArray(models) || !models.length) return;
+    const validIds = new Set(orderDesignCatalog.value.map((item) => String(item.id || "").trim()).filter(Boolean));
     for (const model of models) {
       const orderDesignId = String(model?.id || "").trim();
-      if (!orderDesignId) continue;
+      if (!orderDesignId || !validIds.has(orderDesignId)) continue;
       upsertOrderDesignPlacement({
         orderDesignId,
         x: Number.isFinite(Number(model?.x)) ? Number(model.x) : 0,
@@ -8283,6 +8346,7 @@ onBeforeUnmount(() => {
   passiveModelSelectionStateRef.value = [];
   activeModelDeleteHandlerRef.value = null;
   orderDesignDeleteHandlerRef.value = null;
+  orderDesignDuplicateHandlerRef.value = null;
   externalHistoryCaptureHandlerRef.value = null;
   externalHistoryRestoreHandlerRef.value = null;
   editorRef.value?.setPassiveModels?.([]);

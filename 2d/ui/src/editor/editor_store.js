@@ -24,6 +24,9 @@ export const activeModelDeleteHandlerRef = shallowRef(null);
 // Handler used by the 2D engine when one or more saved designs should be deleted from canvas space and database.
 export const orderDesignDeleteHandlerRef = shallowRef(null);
 
+// Handler used by the 2D engine when one or more saved designs should be duplicated from canvas space and database.
+export const orderDesignDuplicateHandlerRef = shallowRef(null);
+
 // Snapshot provider used by editor undo/redo to persist order-design state alongside canvas history.
 export const externalHistoryCaptureHandlerRef = shallowRef(null);
 

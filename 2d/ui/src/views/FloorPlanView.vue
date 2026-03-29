@@ -9,6 +9,7 @@ import {
   passiveModelTransformStateRef,
   activeModelDeleteHandlerRef,
   orderDesignDeleteHandlerRef,
+  orderDesignDuplicateHandlerRef,
   externalHistoryCaptureHandlerRef,
   externalHistoryRestoreHandlerRef,
   fitAllHandlerRef,
@@ -93,6 +94,11 @@ onMounted(() => {
         const handler = orderDesignDeleteHandlerRef.value;
         if (typeof handler === "function") return await handler(payload);
         return false;
+      },
+      onOrderDesignDuplicateRequest: async (payload) => {
+        const handler = orderDesignDuplicateHandlerRef.value;
+        if (typeof handler === "function") return await handler(payload);
+        return null;
       },
       captureExternalHistoryState: () => {
         const handler = externalHistoryCaptureHandlerRef.value;
