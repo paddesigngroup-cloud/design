@@ -69,6 +69,7 @@ class WallDefaultsPayload(BaseModel):
     wallThicknessMm: int = 120
     wallHeightMm: int = 3000
     wallFillColor: str = "#A6A6A6"
+    wallFillOpacityPercent: float = Field(default=90, ge=0, le=100)
     wallEdgeColor: str = "#000000"
     wallTextColor: str = "#FFFFFF"
     wallHeightColor: str = "#4B5563"
@@ -80,6 +81,7 @@ class BeamDefaultsPayload(BaseModel):
     beamHeightMm: int = 200
     beamFloorOffsetMm: int = 2600
     beamFillColor: str = "#A6A6A6"
+    beamFillOpacityPercent: float = Field(default=20, ge=0, le=100)
     beamEdgeColor: str = "#000000"
     beamTextColor: str = "#FFFFFF"
     beam3dColor: str = "#C7CCD1"
@@ -90,6 +92,7 @@ class ColumnDefaultsPayload(BaseModel):
     columnDepthMm: int = 400
     columnHeightMm: int = 2800
     columnFillColor: str = "#A6A6A6"
+    columnFillOpacityPercent: float = Field(default=90, ge=0, le=100)
     columnEdgeColor: str = "#000000"
     columnTextColor: str = "#FFFFFF"
     column3dColor: str = "#C7CCD1"

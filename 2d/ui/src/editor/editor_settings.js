@@ -26,6 +26,7 @@ export const EDITOR_SETTINGS_DEFAULTS = Object.freeze({
   axisZColor: "#0000FF",
   showObjectAxes: false,
   wallFillColor: "#A6A6A6",
+  wallFillOpacityPercent: 90,
   wallEdgeColor: "#000000",
   wallTextColor: "#FFFFFF",
   wallHeightColor: "#4B5563",
@@ -34,6 +35,7 @@ export const EDITOR_SETTINGS_DEFAULTS = Object.freeze({
   beamHeightMm: 200,
   beamFloorOffsetMm: 2600,
   beamFillColor: "#A6A6A6",
+  beamFillOpacityPercent: 20,
   beamEdgeColor: "#000000",
   beamTextColor: "#FFFFFF",
   beam3dColor: "#C7CCD1",
@@ -41,6 +43,7 @@ export const EDITOR_SETTINGS_DEFAULTS = Object.freeze({
   columnDepthMm: 400,
   columnHeightMm: 2800,
   columnFillColor: "#A6A6A6",
+  columnFillOpacityPercent: 90,
   columnEdgeColor: "#000000",
   columnTextColor: "#FFFFFF",
   column3dColor: "#C7CCD1",
@@ -107,6 +110,12 @@ function normalizeNumber(value, fallback, min = null) {
   return parsed;
 }
 
+function normalizePercent(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.min(100, parsed));
+}
+
 export function normalizeEditorSettingsState(input = {}) {
   const source = input && typeof input === "object" ? input : {};
   return {
@@ -137,6 +146,7 @@ export function normalizeEditorSettingsState(input = {}) {
     axisZColor: normalizeString(source.axisZColor, EDITOR_SETTINGS_DEFAULTS.axisZColor),
     showObjectAxes: normalizeBool(source.showObjectAxes, EDITOR_SETTINGS_DEFAULTS.showObjectAxes),
     wallFillColor: normalizeString(source.wallFillColor, EDITOR_SETTINGS_DEFAULTS.wallFillColor),
+    wallFillOpacityPercent: normalizePercent(source.wallFillOpacityPercent, EDITOR_SETTINGS_DEFAULTS.wallFillOpacityPercent),
     wallEdgeColor: normalizeString(source.wallEdgeColor, EDITOR_SETTINGS_DEFAULTS.wallEdgeColor),
     wallTextColor: normalizeString(source.wallTextColor, EDITOR_SETTINGS_DEFAULTS.wallTextColor),
     wallHeightColor: normalizeString(source.wallHeightColor, EDITOR_SETTINGS_DEFAULTS.wallHeightColor),
@@ -145,6 +155,7 @@ export function normalizeEditorSettingsState(input = {}) {
     beamHeightMm: normalizeNumber(source.beamHeightMm, EDITOR_SETTINGS_DEFAULTS.beamHeightMm, 1),
     beamFloorOffsetMm: normalizeNumber(source.beamFloorOffsetMm, EDITOR_SETTINGS_DEFAULTS.beamFloorOffsetMm, 0),
     beamFillColor: normalizeString(source.beamFillColor, EDITOR_SETTINGS_DEFAULTS.beamFillColor),
+    beamFillOpacityPercent: normalizePercent(source.beamFillOpacityPercent, EDITOR_SETTINGS_DEFAULTS.beamFillOpacityPercent),
     beamEdgeColor: normalizeString(source.beamEdgeColor, EDITOR_SETTINGS_DEFAULTS.beamEdgeColor),
     beamTextColor: normalizeString(source.beamTextColor, EDITOR_SETTINGS_DEFAULTS.beamTextColor),
     beam3dColor: normalizeString(source.beam3dColor, EDITOR_SETTINGS_DEFAULTS.beam3dColor),
@@ -152,6 +163,7 @@ export function normalizeEditorSettingsState(input = {}) {
     columnDepthMm: normalizeNumber(source.columnDepthMm, EDITOR_SETTINGS_DEFAULTS.columnDepthMm, 1),
     columnHeightMm: normalizeNumber(source.columnHeightMm, EDITOR_SETTINGS_DEFAULTS.columnHeightMm, 1),
     columnFillColor: normalizeString(source.columnFillColor, EDITOR_SETTINGS_DEFAULTS.columnFillColor),
+    columnFillOpacityPercent: normalizePercent(source.columnFillOpacityPercent, EDITOR_SETTINGS_DEFAULTS.columnFillOpacityPercent),
     columnEdgeColor: normalizeString(source.columnEdgeColor, EDITOR_SETTINGS_DEFAULTS.columnEdgeColor),
     columnTextColor: normalizeString(source.columnTextColor, EDITOR_SETTINGS_DEFAULTS.columnTextColor),
     column3dColor: normalizeString(source.column3dColor, EDITOR_SETTINGS_DEFAULTS.column3dColor),
@@ -230,6 +242,7 @@ export function editorSettingsStateToPayload(input = {}) {
       wallThicknessMm: state.wallThicknessMm,
       wallHeightMm: state.wallHeightMm,
       wallFillColor: state.wallFillColor,
+      wallFillOpacityPercent: state.wallFillOpacityPercent,
       wallEdgeColor: state.wallEdgeColor,
       wallTextColor: state.wallTextColor,
       wallHeightColor: state.wallHeightColor,
@@ -240,6 +253,7 @@ export function editorSettingsStateToPayload(input = {}) {
       beamHeightMm: state.beamHeightMm,
       beamFloorOffsetMm: state.beamFloorOffsetMm,
       beamFillColor: state.beamFillColor,
+      beamFillOpacityPercent: state.beamFillOpacityPercent,
       beamEdgeColor: state.beamEdgeColor,
       beamTextColor: state.beamTextColor,
       beam3dColor: state.beam3dColor,
@@ -249,6 +263,7 @@ export function editorSettingsStateToPayload(input = {}) {
       columnDepthMm: state.columnDepthMm,
       columnHeightMm: state.columnHeightMm,
       columnFillColor: state.columnFillColor,
+      columnFillOpacityPercent: state.columnFillOpacityPercent,
       columnEdgeColor: state.columnEdgeColor,
       columnTextColor: state.columnTextColor,
       column3dColor: state.column3dColor,
@@ -341,14 +356,17 @@ export function settingsViewStateFromEditorState(state = {}) {
     axisYColor: flat.axisYColor,
     axisZColor: flat.axisZColor,
     wallFillColor: flat.wallFillColor,
+    wallFillOpacityPercent: flat.wallFillOpacityPercent,
     wallEdgeColor: flat.wallEdgeColor,
     wallTextColor: flat.wallTextColor,
     wall3dColor: flat.wall3dColor,
     beamFillColor: flat.beamFillColor,
+    beamFillOpacityPercent: flat.beamFillOpacityPercent,
     beamEdgeColor: flat.beamEdgeColor,
     beamTextColor: flat.beamTextColor,
     beam3dColor: flat.beam3dColor,
     columnFillColor: flat.columnFillColor,
+    columnFillOpacityPercent: flat.columnFillOpacityPercent,
     columnEdgeColor: flat.columnEdgeColor,
     columnTextColor: flat.columnTextColor,
     column3dColor: flat.column3dColor,

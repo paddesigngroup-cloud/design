@@ -111,18 +111,21 @@ const settingsSections = [
       ] },
       { key: "wallColors", kind: "color-group", label: "دیوار", description: "رنگ‌های نمایش دیوار", colors: [
         { key: "wallFillColor", label: "داخلی دوبعدی" },
+        { key: "wallFillOpacityPercent", label: "شفافیت داخلی", kind: "number", min: 0, max: 100, unit: "%" },
         { key: "wallTextColor", label: "متن" },
         { key: "wallEdgeColor", label: "خط بیرونی" },
         { key: "wall3dColor", label: "سه‌بعدی" },
       ] },
       { key: "beamColors", kind: "color-group", label: "تیر", description: "رنگ‌های نمایش تیر", colors: [
         { key: "beamFillColor", label: "داخلی دوبعدی" },
+        { key: "beamFillOpacityPercent", label: "شفافیت داخلی", kind: "number", min: 0, max: 100, unit: "%" },
         { key: "beamTextColor", label: "متن" },
         { key: "beamEdgeColor", label: "خط بیرونی" },
         { key: "beam3dColor", label: "سه‌بعدی" },
       ] },
       { key: "columnColors", kind: "color-group", label: "ستون", description: "رنگ‌های نمایش ستون", colors: [
         { key: "columnFillColor", label: "داخلی دوبعدی" },
+        { key: "columnFillOpacityPercent", label: "شفافیت داخلی", kind: "number", min: 0, max: 100, unit: "%" },
         { key: "columnTextColor", label: "متن" },
         { key: "columnEdgeColor", label: "خط بیرونی" },
         { key: "column3dColor", label: "سه‌بعدی" },
@@ -270,6 +273,12 @@ function getFieldUnitLabel(field) {
   return field.unit || "";
 }
 
+function normalizePercentValue(value, fallback = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.min(100, parsed));
+}
+
 function updateFieldValue(field, rawValue) {
   if (!field) return;
   if (field.kind === "select") {
@@ -286,6 +295,10 @@ function updateFieldValue(field, rawValue) {
   }
   if (field.kind === "color") {
     applyPatch({ [field.key]: rawValue });
+    return;
+  }
+  if (field.max === 100 && field.min === 0 && field.unit === "%") {
+    applyPatch({ [field.key]: normalizePercentValue(rawValue, model[field.key] ?? 0) });
     return;
   }
   if (field.kind === "cm-mm") {
@@ -471,8 +484,23 @@ async function handleSaveSettings() {
               <div class="settingsColorGrid">
                 <label v-for="colorItem in field.colors" :key="colorItem.key" class="settingsColor settingsColor--small">
                   <span class="settingsColor__label">{{ colorItem.label }}</span>
-                  <input class="settingsColor__input" type="color" :value="model[colorItem.key]" @input="applyPatch({ [colorItem.key]: $event.target.value })" />
-                  <span class="settingsColor__value">{{ model[colorItem.key] }}</span>
+                  <template v-if="colorItem.kind === 'number'">
+                    <input
+                      class="settingsField"
+                      type="number"
+                      inputmode="decimal"
+                      :min="colorItem.min"
+                      :max="colorItem.max"
+                      step="1"
+                      :value="model[colorItem.key]"
+                      @change="applyPatch({ [colorItem.key]: normalizePercentValue($event.target.value, model[colorItem.key] ?? 0) })"
+                    />
+                    <span class="settingsColor__value">{{ model[colorItem.key] }}{{ colorItem.unit }}</span>
+                  </template>
+                  <template v-else>
+                    <input class="settingsColor__input" type="color" :value="model[colorItem.key]" @input="applyPatch({ [colorItem.key]: $event.target.value })" />
+                    <span class="settingsColor__value">{{ model[colorItem.key] }}</span>
+                  </template>
                 </label>
               </div>
             </div>

@@ -6279,9 +6279,13 @@ function syncQuickStateFromEditor() {
     state: {
       wallHeightMm: Number.isFinite(s?.wallHeightMm) ? s.wallHeightMm : 2800,
       wallFillColor: (typeof s?.wallFillColor === "string" && s.wallFillColor) ? s.wallFillColor : "#A6A6A6",
+      wallFillOpacityPercent: Number.isFinite(Number(s?.wallFillOpacityPercent)) ? Number(s.wallFillOpacityPercent) : 90,
+      beamFillColor: (typeof s?.beamFillColor === "string" && s.beamFillColor) ? s.beamFillColor : "#A6A6A6",
+      beamFillOpacityPercent: Number.isFinite(Number(s?.beamFillOpacityPercent)) ? Number(s.beamFillOpacityPercent) : 20,
       wall3dColor: (typeof s?.wall3dColor === "string" && s.wall3dColor) ? s.wall3dColor : "#C7CCD1",
       beam3dColor: (typeof s?.beam3dColor === "string" && s.beam3dColor) ? s.beam3dColor : "#C7CCD1",
       columnFillColor: (typeof s?.columnFillColor === "string" && s.columnFillColor) ? s.columnFillColor : "#A6A6A6",
+      columnFillOpacityPercent: Number.isFinite(Number(s?.columnFillOpacityPercent)) ? Number(s.columnFillOpacityPercent) : 90,
       column3dColor: (typeof s?.column3dColor === "string" && s.column3dColor) ? s.column3dColor : "#C7CCD1",
       columnWidthMm: Number.isFinite(Number(s?.columnWidthMm)) ? Number(s.columnWidthMm) : 500,
       columnDepthMm: Number.isFinite(Number(s?.columnDepthMm)) ? Number(s.columnDepthMm) : 400,

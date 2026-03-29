@@ -202,6 +202,7 @@ export function createWallApp({
   showObjectAxes: false,
 
   wallFillColor: "#A6A6A6",
+  wallFillOpacityPercent: 90,
   wallEdgeColor: "#000000",
   wallTextColor: "#FFFFFF",
   wallHeightColor: "#4B5563",
@@ -212,6 +213,7 @@ export function createWallApp({
   beamHeightMm: 200,
   beamFloorOffsetMm: 2600,
   beamFillColor: "#A6A6A6",
+  beamFillOpacityPercent: 20,
   beamEdgeColor: "#000000",
   beamTextColor: "#FFFFFF",
   beam3dColor: "#C7CCD1",
@@ -219,6 +221,7 @@ export function createWallApp({
   columnDepthMm: 400,
   columnHeightMm: 2800,
   columnFillColor: "#A6A6A6",
+  columnFillOpacityPercent: 90,
   columnEdgeColor: "#000000",
   columnTextColor: "#FFFFFF",
   column3dColor: "#C7CCD1",
@@ -427,6 +430,12 @@ function get2dColorsForEdge(edge) {
     edge: state.wallEdgeColor,
     text: state.wallTextColor,
   };
+}
+function get2dFillOpacityForEdge(edge) {
+  const kind = getEdgeKind(edge);
+  if (kind === "beam") return clamp(Number(state.beamFillOpacityPercent) || 0, 0, 100) / 100;
+  if (kind === "column") return clamp(Number(state.columnFillOpacityPercent) || 0, 0, 100) / 100;
+  return clamp(Number(state.wallFillOpacityPercent) || 0, 0, 100) / 100;
 }
 
 const MODEL_WALL_SNAP_DIST_MM = 140;
@@ -6054,7 +6063,9 @@ function drawWallBodyFromCorners(c, edge) {
   ctx.lineTo(s3.x, s3.y);
   ctx.lineTo(s4.x, s4.y);
   ctx.closePath();
+  ctx.globalAlpha = get2dFillOpacityForEdge(edge);
   ctx.fill();
+  ctx.globalAlpha = 1;
   ctx.stroke();
   ctx.restore();
 }
@@ -6096,6 +6107,9 @@ function drawToolOverlay(tool) {
   const previewColors = (tool === beamTool)
     ? { fill: state.beamFillColor || state.wallFillColor, edge: state.beamEdgeColor || state.wallEdgeColor, text: state.beamTextColor || state.wallTextColor }
     : { fill: state.wallFillColor, edge: state.wallEdgeColor, text: state.wallTextColor };
+  const previewFillOpacity = tool === beamTool
+    ? clamp(Number(state.beamFillOpacityPercent) || 0, 0, 100) / 100
+    : clamp(Number(state.wallFillOpacityPercent) || 0, 0, 100) / 100;
 
   for (const s of segs) {
     const ax = s.a.x, ay = s.a.y;
@@ -6127,7 +6141,9 @@ function drawToolOverlay(tool) {
     ctx.lineTo(p3.x, p3.y);
     ctx.lineTo(p4.x, p4.y);
     ctx.closePath();
+    ctx.globalAlpha = previewFillOpacity;
     ctx.fill();
+    ctx.globalAlpha = 1;
     ctx.stroke();
     ctx.restore();
 
@@ -10418,6 +10434,9 @@ function setState(patch) {
   if (typeof patch.wallFillColor === "string" && patch.wallFillColor) {
     state.wallFillColor = patch.wallFillColor;
   }
+  if (Number.isFinite(Number(patch.wallFillOpacityPercent))) {
+    state.wallFillOpacityPercent = clamp(Number(patch.wallFillOpacityPercent), 0, 100);
+  }
   if (typeof patch.wallEdgeColor === "string" && patch.wallEdgeColor) {
     state.wallEdgeColor = patch.wallEdgeColor;
   }
@@ -10431,6 +10450,9 @@ function setState(patch) {
   if (typeof patch.beamFillColor === "string" && patch.beamFillColor) {
     state.beamFillColor = patch.beamFillColor;
   }
+  if (Number.isFinite(Number(patch.beamFillOpacityPercent))) {
+    state.beamFillOpacityPercent = clamp(Number(patch.beamFillOpacityPercent), 0, 100);
+  }
   if (typeof patch.beamEdgeColor === "string" && patch.beamEdgeColor) {
     state.beamEdgeColor = patch.beamEdgeColor;
   }
@@ -10443,6 +10465,9 @@ function setState(patch) {
   }
   if (typeof patch.columnFillColor === "string" && patch.columnFillColor) {
     state.columnFillColor = patch.columnFillColor;
+  }
+  if (Number.isFinite(Number(patch.columnFillOpacityPercent))) {
+    state.columnFillOpacityPercent = clamp(Number(patch.columnFillOpacityPercent), 0, 100);
   }
   if (typeof patch.columnWidthMm === "number" && isFinite(patch.columnWidthMm) && patch.columnWidthMm > 0) {
     state.columnWidthMm = Math.max(1, patch.columnWidthMm);
