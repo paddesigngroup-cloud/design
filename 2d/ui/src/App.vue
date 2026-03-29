@@ -9,6 +9,9 @@ import {
   passiveModelSelectionStateRef,
   passiveModelTransformStateRef,
   activeModelDeleteHandlerRef,
+  orderDesignDeleteHandlerRef,
+  externalHistoryCaptureHandlerRef,
+  externalHistoryRestoreHandlerRef,
   fitAllHandlerRef,
 } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
@@ -2511,25 +2514,11 @@ async function saveOrderDesignEditor() {
 async function deleteOrderDesign(item) {
   const target = normalizeOrderDesignRecord(item);
   if (!target?.id) return;
-  const ok = await showConfirm(`نمونه «${target.instance_code || target.design_title || "طرح"}» حذف شود؟`, {
-    title: "حذف طرح سفارش",
-    confirmText: "حذف",
-    cancelText: "انصراف",
-  });
-  if (!ok) return;
   try {
-    const res = await fetch(`/api/order-designs/${encodeURIComponent(target.id)}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف طرح سفارش انجام نشد."));
-    removeOrderDesignPlacement(target.id);
-    if (String(activeCabinetDesignId.value || "") === String(target.id)) {
-      stageCabinetPlaceholderBoxes.value = [];
-      activeCabinetDesignId.value = null;
-      activeStageOrderDesignSelected.value = false;
-      selectedStageOrderDesignIds.value = [];
-      editorRef.value?.clearModel2dLines?.(false);
-      saveActiveOrderDrawing().catch(() => {});
-    }
-    await loadOrderDesignCatalog(true);
+    await deleteOrderDesignsByIds([target.id], {
+      confirmMode: "single",
+      successMessage: null,
+    });
   } catch (error) {
     showAlert(error?.message || "حذف طرح سفارش انجام نشد.", { title: "خطا" });
   }
@@ -2539,15 +2528,10 @@ async function deleteActiveOrderDesignFromStage() {
   const target = activeStageOrderDesign.value;
   if (!target?.id) return;
   try {
-    const res = await fetch(`/api/order-designs/${encodeURIComponent(String(target.id))}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف طرح سفارش انجام نشد."));
-    removeOrderDesignPlacement(target.id);
-    stageCabinetPlaceholderBoxes.value = [];
-    activeCabinetDesignId.value = null;
-    activeStageOrderDesignSelected.value = false;
-    selectedStageOrderDesignIds.value = [];
-    await loadOrderDesignCatalog(true);
-    saveActiveOrderDrawing().catch(() => {});
+    await deleteOrderDesignsByIds([target.id], {
+      confirmMode: "single",
+      successMessage: null,
+    });
   } catch (error) {
     showAlert(error?.message || "حذف طرح سفارش انجام نشد.", { title: "خطا" });
   }
@@ -2773,6 +2757,129 @@ async function deleteOrderDesignSilentlyById(orderDesignId) {
   removeOrderDesignPlacement(key);
 }
 
+function buildOrderDesignDeleteConfirmMessage(targets, options = {}) {
+  const count = Array.isArray(targets) ? targets.length : 0;
+  const summary = options.selectionSummary || null;
+  const lines = [];
+  if (count > 0) {
+    if (count === 1) {
+      const target = targets[0] || null;
+      lines.push(`نمونه «${target?.instance_code || target?.design_title || "طرح"}» حذف شود؟`);
+    } else {
+      lines.push(`${count} طرح سفارش انتخاب‌شده حذف شوند؟`);
+    }
+    lines.push("این حذف از صفحه و دیتابیس انجام می‌شود.");
+  }
+  if (summary?.wallCount > 0) lines.push(summary.wallCount === 1 ? "۱ دیوار هم حذف می‌شود." : `${summary.wallCount} دیوار هم حذف می‌شوند.`);
+  if (summary?.columnCount > 0) lines.push(summary.columnCount === 1 ? "۱ ستون هم حذف می‌شود." : `${summary.columnCount} ستون هم حذف می‌شوند.`);
+  if (summary?.beamCount > 0) lines.push(summary.beamCount === 1 ? "۱ تیر هم حذف می‌شود." : `${summary.beamCount} تیر هم حذف می‌شوند.`);
+  if (summary?.hiddenCount > 0) lines.push(summary.hiddenCount === 1 ? "۱ خط مخفی هم حذف می‌شود." : `${summary.hiddenCount} خط مخفی هم حذف می‌شوند.`);
+  if (summary?.dimensionCount > 0) lines.push(summary.dimensionCount === 1 ? "۱ اندازه هم حذف می‌شود." : `${summary.dimensionCount} اندازه هم حذف می‌شوند.`);
+  return lines.join("\n");
+}
+
+async function deleteOrderDesignsByIds(designIds, options = {}) {
+  const uniqueIds = [...new Set(normalizeSelectionIds(designIds))];
+  if (!uniqueIds.length) return false;
+  const targets = uniqueIds
+    .map((id) => orderDesignCatalog.value.find((item) => String(item.id) === String(id)) || null)
+    .filter(Boolean);
+  if (!targets.length) return false;
+  if (!options.skipConfirm) {
+    const ok = await showConfirm(buildOrderDesignDeleteConfirmMessage(targets, options), {
+      title: uniqueIds.length > 1 ? "حذف گروهی طرح سفارش" : "حذف طرح سفارش",
+      confirmText: "حذف",
+      cancelText: "انصراف",
+    });
+    if (!ok) return false;
+  }
+
+  for (const id of uniqueIds) {
+    const res = await fetch(`/api/order-designs/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف طرح سفارش انجام نشد."));
+  }
+
+  const deletedIdSet = new Set(uniqueIds);
+  orderDesignCatalog.value = orderDesignCatalog.value.filter((item) => !deletedIdSet.has(String(item.id)));
+  orderDesignPlacements.value = orderDesignPlacements.value.filter((placement) => !deletedIdSet.has(String(placement.orderDesignId)));
+  selectedStageOrderDesignIds.value = selectedStageOrderDesignIds.value.filter((id) => !deletedIdSet.has(String(id)));
+
+  const activeDeleted = deletedIdSet.has(String(activeCabinetDesignId.value || ""));
+  if (activeDeleted) {
+    stageCabinetPlaceholderBoxes.value = [];
+    activeCabinetDesignId.value = null;
+    activeStageOrderDesignSelected.value = false;
+    editorRef.value?.clearModel2dLines?.(false);
+  }
+
+  await loadOrderDesignCatalog(true);
+  await saveActiveOrderDrawing().catch(() => {});
+
+  if (options.successMessage) {
+    showAlert(options.successMessage, { title: "حذف طرح سفارش" });
+  }
+  return true;
+}
+
+async function restoreOrderDesignById(orderDesignId) {
+  const key = String(orderDesignId || "").trim();
+  if (!key) return null;
+  const res = await fetch(`/api/order-designs/${encodeURIComponent(key)}/restore`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, "بازگردانی طرح سفارش انجام نشد."));
+  return normalizeOrderDesignRecord(await res.json());
+}
+
+function captureOrderDesignHistoryState() {
+  return {
+    orderId: String(activeOrder.value?.id || "").trim() || null,
+    orderDesignIds: orderDesignCatalog.value.map((item) => String(item.id || "").trim()).filter(Boolean),
+  };
+}
+
+async function restoreOrderDesignHistoryState(snapshot = null) {
+  const targetOrderId = String(snapshot?.orderId || "").trim();
+  const currentOrderId = String(activeOrder.value?.id || "").trim();
+  if (!targetOrderId || !currentOrderId || targetOrderId !== currentOrderId) return;
+
+  const targetIds = [...new Set(normalizeSelectionIds(snapshot?.orderDesignIds))];
+  const currentIds = orderDesignCatalog.value.map((item) => String(item.id || "").trim()).filter(Boolean);
+  const currentIdSet = new Set(currentIds);
+  const targetIdSet = new Set(targetIds);
+
+  for (const id of targetIds) {
+    if (currentIdSet.has(id)) continue;
+    await restoreOrderDesignById(id);
+  }
+  for (const id of currentIds) {
+    if (!targetIdSet.has(id)) {
+      const res = await fetch(`/api/order-designs/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف طرح سفارش انجام نشد."));
+    }
+  }
+
+  await loadOrderDesignCatalog(true);
+  syncQuickStateFromEditor();
+}
+
+async function handleStageOrderDesignDeleteRequest(payload = null) {
+  const activeId = payload?.activeDesignSelected ? String(activeCabinetDesignId.value || "").trim() : "";
+  const passiveIds = normalizeSelectionIds(payload?.passiveDesignIds);
+  const designIds = [...new Set([activeId, ...passiveIds].filter(Boolean))];
+  if (!designIds.length) return false;
+  try {
+    return await deleteOrderDesignsByIds(designIds, {
+      skipConfirm: true,
+      selectionSummary: payload?.selectionSummary || null,
+      successMessage: null,
+    });
+  } catch (error) {
+    showAlert(error?.message || "حذف طرح سفارش انجام نشد.", { title: "خطا" });
+    return false;
+  }
+}
+
 async function rollbackTransientCabinetDesignDrag(dragState) {
   const transientId = String(dragState?.createdOrderDesignId || "").trim();
   if (!transientId) return;
@@ -2923,6 +3030,9 @@ function activateOrderDesignFromStage(orderDesignId) {
 
 passiveModelSelectionHandlerRef.value = activateOrderDesignFromStage;
 activeModelDeleteHandlerRef.value = deleteActiveOrderDesignFromStage;
+orderDesignDeleteHandlerRef.value = handleStageOrderDesignDeleteRequest;
+externalHistoryCaptureHandlerRef.value = captureOrderDesignHistoryState;
+externalHistoryRestoreHandlerRef.value = restoreOrderDesignHistoryState;
 
 function clearStageOrderDesignPlacement({ persist = true } = {}) {
   const hadStageDesign =
@@ -6064,11 +6174,24 @@ function syncQuickStateFromEditor() {
     offsetY: Number.isFinite(Number(s.offsetY)) ? Number(s.offsetY) : 0,
   };
   const model2dLines = Array.isArray(full?.model2dSnap?.lines) ? full.model2dSnap.lines : [];
+  const restoredModelDesignId = String(full?.model2dSnap?.designId || "").trim();
   if (!model2dLines.length) {
     stageCabinetPlaceholderBoxes.value = [];
     activeCabinetDesignId.value = null;
     activeStageOrderDesignSelected.value = false;
     selectedStageOrderDesignIds.value = [];
+  } else if (restoredModelDesignId) {
+    activeCabinetDesignId.value = restoredModelDesignId;
+    const activeDesign = orderDesignCatalog.value.find((item) => String(item.id) === restoredModelDesignId) || null;
+    if (activeDesign?.viewer_boxes?.length) {
+      stageCabinetPlaceholderBoxes.value = activeDesign.viewer_boxes.map(normalizeCabinetBox);
+    }
+    upsertOrderDesignPlacement({
+      orderDesignId: restoredModelDesignId,
+      x: Number.isFinite(Number(full?.model2dSnap?.offsetXmm)) ? Number(full.model2dSnap.offsetXmm) : 0,
+      y: Number.isFinite(Number(full?.model2dSnap?.offsetYmm)) ? Number(full.model2dSnap.offsetYmm) : 0,
+      rotRad: Number.isFinite(Number(full?.model2dSnap?.rotationRad)) ? Number(full.model2dSnap.rotationRad) : 0,
+    });
   } else if (activeCabinetDesignId.value) {
     upsertOrderDesignPlacement({
       orderDesignId: activeCabinetDesignId.value,
@@ -8150,6 +8273,9 @@ onBeforeUnmount(() => {
   passiveModelSelectionHandlerRef.value = null;
   passiveModelSelectionStateRef.value = [];
   activeModelDeleteHandlerRef.value = null;
+  orderDesignDeleteHandlerRef.value = null;
+  externalHistoryCaptureHandlerRef.value = null;
+  externalHistoryRestoreHandlerRef.value = null;
   editorRef.value?.setPassiveModels?.([]);
 });
 </script>

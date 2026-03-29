@@ -77,6 +77,9 @@ export function createWallApp({
   onPassiveModelSelect,
   onPassiveModelSelectionChange,
   onActiveModelDelete,
+  onOrderDesignDeleteRequest,
+  captureExternalHistoryState,
+  restoreExternalHistoryState,
   onFitViewToAll,
   onSettingsChange,
 } = {}) {
@@ -2690,11 +2693,27 @@ function _stateSignature(snap) {
     dimensions: snap.dimensionsSnap,
     model2d: snap.model2dSnap,
     passiveModels: snap.passiveModelsSnap,
+    externalHistoryState: snap.externalHistoryState ?? null,
   });
 }
 
 class UndoManager {
-  constructor({ graph, tool, hiddenGraph, hiddenTool, beamTool, dimTool, dimensions, model2d, onModel2dRestore, getSelection, setSelection, maxDepth = 200 }) {
+  constructor({
+    graph,
+    tool,
+    hiddenGraph,
+    hiddenTool,
+    beamTool,
+    dimTool,
+    dimensions,
+    model2d,
+    onModel2dRestore,
+    getSelection,
+    setSelection,
+    captureExternalHistoryState,
+    restoreExternalHistoryState,
+    maxDepth = 200,
+  }) {
     this.graph = graph;
     this.tool = tool;
     this.hiddenGraph = hiddenGraph;
@@ -2706,6 +2725,8 @@ class UndoManager {
     this.onModel2dRestore = onModel2dRestore;
     this.getSelection = getSelection;
     this.setSelection = setSelection;
+    this.captureExternalHistoryState = captureExternalHistoryState;
+    this.restoreExternalHistoryState = restoreExternalHistoryState;
     this.maxDepth = maxDepth;
     this.stack = [];
     this.redoStack = [];
@@ -2722,6 +2743,7 @@ class UndoManager {
     const dimensionsSnap = snapshotDimensions(this.dimensions);
     const model2dSnap = snapshotModel2d(this.model2d);
     const passiveModelsSnap = snapshotPassiveModels(passiveModels);
+    const externalHistoryState = this.captureExternalHistoryState?.() ?? null;
     return {
       graphSnap,
       hiddenGraphSnap,
@@ -2732,6 +2754,7 @@ class UndoManager {
       dimensionsSnap,
       model2dSnap,
       passiveModelsSnap,
+      externalHistoryState,
       selectedWallId: sel.selectedWallId,
       hoverWallId: sel.hoverWallId,
       selectedHiddenId: sel.selectedHiddenId,
@@ -2748,11 +2771,14 @@ class UndoManager {
     };
   }
 
-  runAction(fn) {
+  async runAction(fn) {
     const before = this.capture();
     const beforeSig = _stateSignature(before);
 
-    fn();
+    const result = fn();
+    if (result && typeof result.then === "function") {
+      await result;
+    }
 
     const after = this.capture();
     const afterSig = _stateSignature(after);
@@ -2763,7 +2789,7 @@ class UndoManager {
     this.redoStack.length = 0;
   }
 
-  undo() {
+  async undo() {
     const snap = this.stack.pop();
     if (!snap) return;
 
@@ -2780,6 +2806,9 @@ class UndoManager {
     restoreDimensions(this.dimensions, snap.dimensionsSnap);
     restoreModel2d(this.model2d, snap.model2dSnap);
     restorePassiveModels(snap.passiveModelsSnap);
+    if (typeof this.restoreExternalHistoryState === "function") {
+      await this.restoreExternalHistoryState(snap.externalHistoryState ?? null, { direction: "undo" });
+    }
     this.onModel2dRestore?.();
 
     // Validate selection/hover IDs against restored walls
@@ -2834,7 +2863,7 @@ class UndoManager {
     emitPassiveModelsTransformChange();
   }
 
-  redo() {
+  async redo() {
     const snap = this.redoStack.pop();
     if (!snap) return;
 
@@ -2851,6 +2880,9 @@ class UndoManager {
     restoreDimensions(this.dimensions, snap.dimensionsSnap);
     restoreModel2d(this.model2d, snap.model2dSnap);
     restorePassiveModels(snap.passiveModelsSnap);
+    if (typeof this.restoreExternalHistoryState === "function") {
+      await this.restoreExternalHistoryState(snap.externalHistoryState ?? null, { direction: "redo" });
+    }
     this.onModel2dRestore?.();
 
     let nextSelected = snap.selectedWallId ?? null;
@@ -6881,6 +6913,20 @@ const undo = new UndoManager({
     selectedModelOutline,
     hoverModelOutline,
   }),
+  captureExternalHistoryState: () => {
+    if (typeof captureExternalHistoryState !== "function") return null;
+    try {
+      return captureExternalHistoryState();
+    } catch (_) {
+      return null;
+    }
+  },
+  restoreExternalHistoryState: async (snap, meta = null) => {
+    if (typeof restoreExternalHistoryState !== "function") return;
+    try {
+      await restoreExternalHistoryState(snap, meta);
+    } catch (_) {}
+  },
   setSelection: (v) => {
     selectedWallId = v.selectedWallId ?? null;
     hoverWallId = v.hoverWallId ?? null;
@@ -9369,16 +9415,16 @@ function cancelActiveHistoryPreview() {
   return false;
 }
 
-function performUndo() {
+async function performUndo() {
   if (dimEditor.active) closeDimEditor(true);
   if (cancelActiveHistoryPreview()) return;
-  undo.undo();
+  await undo.undo();
 }
 
-function performRedo() {
+async function performRedo() {
   if (dimEditor.active) closeDimEditor(true);
   if (cancelActiveHistoryPreview()) return;
-  undo.redo();
+  await undo.redo();
 }
 
 async function confirmActiveModelDelete() {
@@ -9387,6 +9433,48 @@ async function confirmActiveModelDelete() {
     if (dialogs && typeof dialogs.confirm === "function") {
       return await dialogs.confirm("طرح انتخاب‌شده حذف شود؟", {
         title: "حذف طرح سفارش",
+        confirmText: "حذف",
+        cancelText: "انصراف",
+      });
+    }
+  } catch (_) {}
+  return true;
+}
+
+async function confirmSelectionDeleteSummary(summary) {
+  const solidCounts = { wall: 0, beam: 0, column: 0 };
+  for (const id of Array.isArray(summary?.wallIds) ? summary.wallIds : []) {
+    const edge = graph.getWall(id);
+    if (!edge) continue;
+    const kind = getEdgeKind(edge, "wall");
+    if (kind === "beam") solidCounts.beam += 1;
+    else if (kind === "column") solidCounts.column += 1;
+    else solidCounts.wall += 1;
+  }
+  const hiddenCount = Array.isArray(summary?.hiddenIds) ? summary.hiddenIds.length : 0;
+  const dimCount = Array.isArray(summary?.dimIds) ? summary.dimIds.length : 0;
+  const passiveDesignCount = Array.isArray(summary?.passiveModelIds) ? summary.passiveModelIds.length : 0;
+  const activeDesignCount = summary?.hasModel ? 1 : 0;
+  const designCount = passiveDesignCount + activeDesignCount;
+
+  const lines = [];
+  if (designCount > 0) lines.push(designCount === 1 ? "۱ طرح سفارش" : `${designCount} طرح سفارش`);
+  if (solidCounts.wall > 0) lines.push(solidCounts.wall === 1 ? "۱ دیوار" : `${solidCounts.wall} دیوار`);
+  if (solidCounts.column > 0) lines.push(solidCounts.column === 1 ? "۱ ستون" : `${solidCounts.column} ستون`);
+  if (solidCounts.beam > 0) lines.push(solidCounts.beam === 1 ? "۱ تیر" : `${solidCounts.beam} تیر`);
+  if (hiddenCount > 0) lines.push(hiddenCount === 1 ? "۱ خط مخفی" : `${hiddenCount} خط مخفی`);
+  if (dimCount > 0) lines.push(dimCount === 1 ? "۱ اندازه" : `${dimCount} اندازه`);
+  if (!lines.length) return true;
+
+  const message =
+    lines.length === 1
+      ? `${lines[0]} حذف شود؟${designCount > 0 ? "\nاین حذف از صفحه و دیتابیس انجام می‌شود." : ""}`
+      : `موارد انتخاب‌شده حذف شوند؟\n${lines.join("، ")}${designCount > 0 ? "\nحذف طرح‌ها از صفحه و دیتابیس انجام می‌شود." : ""}`;
+  try {
+    const dialogs = (typeof window !== "undefined") ? window.__designkpDialogs : null;
+    if (dialogs && typeof dialogs.confirm === "function") {
+      return await dialogs.confirm(message, {
+        title: lines.length > 1 ? "حذف گروهی" : (designCount > 0 ? "حذف طرح سفارش" : "حذف"),
         confirmText: "حذف",
         cancelText: "انصراف",
       });
@@ -9417,7 +9505,7 @@ async function onWindowKeyDown(e) {
   if (ctrl && !e.shiftKey && (code === "KeyZ" || key.toLowerCase() === "z")) {
     if (isEditableTarget(e.target)) return;
     e.preventDefault();
-    performUndo();
+    await performUndo();
     return;
   }
 
@@ -9425,13 +9513,13 @@ async function onWindowKeyDown(e) {
   if (ctrl && !e.shiftKey && (code === "KeyY" || key.toLowerCase() === "y")) {
     if (isEditableTarget(e.target)) return;
     e.preventDefault();
-    performRedo();
+    await performRedo();
     return;
   }
   if (ctrl && e.shiftKey && (code === "KeyZ" || key.toLowerCase() === "z")) {
     if (isEditableTarget(e.target)) return;
     e.preventDefault();
-    performRedo();
+    await performRedo();
     return;
   }
 
@@ -9560,21 +9648,90 @@ async function onWindowKeyDown(e) {
   if (key === "Delete") {
     if (isEditableTarget(e.target)) return;
     if (dimEditor.active) closeDimEditor(true);
+    const collectSelectionIds = (singleId, multiIds) => {
+      const ids = [];
+      if (singleId !== null && singleId !== undefined) ids.push(singleId);
+      for (const id of Array.isArray(multiIds) ? multiIds : []) {
+        if (id !== null && id !== undefined && !ids.includes(id)) ids.push(id);
+      }
+      return ids;
+    };
+    const wallSelectionIds = collectSelectionIds(selectedWallId, selectedWallIds);
+    const hiddenSelectionIds = collectSelectionIds(selectedHiddenId, selectedHiddenIds);
+    const dimSelectionIds = collectSelectionIds(selectedDimId, selectedDimIds);
+    const passiveModelIds = [];
+    if (selectedPassiveModelId !== null && selectedPassiveModelId !== undefined) passiveModelIds.push(selectedPassiveModelId);
+    for (const id of selectedPassiveModelIds) {
+      if (id !== null && id !== undefined && !passiveModelIds.includes(id)) passiveModelIds.push(id);
+    }
     const hasGroupSelection =
-      selectedWallIds.length > 0 ||
-      selectedHiddenIds.length > 0 ||
-      selectedDimIds.length > 0 ||
+      wallSelectionIds.length > 0 ||
+      hiddenSelectionIds.length > 0 ||
+      dimSelectionIds.length > 0 ||
+      passiveModelIds.length > 0 ||
       selectedModelOutline;
 
     if (hasGroupSelection) {
       e.preventDefault();
-      const wallIds = selectedWallIds.slice();
-      const hiddenIds = selectedHiddenIds.slice();
-      const dimIds = new Set(selectedDimIds);
+      const wallIds = wallSelectionIds.slice();
+      const hiddenIds = hiddenSelectionIds.slice();
+      const dimIds = new Set(dimSelectionIds);
       const deleteModel = !!selectedModelOutline;
-      let deletedModel = false;
-      if (wallIds.length > 0 || hiddenIds.length > 0 || dimIds.size > 0) {
-        undo.runAction(() => {
+      const deletePassiveModelIds = passiveModelIds.slice();
+      const confirmed = await confirmSelectionDeleteSummary({
+        wallIds,
+        hiddenIds,
+        dimIds: Array.from(dimIds),
+        passiveModelIds: deletePassiveModelIds,
+        hasModel: deleteModel,
+      });
+      if (!confirmed) return;
+      await undo.runAction(async () => {
+        let deletedModel = false;
+        let deletedPassiveModels = false;
+        let designDeleteSucceeded = !(deleteModel || deletePassiveModelIds.length > 0);
+        if (deleteModel || deletePassiveModelIds.length > 0) {
+          if (typeof onOrderDesignDeleteRequest === "function") {
+            const deleted = await onOrderDesignDeleteRequest({
+              activeDesignSelected: deleteModel,
+              passiveDesignIds: deletePassiveModelIds.slice(),
+            });
+            designDeleteSucceeded = !!deleted;
+            deletedModel = !!(deleteModel && deleted);
+            deletedPassiveModels = !!(deletePassiveModelIds.length && deleted);
+          } else if (deleteModel) {
+            const modelConfirmed = await confirmActiveModelDelete();
+            designDeleteSucceeded = !!modelConfirmed;
+            if (modelConfirmed) {
+              model2d.lines = [];
+              model2d.outline = [];
+              model2d.name = "";
+              model2d.unitToMm = 1;
+              model2d.offsetXmm = 0;
+              model2d.offsetYmm = 0;
+              model2d.rotationRad = 0;
+              emitModel2dTransform();
+              deletedModel = true;
+              if (typeof onActiveModelDelete === "function") await onActiveModelDelete();
+            }
+          }
+          if (deletedModel) {
+            model2d.lines = [];
+            model2d.outline = [];
+            model2d.name = "";
+            model2d.unitToMm = 1;
+            model2d.offsetXmm = 0;
+            model2d.offsetYmm = 0;
+            model2d.rotationRad = 0;
+            emitModel2dTransform();
+          }
+          if (deletedPassiveModels) {
+            const deletedIds = new Set(deletePassiveModelIds.map((id) => String(id || "")));
+            passiveModels = passiveModels.filter((model) => !deletedIds.has(String(model?.id || "")));
+          }
+        }
+        if (!designDeleteSucceeded) return;
+        if (wallIds.length > 0 || hiddenIds.length > 0 || dimIds.size > 0) {
           for (const wallId of wallIds) {
             const w = graph.getWall(wallId);
             if (!w) continue;
@@ -9598,37 +9755,26 @@ async function onWindowKeyDown(e) {
           if (hiddenTool.pendingStartNodeId && !hiddenGraph.getNode(hiddenTool.pendingStartNodeId)) hiddenTool.stopChaining();
           enforceLockedInsideLengths();
           syncCreationCountersFromScene();
-        });
-      }
-      if (deleteModel) {
-        const confirmed = await confirmActiveModelDelete();
-        if (confirmed) {
-          model2d.lines = [];
-          model2d.outline = [];
-          model2d.name = "";
-          model2d.unitToMm = 1;
-          model2d.offsetXmm = 0;
-          model2d.offsetYmm = 0;
-          model2d.rotationRad = 0;
-          emitModel2dTransform();
-          deletedModel = true;
-          if (typeof onActiveModelDelete === "function") await onActiveModelDelete();
         }
-      }
-      hoverWallId = null;
-      selectedWallId = null;
-      selectedHiddenId = null;
-      hoverHiddenId = null;
-      selectedDimId = null;
-      hoverDimId = null;
-      hoverModelOutline = deleteModel ? !deletedModel : false;
-      selectedModelOutline = deleteModel ? !deletedModel : false;
-      clearGroupSelection();
-      if (deleteModel && !deletedModel) selectedModelOutline = true;
+        hoverWallId = null;
+        selectedWallId = null;
+        selectedHiddenId = null;
+        hoverHiddenId = null;
+        selectedDimId = null;
+        hoverDimId = null;
+        hoverModelOutline = deleteModel ? !deletedModel : false;
+        selectedModelOutline = deleteModel ? !deletedModel : false;
+        clearGroupSelection();
+        if ((deletePassiveModelIds.length > 0 && !deletedPassiveModels) || (deleteModel && !deletedModel)) {
+          selectedPassiveModelId = deletePassiveModelIds.length ? deletePassiveModelIds[0] : selectedPassiveModelId;
+          selectedPassiveModelIds = deletePassiveModelIds.length > 1 ? deletePassiveModelIds.slice() : [];
+        }
+        if (deleteModel && !deletedModel) selectedModelOutline = true;
+      });
     } else if (selectedWallId) {
       e.preventDefault();
       const wallId = selectedWallId;
-      undo.runAction(() => {
+      await undo.runAction(() => {
         const w = graph.getWall(wallId);
         if (!w) return;
         graph.deleteWall(wallId);
@@ -9647,7 +9793,7 @@ async function onWindowKeyDown(e) {
     } else if (selectedHiddenId) {
       e.preventDefault();
       const wallId = selectedHiddenId;
-      undo.runAction(() => {
+      await undo.runAction(() => {
         const w = hiddenGraph.getWall(wallId);
         if (!w) return;
         hiddenGraph.deleteWall(wallId);
@@ -9665,7 +9811,7 @@ async function onWindowKeyDown(e) {
     } else if (selectedDimId) {
       e.preventDefault();
       const dimId = selectedDimId;
-      undo.runAction(() => {
+      await undo.runAction(() => {
         const idx = dimensions.findIndex((d) => d && d.id === dimId);
         if (idx >= 0) dimensions.splice(idx, 1);
         syncCreationCountersFromScene();

@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import uuid
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.account import OrderDesign, OrderDesignInteriorInstance
 from designkp_backend.services.order_designs import (
+    SNAPSHOT_META_KEY,
     build_order_design_snapshot,
     build_order_design_snapshot_checksum,
     interior_instance_tables_ready,
@@ -25,6 +28,8 @@ from designkp_backend.services.order_designs import (
 )
 
 router = APIRouter(prefix="/order-designs", tags=["order_designs"])
+
+DELETED_RESTORE_INSTANCE_CODE_KEY = "restore_instance_code"
 
 
 class OrderDesignItem(BaseModel):
@@ -135,6 +140,17 @@ async def _require_item(session: AsyncSession, item_id: uuid.UUID) -> OrderDesig
     return item
 
 
+async def _require_item_any_status(session: AsyncSession, item_id: uuid.UUID) -> OrderDesign:
+    stmt = select(OrderDesign)
+    if await interior_instance_tables_ready(session):
+        stmt = stmt.options(selectinload(OrderDesign.interior_instances))
+    item = await session.scalar(stmt.where(OrderDesign.id == item_id))
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design not found.")
+    await require_accessible_order(session, order_id=item.order_id)
+    return item
+
+
 async def _ensure_unique_instance_code(
     session: AsyncSession,
     *,
@@ -154,6 +170,32 @@ async def _ensure_unique_instance_code(
     duplicate = await session.scalar(stmt)
     if duplicate:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Instance code is already used in this order.")
+
+
+def _deleted_order_design_instance_code(instance_code: str, item_id: uuid.UUID) -> str:
+    prefix = (str(instance_code or "").strip() or "design")[:40]
+    suffix = f"__deleted__{str(item_id).replace('-', '')[:12]}"
+    return f"{prefix}{suffix}"[:64]
+
+
+def _remember_deleted_instance_code(meta: dict[str, object] | None, instance_code: str) -> dict[str, object]:
+    next_meta = dict(meta or {})
+    state = dict(next_meta.get(SNAPSHOT_META_KEY) or {})
+    state[DELETED_RESTORE_INSTANCE_CODE_KEY] = str(instance_code or "").strip()
+    next_meta[SNAPSHOT_META_KEY] = state
+    return next_meta
+
+
+def _restore_deleted_instance_code(meta: dict[str, object] | None, fallback: str) -> tuple[str, dict[str, object]]:
+    next_meta = dict(meta or {})
+    state = dict(next_meta.get(SNAPSHOT_META_KEY) or {})
+    instance_code = str(state.get(DELETED_RESTORE_INSTANCE_CODE_KEY) or "").strip() or str(fallback or "").strip()
+    state.pop(DELETED_RESTORE_INSTANCE_CODE_KEY, None)
+    if state:
+        next_meta[SNAPSHOT_META_KEY] = state
+    else:
+        next_meta.pop(SNAPSHOT_META_KEY, None)
+    return instance_code, next_meta
 
 
 def _normalize_attr_values(
@@ -320,12 +362,29 @@ async def update_order_design(
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_order_design(item_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
     item = await _require_item(session, item_id)
-    if await interior_instance_tables_ready(session):
-        await session.delete(item)
-    else:
-        await session.execute(delete(OrderDesign).where(OrderDesign.id == item_id))
+    original_instance_code = str(item.instance_code or "").strip()
+    item.order_attr_meta = _remember_deleted_instance_code(dict(item.order_attr_meta or {}), original_instance_code)
+    item.instance_code = _deleted_order_design_instance_code(original_instance_code, item.id)
+    item.deleted_at = datetime.now(timezone.utc)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{item_id}/restore", response_model=OrderDesignItem)
+async def restore_order_design(item_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> OrderDesignItem:
+    item = await _require_item_any_status(session, item_id)
+    if item.deleted_at is None:
+        include_interior = await interior_instance_tables_ready(session)
+        return _serialize_item(item, include_interior=include_interior)
+    instance_code, next_meta = _restore_deleted_instance_code(dict(item.order_attr_meta or {}), str(item.instance_code or "").strip())
+    await _ensure_unique_instance_code(session, order_id=item.order_id, instance_code=instance_code, exclude_id=item.id)
+    item.instance_code = instance_code
+    item.order_attr_meta = next_meta
+    item.deleted_at = None
+    await session.commit()
+    item = await _require_item(session, item_id)
+    include_interior = await interior_instance_tables_ready(session)
+    return _serialize_item(item, include_interior=include_interior)
 
 
 @router.patch("/{item_id}/interior-instances/{instance_id}", response_model=OrderDesignItem)

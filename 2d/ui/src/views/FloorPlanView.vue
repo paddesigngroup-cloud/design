@@ -8,6 +8,9 @@ import {
   passiveModelSelectionStateRef,
   passiveModelTransformStateRef,
   activeModelDeleteHandlerRef,
+  orderDesignDeleteHandlerRef,
+  externalHistoryCaptureHandlerRef,
+  externalHistoryRestoreHandlerRef,
   fitAllHandlerRef,
 } from "../editor/editor_store.js";
 import {
@@ -85,6 +88,21 @@ onMounted(() => {
       onActiveModelDelete: () => {
         const handler = activeModelDeleteHandlerRef.value;
         if (typeof handler === "function") handler();
+      },
+      onOrderDesignDeleteRequest: async (payload) => {
+        const handler = orderDesignDeleteHandlerRef.value;
+        if (typeof handler === "function") return await handler(payload);
+        return false;
+      },
+      captureExternalHistoryState: () => {
+        const handler = externalHistoryCaptureHandlerRef.value;
+        if (typeof handler === "function") return handler();
+        return null;
+      },
+      restoreExternalHistoryState: async (snap, meta) => {
+        const handler = externalHistoryRestoreHandlerRef.value;
+        if (typeof handler === "function") return await handler(snap, meta);
+        return null;
       },
       onFitViewToAll: () => {
         const handler = fitAllHandlerRef.value;

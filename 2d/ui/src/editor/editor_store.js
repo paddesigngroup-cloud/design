@@ -21,6 +21,15 @@ export const passiveModelTransformStateRef = shallowRef([]);
 // Handler used by the 2D engine when the active saved design is deleted from canvas space.
 export const activeModelDeleteHandlerRef = shallowRef(null);
 
+// Handler used by the 2D engine when one or more saved designs should be deleted from canvas space and database.
+export const orderDesignDeleteHandlerRef = shallowRef(null);
+
+// Snapshot provider used by editor undo/redo to persist order-design state alongside canvas history.
+export const externalHistoryCaptureHandlerRef = shallowRef(null);
+
+// Restore handler used by editor undo/redo to sync order-design state back to UI/database.
+export const externalHistoryRestoreHandlerRef = shallowRef(null);
+
 // Handler used by the 2D engine whenever a canvas-level "fit all" action should sync to the 3D stage widget.
 export const fitAllHandlerRef = shallowRef(null);
 
