@@ -1073,13 +1073,19 @@ textarea {
   color: #4b1e2f;
   font-family: Vazirmatn, sans-serif;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 700;
+  direction: rtl;
 }
 .settingsPage__saveBtn img {
   width: 20px;
   height: 20px;
   opacity: 0.9;
   filter: none;
+}
+.settingsPage__saveBtn span {
+  font-family: Vazirmatn, sans-serif;
+  font-weight: 700;
+  line-height: 1;
 }
 .settingsPage__hint {
   padding: 12px 16px;
@@ -1162,12 +1168,14 @@ textarea {
   min-height: 150px;
 }
 .settingsCard--colors {
-  min-height: 220px;
+  min-height: 480px;
 }
 .settingsCard__head {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  position: relative;
+  z-index: 1;
 }
 .settingsCard__title {
   margin: 0;
@@ -1251,7 +1259,7 @@ textarea {
 .settingsColor--small {
   min-height: 86px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px;
+  grid-template-columns: minmax(88px, 1fr) 44px;
   grid-template-areas:
     "label swatch"
     "value swatch";
@@ -1261,9 +1269,13 @@ textarea {
 .settingsColor__label {
   grid-area: label;
   color: #7a5d67;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   text-align: right;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .settingsColor__input {
   width: 44px;
@@ -1303,9 +1315,13 @@ textarea {
 }
 .settingsColorGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(172px, 1fr));
   gap: 10px;
   align-items: start;
+}
+.settingsCard--colors .settingsCard__body {
+  justify-content: flex-start;
+  margin-top: 6px;
 }
 .settingsSidebar {
   display: flex;
@@ -1343,7 +1359,7 @@ textarea {
 .settingsSidebar__tab {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 4px;
   width: 100%;
   min-height: 78px;
@@ -1353,6 +1369,7 @@ textarea {
   background: rgba(255, 255, 255, 0.84);
   cursor: pointer;
   text-align: right;
+  direction: rtl;
   transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
 }
 .settingsSidebar__tab:hover {
@@ -1368,11 +1385,17 @@ textarea {
   font-size: 15px;
   font-weight: 700;
   line-height: 1.5;
+  display: block;
+  width: 100%;
+  text-align: right;
 }
 .settingsSidebar__tabMeta {
   color: #7a5d67;
   font-size: 12px;
   font-weight: 700;
+  display: block;
+  width: 100%;
+  text-align: right;
 }
 @media (max-width: 1100px) {
   .settingsLayout {
@@ -1410,7 +1433,7 @@ textarea {
     grid-template-columns: 1fr;
   }
   .settingsColorGrid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   }
 }
 
