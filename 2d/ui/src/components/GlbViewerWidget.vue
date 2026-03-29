@@ -122,8 +122,15 @@ const attrsSnapshot = computed(() => props.walls2d?.metrics || props.walls2d || 
 const selectedEntityType = computed(
   () => attrsSnapshot.value?.entityType || props.selectedWallStyle?.entityType || "wall"
 );
-const displayUnit = computed(() => String(props.displayUnit || "").trim() === "mm" ? "mm" : "cm");
-const displayUnitLabel = computed(() => displayUnit.value === "mm" ? "میلی‌متر" : "سانتی‌متر");
+const displayUnit = computed(() => {
+  const unit = String(props.displayUnit || "").trim().toLowerCase();
+  return unit === "mm" || unit === "inch" ? unit : "cm";
+});
+const displayUnitLabel = computed(() => {
+  if (displayUnit.value === "mm") return "میلی‌متر";
+  if (displayUnit.value === "inch") return "اینچ";
+  return "سانتی‌متر";
+});
 const isBeamLikeEntity = computed(() => selectedEntityType.value === "beam" || selectedEntityType.value === "column");
 const showLengthField = computed(() => selectedEntityType.value !== "hidden");
 const showThicknessField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
@@ -251,21 +258,29 @@ const mmToCm = (v) => Math.round((Number(v || 0) * 0.1) * 10) / 10;
 const cmToMm = (v) => Number(v) * 10;
 function cmToDisplay(v) {
   const numeric = Number(v || 0);
-  return displayUnit.value === "mm" ? Math.round(numeric * 10 * 10) / 10 : numeric;
+  if (displayUnit.value === "mm") return Math.round(numeric * 10 * 10) / 10;
+  if (displayUnit.value === "inch") return Math.round((numeric / 2.54) * 100) / 100;
+  return numeric;
 }
 function displayToCm(v) {
   const numeric = Number(v);
   if (!Number.isFinite(numeric)) return numeric;
-  return displayUnit.value === "mm" ? numeric / 10 : numeric;
+  if (displayUnit.value === "mm") return numeric / 10;
+  if (displayUnit.value === "inch") return numeric * 2.54;
+  return numeric;
 }
 function mmToDisplay(v) {
   const numeric = Number(v || 0);
-  return displayUnit.value === "mm" ? numeric : Math.round((numeric / 10) * 10) / 10;
+  if (displayUnit.value === "mm") return numeric;
+  if (displayUnit.value === "inch") return Math.round((numeric / 25.4) * 100) / 100;
+  return Math.round((numeric / 10) * 10) / 10;
 }
 function displayToMm(v) {
   const numeric = Number(v);
   if (!Number.isFinite(numeric)) return numeric;
-  return displayUnit.value === "mm" ? numeric : numeric * 10;
+  if (displayUnit.value === "mm") return numeric;
+  if (displayUnit.value === "inch") return numeric * 25.4;
+  return numeric * 10;
 }
 function formatOrderDesignDisplayValue(value, inputMode) {
   if (inputMode === "binary") return value;
@@ -682,7 +697,7 @@ function patchWallMoveDelta(axis, value) {
   const num = parseNumericInput(value);
   wallMoveDeltaCm.value = {
     ...wallMoveDeltaCm.value,
-    [axis]: Number.isFinite(num) ? (Math.round(num * 10) / 10) : 0,
+    [axis]: Number.isFinite(num) ? displayToCm(num) : 0,
   };
 }
 
@@ -739,7 +754,8 @@ function getCoordFieldValue(key, fallback) {
   if (Object.prototype.hasOwnProperty.call(coordInputDrafts.value, key)) {
     return coordInputDrafts.value[key];
   }
-  return (fallback ?? "");
+  if (fallback == null || fallback === "") return "";
+  return String(cmToDisplay(fallback));
 }
 
 function setCoordFieldDraft(key, value) {
@@ -765,7 +781,7 @@ function commitCenterCoordInput(axis, key) {
   const num = parseNumericInput(text);
   clearCoordFieldDraft(key);
   if (!Number.isFinite(num)) return;
-  patchCenterCoord(axis, num);
+  patchCenterCoord(axis, displayToCm(num));
 }
 
 function commitPointCoordInput(pointKey, axis, key) {
@@ -773,7 +789,7 @@ function commitPointCoordInput(pointKey, axis, key) {
   const num = parseNumericInput(text);
   clearCoordFieldDraft(key);
   if (!Number.isFinite(num)) return;
-  patchByPointKey(pointKey, axis, num);
+  patchByPointKey(pointKey, axis, displayToCm(num));
 }
 
 watch(

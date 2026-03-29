@@ -31,6 +31,7 @@ const settingsSections = [
         description: "واحدی که در فرم‌ها نمایش داده می‌شود",
         options: [
           { value: "mm", label: "میلی‌متر" },
+          { value: "inch", label: "اینچ" },
           { value: "cm", label: "سانتی‌متر" },
         ],
       },
@@ -143,6 +144,52 @@ function positiveOrFallback(value, fallback, min = 0.0001) {
   return Number.isFinite(parsed) && parsed > min ? parsed : fallback;
 }
 
+function normalizeDisplayUnit(unit) {
+  const normalized = String(unit || "").trim().toLowerCase();
+  return normalized === "mm" || normalized === "inch" ? normalized : "cm";
+}
+
+function mmToDisplayValue(value, unit) {
+  const numeric = Number(value ?? 0);
+  const normalizedUnit = normalizeDisplayUnit(unit);
+  if (normalizedUnit === "mm") return numeric;
+  if (normalizedUnit === "inch") return Math.round((numeric / 25.4) * 100) / 100;
+  return numeric / 10;
+}
+
+function displayValueToMm(value, unit) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return numeric;
+  const normalizedUnit = normalizeDisplayUnit(unit);
+  if (normalizedUnit === "mm") return numeric;
+  if (normalizedUnit === "inch") return numeric * 25.4;
+  return numeric * 10;
+}
+
+function cmToDisplayValue(value, unit) {
+  const numeric = Number(value ?? 0);
+  const normalizedUnit = normalizeDisplayUnit(unit);
+  if (normalizedUnit === "mm") return numeric * 10;
+  if (normalizedUnit === "inch") return Math.round((numeric / 2.54) * 100) / 100;
+  return numeric;
+}
+
+function displayValueToCm(value, unit) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return numeric;
+  const normalizedUnit = normalizeDisplayUnit(unit);
+  if (normalizedUnit === "mm") return numeric / 10;
+  if (normalizedUnit === "inch") return numeric * 2.54;
+  return numeric;
+}
+
+function getDisplayLengthUnitLabel(unit) {
+  const normalizedUnit = normalizeDisplayUnit(unit);
+  if (normalizedUnit === "mm") return "میلی‌متر";
+  if (normalizedUnit === "inch") return "اینچ";
+  return "سانتی‌متر";
+}
+
 function hydrateModelFromFlatState(flatState) {
   const nextModel = settingsViewStateFromEditorState(flatState);
   for (const k of Object.keys(model)) model[k] = nextModel[k];
@@ -172,12 +219,13 @@ function selectSection(sectionId) {
 function getFieldValue(field) {
   if (!field) return "";
   if (field.kind === "cm-mm") {
-    const raw = Number(model[field.key] ?? field.fallback ?? 0);
-    return model.unit === "mm" ? raw : raw / 10;
+    return mmToDisplayValue(model[field.key] ?? field.fallback ?? 0, model.unit);
   }
   if (field.key === "dimOffsetMm" || field.key === "offsetWallDistanceMm") {
-    const raw = Number(model[field.key] ?? 0);
-    return model.unit === "mm" ? raw : raw / 10;
+    return mmToDisplayValue(model[field.key] ?? 0, model.unit);
+  }
+  if (field.key === "stepLineCm") {
+    return cmToDisplayValue(model[field.key] ?? 0, model.unit);
   }
   return model[field.key];
 }
@@ -185,8 +233,13 @@ function getFieldValue(field) {
 function getFieldMin(field) {
   if (!field) return undefined;
   if (field.kind === "cm-mm") {
-    const raw = Number(field.min ?? 0);
-    return model.unit === "mm" ? raw : raw / 10;
+    return mmToDisplayValue(field.min ?? 0, model.unit);
+  }
+  if (field.key === "dimOffsetMm" || field.key === "offsetWallDistanceMm") {
+    return mmToDisplayValue(field.min ?? 0, model.unit);
+  }
+  if (field.key === "stepLineCm") {
+    return cmToDisplayValue(field.min ?? 0, model.unit);
   }
   return field.min;
 }
@@ -194,17 +247,25 @@ function getFieldMin(field) {
 function getFieldStep(field) {
   if (!field) return undefined;
   if (field.kind === "cm-mm") {
-    const raw = Number(field.step ?? 1);
-    return model.unit === "mm" ? raw : raw / 10;
+    return mmToDisplayValue(field.step ?? 1, model.unit);
+  }
+  if (field.key === "dimOffsetMm" || field.key === "offsetWallDistanceMm") {
+    return mmToDisplayValue(field.step ?? 1, model.unit);
+  }
+  if (field.key === "stepLineCm") {
+    return cmToDisplayValue(field.step ?? 1, model.unit);
   }
   return field.step;
 }
 
 function getFieldUnitLabel(field) {
   if (!field) return "";
-  if (field.kind === "cm-mm") return model.unit === "mm" ? "میلی‌متر" : "سانتی‌متر";
+  if (field.kind === "cm-mm") return getDisplayLengthUnitLabel(model.unit);
   if (field.key === "dimOffsetMm" || field.key === "offsetWallDistanceMm") {
-    return model.unit === "mm" ? "میلی‌متر" : "سانتی‌متر";
+    return getDisplayLengthUnitLabel(model.unit);
+  }
+  if (field.key === "stepLineCm") {
+    return getDisplayLengthUnitLabel(model.unit);
   }
   return field.unit || "";
 }
@@ -231,16 +292,21 @@ function updateFieldValue(field, rawValue) {
     const min = field.min ?? 0;
     const fallback = field.fallback ?? 0;
     const nextValue = Math.max(min, +rawValue || fallback);
-    applyPatch({ [field.key]: model.unit === "mm" ? nextValue : nextValue * 10 });
+    applyPatch({ [field.key]: displayValueToMm(nextValue, model.unit) });
     return;
   }
   if (field.key === "stepLineCm" || field.key === "stepAngleDeg") {
+    if (field.key === "stepLineCm") {
+      const nextValue = positiveOrFallback(rawValue, getFieldValue(field), 0);
+      applyPatch({ [field.key]: displayValueToCm(nextValue, model.unit) });
+      return;
+    }
     applyPatch({ [field.key]: positiveOrFallback(rawValue, model[field.key]) });
     return;
   }
   if (field.key === "dimOffsetMm" || field.key === "offsetWallDistanceMm") {
     const nextValue = Math.max(field.min ?? 0, +rawValue || 0);
-    applyPatch({ [field.key]: model.unit === "mm" ? nextValue : nextValue * 10 });
+    applyPatch({ [field.key]: displayValueToMm(nextValue, model.unit) });
     return;
   }
   applyPatch({ [field.key]: +rawValue || model[field.key] || 0 });

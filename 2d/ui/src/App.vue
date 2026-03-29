@@ -6156,7 +6156,9 @@ function syncQuickStateFromEditor() {
   const full = editorRef.value?.getState?.();
   const s = full?.state;
   if (!s) return;
-  currentEditorDisplayUnitState.value = String(s.unit || "cm").trim().toLowerCase() === "mm" ? "mm" : "cm";
+  currentEditorDisplayUnitState.value = ["mm", "inch"].includes(String(s.unit || "cm").trim().toLowerCase())
+    ? String(s.unit || "cm").trim().toLowerCase()
+    : "cm";
   activeStageOrderDesignSelected.value = !!full?.selection?.selectedModelOutline;
   {
     const nextSelectedIds = [];
@@ -7645,7 +7647,9 @@ function getEditorStateSnapshot() {
   return editorRef.value?.getState?.()?.state || {};
 }
 const currentEditorDisplayUnit = computed(() => {
-  return currentEditorDisplayUnitState.value === "mm" ? "mm" : "cm";
+  return currentEditorDisplayUnitState.value === "mm" || currentEditorDisplayUnitState.value === "inch"
+    ? currentEditorDisplayUnitState.value
+    : "cm";
 });
 
 function setDraftFromDesignTool(id) {
