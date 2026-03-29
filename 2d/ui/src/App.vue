@@ -7359,6 +7359,10 @@ function onGlbModel2d(payload) {
 function getEditorStateSnapshot() {
   return editorRef.value?.getState?.()?.state || {};
 }
+const currentEditorDisplayUnit = computed(() => {
+  const unit = String(getEditorStateSnapshot()?.unit || "cm").trim().toLowerCase();
+  return unit === "mm" ? "mm" : "cm";
+});
 
 function setDraftFromDesignTool(id) {
   const st = getEditorStateSnapshot();
@@ -8232,6 +8236,7 @@ onBeforeUnmount(() => {
                         src="/models/1_z1.glb"
                         :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
                         :placeholder-boxes="design.preview.viewer_boxes"
+                        :display-unit="currentEditorDisplayUnit"
                         :show-attrs-panel="false"
                         :embedded="true"
                         :preview-only="true"
@@ -8528,6 +8533,7 @@ onBeforeUnmount(() => {
             src="/models/1_z1.glb"
             :model2d-transform="model2dTransformRef"
             :walls2d="walls3dSnapshot"
+            :display-unit="currentEditorDisplayUnit"
             :order-design="selectedOrderDesignSource"
             :selected-order-design-ids="selectedOrderDesignIds"
             :order-param-groups="constructionParamGroups"
@@ -9772,6 +9778,7 @@ onBeforeUnmount(() => {
                           src="/models/1_z1.glb"
                           :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
                           :placeholder-boxes="item.preview.viewer_boxes"
+                          :display-unit="currentEditorDisplayUnit"
                           :show-attrs-panel="false"
                           :embedded="true"
                           :preview-only="true"
@@ -10261,6 +10268,7 @@ onBeforeUnmount(() => {
                   src="/models/1_z1.glb"
                   :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
                   :placeholder-boxes="subCategoryDesignEditorPreview.viewer_boxes"
+                  :display-unit="currentEditorDisplayUnit"
                   :show-attrs-panel="false"
                   :embedded="true"
                 />
@@ -11059,6 +11067,7 @@ onBeforeUnmount(() => {
                         src="/models/1_z1.glb"
                         :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
                         :placeholder-boxes="item.viewer_boxes"
+                        :display-unit="currentEditorDisplayUnit"
                         :show-attrs-panel="false"
                         :embedded="true"
                         :preview-only="true"

@@ -58,6 +58,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  displayUnit: {
+    type: String,
+    default: "cm",
+  },
 });
 
 const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords", "update:orderDesignAttr"]);
@@ -118,13 +122,15 @@ const attrsSnapshot = computed(() => props.walls2d?.metrics || props.walls2d || 
 const selectedEntityType = computed(
   () => attrsSnapshot.value?.entityType || props.selectedWallStyle?.entityType || "wall"
 );
+const displayUnit = computed(() => String(props.displayUnit || "").trim() === "mm" ? "mm" : "cm");
+const displayUnitLabel = computed(() => displayUnit.value === "mm" ? "میلی‌متر" : "سانتی‌متر");
 const isBeamLikeEntity = computed(() => selectedEntityType.value === "beam" || selectedEntityType.value === "column");
 const showLengthField = computed(() => selectedEntityType.value !== "hidden");
 const showThicknessField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
 const showHeightField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
 const showFloorDistanceField = computed(() => selectedEntityType.value === "beam");
-const lengthFieldLabel = computed(() => selectedEntityType.value === "column" ? "عرض (cm)" : "طول (cm)");
-const thicknessFieldLabel = computed(() => selectedEntityType.value === "column" ? "عمق (cm)" : "ضخامت (cm)");
+const lengthFieldLabel = computed(() => selectedEntityType.value === "column" ? "عرض" : "طول");
+const thicknessFieldLabel = computed(() => selectedEntityType.value === "column" ? "عمق" : "ضخامت");
 const colorFieldLabel = computed(() => {
   if (selectedEntityType.value === "column") return "رنگ سه بعدی ستون";
   if (selectedEntityType.value === "beam") return "رنگ سه بعدی تیر";
@@ -186,6 +192,10 @@ const orderDesignAttrGroups = computed(() => {
       value: Object.prototype.hasOwnProperty.call(orderDesignInputDrafts.value, key)
         ? orderDesignInputDrafts.value[key]
         : values[key] ?? "",
+      displayValue: Object.prototype.hasOwnProperty.call(orderDesignInputDrafts.value, key)
+        ? orderDesignInputDrafts.value[key]
+        : formatOrderDesignDisplayValue(values[key] ?? "", entryMeta.input_mode === "binary" ? "binary" : "value"),
+      unitLabel: getOrderDesignValueUnit(entryMeta.input_mode === "binary" ? "binary" : "value"),
       sortOrder: Number(entryMeta.param_ui_order) || 0,
       paramId: Number(entryMeta.param_id) || 0,
     });
@@ -239,6 +249,35 @@ const activeOrderDesignIdentity = computed(() => {
 });
 const mmToCm = (v) => Math.round((Number(v || 0) * 0.1) * 10) / 10;
 const cmToMm = (v) => Number(v) * 10;
+function cmToDisplay(v) {
+  const numeric = Number(v || 0);
+  return displayUnit.value === "mm" ? Math.round(numeric * 10 * 10) / 10 : numeric;
+}
+function displayToCm(v) {
+  const numeric = Number(v);
+  if (!Number.isFinite(numeric)) return numeric;
+  return displayUnit.value === "mm" ? numeric / 10 : numeric;
+}
+function mmToDisplay(v) {
+  const numeric = Number(v || 0);
+  return displayUnit.value === "mm" ? numeric : Math.round((numeric / 10) * 10) / 10;
+}
+function displayToMm(v) {
+  const numeric = Number(v);
+  if (!Number.isFinite(numeric)) return numeric;
+  return displayUnit.value === "mm" ? numeric : numeric * 10;
+}
+function formatOrderDesignDisplayValue(value, inputMode) {
+  if (inputMode === "binary") return value;
+  const text = value == null ? "" : String(value).trim();
+  if (!text) return "";
+  const numeric = Number(text);
+  if (!Number.isFinite(numeric)) return text;
+  return String(mmToDisplay(numeric));
+}
+function getOrderDesignValueUnit(inputMode) {
+  return inputMode === "binary" ? "" : displayUnitLabel.value;
+}
 function normalizeIds(ids) {
   return Array.isArray(ids)
     ? ids.map((id) => String(id || "").trim()).filter(Boolean)
@@ -587,9 +626,19 @@ function setOrderDesignDraftValue(key, value) {
   };
 }
 
-function commitOrderDesignDraftValue(key) {
+function commitOrderDesignDraftValue(key, entry = null) {
   if (!Object.prototype.hasOwnProperty.call(orderDesignInputDrafts.value, key)) return;
-  patchOrderDesignAttr(key, orderDesignInputDrafts.value[key] ?? "");
+  const rawValue = orderDesignInputDrafts.value[key] ?? "";
+  if (entry?.inputMode === "binary") {
+    patchOrderDesignAttr(key, rawValue);
+    return;
+  }
+  const numeric = Number(rawValue);
+  if (!String(rawValue).trim() || !Number.isFinite(numeric)) {
+    patchOrderDesignAttr(key, rawValue);
+    return;
+  }
+  patchOrderDesignAttr(key, String(displayToMm(numeric)));
 }
 
 function toggleOrderDesignGroup(groupKey) {
@@ -1702,6 +1751,7 @@ defineExpose({
     <div class="glbWallAttrs__sticky">
       <div class="glbWallAttrs__head">
         <div class="menuPanel__title glbWallAttrs__title">صفات</div>
+        <div class="glbWallAttrs__titleUnit">({{ displayUnitLabel }})</div>
         <div v-if="isGroupEditMode || selectedOrderDesignCount > 1" class="glbWallAttrs__groupLabel">ویرایش گروهی</div>
       </div>
       <div class="glbWallAttrs__sep"></div>
@@ -1775,11 +1825,12 @@ defineExpose({
                 class="glbWallAttrs__input"
                 type="text"
                 inputmode="decimal"
-                :value="entry.value"
+                :value="entry.displayValue"
                 @input="setOrderDesignDraftValue(entry.key, $event.target.value)"
-                @blur="commitOrderDesignDraftValue(entry.key)"
-                @keydown.enter.prevent="commitOrderDesignDraftValue(entry.key)"
+                @blur="commitOrderDesignDraftValue(entry.key, entry)"
+                @keydown.enter.prevent="commitOrderDesignDraftValue(entry.key, entry)"
               />
+              <span v-if="entry.unitLabel" class="glbWallAttrs__unit">{{ entry.unitLabel }}</span>
               <img
                 v-if="resolveOrderDesignMetaIcon(entry.iconPath || group.iconPath)"
                 :src="resolveOrderDesignMetaIcon(entry.iconPath || group.iconPath)"
@@ -1806,10 +1857,11 @@ defineExpose({
               type="number"
               min="1"
               step="0.1"
-              :value="isGroupEditMode ? '' : wallMetrics.lengthCm"
+              :value="isGroupEditMode ? '' : cmToDisplay(wallMetrics.lengthCm)"
               :disabled="isGroupEditMode"
-              @input="patchWallStyleDraft({ lengthCm: +$event.target.value })"
+              @input="patchWallStyleDraft({ lengthCm: displayToCm($event.target.value) })"
             />
+            <span class="glbWallAttrs__unit">{{ displayUnitLabel }}</span>
           </div>
         </label>
         <label v-if="showThicknessField" class="glbWallAttrs__editRow">
@@ -1820,35 +1872,38 @@ defineExpose({
               type="number"
               min="0.1"
               step="0.5"
-              :value="wallStyleDraft.thicknessCm"
-              @input="patchWallStyleDraft({ thicknessCm: +$event.target.value })"
+              :value="cmToDisplay(wallStyleDraft.thicknessCm)"
+              @input="patchWallStyleDraft({ thicknessCm: displayToCm($event.target.value) })"
             />
+            <span class="glbWallAttrs__unit">{{ displayUnitLabel }}</span>
           </div>
         </label>
         <label v-if="showHeightField" class="glbWallAttrs__editRow">
-          <span class="glbWallAttrs__fieldTitle">ارتفاع (cm)</span>
+          <span class="glbWallAttrs__fieldTitle">ارتفاع</span>
           <div class="glbWallAttrs__fieldBody">
             <input
               class="glbWallAttrs__input"
               type="number"
               min="1"
               step="1"
-              :value="wallStyleDraft.heightCm"
-              @input="patchWallStyleDraft({ heightCm: +$event.target.value })"
+              :value="cmToDisplay(wallStyleDraft.heightCm)"
+              @input="patchWallStyleDraft({ heightCm: displayToCm($event.target.value) })"
             />
+            <span class="glbWallAttrs__unit">{{ displayUnitLabel }}</span>
           </div>
         </label>
         <label v-if="showFloorDistanceField" class="glbWallAttrs__editRow">
-          <span class="glbWallAttrs__fieldTitle">ارتفاع از کف (cm)</span>
+          <span class="glbWallAttrs__fieldTitle">ارتفاع از کف</span>
           <div class="glbWallAttrs__fieldBody">
             <input
               class="glbWallAttrs__input"
               type="number"
               min="0"
               step="0.1"
-              :value="wallStyleDraft.floorOffsetCm"
-              @input="patchWallStyleDraft({ floorOffsetCm: +$event.target.value })"
+              :value="cmToDisplay(wallStyleDraft.floorOffsetCm)"
+              @input="patchWallStyleDraft({ floorOffsetCm: displayToCm($event.target.value) })"
             />
+            <span class="glbWallAttrs__unit">{{ displayUnitLabel }}</span>
           </div>
         </label>
         <label v-if="showColorField" class="glbWallAttrs__editRow">

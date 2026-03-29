@@ -18,6 +18,125 @@ const defaultViewState = settingsViewStateFromEditorState(EDITOR_SETTINGS_DEFAUL
 const baseState = ref({ ...defaultViewState });
 const baseEditorState = ref({ ...EDITOR_SETTINGS_DEFAULTS });
 const model = reactive({ ...defaultViewState });
+const settingsSections = [
+  {
+    id: "units",
+    title: "واحدها",
+    description: "تنظیمات پایه دیوار، تیر و ستون",
+    fields: [
+      {
+        key: "unit",
+        kind: "select",
+        label: "واحد نمایش",
+        description: "واحدی که در فرم‌ها نمایش داده می‌شود",
+        options: [
+          { value: "mm", label: "میلی‌متر" },
+          { value: "cm", label: "سانتی‌متر" },
+        ],
+      },
+      { key: "wallThicknessMm", kind: "cm-mm", label: "ضخامت دیوار", description: "مقدار پیش‌فرض ضخامت دیوار", min: 1, step: 0.5, fallback: 120 },
+      { key: "wallHeightMm", kind: "cm-mm", label: "ارتفاع دیوار", description: "ارتفاع پیش‌فرض دیوار", min: 1, step: 1, fallback: 3000 },
+      { key: "hiddenWallThicknessMm", kind: "cm-mm", label: "ضخامت خط راهنما", description: "ضخامت پیش‌فرض خط راهنما", min: 0.1, step: 0.1, fallback: 1 },
+      { key: "beamThicknessMm", kind: "cm-mm", label: "ضخامت تیر", description: "ضخامت پیش‌فرض تیر", min: 1, step: 0.5, fallback: 400 },
+      { key: "beamHeightMm", kind: "cm-mm", label: "ارتفاع تیر", description: "ارتفاع پیش‌فرض تیر", min: 1, step: 0.5, fallback: 200 },
+      { key: "beamFloorOffsetMm", kind: "cm-mm", label: "فاصله تیر از کف", description: "فاصله پیش‌فرض تیر از کف", min: 0, step: 1, fallback: 2600 },
+      { key: "columnWidthMm", kind: "cm-mm", label: "عرض ستون", description: "عرض پیش‌فرض ستون", min: 1, step: 0.5, fallback: 500 },
+      { key: "columnDepthMm", kind: "cm-mm", label: "عمق ستون", description: "عمق پیش‌فرض ستون", min: 1, step: 0.5, fallback: 400 },
+      { key: "columnHeightMm", kind: "cm-mm", label: "ارتفاع ستون", description: "ارتفاع پیش‌فرض ستون", min: 1, step: 1, fallback: 2800 },
+    ],
+  },
+  {
+    id: "dimension",
+    title: "اندازه‌گذاری",
+    description: "فاصله و نمایش خطوط اندازه‌گذاری",
+    fields: [
+      { key: "dimOffsetMm", kind: "number", label: "فاصله اندازه‌گذاری از دیوار", description: "فاصله خطوط اندازه‌گذاری از دیوار", min: 0, step: 10, unit: "میلی‌متر" },
+      { key: "dimFontPx", kind: "number", label: "فونت اندازه‌گذاری", description: "اندازه فونت اندازه‌گذاری", min: 8, step: 1, unit: "px" },
+      { key: "dimLineWidthPx", kind: "number", label: "ضخامت خط دایمنشن", description: "ضخامت خطوط اندازه‌گذاری", min: 1, step: 0.5, unit: "px" },
+    ],
+  },
+  {
+    id: "grid",
+    title: "شبکه",
+    description: "تقسیم‌بندی و خطوط راهنمای شبکه",
+    fields: [
+      { key: "meterDivisions", kind: "number", label: "تقسیمات هر متر", description: "تعداد تقسیمات هر متر", min: 2, step: 1 },
+      { key: "majorEvery", kind: "number", label: "خط درشت هر چند خانه", description: "فاصله تکرار خطوط درشت", min: 2, step: 1 },
+    ],
+  },
+  {
+    id: "snap",
+    title: "نمایش و جذب",
+    description: "کنترل نمایش، جذب و رسم گام به گام",
+    fields: [
+      { key: "showDimensions", kind: "toggle", label: "نمایش اندازه‌گذاری", description: "نمایش یا مخفی کردن اندازه‌گذاری" },
+      { key: "stepDrawEnabled", kind: "toggle", label: "رسم گام به گام", description: "فعال بودن رسم پله‌ای" },
+      { key: "stepLineCm", kind: "number", label: "گام خط", description: "فاصله رسم پله‌ای خط", min: 0.1, step: 0.5, unit: "سانتی‌متر" },
+      { key: "stepAngleDeg", kind: "number", label: "گام زاویه", description: "فاصله رسم پله‌ای زاویه", min: 0.1, step: 1, unit: "درجه" },
+      { key: "snapOn", kind: "toggle", label: "جذب کلی", description: "روشن یا خاموش بودن جذب" },
+      { key: "snapCornerEnabled", kind: "toggle", label: "جذب گوشه", description: "جذب روی گوشه‌ها" },
+      { key: "snapMidEnabled", kind: "toggle", label: "جذب وسط ضلع", description: "جذب روی نقاط میانی" },
+      { key: "snapCenterEnabled", kind: "toggle", label: "جذب آکس وسط", description: "جذب روی محور مرکز" },
+      { key: "snapEdgeEnabled", kind: "toggle", label: "جذب لبه", description: "جذب روی لبه‌ها" },
+      { key: "wallMagnetEnabled", kind: "toggle", label: "جذب مغناطیسی دیوار", description: "جذب مغناطیسی روی دیوار" },
+      { key: "offsetWallEnabled", kind: "toggle", label: "دیوار موازی", description: "فعالسازی دیوار موازی" },
+      { key: "offsetWallDistanceMm", kind: "number", label: "فاصله دیوار موازی", description: "فاصله دیوار موازی", min: 0, step: 10, unit: "میلی‌متر" },
+    ],
+  },
+  {
+    id: "fonts",
+    title: "نوشتار",
+    description: "تنظیمات نوشتار و متن",
+    fields: [
+      { key: "fontFamily", kind: "text", label: "خانواده فونت", description: "فونت اصلی محیط طراحی", placeholder: "مثلاً Tahoma" },
+      { key: "wallNameFontPx", kind: "number", label: "فونت نام دیوار", description: "اندازه فونت نام دیوار", min: 8, step: 1, unit: "px" },
+      { key: "angleFontPx", kind: "number", label: "فونت زاویه", description: "اندازه فونت زاویه", min: 8, step: 1, unit: "px" },
+    ],
+  },
+  {
+    id: "colors",
+    title: "رنگ‌ها",
+    description: "پالت نمایش صفحه و اجزای ترسیم",
+    fields: [
+      { key: "bgColor", kind: "color", label: "پس‌زمینه", description: "رنگ پس‌زمینه محیط" },
+      { key: "gridColors", kind: "color-group", label: "شبکه", description: "رنگ خطوط ریز و درشت", colors: [
+        { key: "minorColor", label: "ریز" },
+        { key: "majorColor", label: "درشت" },
+      ] },
+      { key: "axisColors", kind: "color-group", label: "محورها", description: "رنگ محورهای X / Y / Z", colors: [
+        { key: "axisXColor", label: "محور X" },
+        { key: "axisYColor", label: "محور Y" },
+        { key: "axisZColor", label: "محور Z" },
+      ] },
+      { key: "wallColors", kind: "color-group", label: "دیوار", description: "رنگ‌های نمایش دیوار", colors: [
+        { key: "wallFillColor", label: "داخلی دوبعدی" },
+        { key: "wallTextColor", label: "متن" },
+        { key: "wallEdgeColor", label: "خط بیرونی" },
+        { key: "wall3dColor", label: "سه‌بعدی" },
+      ] },
+      { key: "beamColors", kind: "color-group", label: "تیر", description: "رنگ‌های نمایش تیر", colors: [
+        { key: "beamFillColor", label: "داخلی دوبعدی" },
+        { key: "beamTextColor", label: "متن" },
+        { key: "beamEdgeColor", label: "خط بیرونی" },
+        { key: "beam3dColor", label: "سه‌بعدی" },
+      ] },
+      { key: "columnColors", kind: "color-group", label: "ستون", description: "رنگ‌های نمایش ستون", colors: [
+        { key: "columnFillColor", label: "داخلی دوبعدی" },
+        { key: "columnTextColor", label: "متن" },
+        { key: "columnEdgeColor", label: "خط بیرونی" },
+        { key: "column3dColor", label: "سه‌بعدی" },
+      ] },
+      { key: "guideColors", kind: "color-group", label: "اندازه‌گذاری و راهنما", description: "رنگ خطوط اندازه‌گذاری و راهنما", colors: [
+        { key: "dimColor", label: "اندازه‌گذاری" },
+        { key: "hiddenWallColor", label: "راهنما" },
+      ] },
+    ],
+  },
+];
+const activeSectionId = ref(settingsSections[0]?.id || "");
+const activeSettingsSection = computed(() =>
+  settingsSections.find((section) => section.id === activeSectionId.value) || settingsSections[0]
+);
 
 function positiveOrFallback(value, fallback, min = 0.0001) {
   const parsed = Number(value);
@@ -44,6 +163,66 @@ function applyPatch(patch) {
   if (!patch || typeof patch !== "object") return;
   // Local draft only; nothing is applied to engine until Save is clicked.
   Object.assign(model, patch);
+}
+
+function selectSection(sectionId) {
+  activeSectionId.value = String(sectionId || settingsSections[0]?.id || "");
+}
+
+function getFieldValue(field) {
+  if (!field) return "";
+  if (field.kind === "cm-mm") return Number(model[field.key] ?? field.fallback ?? 0) / 10;
+  if (field.key === "dimOffsetMm" || field.key === "offsetWallDistanceMm") {
+    const raw = Number(model[field.key] ?? 0);
+    return model.unit === "mm" ? raw : raw / 10;
+  }
+  return model[field.key];
+}
+
+function getFieldUnitLabel(field) {
+  if (!field) return "";
+  if (field.kind === "cm-mm") return model.unit === "mm" ? "میلی‌متر" : "سانتی‌متر";
+  if (field.key === "dimOffsetMm" || field.key === "offsetWallDistanceMm") {
+    return model.unit === "mm" ? "میلی‌متر" : "سانتی‌متر";
+  }
+  return field.unit || "";
+}
+
+function updateFieldValue(field, rawValue) {
+  if (!field) return;
+  if (field.kind === "select") {
+    applyPatch({ [field.key]: rawValue });
+    return;
+  }
+  if (field.kind === "text") {
+    applyPatch({ [field.key]: rawValue || field.placeholder || "" });
+    return;
+  }
+  if (field.kind === "toggle") {
+    applyPatch({ [field.key]: !!rawValue });
+    return;
+  }
+  if (field.kind === "color") {
+    applyPatch({ [field.key]: rawValue });
+    return;
+  }
+  if (field.kind === "cm-mm") {
+    const min = field.min ?? 0;
+    const fallback = field.fallback ?? 0;
+    const nextValue = Math.max(min, +rawValue || fallback);
+    applyPatch({ [field.key]: nextValue * 10 });
+    return;
+  }
+  if (field.key === "stepLineCm" || field.key === "stepAngleDeg") {
+    applyPatch({ [field.key]: positiveOrFallback(rawValue, model[field.key]) });
+    return;
+  }
+  if (field.key === "dimOffsetMm" || field.key === "offsetWallDistanceMm") {
+    const nextValue = Math.max(field.min ?? 0, +rawValue || 0);
+    applyPatch({ [field.key]: model.unit === "mm" ? nextValue : nextValue * 10 });
+    return;
+  }
+  applyPatch({ [field.key]: +rawValue || model[field.key] || 0 });
 }
 
 function getDialogApi() {
@@ -124,423 +303,130 @@ async function handleSaveSettings() {
 </script>
 
 <template>
-  <div style="padding: 14px;" class="settin_panel">
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin: 0 0 12px;">
-      <h3 style="margin: 0;">تنظیمات</h3>
-      <button class="iconbtn iconbtn--sm" type="button" title="ذخیره تنظیمات" @click="handleSaveSettings">
+  <div class="settin_panel settingsPage" dir="rtl">
+    <header class="settingsPage__header">
+      <div class="settingsPage__titleWrap">
+        <h2 class="settingsPage__title">تنظیمات</h2>
+        <p class="settingsPage__caption">
+          دسته‌بندی‌ها مثل پیش‌فرض‌های ساب‌کت در ستون راست قرار گرفته‌اند و هر بخش تنظیمات در پنل سمت چپ نمایش داده می‌شود.
+        </p>
+      </div>
+      <button class="settingsPage__saveBtn" type="button" title="ذخیره تنظیمات" @click="handleSaveSettings">
         <img src="/icons/save.png" alt="" />
+        <span>ذخیره</span>
       </button>
-    </div>
-    <div v-if="!hasEditor" style="color:#6b7280; font-size:13px; line-height:1.7; margin-bottom: 12px;">
+    </header>
+
+    <div v-if="!hasEditor" class="settingsPage__hint">
       برای اعمال تنظیمات، اول صفحه «پلان» را باز کنید تا موتور 2D فعال شود.
     </div>
 
-    <div class="panel">
-      <div class="panel__title">واحدها و دیوار</div>
-      <div class="row">
-        <label class="label">واحد نمایش</label>
-        <select
-          class="input"
-          :value="model.unit"
-          @change="model.unit = $event.target.value; applyPatch({ unit: model.unit })"
-        >
-          <option value="mm">میلی‌متر</option>
-          <option value="cm">سانتی‌متر</option>
-        </select>
-      </div>
-      <div class="row">
-        <label class="label">ضخامت دیوار (سانتی‌متر)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="1"
-          step="0.5"
-          :value="(model.wallThicknessMm || 120) / 10"
-          @change="applyPatch({ wallThicknessMm: Math.max(1, (+$event.target.value || 12) * 10) })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">ارتفاع دیوار (سانتی‌متر)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="1"
-          step="1"
-          :value="(model.wallHeightMm || 3000) / 10"
-          @change="applyPatch({ wallHeightMm: Math.max(1, (+$event.target.value || 300) * 10) })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">ضخامت پیش‌فرض خط راهنما (سانتی‌متر)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="0.1"
-          step="0.1"
-          :value="(model.hiddenWallThicknessMm || 1) / 10"
-          @change="applyPatch({ hiddenWallThicknessMm: Math.max(0.1, (+$event.target.value || 0.1) * 10) })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">ضخامت پیش‌فرض تیر (سانتی‌متر)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="1"
-          step="0.5"
-          :value="(model.beamThicknessMm || 400) / 10"
-          @change="applyPatch({ beamThicknessMm: Math.max(1, (+$event.target.value || 40) * 10) })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">ارتفاع پیش‌فرض تیر (سانتی‌متر)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="1"
-          step="0.5"
-          :value="(model.beamHeightMm || 200) / 10"
-          @change="applyPatch({ beamHeightMm: Math.max(1, (+$event.target.value || 20) * 10) })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">فاصله پیش‌فرض تیر از کف (سانتی‌متر)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="0"
-          step="1"
-          :value="(model.beamFloorOffsetMm || 2600) / 10"
-          @change="applyPatch({ beamFloorOffsetMm: Math.max(0, (+$event.target.value || 260) * 10) })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">عرض پیش‌فرض ستون (سانتی‌متر)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="1"
-          step="0.5"
-          :value="(model.columnWidthMm || 500) / 10"
-          @change="applyPatch({ columnWidthMm: Math.max(1, (+$event.target.value || 50) * 10) })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">عمق پیش‌فرض ستون (سانتی‌متر)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="1"
-          step="0.5"
-          :value="(model.columnDepthMm || 400) / 10"
-          @change="applyPatch({ columnDepthMm: Math.max(1, (+$event.target.value || 40) * 10) })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">ارتفاع پیش‌فرض ستون (سانتی‌متر)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="1"
-          step="1"
-          :value="(model.columnHeightMm || 2800) / 10"
-          @change="applyPatch({ columnHeightMm: Math.max(1, (+$event.target.value || 280) * 10) })"
-        />
-      </div>
-    </div>
+    <div class="settingsLayout">
+      <section class="settingsPanel">
+        <div v-if="activeSettingsSection" class="settingsPanel__head">
+          <div class="settingsPanel__title">{{ activeSettingsSection.title }}</div>
+          <div class="settingsPanel__caption">
+            {{ activeSettingsSection.description }}
+            <span>{{ activeSettingsSection.fields.length }} آیتم</span>
+          </div>
+        </div>
 
-    <div class="panel">
-      <div class="panel__title">دایمنشن</div>
-      <div class="row">
-        <label class="label">فاصله دایمنشن از دیوار (میلی‌متر)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="0"
-          step="10"
-          :value="model.dimOffsetMm"
-          @change="applyPatch({ dimOffsetMm: +$event.target.value || 0 })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">فونت دایمنشن (px)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="8"
-          step="1"
-          :value="model.dimFontPx"
-          @change="applyPatch({ dimFontPx: +$event.target.value || model.dimFontPx })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">ضخامت خط دایمنشن (px)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="1"
-          step="0.5"
-          :value="model.dimLineWidthPx"
-          @change="applyPatch({ dimLineWidthPx: +$event.target.value || model.dimLineWidthPx })"
-        />
-      </div>
-    </div>
+        <div v-if="activeSettingsSection" class="settingsGrid">
+          <article
+            v-for="field in activeSettingsSection.fields"
+            :key="field.key"
+            class="settingsCard"
+            :class="{
+              'settingsCard--toggle': field.kind === 'toggle',
+              'settingsCard--colors': field.kind === 'color-group',
+            }"
+          >
+            <div class="settingsCard__head">
+              <h3 class="settingsCard__title">{{ field.label }}</h3>
+              <p v-if="field.description" class="settingsCard__desc">{{ field.description }}</p>
+            </div>
 
-    <div class="panel">
-      <div class="panel__title">گرید</div>
-      <div class="row">
-        <label class="label">تقسیمات هر متر</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="2"
-          step="1"
-          :value="model.meterDivisions"
-          @change="applyPatch({ meterDivisions: +$event.target.value || 10 })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">هر چند خانه یک خط درشت</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="2"
-          step="1"
-          :value="model.majorEvery"
-          @change="applyPatch({ majorEvery: +$event.target.value || 10 })"
-        />
-      </div>
-    </div>
+            <div v-if="field.kind === 'select'" class="settingsCard__body">
+              <select class="settingsField settingsField--select" :value="getFieldValue(field)" @change="updateFieldValue(field, $event.target.value)">
+                <option v-for="option in field.options" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </div>
 
-    <div class="panel">
-      <div class="panel__title">نمایش و اسنپ</div>
-      <div class="row">
-        <label class="label">نمایش دایمنشن ها</label>
-        <label style="display:flex; gap:10px; align-items:center;">
-          <input
-            type="checkbox"
-            :checked="!!model.showDimensions"
-            @change="applyPatch({ showDimensions: !!$event.target.checked })"
-          />
-          <span style="font-size:13px; color:#111827;">فعال</span>
-        </label>
-      </div>
-      <div class="row">
-        <label class="label">رسم گام به گام</label>
-        <label style="display:flex; gap:10px; align-items:center;">
-          <input
-            type="checkbox"
-            :checked="!!model.stepDrawEnabled"
-            @change="applyPatch({ stepDrawEnabled: !!$event.target.checked })"
-          />
-          <span style="font-size:13px; color:#111827;">فعال</span>
-        </label>
-      </div>
-      <div style="margin: 4px 0 10px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px;">
-        <div style="font-size: 12px; color: #374151; margin-bottom: 8px;">رسم گام به گام</div>
-        <div class="row" style="margin-bottom: 8px;">
-          <label class="label">گام خط (سانتی‌متر)</label>
-          <input
-            class="input ltr"
-            type="number"
-            min="0.1"
-            step="0.5"
-            :value="model.stepLineCm"
-            @change="applyPatch({ stepLineCm: positiveOrFallback($event.target.value, model.stepLineCm) })"
-          />
-        </div>
-        <div class="row" style="margin-bottom: 0;">
-          <label class="label">گام زاویه (درجه)</label>
-          <input
-            class="input ltr"
-            type="number"
-            min="0.1"
-            step="1"
-            :value="model.stepAngleDeg"
-            @change="applyPatch({ stepAngleDeg: positiveOrFallback($event.target.value, model.stepAngleDeg) })"
-          />
-        </div>
-      </div>
-      <div class="row">
-        <label class="label">اسنپ</label>
-        <label style="display:flex; gap:10px; align-items:center;">
-          <input
-            type="checkbox"
-            :checked="!!model.snapOn"
-            @change="applyPatch({ snapOn: !!$event.target.checked })"
-          />
-          <span style="font-size:13px; color:#111827;">روشن</span>
-        </label>
-      </div>
-      <div class="row">
-        <label class="label">اسنپ گوشه</label>
-        <label style="display:flex; gap:10px; align-items:center;">
-          <input
-            type="checkbox"
-            :checked="!!model.snapCornerEnabled"
-            @change="applyPatch({ snapCornerEnabled: !!$event.target.checked })"
-          />
-          <span style="font-size:13px; color:#111827;">فعال</span>
-        </label>
-      </div>
-      <div class="row">
-        <label class="label">اسنپ وسط ضلع</label>
-        <label style="display:flex; gap:10px; align-items:center;">
-          <input
-            type="checkbox"
-            :checked="!!model.snapMidEnabled"
-            @change="applyPatch({ snapMidEnabled: !!$event.target.checked })"
-          />
-          <span style="font-size:13px; color:#111827;">فعال</span>
-        </label>
-      </div>
-      <div class="row">
-        <label class="label">اسنپ آکس وسط</label>
-        <label style="display:flex; gap:10px; align-items:center;">
-          <input
-            type="checkbox"
-            :checked="!!model.snapCenterEnabled"
-            @change="applyPatch({ snapCenterEnabled: !!$event.target.checked })"
-          />
-          <span style="font-size:13px; color:#111827;">فعال</span>
-        </label>
-      </div>
-      <div class="row">
-        <label class="label">اسنپ لبه</label>
-        <label style="display:flex; gap:10px; align-items:center;">
-          <input
-            type="checkbox"
-            :checked="!!model.snapEdgeEnabled"
-            @change="applyPatch({ snapEdgeEnabled: !!$event.target.checked })"
-          />
-          <span style="font-size:13px; color:#111827;">فعال</span>
-        </label>
-      </div>
-      <div class="row">
-        <label class="label">اسنپ مغناطیسی دیوار</label>
-        <label style="display:flex; gap:10px; align-items:center;">
-          <input
-            type="checkbox"
-            :checked="!!model.wallMagnetEnabled"
-            @change="applyPatch({ wallMagnetEnabled: !!$event.target.checked })"
-          />
-          <span style="font-size:13px; color:#111827;">فعال</span>
-        </label>
-      </div>
-      <div class="row">
-        <label class="label">Offset Wall</label>
-        <label style="display:flex; gap:10px; align-items:center;">
-          <input
-            type="checkbox"
-            :checked="!!model.offsetWallEnabled"
-            @change="applyPatch({ offsetWallEnabled: !!$event.target.checked })"
-          />
-          <span style="font-size:13px; color:#111827;">فعال</span>
-        </label>
-      </div>
-      <div class="row">
-        <label class="label">فاصله Offset (میلی‌متر)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="0"
-          step="10"
-          :value="model.offsetWallDistanceMm"
-          @change="applyPatch({ offsetWallDistanceMm: +$event.target.value || model.offsetWallDistanceMm })"
-        />
-      </div>
-    </div>
+            <div v-else-if="field.kind === 'toggle'" class="settingsCard__body">
+              <div class="settingsToggle">
+                <button
+                  type="button"
+                  class="settingsToggle__btn"
+                  :class="{ 'is-active': !model[field.key] }"
+                  @click="updateFieldValue(field, false)"
+                >
+                  غیرفعال
+                </button>
+                <button
+                  type="button"
+                  class="settingsToggle__btn"
+                  :class="{ 'is-active': !!model[field.key] }"
+                  @click="updateFieldValue(field, true)"
+                >
+                  فعال
+                </button>
+              </div>
+            </div>
 
-    <div class="panel">
-      <div class="panel__title">فونت‌ها</div>
-      <div class="row">
-        <label class="label">Font Family</label>
-        <input
-          class="input ltr"
-          type="text"
-          :value="model.fontFamily"
-          @change="applyPatch({ fontFamily: $event.target.value || 'Tahoma' })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">فونت نام دیوار (px)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="8"
-          step="1"
-          :value="model.wallNameFontPx"
-          @change="applyPatch({ wallNameFontPx: +$event.target.value || model.wallNameFontPx })"
-        />
-      </div>
-      <div class="row">
-        <label class="label">فونت زاویه (px)</label>
-        <input
-          class="input ltr"
-          type="number"
-          min="8"
-          step="1"
-          :value="model.angleFontPx"
-          @change="applyPatch({ angleFontPx: +$event.target.value || model.angleFontPx })"
-        />
-      </div>
-    </div>
+            <div v-else-if="field.kind === 'color'" class="settingsCard__body">
+              <label class="settingsColor">
+                <input class="settingsColor__input" type="color" :value="model[field.key]" @input="updateFieldValue(field, $event.target.value)" />
+                <span class="settingsColor__value">{{ model[field.key] }}</span>
+              </label>
+            </div>
 
-    <div class="panel">
-      <div class="panel__title">رنگ‌ها</div>
-      <div class="row">
-        <label class="label">Background</label>
-        <input type="color" :value="model.bgColor" @input="applyPatch({ bgColor: $event.target.value })" />
-      </div>
-      <div class="row">
-        <label class="label">Grid Minor / Major</label>
-        <div style="display:flex; gap:10px; align-items:center;">
-          <input type="color" :value="model.minorColor" @input="applyPatch({ minorColor: $event.target.value })" />
-          <input type="color" :value="model.majorColor" @input="applyPatch({ majorColor: $event.target.value })" />
+            <div v-else-if="field.kind === 'color-group'" class="settingsCard__body">
+              <div class="settingsColorGrid">
+                <label v-for="colorItem in field.colors" :key="colorItem.key" class="settingsColor settingsColor--small">
+                  <span class="settingsColor__label">{{ colorItem.label }}</span>
+                  <input class="settingsColor__input" type="color" :value="model[colorItem.key]" @input="applyPatch({ [colorItem.key]: $event.target.value })" />
+                  <span class="settingsColor__value">{{ model[colorItem.key] }}</span>
+                </label>
+              </div>
+            </div>
+
+            <div v-else class="settingsCard__body">
+              <input
+                class="settingsField"
+                :class="{ 'settingsField--text': field.kind === 'text' }"
+                :type="field.kind === 'text' ? 'text' : 'number'"
+                :inputmode="field.kind === 'text' ? undefined : 'decimal'"
+                :min="field.min"
+                :step="field.step"
+                :value="getFieldValue(field)"
+                :placeholder="field.placeholder || field.label"
+                @change="updateFieldValue(field, $event.target.value)"
+              />
+              <div v-if="getFieldUnitLabel(field)" class="settingsCard__unit">{{ getFieldUnitLabel(field) }}</div>
+            </div>
+          </article>
         </div>
-      </div>
-      <div class="row">
-        <label class="label">Axis X / Y / Z</label>
-        <div style="display:flex; gap:10px; align-items:center;">
-          <input type="color" :value="model.axisXColor" @input="applyPatch({ axisXColor: $event.target.value })" />
-          <input type="color" :value="model.axisYColor" @input="applyPatch({ axisYColor: $event.target.value })" />
-          <input type="color" :value="model.axisZColor" @input="applyPatch({ axisZColor: $event.target.value })" />
+      </section>
+
+      <aside class="settingsSidebar">
+        <div class="settingsSidebar__head">
+          <div class="settingsSidebar__title">دسته‌بندی تنظیمات</div>
+          <div class="settingsSidebar__caption">{{ settingsSections.length }} گروه</div>
         </div>
-      </div>
-      <div class="row">
-        <label class="label">دیوار: داخلی 2D / متن / خط بیرونی / 3D</label>
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <input type="color" :value="model.wallFillColor" title="رنگ داخلی دوبعدی دیوار" @input="applyPatch({ wallFillColor: $event.target.value })" />
-          <input type="color" :value="model.wallTextColor" title="رنگ متن دیوار" @input="applyPatch({ wallTextColor: $event.target.value })" />
-          <input type="color" :value="model.wallEdgeColor" title="رنگ خط بیرونی دیوار" @input="applyPatch({ wallEdgeColor: $event.target.value })" />
-          <input type="color" :value="model.wall3dColor" title="رنگ سه بعدی دیوار" @input="applyPatch({ wall3dColor: $event.target.value })" />
+        <div class="settingsSidebar__list">
+          <button
+            v-for="section in settingsSections"
+            :key="section.id"
+            type="button"
+            class="settingsSidebar__tab"
+            :class="{ 'is-active': activeSettingsSection?.id === section.id }"
+            @click="selectSection(section.id)"
+          >
+            <span class="settingsSidebar__tabTitle">{{ section.title }}</span>
+            <span class="settingsSidebar__tabMeta">{{ section.fields.length }} آیتم</span>
+          </button>
         </div>
-      </div>
-      <div class="row">
-        <label class="label">تیر: داخلی 2D / متن / خط بیرونی / 3D</label>
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <input type="color" :value="model.beamFillColor" title="رنگ داخلی دوبعدی تیر" @input="applyPatch({ beamFillColor: $event.target.value })" />
-          <input type="color" :value="model.beamTextColor" title="رنگ متن تیر" @input="applyPatch({ beamTextColor: $event.target.value })" />
-          <input type="color" :value="model.beamEdgeColor" title="رنگ خط بیرونی تیر" @input="applyPatch({ beamEdgeColor: $event.target.value })" />
-          <input type="color" :value="model.beam3dColor" title="رنگ سه بعدی تیر" @input="applyPatch({ beam3dColor: $event.target.value })" />
-        </div>
-      </div>
-      <div class="row">
-        <label class="label">ستون: داخلی 2D / متن / خط بیرونی / 3D</label>
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <input type="color" :value="model.columnFillColor" title="رنگ داخلی دوبعدی ستون" @input="applyPatch({ columnFillColor: $event.target.value })" />
-          <input type="color" :value="model.columnTextColor" title="رنگ متن ستون" @input="applyPatch({ columnTextColor: $event.target.value })" />
-          <input type="color" :value="model.columnEdgeColor" title="رنگ خط بیرونی ستون" @input="applyPatch({ columnEdgeColor: $event.target.value })" />
-          <input type="color" :value="model.column3dColor" title="رنگ سه بعدی ستون" @input="applyPatch({ column3dColor: $event.target.value })" />
-        </div>
-      </div>
-      <div class="row">
-        <label class="label">Dimension / خط راهنما</label>
-        <div style="display:flex; gap:10px; align-items:center;">
-          <input type="color" :value="model.dimColor" @input="applyPatch({ dimColor: $event.target.value })" />
-          <input type="color" :value="model.hiddenWallColor" @input="applyPatch({ hiddenWallColor: $event.target.value })" />
-        </div>
-      </div>
+      </aside>
     </div>
   </div>
 </template>
