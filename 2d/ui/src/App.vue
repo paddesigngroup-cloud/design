@@ -24,6 +24,7 @@ const snapOn = ref(true);
 const showDimensions = ref(true);
 const showOffsetWalls = ref(true);
 const showObjectAxes = ref(false);
+const currentEditorDisplayUnitState = ref("cm");
 const walls3dSnapshot = ref({
   nodes: [],
   walls: [],
@@ -6155,6 +6156,7 @@ function syncQuickStateFromEditor() {
   const full = editorRef.value?.getState?.();
   const s = full?.state;
   if (!s) return;
+  currentEditorDisplayUnitState.value = String(s.unit || "cm").trim().toLowerCase() === "mm" ? "mm" : "cm";
   activeStageOrderDesignSelected.value = !!full?.selection?.selectedModelOutline;
   {
     const nextSelectedIds = [];
@@ -7643,8 +7645,7 @@ function getEditorStateSnapshot() {
   return editorRef.value?.getState?.()?.state || {};
 }
 const currentEditorDisplayUnit = computed(() => {
-  const unit = String(getEditorStateSnapshot()?.unit || "cm").trim().toLowerCase();
-  return unit === "mm" ? "mm" : "cm";
+  return currentEditorDisplayUnitState.value === "mm" ? "mm" : "cm";
 });
 
 function setDraftFromDesignTool(id) {

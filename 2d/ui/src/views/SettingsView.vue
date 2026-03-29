@@ -171,12 +171,33 @@ function selectSection(sectionId) {
 
 function getFieldValue(field) {
   if (!field) return "";
-  if (field.kind === "cm-mm") return Number(model[field.key] ?? field.fallback ?? 0) / 10;
+  if (field.kind === "cm-mm") {
+    const raw = Number(model[field.key] ?? field.fallback ?? 0);
+    return model.unit === "mm" ? raw : raw / 10;
+  }
   if (field.key === "dimOffsetMm" || field.key === "offsetWallDistanceMm") {
     const raw = Number(model[field.key] ?? 0);
     return model.unit === "mm" ? raw : raw / 10;
   }
   return model[field.key];
+}
+
+function getFieldMin(field) {
+  if (!field) return undefined;
+  if (field.kind === "cm-mm") {
+    const raw = Number(field.min ?? 0);
+    return model.unit === "mm" ? raw : raw / 10;
+  }
+  return field.min;
+}
+
+function getFieldStep(field) {
+  if (!field) return undefined;
+  if (field.kind === "cm-mm") {
+    const raw = Number(field.step ?? 1);
+    return model.unit === "mm" ? raw : raw / 10;
+  }
+  return field.step;
 }
 
 function getFieldUnitLabel(field) {
@@ -210,7 +231,7 @@ function updateFieldValue(field, rawValue) {
     const min = field.min ?? 0;
     const fallback = field.fallback ?? 0;
     const nextValue = Math.max(min, +rawValue || fallback);
-    applyPatch({ [field.key]: nextValue * 10 });
+    applyPatch({ [field.key]: model.unit === "mm" ? nextValue : nextValue * 10 });
     return;
   }
   if (field.key === "stepLineCm" || field.key === "stepAngleDeg") {
@@ -396,8 +417,8 @@ async function handleSaveSettings() {
                 :class="{ 'settingsField--text': field.kind === 'text' }"
                 :type="field.kind === 'text' ? 'text' : 'number'"
                 :inputmode="field.kind === 'text' ? undefined : 'decimal'"
-                :min="field.min"
-                :step="field.step"
+                :min="getFieldMin(field)"
+                :step="getFieldStep(field)"
                 :value="getFieldValue(field)"
                 :placeholder="field.placeholder || field.label"
                 @change="updateFieldValue(field, $event.target.value)"
