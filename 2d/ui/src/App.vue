@@ -8196,6 +8196,19 @@ onMounted(() => {
     _ro.observe(stageEl.value);
   }
 
+  const onSaveShortcut = (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && String(e.key || "").toLowerCase() === "s") {
+      e.preventDefault();
+      if (route.path === "/settings") {
+        window.dispatchEvent(new CustomEvent("designkp:save-settings"));
+        return;
+      }
+      doSaveProject();
+    }
+  };
+  window.addEventListener("keydown", onSaveShortcut, true);
+  window.__designkpOnSaveShortcut = onSaveShortcut;
+
   const onEsc = (e) => {
     if (String(e.key || "") !== "Escape") return;
     const t = e.target;
@@ -8352,6 +8365,10 @@ onBeforeUnmount(() => {
   if (window.__designkpOnEsc) {
     window.removeEventListener("keydown", window.__designkpOnEsc, true);
     delete window.__designkpOnEsc;
+  }
+  if (window.__designkpOnSaveShortcut) {
+    window.removeEventListener("keydown", window.__designkpOnSaveShortcut, true);
+    delete window.__designkpOnSaveShortcut;
   }
   if (window.__designkpOnFocus) {
     window.removeEventListener("focus", window.__designkpOnFocus, true);

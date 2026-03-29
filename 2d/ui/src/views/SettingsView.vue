@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { editorRef } from "../editor/editor_store.js";
 import {
@@ -400,6 +400,18 @@ async function handleSaveSettings() {
   }
   router.push("/");
 }
+
+function onGlobalSaveShortcut() {
+  handleSaveSettings();
+}
+
+onMounted(() => {
+  window.addEventListener("designkp:save-settings", onGlobalSaveShortcut);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("designkp:save-settings", onGlobalSaveShortcut);
+});
 </script>
 
 <template>
