@@ -2623,6 +2623,7 @@ function snapshotModel2d(model) {
 function snapshotPassiveModels(models) {
   return (Array.isArray(models) ? models : []).map((model) => ({
     id: String(model?.id || "").trim(),
+    isCopyPreview: !!model?.isCopyPreview,
     designCode: String(model?.designCode || "").trim() || null,
     designTitle: String(model?.designTitle || "").trim() || null,
     instanceCode: String(model?.instanceCode || "").trim() || null,
@@ -2666,6 +2667,7 @@ function restorePassiveModels(snap) {
   passiveModels = (Array.isArray(snap) ? snap : [])
     .map((model) => ({
       id: String(model?.id || "").trim(),
+      isCopyPreview: !!model?.isCopyPreview,
       designCode: String(model?.designCode || "").trim() || null,
       designTitle: String(model?.designTitle || "").trim() || null,
       instanceCode: String(model?.instanceCode || "").trim() || null,
@@ -2689,6 +2691,7 @@ function restorePassiveModels(snap) {
       alpha: Number.isFinite(Number(model?.alpha)) ? Number(model.alpha) : model2d.alpha,
     }))
     .filter((model) => model.id && model.outline.length >= 3 && model.lines.length >= 1);
+  copyPreviewPassiveModels = [];
   emitPassiveModelsTransformChange();
 }
 
@@ -2974,6 +2977,7 @@ const model2d = {
   rotationRad: 0,
 };
 let passiveModels = [];
+let copyPreviewPassiveModels = [];
 const COPY_PREVIEW_MODEL_PREFIX = "__copy_preview__";
 let hoverPassiveModelId = null;
 let selectedPassiveModelId = null;
@@ -3023,6 +3027,10 @@ function emitPassiveModelsTransformChange(modelIds = null) {
 
 function isCopyPreviewModelId(id) {
   return String(id || "").startsWith(COPY_PREVIEW_MODEL_PREFIX);
+}
+
+function getRenderablePassiveModels() {
+  return [...passiveModels, ...copyPreviewPassiveModels];
 }
 
 function _loadImgWithFallback(map, key, urls) {
@@ -3261,6 +3269,7 @@ function setPassiveModels(models = []) {
       const prevTransform = prevTransformById.get(id) || null;
       return {
         id,
+        isCopyPreview: !!model?.isCopyPreview,
         lines,
         outline,
         designCode: String(model?.designCode || "").trim() || null,
@@ -3291,6 +3300,7 @@ function setPassiveModels(models = []) {
       };
     })
     .filter(Boolean);
+  copyPreviewPassiveModels = [];
   if (!passiveModels.some((model) => String(model.id) === String(hoverPassiveModelId || ""))) {
     hoverPassiveModelId = null;
   }
@@ -3832,6 +3842,7 @@ function buildPassiveModelCopyPreview(source, previewId, dx, dy) {
   const transform = source?.transform || {};
   return {
     id: previewId,
+    isCopyPreview: true,
     designCode: String(source?.designCode || "").trim() || null,
     designTitle: String(source?.designTitle || "").trim() || null,
     instanceCode: String(source?.instanceCode || "").trim() || null,
@@ -3855,12 +3866,12 @@ function buildPassiveModelCopyPreview(source, previewId, dx, dy) {
       y: (Number(transform?.y) || 0) + dy,
       rotRad: Number(transform?.rotRad) || 0,
     },
-    color: source?.color ?? model2d.color,
-    outlineColor: source?.outlineColor ?? model2d.outlineColor,
-    outlineHoverColor: source?.outlineHoverColor ?? model2d.outlineSelectedColor,
-    lineWidthPx: Number.isFinite(Number(source?.lineWidthPx)) ? Number(source.lineWidthPx) : model2d.lineWidthPx,
-    dash: Array.isArray(source?.dash) ? source.dash.slice() : (model2d.dash || []).slice(),
-    alpha: Number.isFinite(Number(source?.alpha)) ? Number(source.alpha) : model2d.alpha,
+    color: source?.color ?? model2d.color ?? "#7a8792",
+    outlineColor: source?.outlineColor ?? model2d.outlineColor ?? "#C96F2D",
+    outlineHoverColor: source?.outlineHoverColor ?? model2d.outlineSelectedColor ?? "#D97706",
+    lineWidthPx: Math.max(2, Number.isFinite(Number(source?.lineWidthPx)) ? Number(source.lineWidthPx) : (model2d.lineWidthPx || 1)),
+    dash: [],
+    alpha: 0.92,
   };
 }
 
@@ -4229,7 +4240,7 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
   };
 
   if (selectionSnapshotHasDesign(snapshot)) {
-    const previewModels = passiveModels.filter((model) => !isCopyPreviewModelId(model?.id));
+    const previewModels = [];
     if (snapshot.hasModel && model2d.designId && Array.isArray(model2d.outline) && model2d.outline.length >= 3 && Array.isArray(model2d.lines) && model2d.lines.length >= 1) {
       const sourceId = String(model2d.designId || "").trim();
       const previewId = `${COPY_PREVIEW_MODEL_PREFIX}active-${sourceId}`;
@@ -4265,7 +4276,7 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
       result.passiveModelIds.push(previewId);
       result.sourceOrderDesignIds.push(sourceId);
     }
-    passiveModels = previewModels;
+    copyPreviewPassiveModels = previewModels;
   }
 
   for (const wallId of snapshot.wallIds || []) {
@@ -4871,6 +4882,7 @@ function stopCopyCommandRuntime() {
   copyCommand.startToolSnap = null;
   copyCommand.startHiddenToolSnap = null;
   copyCommand.moved = false;
+  copyPreviewPassiveModels = [];
 }
 
 function beginCopyCommand() {
@@ -5763,20 +5775,31 @@ function drawModel2dOverlay() {
 }
 
 function drawPassiveModelOverlays() {
-  if (!Array.isArray(passiveModels) || !passiveModels.length) return;
-  for (const model of passiveModels) {
+  const models = getRenderablePassiveModels();
+  if (!Array.isArray(models) || !models.length) return;
+  for (const model of models) {
     if (!Array.isArray(model?.lines) || !Array.isArray(model?.outline) || model.outline.length < 3) continue;
+    const isCopyPreview = !!model.isCopyPreview;
     const isHover = String(hoverPassiveModelId || "") === String(model.id || "");
     const isSelected =
       String(selectedPassiveModelId || "") === String(model.id || "") ||
       selectedPassiveModelIds.includes(model.id);
 
     ctx.save();
-    ctx.setLineDash(model.dash || model2d.dash || []);
-    ctx.lineWidth = model.lineWidthPx || model2d.lineWidthPx || 1;
+    ctx.setLineDash(isCopyPreview ? [] : (model.dash || model2d.dash || []));
+    ctx.lineWidth = isCopyPreview
+      ? Math.max(2.4, model.lineWidthPx || model2d.lineWidthPx || 1)
+      : (model.lineWidthPx || model2d.lineWidthPx || 1);
     ctx.strokeStyle = model.color || model2d.color || "#7a8792";
-    ctx.globalAlpha = typeof model.alpha === "number" ? model.alpha : (typeof model2d.alpha === "number" ? model2d.alpha : 0.55);
+    ctx.globalAlpha = isCopyPreview
+      ? 0.96
+      : (typeof model.alpha === "number" ? model.alpha : (typeof model2d.alpha === "number" ? model2d.alpha : 0.55));
     ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    if (isCopyPreview) {
+      ctx.shadowColor = model.outlineHoverColor || model2d.outlineSelectedColor || "#D97706";
+      ctx.shadowBlur = 10;
+    }
     ctx.beginPath();
     for (const l of model.lines) {
       const a = worldToScreen(l.ax, l.ay);
@@ -5788,17 +5811,19 @@ function drawPassiveModelOverlays() {
     ctx.restore();
 
     const pts = model.outline;
-    const col = (isSelected || isHover)
+    const col = isCopyPreview
+      ? (model.outlineHoverColor || model2d.outlineSelectedColor)
+      : (isSelected || isHover)
       ? (model.outlineHoverColor || model2d.outlineSelectedColor)
       : (model.outlineColor || model2d.outlineColor);
 
     ctx.save();
     ctx.setLineDash([]);
-    ctx.lineWidth = isSelected ? 6 : (isHover ? 5 : 3);
+    ctx.lineWidth = isCopyPreview ? 4.5 : (isSelected ? 6 : (isHover ? 5 : 3));
     ctx.strokeStyle = col;
-    ctx.globalAlpha = isSelected ? 0.78 : (isHover ? 0.58 : 0.4);
+    ctx.globalAlpha = isCopyPreview ? 0.82 : (isSelected ? 0.78 : (isHover ? 0.58 : 0.4));
     ctx.shadowColor = col;
-    ctx.shadowBlur = isSelected ? 16 : (isHover ? 12 : 0);
+    ctx.shadowBlur = isCopyPreview ? 14 : (isSelected ? 16 : (isHover ? 12 : 0));
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     const p0 = worldToScreen(pts[0].x, pts[0].y);
@@ -7126,6 +7151,7 @@ function loop() {
     emitViewportChange();
     drawGrid();
     drawPassiveModelOverlays();
+    drawCopyDesignPreview();
     drawModel2dOverlay();
     drawHiddenWalls({
       ctx,
@@ -8957,6 +8983,93 @@ function onMouseDown(e) {
   }
 }
 
+function drawCopyDesignPreview() {
+  if (
+    copyCommand.mode !== "await_target_point" ||
+    !copyCommand.basePoint ||
+    !copyCommand.cursorPoint ||
+    !selectionSnapshotHasDesign(copyCommand.selectionSnapshot)
+  ) {
+    return;
+  }
+
+  const dx = (Number(copyCommand.cursorPoint.x) || 0) - (Number(copyCommand.basePoint.x) || 0);
+  const dy = (Number(copyCommand.cursorPoint.y) || 0) - (Number(copyCommand.basePoint.y) || 0);
+  if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return;
+
+  const previewEntries = [];
+  if (
+    copyCommand.selectionSnapshot?.hasModel &&
+    Array.isArray(model2d.lines) &&
+    model2d.lines.length > 0 &&
+    Array.isArray(model2d.outline) &&
+    model2d.outline.length >= 3
+  ) {
+    previewEntries.push({
+      lines: model2d.lines,
+      outline: model2d.outline,
+      color: model2d.color || "#7a8792",
+      outlineColor: model2d.outlineSelectedColor || model2d.outlineColor || "#D97706",
+      lineWidthPx: Math.max(2.4, model2d.lineWidthPx || 1),
+    });
+  }
+
+  for (const modelId of copyCommand.selectionSnapshot?.passiveModelIds || []) {
+    const model = passiveModels.find((entry) => String(entry?.id || "") === String(modelId || ""));
+    if (!model?.lines?.length || !model?.outline?.length) continue;
+    previewEntries.push({
+      lines: model.lines,
+      outline: model.outline,
+      color: model.color || model2d.color || "#7a8792",
+      outlineColor: model.outlineHoverColor || model.outlineColor || model2d.outlineSelectedColor || "#D97706",
+      lineWidthPx: Math.max(2.4, model.lineWidthPx || model2d.lineWidthPx || 1),
+    });
+  }
+
+  for (const entry of previewEntries) {
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.lineWidth = entry.lineWidthPx;
+    ctx.strokeStyle = entry.color;
+    ctx.globalAlpha = 0.96;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.shadowColor = entry.outlineColor;
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    for (const line of entry.lines) {
+      const a = worldToScreen((Number(line?.ax) || 0) + dx, (Number(line?.ay) || 0) + dy);
+      const b = worldToScreen((Number(line?.bx) || 0) + dx, (Number(line?.by) || 0) + dy);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.lineWidth = 4.5;
+    ctx.strokeStyle = entry.outlineColor;
+    ctx.globalAlpha = 0.82;
+    ctx.shadowColor = entry.outlineColor;
+    ctx.shadowBlur = 14;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    const first = entry.outline[0];
+    const p0 = worldToScreen((Number(first?.x) || 0) + dx, (Number(first?.y) || 0) + dy);
+    ctx.beginPath();
+    ctx.moveTo(p0.x, p0.y);
+    for (let i = 1; i < entry.outline.length; i++) {
+      const pt = entry.outline[i];
+      const p = worldToScreen((Number(pt?.x) || 0) + dx, (Number(pt?.y) || 0) + dy);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 function onWindowMouseUp() {
   if (boxSelect.active) {
     const x1 = boxSelect.startX;
@@ -10466,10 +10579,11 @@ function getState() {
 }
 
 function hitTestPassiveModel(screenX, screenY) {
-  if (!Array.isArray(passiveModels) || !passiveModels.length) return null;
+  const models = getRenderablePassiveModels();
+  if (!Array.isArray(models) || !models.length) return null;
   const world = screenToWorld(screenX, screenY);
-  for (let idx = passiveModels.length - 1; idx >= 0; idx--) {
-    const model = passiveModels[idx];
+  for (let idx = models.length - 1; idx >= 0; idx--) {
+    const model = models[idx];
     const pts = Array.isArray(model?.outline) ? model.outline : [];
     if (pts.length < 3) continue;
     if (pointInPolygonWorld(world.x, world.y, pts)) {
