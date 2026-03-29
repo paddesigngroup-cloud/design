@@ -26,6 +26,7 @@ const showDimensions = ref(true);
 const showOffsetWalls = ref(true);
 const showObjectAxes = ref(false);
 const currentEditorDisplayUnitState = ref("cm");
+const orderDesignGeometryCache = new WeakMap();
 const walls3dSnapshot = ref({
   nodes: [],
   walls: [],
@@ -2087,6 +2088,18 @@ function buildModel2dOutlineFromBoxes(boxes) {
   ];
 }
 
+function getCachedOrderDesignGeometry(item) {
+  if (!item) return { lines: [], outline: [] };
+  const cached = orderDesignGeometryCache.get(item);
+  if (cached) return cached;
+  const next = {
+    lines: buildModel2dLinesFromBoxes(item.viewer_boxes || []),
+    outline: buildModel2dOutlineFromBoxes(item.viewer_boxes || []),
+  };
+  orderDesignGeometryCache.set(item, next);
+  return next;
+}
+
 function getLinesBounds(lines) {
   let minX = Infinity;
   let maxX = -Infinity;
@@ -2691,8 +2704,9 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
     orderDesignId: target.id,
     ...(placement || {}),
   }) || { orderDesignId: target.id, x: 0, y: 0, rotRad: 0 };
-  const worldLines = localDesignToWorld(buildModel2dLinesFromBoxes(target.viewer_boxes), nextPlacement, "lines");
-  const worldOutline = localDesignToWorld(buildModel2dOutlineFromBoxes(target.viewer_boxes), nextPlacement, "points");
+  const geometry = getCachedOrderDesignGeometry(target);
+  const worldLines = localDesignToWorld(geometry.lines, nextPlacement, "lines");
+  const worldOutline = localDesignToWorld(geometry.outline, nextPlacement, "points");
   const full = editorRef.value?.getState?.();
   const nextSnapshot = {
     ...full,
@@ -6938,13 +6952,13 @@ const passiveStageOrderDesignModels = computed(() =>
     .map((placement) => {
       const item = orderDesignCatalog.value.find((row) => String(row.id) === String(placement.orderDesignId));
       if (!item?.viewer_boxes?.length) return null;
-      const worldLines = localDesignToWorld(buildModel2dLinesFromBoxes(item.viewer_boxes), placement, "lines");
-      const worldOutline = localDesignToWorld(buildModel2dOutlineFromBoxes(item.viewer_boxes), placement, "points");
-      if (!worldOutline.length || !worldLines.length) return null;
+      const geometry = getCachedOrderDesignGeometry(item);
+      if (!geometry.outline.length || !geometry.lines.length) return null;
       return {
         id: placement.orderDesignId,
-        lines: worldLines,
-        outline: worldOutline,
+        geometrySpace: "local",
+        lines: geometry.lines,
+        outline: geometry.outline,
         transform: {
           x: placement.x,
           y: placement.y,

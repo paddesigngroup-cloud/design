@@ -1206,7 +1206,7 @@ function collectOverlapHits(screenX, screenY) {
   }
   for (let idx = passiveModels.length - 1; idx >= 0; idx--) {
     const model = passiveModels[idx];
-    const pts = Array.isArray(model?.outline) ? model.outline : [];
+    const pts = getPassiveModelWorldOutline(model);
     if (pts.length < 3) continue;
     let matched = pointInPolygonWorld(world.x, world.y, pts);
     let bestDistance = 0;
@@ -2624,6 +2624,7 @@ function snapshotPassiveModels(models) {
   return (Array.isArray(models) ? models : []).map((model) => ({
     id: String(model?.id || "").trim(),
     isCopyPreview: !!model?.isCopyPreview,
+    geometrySpace: model?.geometrySpace === "local" ? "local" : "world",
     designCode: String(model?.designCode || "").trim() || null,
     designTitle: String(model?.designTitle || "").trim() || null,
     instanceCode: String(model?.instanceCode || "").trim() || null,
@@ -2668,6 +2669,7 @@ function restorePassiveModels(snap) {
     .map((model) => ({
       id: String(model?.id || "").trim(),
       isCopyPreview: !!model?.isCopyPreview,
+      geometrySpace: model?.geometrySpace === "local" ? "local" : "world",
       designCode: String(model?.designCode || "").trim() || null,
       designTitle: String(model?.designTitle || "").trim() || null,
       instanceCode: String(model?.instanceCode || "").trim() || null,
@@ -3025,6 +3027,49 @@ function emitPassiveModelsTransformChange(modelIds = null) {
   onPassiveModelsTransformChange(payload);
 }
 
+function getPassiveModelTransform(model) {
+  return {
+    x: Number(model?.transform?.x) || 0,
+    y: Number(model?.transform?.y) || 0,
+    rotRad: Number(model?.transform?.rotRad) || 0,
+  };
+}
+
+function transformPointByPassiveModel(point, model) {
+  const x = Number(point?.x) || 0;
+  const y = Number(point?.y) || 0;
+  if (model?.geometrySpace !== "local") return { x, y };
+  const transform = getPassiveModelTransform(model);
+  const c = Math.cos(transform.rotRad);
+  const s = Math.sin(transform.rotRad);
+  return {
+    x: x * c - y * s + transform.x,
+    y: x * s + y * c + transform.y,
+  };
+}
+
+function transformLineByPassiveModel(line, model) {
+  if (model?.geometrySpace !== "local") {
+    return {
+      ax: Number(line?.ax) || 0,
+      ay: Number(line?.ay) || 0,
+      bx: Number(line?.bx) || 0,
+      by: Number(line?.by) || 0,
+    };
+  }
+  const a = transformPointByPassiveModel({ x: line?.ax, y: line?.ay }, model);
+  const b = transformPointByPassiveModel({ x: line?.bx, y: line?.by }, model);
+  return { ax: a.x, ay: a.y, bx: b.x, by: b.y };
+}
+
+function getPassiveModelWorldOutline(model) {
+  return Array.isArray(model?.outline) ? model.outline.map((pt) => transformPointByPassiveModel(pt, model)) : [];
+}
+
+function getPassiveModelWorldLines(model) {
+  return Array.isArray(model?.lines) ? model.lines.map((line) => transformLineByPassiveModel(line, model)) : [];
+}
+
 function isCopyPreviewModelId(id) {
   return String(id || "").startsWith(COPY_PREVIEW_MODEL_PREFIX);
 }
@@ -3270,6 +3315,7 @@ function setPassiveModels(models = []) {
       return {
         id,
         isCopyPreview: !!model?.isCopyPreview,
+        geometrySpace: model?.geometrySpace === "local" ? "local" : "world",
         lines,
         outline,
         designCode: String(model?.designCode || "").trim() || null,
@@ -3726,8 +3772,9 @@ function getSelectedObjectTargetInfo() {
 
   const passiveModelTarget = collectTargetForIds(collectIds(selectedPassiveModelId, selectedPassiveModelIds), (id, points) => {
     const model = passiveModels.find((entry) => String(entry?.id || "") === String(id || ""));
-    if (!model?.outline?.length) return false;
-    for (const pt of model.outline) points.push({ x: pt.x, y: pt.y });
+    const worldOutline = getPassiveModelWorldOutline(model);
+    if (!worldOutline.length) return false;
+    for (const pt of worldOutline) points.push({ x: pt.x, y: pt.y });
     return true;
   });
   if (passiveModelTarget) targets.push({ type: "passive_model", ...passiveModelTarget });
@@ -3840,9 +3887,11 @@ function selectionSnapshotHasDesign(snapshot) {
 
 function buildPassiveModelCopyPreview(source, previewId, dx, dy) {
   const transform = source?.transform || {};
+  const geometrySpace = source?.geometrySpace === "local" ? "local" : "world";
   return {
     id: previewId,
     isCopyPreview: true,
+    geometrySpace,
     designCode: String(source?.designCode || "").trim() || null,
     designTitle: String(source?.designTitle || "").trim() || null,
     instanceCode: String(source?.instanceCode || "").trim() || null,
@@ -3852,14 +3901,14 @@ function buildPassiveModelCopyPreview(source, previewId, dx, dy) {
       String(source?.instanceCode || "").trim() ||
       previewId,
     lines: (source?.lines || []).map((line) => ({
-      ax: (Number(line?.ax) || 0) + dx,
-      ay: (Number(line?.ay) || 0) + dy,
-      bx: (Number(line?.bx) || 0) + dx,
-      by: (Number(line?.by) || 0) + dy,
+      ax: Number(line?.ax) || 0,
+      ay: Number(line?.ay) || 0,
+      bx: Number(line?.bx) || 0,
+      by: Number(line?.by) || 0,
     })),
     outline: (source?.outline || []).map((pt) => ({
-      x: (Number(pt?.x) || 0) + dx,
-      y: (Number(pt?.y) || 0) + dy,
+      x: Number(pt?.x) || 0,
+      y: Number(pt?.y) || 0,
     })),
     transform: {
       x: (Number(transform?.x) || 0) + dx,
@@ -3921,18 +3970,26 @@ function applySelectionDelta(snapshot, delta, opts = null) {
   const passiveModelIdSet = new Set(normalizeIds(snapshot.passiveModelIds));
   for (const model of passiveModels) {
     if (!model || !passiveModelIdSet.has(model.id)) continue;
-    model.lines = (model.lines || []).map((line) => ({
-      ax: line.ax + dx,
-      ay: line.ay + dy,
-      bx: line.bx + dx,
-      by: line.by + dy,
-    }));
-    model.outline = (model.outline || []).map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));
-    model.transform = {
-      x: (Number(model.transform?.x) || 0) + dx,
-      y: (Number(model.transform?.y) || 0) + dy,
-      rotRad: Number(model.transform?.rotRad) || 0,
-    };
+    if (model.geometrySpace === "local") {
+      model.transform = {
+        x: (Number(model.transform?.x) || 0) + dx,
+        y: (Number(model.transform?.y) || 0) + dy,
+        rotRad: Number(model.transform?.rotRad) || 0,
+      };
+    } else {
+      model.lines = (model.lines || []).map((line) => ({
+        ax: line.ax + dx,
+        ay: line.ay + dy,
+        bx: line.bx + dx,
+        by: line.by + dy,
+      }));
+      model.outline = (model.outline || []).map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));
+      model.transform = {
+        x: (Number(model.transform?.x) || 0) + dx,
+        y: (Number(model.transform?.y) || 0) + dy,
+        rotRad: Number(model.transform?.rotRad) || 0,
+      };
+    }
   }
   if (passiveModelIdSet.size > 0) emitPassiveModelsTransformChange([...passiveModelIdSet]);
 
@@ -4098,21 +4155,29 @@ function applySelectionRotation(snapshot, pivot, angleRad) {
   const passiveModelIdSet = new Set(normalizeIds(snapshot.passiveModelIds));
   for (const model of passiveModels) {
     if (!model || !passiveModelIdSet.has(model.id)) continue;
-    model.lines = (model.lines || []).map((line) => {
-      const a = rotatePointAroundPivot({ x: line.ax, y: line.ay }, pivot, angleRad);
-      const b = rotatePointAroundPivot({ x: line.bx, y: line.by }, pivot, angleRad);
-      return { ax: a.x, ay: a.y, bx: b.x, by: b.y };
-    });
-    model.outline = (model.outline || []).map((pt) => rotatePointAroundPivot(pt, pivot, angleRad));
     const rotatedOrigin = rotatePointAroundPivot({
       x: Number(model.transform?.x) || 0,
       y: Number(model.transform?.y) || 0,
     }, pivot, angleRad);
-    model.transform = {
-      x: rotatedOrigin.x,
-      y: rotatedOrigin.y,
-      rotRad: wrapAnglePi((Number(model.transform?.rotRad) || 0) + angleRad),
-    };
+    if (model.geometrySpace === "local") {
+      model.transform = {
+        x: rotatedOrigin.x,
+        y: rotatedOrigin.y,
+        rotRad: wrapAnglePi((Number(model.transform?.rotRad) || 0) + angleRad),
+      };
+    } else {
+      model.lines = (model.lines || []).map((line) => {
+        const a = rotatePointAroundPivot({ x: line.ax, y: line.ay }, pivot, angleRad);
+        const b = rotatePointAroundPivot({ x: line.bx, y: line.by }, pivot, angleRad);
+        return { ax: a.x, ay: a.y, bx: b.x, by: b.y };
+      });
+      model.outline = (model.outline || []).map((pt) => rotatePointAroundPivot(pt, pivot, angleRad));
+      model.transform = {
+        x: rotatedOrigin.x,
+        y: rotatedOrigin.y,
+        rotRad: wrapAnglePi((Number(model.transform?.rotRad) || 0) + angleRad),
+      };
+    }
   }
   if (passiveModelIdSet.size > 0) emitPassiveModelsTransformChange([...passiveModelIdSet]);
 
@@ -5779,6 +5844,9 @@ function drawPassiveModelOverlays() {
   if (!Array.isArray(models) || !models.length) return;
   for (const model of models) {
     if (!Array.isArray(model?.lines) || !Array.isArray(model?.outline) || model.outline.length < 3) continue;
+    const worldLines = getPassiveModelWorldLines(model);
+    const pts = getPassiveModelWorldOutline(model);
+    if (!worldLines.length || pts.length < 3) continue;
     const isCopyPreview = !!model.isCopyPreview;
     const isHover = String(hoverPassiveModelId || "") === String(model.id || "");
     const isSelected =
@@ -5801,7 +5869,7 @@ function drawPassiveModelOverlays() {
       ctx.shadowBlur = 10;
     }
     ctx.beginPath();
-    for (const l of model.lines) {
+    for (const l of worldLines) {
       const a = worldToScreen(l.ax, l.ay);
       const b = worldToScreen(l.bx, l.by);
       ctx.moveTo(a.x, a.y);
@@ -5810,7 +5878,6 @@ function drawPassiveModelOverlays() {
     ctx.stroke();
     ctx.restore();
 
-    const pts = model.outline;
     const col = isCopyPreview
       ? (model.outlineHoverColor || model2d.outlineSelectedColor)
       : (isSelected || isHover)
@@ -7753,7 +7820,7 @@ function applyBoxSelection(x1, y1, x2, y2, mode = "replace") {
 
   const passiveModelHits = [];
   for (const model of passiveModels) {
-    const pts = Array.isArray(model?.outline) ? model.outline.map((p) => worldToScreen(p.x, p.y)) : [];
+    const pts = getPassiveModelWorldOutline(model).map((p) => worldToScreen(p.x, p.y));
     if (pts.length < 3) continue;
     const allInside = pts.every((p) => pointInRect(p.x, p.y, r));
     let hit = false;
@@ -7888,8 +7955,8 @@ function collectSnapCandidatesWorld(x, y, tolMm) {
     }
   }
   for (const model of passiveModels) {
-    if (!Array.isArray(model?.outline) || model.outline.length < 2) continue;
-    const pts = model.outline;
+    const pts = getPassiveModelWorldOutline(model);
+    if (pts.length < 2) continue;
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i];
       const b = pts[(i + 1) % pts.length];
@@ -9018,8 +9085,8 @@ function drawCopyDesignPreview() {
     const model = passiveModels.find((entry) => String(entry?.id || "") === String(modelId || ""));
     if (!model?.lines?.length || !model?.outline?.length) continue;
     previewEntries.push({
-      lines: model.lines,
-      outline: model.outline,
+      lines: getPassiveModelWorldLines(model),
+      outline: getPassiveModelWorldOutline(model),
       color: model.color || model2d.color || "#7a8792",
       outlineColor: model.outlineHoverColor || model.outlineColor || model2d.outlineSelectedColor || "#D97706",
       lineWidthPx: Math.max(2.4, model.lineWidthPx || model2d.lineWidthPx || 1),
@@ -10286,8 +10353,7 @@ function collectSelectionWorldPoints(snapshot = null) {
 
   for (const id of Array.isArray(snap.passiveModelIds) ? snap.passiveModelIds : []) {
     const model = passiveModels.find((entry) => String(entry?.id || "") === String(id || ""));
-    if (!model?.outline?.length) continue;
-    for (const pt of model.outline) pushPoint(pt?.x, pt?.y);
+    for (const pt of getPassiveModelWorldOutline(model)) pushPoint(pt?.x, pt?.y);
   }
 
   if (snap.hasModel && Array.isArray(model2d.outline)) {
@@ -10354,8 +10420,8 @@ function fitViewToBounds() {
   }
   for (const model of passiveModels || []) {
     if (!model) continue;
-    for (const line of model.lines || []) extendBoundsWithLine(line);
-    for (const point of model.outline || []) {
+    for (const line of getPassiveModelWorldLines(model)) extendBoundsWithLine(line);
+    for (const point of getPassiveModelWorldOutline(model)) {
       extendBoundsWithPoint(point?.x, point?.y);
     }
   }
@@ -10584,7 +10650,7 @@ function hitTestPassiveModel(screenX, screenY) {
   const world = screenToWorld(screenX, screenY);
   for (let idx = models.length - 1; idx >= 0; idx--) {
     const model = models[idx];
-    const pts = Array.isArray(model?.outline) ? model.outline : [];
+    const pts = getPassiveModelWorldOutline(model);
     if (pts.length < 3) continue;
     if (pointInPolygonWorld(world.x, world.y, pts)) {
       return model.id;
