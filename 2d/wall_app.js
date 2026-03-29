@@ -2609,6 +2609,7 @@ function snapshotModel2d(model) {
   return {
     lines: (model?.lines || []).map((l) => ({ ax: l.ax, ay: l.ay, bx: l.bx, by: l.by })),
     outline: (model?.outline || []).map((p) => ({ x: p.x, y: p.y })),
+    outlineColor: String(model?.outlineColor || "").trim() || null,
     designId: String(model?.designId || "").trim() || null,
     designCode: String(model?.designCode || "").trim() || null,
     designTitle: String(model?.designTitle || "").trim() || null,
@@ -2649,6 +2650,7 @@ function restoreModel2d(model, snap) {
   if (!model) return;
   model.lines = (snap?.lines || []).map((l) => ({ ax: l.ax, ay: l.ay, bx: l.bx, by: l.by }));
   model.outline = (snap?.outline || []).map((p) => ({ x: p.x, y: p.y }));
+  model.outlineColor = String(snap?.outlineColor || "").trim() || model.outlineColor;
   model.designId = String(snap?.designId || "").trim() || null;
   model.designCode = String(snap?.designCode || "").trim() || null;
   model.designTitle = String(snap?.designTitle || "").trim() || null;

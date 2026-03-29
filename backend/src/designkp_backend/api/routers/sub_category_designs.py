@@ -93,6 +93,7 @@ class SubCategoryDesignInteriorInstancePreviewItem(BaseModel):
 class SubCategoryDesignPreviewResponse(BaseModel):
     design_id: uuid.UUID | None = None
     sub_category_id: uuid.UUID
+    design_outline_color: str = "#7A4A2B"
     resolved_params: dict[str, str | None]
     resolved_base_formulas: dict[str, float]
     viewer_boxes: list[dict[str, object]]
@@ -104,6 +105,7 @@ class SubCategoryDesignItem(BaseModel):
     id: uuid.UUID
     admin_id: uuid.UUID | None
     sub_category_id: uuid.UUID
+    design_outline_color: str = "#7A4A2B"
     temp_id: int
     cat_id: int
     sub_cat_id: int
@@ -198,11 +200,12 @@ async def _ensure_unique_design_code(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Design code is already used.")
 
 
-def _serialize_design(item: SubCategoryDesign, *, include_interior: bool = True) -> SubCategoryDesignItem:
+def _serialize_design(item: SubCategoryDesign, *, include_interior: bool = True, design_outline_color: str = "#7A4A2B") -> SubCategoryDesignItem:
     return SubCategoryDesignItem(
         id=item.id,
         admin_id=item.admin_id,
         sub_category_id=item.sub_category_id,
+        design_outline_color=str(design_outline_color or "#7A4A2B").strip() or "#7A4A2B",
         temp_id=item.temp_id,
         cat_id=item.cat_id,
         sub_cat_id=item.sub_cat_id,
@@ -230,6 +233,7 @@ def _serialize_preview(
     *,
     design_id: uuid.UUID | None,
     sub_category_id: uuid.UUID,
+    design_outline_color: str,
     raw_params: dict[str, str | None],
     resolved_base_formulas: dict[str, float],
     snapshots: list,
@@ -251,6 +255,7 @@ def _serialize_preview(
     return SubCategoryDesignPreviewResponse(
         design_id=design_id,
         sub_category_id=sub_category_id,
+        design_outline_color=str(design_outline_color or "#7A4A2B").strip() or "#7A4A2B",
         resolved_params=raw_params,
         resolved_base_formulas=resolved_base_formulas,
         viewer_boxes=[item.viewer_payload["box"] for item in snapshots],
@@ -361,7 +366,10 @@ async def list_sub_category_designs(
 ) -> list[SubCategoryDesignItem]:
     await require_admin_if_present(session, admin_id)
     include_interior = await interior_instance_tables_ready(session)
-    stmt = select(SubCategoryDesign).options(selectinload(SubCategoryDesign.parts))
+    stmt = select(SubCategoryDesign).options(
+        selectinload(SubCategoryDesign.parts),
+        selectinload(SubCategoryDesign.sub_category),
+    )
     if include_interior:
         stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
     if admin_id is None:
@@ -386,7 +394,14 @@ async def list_sub_category_designs(
     if sub_cat_id is not None:
         stmt = stmt.where(SubCategoryDesign.sub_cat_id == sub_cat_id)
     items = (await session.scalars(stmt)).all()
-    return [_serialize_design(item, include_interior=include_interior) for item in items]
+    return [
+        _serialize_design(
+            item,
+            include_interior=include_interior,
+            design_outline_color=getattr(item.sub_category, "design_outline_color", "#7A4A2B"),
+        )
+        for item in items
+    ]
 
 
 @router.post("", response_model=SubCategoryDesignItem, status_code=status.HTTP_201_CREATED)
@@ -424,7 +439,11 @@ async def create_sub_category_design(payload: SubCategoryDesignCreate, session: 
     await rebuild_design_snapshots(session, item)
     await session.commit()
     item = await _load_design(session, item.id)
-    return _serialize_design(item, include_interior=await interior_instance_tables_ready(session))
+    return _serialize_design(
+        item,
+        include_interior=await interior_instance_tables_ready(session),
+        design_outline_color=getattr(sub_category, "design_outline_color", "#7A4A2B"),
+    )
 
 
 @router.patch("/{design_uuid}", response_model=SubCategoryDesignItem)
@@ -463,7 +482,11 @@ async def update_sub_category_design(
     await rebuild_design_snapshots(session, item)
     await session.commit()
     item = await _load_design(session, item.id)
-    return _serialize_design(item, include_interior=await interior_instance_tables_ready(session))
+    return _serialize_design(
+        item,
+        include_interior=await interior_instance_tables_ready(session),
+        design_outline_color=getattr(sub_category, "design_outline_color", "#7A4A2B"),
+    )
 
 
 @router.delete("/{design_uuid}", status_code=status.HTTP_204_NO_CONTENT)
@@ -509,6 +532,7 @@ async def preview_sub_category_design_draft(
     return _serialize_preview(
         design_id=None,
         sub_category_id=sub_category.id,
+        design_outline_color=str(getattr(sub_category, "design_outline_color", "#7A4A2B") or "#7A4A2B"),
         raw_params=raw_params,
         resolved_base_formulas=resolved_base_formulas,
         snapshots=snapshots,
@@ -561,6 +585,7 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
     return SubCategoryDesignPreviewResponse(
         design_id=item.id,
         sub_category_id=sub_category.id,
+        design_outline_color=str(getattr(sub_category, "design_outline_color", "#7A4A2B") or "#7A4A2B"),
         resolved_params=raw_params,
         resolved_base_formulas=resolved_base_formulas,
         viewer_boxes=viewer_boxes + ([

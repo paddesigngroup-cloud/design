@@ -315,6 +315,7 @@ const constructionDeletedPartKindIds = ref([]);
 const constructionDeletedParamGroupIds = ref([]);
 const constructionDeletedParamIds = ref([]);
 const constructionDeletedSubCategoryIds = ref([]);
+const DEFAULT_SUB_CATEGORY_DESIGN_OUTLINE_COLOR = "#7A4A2B";
 const constructionDeletedSubCategoryDesignIds = ref([]);
 const constructionDeletedBaseFormulaIds = ref([]);
 const constructionDeletedPartFormulaIds = ref([]);
@@ -1024,6 +1025,13 @@ function normalizeCategoryPayload(item) {
   };
 }
 
+function normalizeHexColor(value, fallback = DEFAULT_SUB_CATEGORY_DESIGN_OUTLINE_COLOR) {
+  const raw = String(value || "").trim();
+  if (!raw) return fallback;
+  const normalized = raw.startsWith("#") ? raw : `#${raw}`;
+  return /^#[0-9A-Fa-f]{6}$/.test(normalized) ? normalized.toUpperCase() : fallback;
+}
+
 function normalizeSubCategoryPayload(item) {
   return {
     admin_id: item.admin_id,
@@ -1031,6 +1039,7 @@ function normalizeSubCategoryPayload(item) {
     cat_id: Number(item.cat_id),
     sub_cat_id: Number(item.sub_cat_id),
     sub_cat_title: String(item.sub_cat_title || "").trim(),
+    design_outline_color: normalizeHexColor(item.design_outline_color),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.sub_cat_id),
     is_system: !!item.is_system,
     param_defaults: Object.fromEntries(
@@ -2176,12 +2185,14 @@ async function enrichDesignWithPreview(item) {
     const preview = await fetchSubCategoryDesignPreview(item.id);
     return {
       ...item,
+      design_outline_color: normalizeHexColor(item.design_outline_color || preview?.design_outline_color),
       sub_cat_title: getConstructionSubCategoryTitleByDesign(item),
       preview,
     };
   } catch (_) {
     return {
       ...item,
+      design_outline_color: normalizeHexColor(item.design_outline_color),
       sub_cat_title: getConstructionSubCategoryTitleByDesign(item),
       preview: null,
     };
@@ -2196,6 +2207,7 @@ function normalizeOrderDesignRecord(item) {
     order_id: String(item.order_id || ""),
     sub_category_design_id: String(item.sub_category_design_id || ""),
     sub_category_id: String(item.sub_category_id || ""),
+    design_outline_color: normalizeHexColor(item.design_outline_color),
     design_code: String(item.design_code || "").trim(),
     design_title: String(item.design_title || "").trim(),
     instance_code: String(item.instance_code || "").trim(),
@@ -2714,6 +2726,7 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
       ...(full.model2dSnap || {}),
       lines: worldLines,
       outline: worldOutline,
+      outlineColor: normalizeHexColor(target.design_outline_color),
       designId: target.id,
       designCode: String(target.design_code || "").trim() || null,
       designTitle: String(target.design_title || "").trim() || null,
@@ -2737,6 +2750,7 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
     }
     if (!restored && editorRef.value?.setModel2dLines) {
       editorRef.value.setModel2dLines(worldLines, {
+        outlineColor: normalizeHexColor(target.design_outline_color),
         designId: target.id,
         designCode: String(target.design_code || "").trim() || null,
         designTitle: String(target.design_title || "").trim() || null,
@@ -3700,6 +3714,7 @@ function getConstructionCategoryOptions(tempId) {
 }
 
 function ensureSubCategoryParamDefaults(item) {
+  item.design_outline_color = normalizeHexColor(item.design_outline_color);
   if (!item.param_defaults || typeof item.param_defaults !== "object") {
     item.param_defaults = {};
   }
@@ -3740,6 +3755,7 @@ function ensureSubCategoryParamDefaults(item) {
 
 function cloneSubCategoryDefaultsSeed(source) {
   const seeded = ensureSubCategoryParamDefaults({
+    design_outline_color: normalizeHexColor(source?.design_outline_color),
     param_defaults: Object.fromEntries(
       constructionSubCategoryParamColumns.value.map((column) => [
         column.key,
@@ -3764,6 +3780,7 @@ function cloneSubCategoryDefaultsSeed(source) {
     ),
   });
   return {
+    design_outline_color: normalizeHexColor(source?.design_outline_color),
     param_defaults: { ...(seeded.param_defaults || {}) },
     param_overrides: Object.fromEntries(
       Object.entries(seeded.param_overrides || {}).map(([key, value]) => [key, { ...(value || {}) }])
@@ -4045,6 +4062,10 @@ function validateConstructionSubCategories() {
       showAlert("عنوان ساب‌کت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
       return false;
     }
+    if (normalizeHexColor(item.design_outline_color) !== String(item.design_outline_color || "").trim().toUpperCase()) {
+      showAlert("رنگ خط بیرونی طرح باید با فرمت HEX مثل #7A4A2B وارد شود.", { title: "اعتبارسنجی" });
+      return false;
+    }
   }
   const ids = editableSubCategories.value.map((item) => Number(item.sub_cat_id));
   if (new Set(ids).size !== ids.length) {
@@ -4203,6 +4224,7 @@ function getConstructionCsvHeaders() {
       "cat_id",
       "sub_cat_id",
       "sub_cat_title",
+      "design_outline_color",
       ...constructionSubCategoryParamColumns.value.flatMap((item) => [
         item.key,
         `${item.key}__display_title`,
@@ -4257,6 +4279,7 @@ function getConstructionCsvRows(items = null) {
       Number(item.cat_id) || "",
       Number(item.sub_cat_id) || "",
       String(item.sub_cat_title || "").trim(),
+      normalizeHexColor(item.design_outline_color),
       ...constructionSubCategoryParamColumns.value.flatMap((column) => {
         const override = item.param_overrides?.[column.key] || {};
         return [
@@ -4519,13 +4542,14 @@ async function onConstructionImportFileChange(event) {
         };
       });
     } else if (constructionStep.value === "sub_categories") {
+      const fixedColumnCount = 5;
       const perParamColumnCount = 9;
-      const adminModeIndex = 4 + (constructionSubCategoryParamColumns.value.length * perParamColumnCount);
+      const adminModeIndex = fixedColumnCount + (constructionSubCategoryParamColumns.value.length * perParamColumnCount);
       previewRows = rows.slice(1).map((row, index) => {
         const paramDefaults = {};
         const paramOverrides = {};
         constructionSubCategoryParamColumns.value.forEach((column, paramIndex) => {
-          const offset = 4 + (paramIndex * perParamColumnCount);
+          const offset = fixedColumnCount + (paramIndex * perParamColumnCount);
           paramDefaults[column.key] = String(row[offset] || "").trim();
           paramOverrides[column.key] = {
             display_title: String(row[offset + 1] || "").trim(),
@@ -4544,6 +4568,7 @@ async function onConstructionImportFileChange(event) {
           cat_id: Number(row[1]),
           sub_cat_id: Number(row[2]),
           sub_cat_title: String(row[3] || "").trim(),
+          design_outline_color: normalizeHexColor(row[4]),
           param_defaults: paramDefaults,
           param_overrides: paramOverrides,
           admin_mode: String(row[adminModeIndex] || "admin").trim().toLowerCase() === "system" ? "system" : "admin",
@@ -5087,6 +5112,7 @@ function buildImportedConstructionSubCategoryDrafts(rows) {
       cat_id: Number(row.cat_id),
       sub_cat_id: Number(row.sub_cat_id),
       sub_cat_title: String(row.sub_cat_title || "").trim(),
+      design_outline_color: normalizeHexColor(row.design_outline_color),
       code: `sub_category_${Number(row.sub_cat_id)}`,
       title: String(row.sub_cat_title || "").trim(),
       sort_order: index + 1,
@@ -5109,6 +5135,7 @@ function buildImportedConstructionSubCategoryDrafts(rows) {
       Number(existing.cat_id) !== nextPayload.cat_id ||
       Number(existing.sub_cat_id) !== nextPayload.sub_cat_id ||
       String(existing.sub_cat_title || "").trim() !== nextPayload.sub_cat_title ||
+      normalizeHexColor(existing.design_outline_color) !== nextPayload.design_outline_color ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system ||
       constructionSubCategoryParamColumns.value.some((column) => {
@@ -5307,6 +5334,7 @@ function addConstructionSubCategory() {
       cat_id: Number(fallbackCategory?.cat_id) || 1,
       sub_cat_id: nextId,
       sub_cat_title: `ساب‌کت ${toPersianDigits(nextId)}`,
+      design_outline_color: clonedDefaults.design_outline_color,
       code: `sub_category_${nextId}`,
       title: `ساب‌کت ${toPersianDigits(nextId)}`,
       sort_order: nextId,
@@ -6967,6 +6995,7 @@ const passiveStageOrderDesignModels = computed(() =>
         designCode: String(item.design_code || "").trim() || null,
         designTitle: String(item.design_title || "").trim() || null,
         instanceCode: String(item.instance_code || "").trim() || null,
+        outlineColor: normalizeHexColor(item.design_outline_color),
         displayName:
           String(item.design_title || "").trim() ||
           String(item.instance_code || "").trim() ||
@@ -9983,6 +10012,7 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--id">دسته</th>
                       <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                       <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
+                      <th class="constructionDialog__col constructionDialog__col--outlineColor">خط بیرونی طرح</th>
                       <th class="constructionDialog__col constructionDialog__col--title">پارامترهای مقداردهی‌شده</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
@@ -9993,6 +10023,12 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.cat_id }}</td>
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.sub_cat_id }}</td>
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.sub_cat_title }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--outlineColor">
+                        <div class="constructionDialog__colorField">
+                          <span class="constructionDialog__colorSwatch" :style="{ backgroundColor: normalizeHexColor(row.design_outline_color) }"></span>
+                          <span class="constructionDialog__colorValue">{{ normalizeHexColor(row.design_outline_color) }}</span>
+                        </div>
+                      </td>
                       <td class="constructionDialog__col constructionDialog__col--title">
                         {{ Object.values(row.param_defaults || {}).filter((value) => String(value || "").trim()).length }}
                       </td>
@@ -10026,6 +10062,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">دسته</th>
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان ساب‌کت</th>
+                    <th class="constructionDialog__col constructionDialog__col--outlineColor">خط بیرونی طرح</th>
                     <th class="constructionDialog__col constructionDialog__col--defaults">پیش‌فرض‌ها</th>
                     <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
                     <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
@@ -10053,6 +10090,25 @@ onBeforeUnmount(() => {
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--title">
                       <input v-model="item.sub_cat_title" class="constructionDialog__input" type="text" @input="markConstructionSubCategoryDirty(item)" />
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--outlineColor">
+                      <div class="constructionDialog__colorEditor">
+                        <input
+                          v-model="item.design_outline_color"
+                          class="constructionDialog__colorInput"
+                          type="color"
+                          @input="item.design_outline_color = normalizeHexColor(item.design_outline_color); markConstructionSubCategoryDirty(item)"
+                        />
+                        <input
+                          v-model="item.design_outline_color"
+                          class="constructionDialog__input constructionDialog__input--mono constructionDialog__colorHex"
+                          type="text"
+                          dir="ltr"
+                          maxlength="7"
+                          placeholder="#7A4A2B"
+                          @change="item.design_outline_color = normalizeHexColor(item.design_outline_color); markConstructionSubCategoryDirty(item)"
+                        />
+                      </div>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--defaults">
                       <div class="constructionDialog__defaultsActions">
