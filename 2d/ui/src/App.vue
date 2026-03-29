@@ -175,7 +175,31 @@ const designMenuTools = [
 ];
 
 const wallPresets = WALL_READY_PRESETS;
-const presetDrag = ref({ active: false, type: null, preset: null, design: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false, leftPanel: false });
+let presetDragSessionSeed = 0;
+function createEmptyPresetDragState() {
+  return {
+    active: false,
+    type: null,
+    preset: null,
+    design: null,
+    clientX: 0,
+    clientY: 0,
+    startX: 0,
+    startY: 0,
+    enteredStage: false,
+    leftPanel: false,
+    sessionId: 0,
+    createdOrderDesignId: "",
+    dragBootstrapping: false,
+    dragStarted: false,
+    previousActiveOrderDesignId: "",
+    previousActivePlacement: null,
+    releasePending: false,
+    releaseClientX: 0,
+    releaseClientY: 0,
+  };
+}
+const presetDrag = ref(createEmptyPresetDragState());
 const PRESET_PREVIEW_MIN_DRAG_PX = 12;
 const snapMenuItems = [
   { id: "corner", title: "گوشه", icon: "/icons/corner_point.png" },
@@ -2738,6 +2762,141 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
     editorRef.value?.selectModelOutline?.();
   }
   return restored;
+}
+
+async function deleteOrderDesignSilentlyById(orderDesignId) {
+  const key = String(orderDesignId || "").trim();
+  if (!key) return;
+  const res = await fetch(`/api/order-designs/${encodeURIComponent(key)}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف طرح سفارش انجام نشد."));
+  orderDesignCatalog.value = orderDesignCatalog.value.filter((item) => String(item.id) !== key);
+  removeOrderDesignPlacement(key);
+}
+
+async function rollbackTransientCabinetDesignDrag(dragState) {
+  const transientId = String(dragState?.createdOrderDesignId || "").trim();
+  if (!transientId) return;
+  try {
+    await deleteOrderDesignSilentlyById(transientId);
+  } catch (error) {
+    await loadOrderDesignCatalog(true).catch(() => {});
+    showAlert(error?.message || "برگرداندن طرح موقت انجام نشد.", { title: "خطا" });
+  }
+
+  const previousId = String(dragState?.previousActiveOrderDesignId || "").trim();
+  const previousPlacement = dragState?.previousActivePlacement || null;
+  const previousItem = previousId
+    ? orderDesignCatalog.value.find((item) => String(item.id) === previousId) || null
+    : null;
+
+  if (previousItem?.viewer_boxes?.length) {
+    stageCabinetPlaceholderBoxes.value = previousItem.viewer_boxes.map(normalizeCabinetBox);
+    restoreActiveOrderDesignToEditor(previousItem, previousPlacement || getOrderDesignPlacement(previousId));
+  } else {
+    stageCabinetPlaceholderBoxes.value = [];
+    activeCabinetDesignId.value = null;
+    activeStageOrderDesignSelected.value = false;
+    selectedStageOrderDesignIds.value = [];
+    editorRef.value?.clearModel2dLines?.(false);
+  }
+  syncQuickStateFromEditor();
+}
+
+function finishPresetDragSession() {
+  presetDrag.value = createEmptyPresetDragState();
+  window.removeEventListener("pointermove", onPresetPointerMove);
+  window.removeEventListener("pointerup", onPresetPointerUp);
+  enable2dInput();
+}
+
+async function ensureCabinetDesignDragPlacement(clientX, clientY) {
+  const drag = presetDrag.value;
+  if (!drag.active || drag.type !== "cabinetDesign" || drag.dragBootstrapping || drag.createdOrderDesignId) return false;
+  const sessionId = drag.sessionId;
+  const previousActiveOrderDesignId = String(activeCabinetDesignId.value || "").trim();
+  const previousActivePlacement = previousActiveOrderDesignId
+    ? { ...(getOrderDesignPlacement(previousActiveOrderDesignId) || getCurrentEditorModelPlacement()) }
+    : null;
+  presetDrag.value = {
+    ...drag,
+    dragBootstrapping: true,
+    previousActiveOrderDesignId,
+    previousActivePlacement,
+  };
+  cabinetDesignDropLoadingMode.value = "add";
+  cabinetDesignDropLoading.value = true;
+  cabinetDesignDropLoadingTitle.value = String(drag.design?.design_title || "").trim();
+  try {
+    const createdOrderDesign = await createOrderDesignFromSource(drag.design);
+    const currentDrag = presetDrag.value;
+    if (!currentDrag.active || currentDrag.sessionId !== sessionId || currentDrag.type !== "cabinetDesign") {
+      if (createdOrderDesign?.id) {
+        await deleteOrderDesignSilentlyById(createdOrderDesign.id).catch(() => loadOrderDesignCatalog(true).catch(() => {}));
+      }
+      return false;
+    }
+    const latestClientX = Number.isFinite(Number(presetDrag.value.clientX)) ? Number(presetDrag.value.clientX) : clientX;
+    const latestClientY = Number.isFinite(Number(presetDrag.value.clientY)) ? Number(presetDrag.value.clientY) : clientY;
+    const localBoxes = (createdOrderDesign?.viewer_boxes || []).map(normalizeCabinetBox);
+    const dropWorld = clientPointToStageWorld(latestClientX, latestClientY);
+    const placement = normalizeOrderDesignPlacement({
+      orderDesignId: createdOrderDesign?.id || "",
+      x: Number(dropWorld?.x) || 0,
+      y: Number(dropWorld?.y) || 0,
+      rotRad: 0,
+    }) || { orderDesignId: createdOrderDesign?.id || "", x: 0, y: 0, rotRad: 0 };
+    stageCabinetPlaceholderBoxes.value = localBoxes;
+    if (createdOrderDesign?.id) {
+      upsertOrderDesignPlacement(placement);
+    }
+    const restored = restoreActiveOrderDesignToEditor(createdOrderDesign, placement);
+    await nextTick();
+    presetDrag.value = {
+      ...presetDrag.value,
+      createdOrderDesignId: String(createdOrderDesign?.id || ""),
+      dragBootstrapping: false,
+      dragStarted: restored,
+      previousActiveOrderDesignId,
+      previousActivePlacement,
+    };
+    syncQuickStateFromEditor();
+    if (presetDrag.value.releasePending) {
+      const releaseX = Number.isFinite(Number(presetDrag.value.releaseClientX)) ? Number(presetDrag.value.releaseClientX) : latestClientX;
+      const releaseY = Number.isFinite(Number(presetDrag.value.releaseClientY)) ? Number(presetDrag.value.releaseClientY) : latestClientY;
+      const stageRect = stageEl.value?.getBoundingClientRect();
+      const inStage = !!stageRect && releaseX >= stageRect.left && releaseX <= stageRect.right
+        && releaseY >= stageRect.top && releaseY <= stageRect.bottom;
+      const commit = inStage
+        && Math.hypot(releaseX - (presetDrag.value.startX || releaseX), releaseY - (presetDrag.value.startY || releaseY)) >= PRESET_PREVIEW_MIN_DRAG_PX
+        && presetDrag.value.enteredStage
+        && presetDrag.value.leftPanel;
+      if (commit) {
+        enable2dInput();
+        const dragStarted = !!editorRef.value?.beginModelDragAtClient?.(releaseX, releaseY);
+        if (dragStarted) {
+          editorRef.value?.updateModelDragAtClient?.(releaseX, releaseY);
+        }
+        syncQuickStateFromEditor();
+      } else {
+        await rollbackTransientCabinetDesignDrag({ ...presetDrag.value });
+      }
+      finishPresetDragSession();
+    }
+    return true;
+  } catch (error) {
+    if (presetDrag.value.active && presetDrag.value.sessionId === sessionId) {
+      showAlert(error?.message || "افزودن طرح به سفارش انجام نشد.", { title: "خطا" });
+      presetDrag.value = {
+        ...presetDrag.value,
+        dragBootstrapping: false,
+      };
+    }
+    return false;
+  } finally {
+    cabinetDesignDropLoading.value = false;
+    cabinetDesignDropLoadingTitle.value = "";
+    cabinetDesignDropLoadingMode.value = "add";
+  }
 }
 
 function placeOrderDesignOnStage(item) {
@@ -6513,6 +6672,7 @@ const activeStageOrderPlacement = computed(() => getOrderDesignPlacement(activeC
 const draggedCabinetPreviewInstance = computed(() => {
   const drag = presetDrag.value;
   if (!drag?.active || drag.type !== "cabinetDesign" || !drag.design?.preview?.viewer_boxes?.length) return null;
+  if (drag.dragBootstrapping || drag.createdOrderDesignId || cabinetDesignDropLoading.value) return null;
   if (!drag.leftPanel) return null;
 
   const dx = drag.clientX - (drag.startX || drag.clientX);
@@ -7399,16 +7559,15 @@ function setDraftFromDesignTool(id) {
 function startWallPresetDrag(ev, preset) {
   if (!preset || !ev?.isPrimary) return;
   presetDrag.value = {
+    ...createEmptyPresetDragState(),
     active: true,
     type: "wallPreset",
     preset,
-    design: null,
     clientX: ev.clientX,
     clientY: ev.clientY,
     startX: ev.clientX,
     startY: ev.clientY,
-    enteredStage: false,
-    leftPanel: false,
+    sessionId: ++presetDragSessionSeed,
   };
   disable2dInput();
   window.addEventListener("pointermove", onPresetPointerMove);
@@ -7420,16 +7579,14 @@ function startColumnDrag(ev) {
   designMenuTool.value = "column";
   setDraftFromDesignTool("column");
   presetDrag.value = {
+    ...createEmptyPresetDragState(),
     active: true,
     type: "column",
-    preset: null,
-    design: null,
     clientX: ev.clientX,
     clientY: ev.clientY,
     startX: ev.clientX,
     startY: ev.clientY,
-    enteredStage: false,
-    leftPanel: false,
+    sessionId: ++presetDragSessionSeed,
   };
   disable2dInput();
   window.addEventListener("pointermove", onPresetPointerMove);
@@ -7439,23 +7596,22 @@ function startColumnDrag(ev) {
 function startCabinetDesignDrag(ev, design) {
   if (!ev?.isPrimary || !design?.preview?.viewer_boxes?.length) return;
   presetDrag.value = {
+    ...createEmptyPresetDragState(),
     active: true,
     type: "cabinetDesign",
-    preset: null,
     design,
     clientX: ev.clientX,
     clientY: ev.clientY,
     startX: ev.clientX,
     startY: ev.clientY,
-    enteredStage: false,
-    leftPanel: false,
+    sessionId: ++presetDragSessionSeed,
   };
   disable2dInput();
   window.addEventListener("pointermove", onPresetPointerMove);
   window.addEventListener("pointerup", onPresetPointerUp, { once: true });
 }
 
-function onPresetPointerMove(ev) {
+async function onPresetPointerMove(ev) {
   if (!presetDrag.value.active) return;
   const stageRect = stageEl.value?.getBoundingClientRect();
   const panelRect = menuPanelEl.value?.getBoundingClientRect();
@@ -7472,57 +7628,46 @@ function onPresetPointerMove(ev) {
     enteredStage: presetDrag.value.enteredStage || inStage,
     leftPanel: presetDrag.value.leftPanel || !inPanel,
   };
+  const drag = presetDrag.value;
+  if (drag.type !== "cabinetDesign") return;
+  const dragDx = ev.clientX - (drag.startX || ev.clientX);
+  const dragDy = ev.clientY - (drag.startY || ev.clientY);
+  const movedEnough = Math.hypot(dragDx, dragDy) >= PRESET_PREVIEW_MIN_DRAG_PX;
+  const canDropCabinet = drag.leftPanel;
+  if (!movedEnough || !canDropCabinet || (!inStage && !drag.enteredStage)) return;
 }
 
 async function onPresetPointerUp(ev) {
+  let drag = { ...presetDrag.value };
   const stageRect = stageEl.value?.getBoundingClientRect();
   const inStage = !!stageRect && ev.clientX >= stageRect.left && ev.clientX <= stageRect.right
     && ev.clientY >= stageRect.top && ev.clientY <= stageRect.bottom;
-  const dragDx = ev.clientX - (presetDrag.value.startX || ev.clientX);
-  const dragDy = ev.clientY - (presetDrag.value.startY || ev.clientY);
+  const dragDx = ev.clientX - (drag.startX || ev.clientX);
+  const dragDy = ev.clientY - (drag.startY || ev.clientY);
   const movedEnough = Math.hypot(dragDx, dragDy) >= PRESET_PREVIEW_MIN_DRAG_PX;
 
-  const canDropCabinet = presetDrag.value.type !== "cabinetDesign" || presetDrag.value.leftPanel;
-  if (inStage && movedEnough && presetDrag.value.enteredStage && canDropCabinet) {
-    if (presetDrag.value.type === "column") {
+  const canDropCabinet = drag.type !== "cabinetDesign" || drag.leftPanel;
+  const shouldCommitCabinet = inStage && movedEnough && drag.enteredStage && canDropCabinet;
+  if (inStage && movedEnough && drag.enteredStage && canDropCabinet) {
+    if (drag.type === "column") {
       editorRef.value?.placeColumnAtClient?.(ev.clientX, ev.clientY);
-    } else if (presetDrag.value.type === "cabinetDesign" && presetDrag.value.design?.preview?.viewer_boxes?.length) {
-      cabinetDesignDropLoadingMode.value = "add";
-      cabinetDesignDropLoading.value = true;
-      cabinetDesignDropLoadingTitle.value = String(presetDrag.value.design.design_title || "").trim();
-      try {
-        const createdOrderDesign = await createOrderDesignFromSource(presetDrag.value.design);
-        const localBoxes = (createdOrderDesign?.viewer_boxes || []).map(normalizeCabinetBox);
-        const dropWorld = clientPointToStageWorld(ev.clientX, ev.clientY);
-        const placement = normalizeOrderDesignPlacement({
-          orderDesignId: createdOrderDesign?.id || "",
-          x: Number(dropWorld?.x) || 0,
-          y: Number(dropWorld?.y) || 0,
-          rotRad: 0,
-        }) || { orderDesignId: createdOrderDesign?.id || "", x: 0, y: 0, rotRad: 0 };
-        stageCabinetPlaceholderBoxes.value = localBoxes;
-        if (createdOrderDesign?.id) {
-          upsertOrderDesignPlacement(placement);
-        }
-        restoreActiveOrderDesignToEditor(createdOrderDesign, placement);
-        await nextTick();
-        syncQuickStateFromEditor();
-        scheduleActiveOrderDrawingSave({ debounceMs: 0 });
-      } catch (error) {
-        showAlert(error?.message || "افزودن طرح به سفارش انجام نشد.", { title: "خطا" });
-      } finally {
-        cabinetDesignDropLoading.value = false;
-        cabinetDesignDropLoadingTitle.value = "";
-        cabinetDesignDropLoadingMode.value = "add";
-      }
-    } else if (presetDrag.value.preset) {
-      const lines = buildPresetLines(presetDrag.value.preset.kind);
+    } else if (drag.type === "cabinetDesign" && drag.design?.preview?.viewer_boxes?.length) {
+      presetDrag.value = {
+        ...presetDrag.value,
+        releasePending: true,
+        releaseClientX: ev.clientX,
+        releaseClientY: ev.clientY,
+        clientX: ev.clientX,
+        clientY: ev.clientY,
+      };
+      await ensureCabinetDesignDragPlacement(ev.clientX, ev.clientY);
+      return;
+    } else if (drag.preset) {
+      const lines = buildPresetLines(drag.preset.kind);
       editorRef.value?.placeWallPresetAtClient?.(lines, ev.clientX, ev.clientY);
     }
   }
-  presetDrag.value = { active: false, type: null, preset: null, design: null, clientX: 0, clientY: 0, startX: 0, startY: 0, enteredStage: false, leftPanel: false };
-  window.removeEventListener("pointermove", onPresetPointerMove);
-  enable2dInput();
+  finishPresetDragSession();
 }
 
 const presetPreview = computed(() => {
@@ -7530,6 +7675,7 @@ const presetPreview = computed(() => {
   if (!drag.active) return null;
   if (drag.type !== "column" && !drag.preset && !drag.design) return null;
   if (drag.type === "cabinetDesign" && !drag.leftPanel) return null;
+  if (drag.type === "cabinetDesign" && (drag.dragBootstrapping || drag.createdOrderDesignId || cabinetDesignDropLoading.value)) return null;
 
   const dx = drag.clientX - (drag.startX || drag.clientX);
   const dy = drag.clientY - (drag.startY || drag.clientY);

@@ -1933,6 +1933,14 @@ function _cloneModel2dLines(lines) {
 function _cloneModel2dOutline(outline) {
   return (outline || []).map((p) => ({ x: p.x, y: p.y }));
 }
+function clientToCanvasOffset(clientX, clientY) {
+  if (!isFinite(clientX) || !isFinite(clientY)) return null;
+  const rect = canvas.getBoundingClientRect();
+  return {
+    offsetX: clamp(clientX - rect.left, 0, rect.width),
+    offsetY: clamp(clientY - rect.top, 0, rect.height),
+  };
+}
 function startModelDrag(offsetX, offsetY) {
   if (!model2d.lines || model2d.lines.length === 0) return false;
   modelDrag.active = true;
@@ -2046,6 +2054,56 @@ function stopModelDrag(keepMovedGeometry = true) {
   modelDrag.startRotationRad = 0;
   modelDrag.startSnap = null;
   modelDrag.moved = false;
+}
+function beginModelDragAtClient(clientX, clientY) {
+  const point = clientToCanvasOffset(clientX, clientY);
+  if (!point) return false;
+  if (modelDrag.active) stopModelDrag(true);
+  hoverModelOutline = true;
+  selectedModelOutline = true;
+  return startModelDrag(point.offsetX, point.offsetY);
+}
+function updateModelDragAtClient(clientX, clientY) {
+  if (!modelDrag.active) return false;
+  const point = clientToCanvasOffset(clientX, clientY);
+  if (!point) return false;
+  let target = screenToWorld(point.offsetX, point.offsetY);
+  if (state.snapOn) {
+    target = resolveModelDragTargetWorld(target);
+  }
+  applyModelDrag(target);
+  const movedMm = modelDrag.startMouseWorld
+    ? Math.hypot(target.x - modelDrag.startMouseWorld.x, target.y - modelDrag.startMouseWorld.y)
+    : 0;
+  if (movedMm > 0.5) modelDrag.moved = true;
+  selectedModelOutline = true;
+  hoverModelOutline = true;
+  return true;
+}
+function finalizeModelDrag(commit = true) {
+  if (!modelDrag.active) return false;
+  const startSnap = modelDrag.startSnap;
+  const moved = !!modelDrag.moved;
+  const endSnap = snapshotModel2d(model2d);
+  stopModelDrag(commit);
+  if (!commit) {
+    hoverModelOutline = false;
+    selectedModelOutline = false;
+    return moved;
+  }
+  if (moved && startSnap) {
+    restoreModel2d(model2d, startSnap);
+    undo.runAction(() => {
+      restoreModel2d(model2d, endSnap);
+      emitModel2dTransform();
+    });
+  }
+  selectedModelOutline = true;
+  hoverModelOutline = moved ? true : hoverModelOutline;
+  return moved;
+}
+function endModelDragAtClient(commit = true) {
+  return finalizeModelDrag(commit);
 }
 
 // Standalone dimensions (AutoCAD-like 3-click). Implemented later; keep store here for Clear/Undo scaffolding.
@@ -4283,6 +4341,29 @@ function beginMoveDirectDrag(offsetX, offsetY) {
   moveCommand.cursorPoint = { x: snap.x, y: snap.y };
   _startMoveTargetPhase(snap);
   moveCommand.mode = "drag_direct";
+  return true;
+}
+function beginMoveSelectionFromClient(clientX, clientY) {
+  if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
+  if (copyCommand.mode !== "idle") cancelCopyCommand(true);
+  if (extendCommand.mode !== "idle") cancelExtendCommand(true);
+  if (moveCommand.mode !== "idle") cancelMoveCommand(true);
+  if (modelDrag.active) stopModelDrag(true);
+
+  const selectionSnapshot = buildSelectionSnapshotFromCurrentSelection();
+  if (!selectionSnapshotHasAny(selectionSnapshot)) return false;
+
+  const point = clientToCanvasOffset(clientX, clientY);
+  if (!point) return false;
+  const raw = screenToWorld(point.offsetX, point.offsetY);
+  const base = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+
+  stopMoveCommandRuntime();
+  moveCommand.selectionSnapshot = selectionSnapshot;
+  moveCommand.mode = "await_target_point";
+  moveCommand.cursorPoint = { x: base.x, y: base.y };
+  _startMoveTargetPhase(base);
+  moveCommand.cursorPoint = { x: base.x, y: base.y };
   return true;
 }
 
@@ -8798,20 +8879,7 @@ function onWindowMouseUp() {
     }
   }
   if (modelDrag.active) {
-    const startSnap = modelDrag.startSnap;
-    const moved = !!modelDrag.moved;
-    const endSnap = snapshotModel2d(model2d);
-    stopModelDrag(true);
-    if (moved && startSnap) {
-      restoreModel2d(model2d, startSnap);
-      undo.runAction(() => {
-        restoreModel2d(model2d, endSnap);
-        emitModel2dTransform();
-      });
-    }
-    // Keep the model selected after drag.
-    selectedModelOutline = true;
-    hoverModelOutline = moved ? true : hoverModelOutline;
+    finalizeModelDrag(true);
   }
   if (axisDrag.active) {
     const moved = !!axisDrag.moved;
@@ -10873,6 +10941,7 @@ return {
 
   setActiveTool,
   beginMoveCommand,
+  beginMoveSelectionFromClient,
   confirmMoveStep,
   cancelMoveCommand,
   beginCopyCommand,
@@ -10891,6 +10960,9 @@ return {
   setPassiveModels,
   clearModel2dLines,
   selectModelOutline,
+  beginModelDragAtClient,
+  updateModelDragAtClient,
+  endModelDragAtClient,
   addRectModel2dPreset,
   placeModel2dPresetAtClient,
   placeWallPresetAtClient,
