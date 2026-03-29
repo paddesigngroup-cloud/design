@@ -7059,7 +7059,9 @@ function renderOverlapPickerItems() {
         mode: overlapPickerState.modifierMode,
         offsetX: overlapPickerState.offsetX,
         offsetY: overlapPickerState.offsetY,
-        armPassiveDrag: item?.type === "passive_model" ? false : true,
+        // Keep overlap-picker selection aligned with direct canvas selection:
+        // passive models must still arm activation/drag-ready state on first pick.
+        armPassiveDrag: true,
       });
     };
     const primary = document.createElement("div");
@@ -8422,7 +8424,25 @@ function onMouseDown(e) {
   // Clicking a passive saved design should fully activate it on the first click.
   // Hit-testing resolves from the full filled outline, not only its edges.
   if (overlapHits.length === 1) {
-    const selected = applyOverlapSelectionHit(overlapHits[0], {
+    const onlyHit = overlapHits[0];
+    if (
+      onlyHit?.type === "active_model" &&
+      !isRemoveSelectModifier &&
+      !isAddSelectModifier
+    ) {
+      clearPendingPassiveActivation();
+      setSingleOrMultiSelection("passive_model", []);
+      clearGroupSelection();
+      selectedWallId = null;
+      selectedHiddenId = null;
+      selectedDimId = null;
+      hoverPassiveModelId = null;
+      hoverModelOutline = true;
+      selectedModelOutline = true;
+      startModelDrag(e.offsetX, e.offsetY);
+      return;
+    }
+    const selected = applyOverlapSelectionHit(onlyHit, {
       mode: isRemoveSelectModifier ? "remove" : (isAddSelectModifier ? "add" : "replace"),
       offsetX: e.offsetX,
       offsetY: e.offsetY,
