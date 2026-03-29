@@ -2895,6 +2895,18 @@ async function handleStageOrderDesignDuplicateRequest(payload = null) {
 
   persistCurrentActiveOrderDesignPlacement();
   const createdItems = [];
+  const sourceItems = sourceIds
+    .map((id) => orderDesignCatalog.value.find((item) => String(item.id) === String(id)) || null)
+    .filter(Boolean);
+  const shouldToggleStageLoading = !cabinetDesignDropLoading.value;
+  if (shouldToggleStageLoading) {
+    cabinetDesignDropLoadingMode.value = "duplicate";
+    cabinetDesignDropLoading.value = true;
+    cabinetDesignDropLoadingTitle.value =
+      sourceItems.length > 1
+        ? `${sourceItems.length} طرح سفارش`
+        : String(sourceItems[0]?.design_title || sourceItems[0]?.instance_code || "").trim();
+  }
   try {
     for (const sourceId of sourceIds) {
       const created = await duplicateOrderDesignById(sourceId);
@@ -2921,6 +2933,12 @@ async function handleStageOrderDesignDuplicateRequest(payload = null) {
   } catch (error) {
     await loadOrderDesignCatalog(true).catch(() => {});
     throw error;
+  } finally {
+    if (shouldToggleStageLoading) {
+      cabinetDesignDropLoading.value = false;
+      cabinetDesignDropLoadingTitle.value = "";
+      cabinetDesignDropLoadingMode.value = "add";
+    }
   }
 }
 
@@ -8685,7 +8703,15 @@ onBeforeUnmount(() => {
         <div v-if="cabinetDesignDropLoading" class="stageDropLoading" aria-live="polite">
           <div class="stageDropLoading__card">
             <span class="stageDropLoading__spinner" aria-hidden="true"></span>
-            <div class="stageDropLoading__title">{{ cabinetDesignDropLoadingMode === "edit" ? "در حال ویرایش طرح..." : "در حال افزودن طرح به صحنه..." }}</div>
+            <div class="stageDropLoading__title">
+              {{
+                cabinetDesignDropLoadingMode === "edit"
+                  ? "در حال ویرایش طرح..."
+                  : cabinetDesignDropLoadingMode === "duplicate"
+                    ? "در حال کپی طرح..."
+                    : "در حال افزودن طرح به صحنه..."
+              }}
+            </div>
             <div v-if="cabinetDesignDropLoadingTitle" class="stageDropLoading__caption">{{ cabinetDesignDropLoadingTitle }}</div>
           </div>
         </div>
