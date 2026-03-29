@@ -2617,6 +2617,7 @@ function restorePassiveModels(snap) {
       alpha: Number.isFinite(Number(model?.alpha)) ? Number(model.alpha) : model2d.alpha,
     }))
     .filter((model) => model.id && model.outline.length >= 3 && model.lines.length >= 1);
+  emitPassiveModelsTransformChange();
 }
 
 function _stateSignature(snap) {
