@@ -579,12 +579,6 @@ async def resolve_internal_instance_preview(
     if "u_i_d" in auto_param_codes:
         auto_values["u_i_d"] = depth
         formula_values["u_i_d"] = str(depth)
-    if "f_s_cz" in auto_param_codes:
-        auto_values["f_s_cz"] = placement
-        formula_values["f_s_cz"] = str(placement)
-    if "m_s_cz" in auto_param_codes:
-        auto_values["m_s_cz"] = placement
-        formula_values["m_s_cz"] = str(placement)
     numeric_params = dict(sub_category_numeric_params)
     numeric_params.update({str(key): _round_number(_coerce_numeric(value)) for key, value in formula_values.items()})
     numeric_params.update(auto_values)

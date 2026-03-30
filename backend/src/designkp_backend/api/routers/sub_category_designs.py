@@ -267,32 +267,40 @@ def _serialize_preview(
         )
         for item in snapshots
     ]
+    interior_preview_items = [
+        SubCategoryDesignInteriorInstancePreviewItem(
+            id=item.instance_id,
+            internal_part_group_id=item.internal_part_group_id,
+            internal_part_group_code=item.internal_part_group_code,
+            internal_part_group_title=item.internal_part_group_title,
+            instance_code=item.instance_code,
+            ui_order=item.ui_order,
+            placement_z=item.placement_z,
+            interior_box_snapshot=item.interior_box_snapshot,
+            param_values=item.param_values,
+            param_meta=item.param_meta,
+            auto_params=item.auto_params,
+            part_snapshots=item.part_snapshots,
+            viewer_boxes=item.viewer_boxes,
+        )
+        for item in interior_instances
+    ]
     return SubCategoryDesignPreviewResponse(
         design_id=design_id,
         sub_category_id=sub_category_id,
         design_outline_color=str(design_outline_color or "#7A4A2B").strip() or "#7A4A2B",
         resolved_params=raw_params,
         resolved_base_formulas=resolved_base_formulas,
-        viewer_boxes=[item.viewer_payload["box"] for item in snapshots],
-        parts=parts,
-        interior_instances=[
-            SubCategoryDesignInteriorInstancePreviewItem(
-                id=item.instance_id,
-                internal_part_group_id=item.internal_part_group_id,
-                internal_part_group_code=item.internal_part_group_code,
-                internal_part_group_title=item.internal_part_group_title,
-                instance_code=item.instance_code,
-                ui_order=item.ui_order,
-                placement_z=item.placement_z,
-                interior_box_snapshot=item.interior_box_snapshot,
-                param_values=item.param_values,
-                param_meta=item.param_meta,
-                auto_params=item.auto_params,
-                part_snapshots=item.part_snapshots,
-                viewer_boxes=item.viewer_boxes,
-            )
-            for item in interior_instances
+        viewer_boxes=[
+            *[item.viewer_payload["box"] for item in snapshots],
+            *[
+                dict(box or {})
+                for item in interior_preview_items
+                for box in list(item.viewer_boxes or [])
+            ],
         ],
+        parts=parts,
+        interior_instances=interior_preview_items,
     )
 
 
