@@ -232,6 +232,9 @@ const orderDesignCatalog = ref([]);
 const orderDesignCatalogLoading = ref(false);
 const orderDesignCatalogLoadedForOrderId = ref("");
 const interiorLibraryOpen = ref(false);
+const interiorInstanceEditorOpen = ref(false);
+const interiorInstanceEditorDraft = ref(null);
+const interiorInstanceEditorActiveGroupId = ref("");
 const orderDesignEditorOpen = ref(false);
 const orderDesignEditorDraft = ref(null);
 const orderDesignSavingIds = ref([]);
@@ -296,6 +299,7 @@ const internalPartGroupEditorDraft = ref(null);
 const internalPartGroupParamGroupsOpen = ref(false);
 const internalPartGroupDefaultsEditorOpen = ref(false);
 const internalPartGroupDefaultsEditorRowId = ref(null);
+const internalPartGroupDefaultsEditorGroups = ref([]);
 const internalPartGroupDefaultsValues = ref({});
 const internalPartGroupDefaultsActiveGroupId = ref("");
 const baseFormulaBuilderOpen = ref(false);
@@ -617,42 +621,16 @@ const activeSubCategoryDefaultsCount = computed(() =>
 const activeInternalPartGroupDefaultsRow = computed(() =>
   editableInternalPartGroups.value.find((item) => String(item.id) === String(internalPartGroupDefaultsEditorRowId.value)) || null
 );
-const activeInternalPartGroupDefaultsGroups = computed(() => {
-  const row = activeInternalPartGroupDefaultsRow.value;
-  if (!row) return [];
-  ensureInternalPartGroupParamDefaults(row);
-  const selectedParamGroupIds = new Set(
-    (Array.isArray(row.param_groups) ? row.param_groups : [])
-      .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
-      .map((group) => String(Number(group.param_group_id)))
-  );
-  return constructionSubCategoryParamTree.value
-    .filter((group) => selectedParamGroupIds.has(String(group.id)))
-    .map((group) => ({
-      ...group,
-      items: group.items.map((column) => {
-        const override = row.param_overrides?.[column.key] || {};
-        const displayTitle = String(override.display_title || column.label || column.key).trim() || column.key;
-        const descriptionText = String(override.description_text || "").trim();
-        const inputMode = override.input_mode === "binary" ? "binary" : "value";
-        return {
-          ...column,
-          displayTitle,
-          descriptionText,
-          iconUrl: getSubCategoryDefaultIconUrl(override.icon_path),
-          inputMode,
-          binaryOffLabel: String(override.binary_off_label || "").trim() || "0",
-          binaryOnLabel: String(override.binary_on_label || "").trim() || "1",
-          binaryOffIconUrl: getSubCategoryDefaultIconUrl(override.binary_off_icon_path),
-          binaryOnIconUrl: getSubCategoryDefaultIconUrl(override.binary_on_icon_path),
-        };
-      }),
-    }))
-    .filter((group) => group.items.length > 0);
-});
+const activeInternalPartGroupDefaultsGroups = computed(() => internalPartGroupDefaultsEditorGroups.value);
 const activeInternalPartGroupDefaultsGroup = computed(() =>
   activeInternalPartGroupDefaultsGroups.value.find((group) => String(group.id) === String(internalPartGroupDefaultsActiveGroupId.value))
   || activeInternalPartGroupDefaultsGroups.value[0]
+  || null
+);
+const activeInteriorInstanceEditorGroups = computed(() => buildInteriorInstanceGroups(interiorInstanceEditorDraft.value));
+const activeInteriorInstanceEditorGroup = computed(() =>
+  activeInteriorInstanceEditorGroups.value.find((group) => String(group.id) === String(interiorInstanceEditorActiveGroupId.value))
+  || activeInteriorInstanceEditorGroups.value[0]
   || null
 );
 const constructionSubCategoryDesignSubCategoryOptions = computed(() =>
@@ -702,6 +680,13 @@ const constructionInternalParamGroupOptions = computed(() =>
     }))
     .filter((item) => item.id > 0 && item.title)
     .sort((a, b) => a.uiOrder - b.uiOrder || a.id - b.id)
+);
+const constructionInternalPartGroupsById = computed(() =>
+  new Map(
+    constructionInternalPartGroups.value
+      .map((item) => [String(item.id), item])
+      .filter(([id]) => id)
+  )
 );
 const activeInteriorLibrarySubCategory = computed(() => {
   const subCategoryId = String(subCategoryDesignEditorDraft.value?.sub_category_id || "").trim();
@@ -826,53 +811,102 @@ function collectInternalGroupParamCodesLocal(group) {
   return Array.from(resolved);
 }
 
-const interiorLibraryGroupCards = computed(() => {
-  const subCategory = activeInteriorLibrarySubCategory.value;
-  if (!subCategory) return [];
-  ensureSubCategoryParamDefaults(subCategory);
-  return constructionInternalPartGroups.value.map((group) => {
-    const paramCodes = collectInternalGroupParamCodesLocal(group);
-    const relatedGroups = Array.from(
-      new Set(
-        paramCodes
-          .map((code) => String(constructionParamsByCode.value.get(code)?.param_group_id || "").trim())
-          .filter(Boolean)
-      )
-    )
-      .map((groupId) => constructionSubCategoryParamTree.value.find((item) => String(item.id) === groupId))
-      .filter(Boolean)
-      .map((item) => ({
-        id: String(item.id),
-        title: item.title,
-        count: item.items.length,
-      }));
-    const params = paramCodes
-      .map((code) => {
-        const override = subCategory.param_overrides?.[code] || {};
+function buildInternalGroupDefaultsTree(group) {
+  if (!group) return [];
+  ensureInternalPartGroupParamDefaults(group);
+  const selectedParamGroupIds = new Set(
+    (Array.isArray(group.param_groups) ? group.param_groups : [])
+      .filter((row) => row?.enabled !== false && Number(row?.param_group_id) > 0)
+      .map((row) => String(Number(row.param_group_id)))
+  );
+  return constructionSubCategoryParamTree.value
+    .filter((row) => selectedParamGroupIds.has(String(row.id)))
+    .map((row) => ({
+      ...row,
+      items: row.items.map((column) => {
+        const override = group.param_overrides?.[column.key] || {};
         return {
-          code,
-          label: String(override.display_title || constructionSubCategoryParamMetaByCode.value[code]?.label || code).trim() || code,
-          value: String(subCategory.param_defaults?.[code] ?? "").trim(),
+          ...column,
+          displayTitle: String(override.display_title || column.label || column.key).trim() || column.key,
+          descriptionText: String(override.description_text || "").trim(),
+          inputMode: override.input_mode === "binary" ? "binary" : "value",
+          iconUrl: getSubCategoryDefaultIconUrl(override.icon_path),
+          binaryOffLabel: String(override.binary_off_label || "").trim() || "0",
+          binaryOnLabel: String(override.binary_on_label || "").trim() || "1",
+          binaryOffIconUrl: getSubCategoryDefaultIconUrl(override.binary_off_icon_path),
+          binaryOnIconUrl: getSubCategoryDefaultIconUrl(override.binary_on_icon_path),
+          value: String(group.param_defaults?.[column.key] ?? "").trim(),
         };
-      })
-      .sort((a, b) => a.label.localeCompare(b.label, "fa"));
+      }),
+    }))
+    .filter((row) => row.items.length > 0);
+}
+
+function buildInteriorInstanceGroups(instance) {
+  const groupsById = new Map();
+  for (const [key, meta] of Object.entries(instance?.param_meta || {})) {
+    const code = String(key || "").trim();
+    if (!code) continue;
+    const groupId = String(meta?.group_id || "").trim() || "__ungrouped__";
+    if (!groupsById.has(groupId)) {
+      const sourceGroup = constructionSubCategoryParamTree.value.find((row) => String(row.id) === groupId);
+      groupsById.set(groupId, {
+        id: groupId,
+        title: String(meta?.group_title || sourceGroup?.title || "بدون گروه").trim(),
+        iconUrl: sourceGroup?.iconUrl || "",
+        order: Number(meta?.group_ui_order) || 0,
+        items: [],
+      });
+    }
+    groupsById.get(groupId).items.push({
+      key: code,
+      displayTitle: String(meta?.label || constructionSubCategoryParamMetaByCode.value[code]?.label || code).trim() || code,
+      descriptionText: String(meta?.description_text || "").trim(),
+      inputMode: meta?.input_mode === "binary" ? "binary" : "value",
+      iconUrl: getSubCategoryDefaultIconUrl(meta?.icon_path),
+      binaryOffLabel: String(meta?.binary_off_label || "").trim() || "0",
+      binaryOnLabel: String(meta?.binary_on_label || "").trim() || "1",
+      binaryOffIconUrl: getSubCategoryDefaultIconUrl(meta?.binary_off_icon_path),
+      binaryOnIconUrl: getSubCategoryDefaultIconUrl(meta?.binary_on_icon_path),
+      value: String(instance?.param_values?.[code] ?? "").trim(),
+      order: Number(meta?.param_ui_order) || 0,
+    });
+  }
+  return Array.from(groupsById.values())
+    .map((group) => ({
+      ...group,
+      items: group.items.sort((a, b) => a.order - b.order || a.displayTitle.localeCompare(b.displayTitle, "fa")),
+    }))
+    .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title, "fa"));
+}
+
+const interiorLibraryGroupCards = computed(() =>
+  constructionInternalPartGroups.value.map((group) => {
+    const groupTree = buildInternalGroupDefaultsTree(group);
     return {
       ...group,
-      params,
-      relatedGroups,
+      groupTree,
+      relatedGroups: groupTree.map((row) => ({ id: String(row.id), title: row.title, count: row.items.length })),
+      paramCount: groupTree.reduce((sum, row) => sum + row.items.length, 0),
     };
-  });
-});
-
-function openInteriorLibraryGroupDefaults(group) {
-  const subCategory = activeInteriorLibrarySubCategory.value;
-  if (!subCategory) return;
-  openSubCategoryDefaultsEditor(subCategory);
-  const targetGroupId = String(group?.relatedGroups?.[0]?.id || "").trim();
-  if (targetGroupId) {
-    subCategoryDefaultsActiveGroupId.value = targetGroupId;
-  }
-}
+  })
+);
+const interiorLibraryInstanceCards = computed(() =>
+  (subCategoryDesignEditorDraft.value?.interior_instances || [])
+    .slice()
+    .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
+    .map((instance) => {
+    const group = constructionInternalPartGroupsById.value.get(String(instance.internal_part_group_id));
+    const groups = buildInteriorInstanceGroups(instance);
+    return {
+      ...instance,
+      groupTitle: String(group?.group_title || group?.title || instance.instance_code || "گروه داخلی").trim(),
+      groupCode: String(group?.code || "").trim(),
+      groups,
+      paramCount: groups.reduce((sum, row) => sum + row.items.length, 0),
+    };
+  })
+);
 
 function getConstructionPartKindInternalLabel(partKindId) {
   const partKind = constructionPartKindsById.value.get(Number(partKindId) || 0);
@@ -2120,8 +2154,15 @@ async function closeInternalPartGroupDefaultsEditor() {
   }
   internalPartGroupDefaultsEditorOpen.value = false;
   internalPartGroupDefaultsEditorRowId.value = null;
+  internalPartGroupDefaultsEditorGroups.value = [];
   internalPartGroupDefaultsValues.value = {};
   internalPartGroupDefaultsActiveGroupId.value = "";
+}
+
+function findEditableInternalPartGroupById(value) {
+  const id = String(value || "").trim();
+  if (!id) return null;
+  return editableInternalPartGroups.value.find((row) => String(row?.id || "").trim() === id) || null;
 }
 
 
@@ -2143,6 +2184,20 @@ async function refreshSubCategoryDesignPreview() {
         admin_id: draft.admin_id ?? currentAdminId.value,
         sub_category_id: draft.sub_category_id,
         parts: normalizeSubCategoryDesignPayload(draft).parts,
+        interior_instances: (Array.isArray(draft.interior_instances) ? draft.interior_instances : []).map((item) => ({
+          id: item.id || null,
+          internal_part_group_id: item.internal_part_group_id,
+          instance_code: String(item.instance_code || "").trim() || "interior",
+          ui_order: Number(item.ui_order) || 0,
+          placement_z: Number(item.placement_z) || 0,
+          interior_box_snapshot: { ...(item.interior_box_snapshot || {}) },
+          param_values: Object.fromEntries(
+            Object.entries(item.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+          ),
+          param_meta: Object.fromEntries(
+            Object.entries(item.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])
+          ),
+        })),
       }),
     });
     if (!res.ok) {
@@ -3334,6 +3389,7 @@ async function openSubCategoryDesignEditor(item = null) {
           enabled: part.enabled !== false,
           ui_order: Number(part.ui_order) || 0,
         })) : [],
+        interior_instances: Array.isArray(item.interior_instances) ? item.interior_instances.map(normalizeInteriorInstanceRecord).filter(Boolean) : [],
       })
     : buildNewSubCategoryDesignDraft();
   subCategoryDesignEditorDraft.value = draft;
@@ -3389,29 +3445,171 @@ function openInternalPartGroupEditor(item = null) {
 }
 
 function openInternalPartGroupDefaultsEditor(item) {
-  if (!item?.id) return;
-  ensureInternalPartGroupParamDefaults(item);
-  const selectedColumns = getInternalPartGroupSelectedParamColumns(item);
+  const row = findEditableInternalPartGroupById(item?.id);
+  if (!row?.id) return;
+  ensureInternalPartGroupParamDefaults(row);
+  const selectedColumns = getInternalPartGroupSelectedParamColumns(row);
   if (!selectedColumns.length) {
     showAlert("برای این گروه داخلی هنوز گروه پارامتری انتخاب نشده است.", { title: "پیش‌فرض گروه داخلی" });
     return;
   }
-  internalPartGroupDefaultsEditorRowId.value = item.id;
+  internalPartGroupDefaultsEditorRowId.value = row.id;
   internalPartGroupDefaultsValues.value = Object.fromEntries(
     selectedColumns.map((column) => {
-      const override = item.param_overrides?.[column.key] || {};
-      const value = String(item.param_defaults?.[column.key] ?? "").trim();
+      const override = row.param_overrides?.[column.key] || {};
+      const value = String(row.param_defaults?.[column.key] ?? "").trim();
       return [
         column.key,
         override.input_mode === "binary" ? (value === "1" ? "1" : "0") : value,
       ];
     })
   );
-  internalPartGroupDefaultsActiveGroupId.value = String(item.param_groups?.find((group) => group?.enabled !== false)?.param_group_id || "");
+  internalPartGroupDefaultsEditorGroups.value = buildInternalPartGroupDefaultsGroups(row);
+  internalPartGroupDefaultsActiveGroupId.value = String(row.param_groups?.find((group) => group?.enabled !== false)?.param_group_id || "");
   if (!internalPartGroupDefaultsActiveGroupId.value) {
-    internalPartGroupDefaultsActiveGroupId.value = activeInternalPartGroupDefaultsGroups.value[0]?.id || "";
+    internalPartGroupDefaultsActiveGroupId.value = internalPartGroupDefaultsEditorGroups.value[0]?.id || "";
   }
   internalPartGroupDefaultsEditorOpen.value = true;
+}
+
+function selectInteriorInstanceEditorGroup(groupId) {
+  interiorInstanceEditorActiveGroupId.value = String(groupId || "");
+}
+
+function setInteriorInstanceBinaryValue(paramCode, value) {
+  const key = String(paramCode || "").trim();
+  if (!key || !interiorInstanceEditorDraft.value) return;
+  interiorInstanceEditorDraft.value.param_values = {
+    ...(interiorInstanceEditorDraft.value.param_values || {}),
+    [key]: String(value) === "1" ? "1" : "0",
+  };
+}
+
+function syncInteriorInstanceInDraft(instance) {
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft) return;
+  const normalized = normalizeInteriorInstanceRecord(instance);
+  if (!normalized) return;
+  const existingIndex = (draft.interior_instances || []).findIndex((row) => String(row.id) === String(normalized.id));
+  if (existingIndex === -1) {
+    draft.interior_instances = [...(draft.interior_instances || []), normalized];
+    return;
+  }
+  draft.interior_instances = (draft.interior_instances || []).map((row, index) => index === existingIndex ? normalized : row);
+}
+
+function syncOpenSubCategoryDesignDraftToCollection() {
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft?.id) return;
+  editableSubCategoryDesigns.value = editableSubCategoryDesigns.value.map((item) =>
+    String(item.id) === String(draft.id)
+      ? {
+          ...item,
+          interior_instances: (draft.interior_instances || []).map((row) => normalizeInteriorInstanceRecord(row)).filter(Boolean),
+        }
+      : item
+  );
+}
+
+async function addInteriorGroupToDesign(group) {
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft?.id) {
+    showAlert("ابتدا خود طرح ساب‌کت را ذخیره کنید، سپس گروه داخلی را به آن اضافه کنید.", { title: "قطعات داخلی" });
+    return;
+  }
+  try {
+    const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        internal_part_group_id: group.id,
+        placement_z: 0,
+      }),
+    });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه داخلی به طرح انجام نشد."));
+    syncInteriorInstanceInDraft(await res.json());
+    syncOpenSubCategoryDesignDraftToCollection();
+    await refreshSubCategoryDesignPreview();
+  } catch (error) {
+    showAlert(error?.message || "افزودن گروه داخلی به طرح انجام نشد.", { title: "خطا" });
+  }
+}
+
+function openInteriorInstanceEditor(instance) {
+  const normalized = normalizeInteriorInstanceRecord(instance);
+  if (!normalized) return;
+  interiorInstanceEditorDraft.value = {
+    ...normalized,
+    interior_box_snapshot: { ...(normalized.interior_box_snapshot || {}) },
+    param_values: Object.fromEntries(Object.entries(normalized.param_values || {}).map(([key, value]) => [key, String(value ?? "")])),
+    param_meta: Object.fromEntries(Object.entries(normalized.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])),
+    part_snapshots: Array.isArray(normalized.part_snapshots) ? normalized.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
+    viewer_boxes: Array.isArray(normalized.viewer_boxes) ? normalized.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
+  };
+  interiorInstanceEditorActiveGroupId.value = activeInteriorInstanceEditorGroups.value[0]?.id || "";
+  interiorInstanceEditorOpen.value = true;
+}
+
+function closeInteriorInstanceEditor() {
+  interiorInstanceEditorOpen.value = false;
+  interiorInstanceEditorDraft.value = null;
+  interiorInstanceEditorActiveGroupId.value = "";
+}
+
+async function applyInteriorInstanceEditor() {
+  const draft = subCategoryDesignEditorDraft.value;
+  const instance = interiorInstanceEditorDraft.value;
+  if (!draft?.id || !instance?.id) return;
+  try {
+    const res = await fetch(
+      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          placement_z: Number(instance.placement_z) || 0,
+          ui_order: Math.max(0, Number(instance.ui_order) || 0),
+          instance_code: String(instance.instance_code || "").trim() || "interior",
+          param_values: Object.fromEntries(
+            Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+          ),
+        }),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه داخلی انجام نشد."));
+    syncInteriorInstanceInDraft(await res.json());
+    syncOpenSubCategoryDesignDraftToCollection();
+    closeInteriorInstanceEditor();
+    await refreshSubCategoryDesignPreview();
+  } catch (error) {
+    showAlert(error?.message || "ذخیره تنظیمات نمونه داخلی انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function deleteInteriorInstanceFromDesign(instance) {
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft?.id || !instance?.id) return;
+  const ok = await showConfirm("این نمونه داخلی از طرح حذف شود؟", {
+    title: "حذف نمونه داخلی",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  try {
+    const res = await fetch(
+      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
+      { method: "DELETE" }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه داخلی انجام نشد."));
+    draft.interior_instances = (draft.interior_instances || []).filter((row) => String(row.id) !== String(instance.id));
+    syncOpenSubCategoryDesignDraftToCollection();
+    if (String(interiorInstanceEditorDraft.value?.id || "") === String(instance.id)) {
+      closeInteriorInstanceEditor();
+    }
+    await refreshSubCategoryDesignPreview();
+  } catch (error) {
+    showAlert(error?.message || "حذف نمونه داخلی انجام نشد.", { title: "خطا" });
+  }
 }
 
 function onSubCategoryDesignSubCategoryChange() {
@@ -4049,6 +4247,53 @@ function ensureInternalPartGroupParamDefaults(item) {
   return item;
 }
 
+function buildInternalPartGroupDefaultsGroups(row) {
+  if (!row) return [];
+  const selectedParamGroupIds = new Set(
+    (Array.isArray(row.param_groups) ? row.param_groups : [])
+      .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
+      .map((group) => String(Number(group.param_group_id)))
+  );
+  if (!selectedParamGroupIds.size) return [];
+  return constructionSubCategoryParamTree.value
+    .filter((group) => selectedParamGroupIds.has(String(group.id)))
+    .map((group) => ({
+      ...group,
+      items: group.items.map((column) => {
+        const baseLabel = column.label || column.key;
+        const override = normalizeInternalPartGroupParamOverride(row.param_overrides?.[column.key], baseLabel);
+        const displayTitle = String(override.display_title || baseLabel).trim() || column.key;
+        const descriptionText = String(override.description_text || "").trim();
+        const inputMode = override.input_mode === "binary" ? "binary" : "value";
+        return {
+          ...column,
+          displayTitle,
+          descriptionText,
+          iconUrl: getSubCategoryDefaultIconUrl(override.icon_path),
+          inputMode,
+          binaryOffLabel: String(override.binary_off_label || "").trim() || "0",
+          binaryOnLabel: String(override.binary_on_label || "").trim() || "1",
+          binaryOffIconUrl: getSubCategoryDefaultIconUrl(override.binary_off_icon_path),
+          binaryOnIconUrl: getSubCategoryDefaultIconUrl(override.binary_on_icon_path),
+        };
+      }),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
+function normalizeInternalPartGroupParamOverride(override, baseLabel) {
+  return {
+    display_title: String(override?.display_title || "").trim() || baseLabel,
+    description_text: String(override?.description_text || "").trim(),
+    icon_path: normalizeIconFileName(override?.icon_path) || "",
+    input_mode: override?.input_mode === "binary" ? "binary" : "value",
+    binary_off_label: String(override?.binary_off_label || "").trim() || "0",
+    binary_on_label: String(override?.binary_on_label || "").trim() || "1",
+    binary_off_icon_path: normalizeIconFileName(override?.binary_off_icon_path) || "",
+    binary_on_icon_path: normalizeIconFileName(override?.binary_on_icon_path) || "",
+  };
+}
+
 function getInternalPartGroupDefaultsSummary(item) {
   const columns = getInternalPartGroupSelectedParamColumns(item);
   const total = columns.length;
@@ -4341,6 +4586,7 @@ async function applyInternalPartGroupDefaultsEditor() {
   }
   internalPartGroupDefaultsEditorOpen.value = false;
   internalPartGroupDefaultsEditorRowId.value = null;
+  internalPartGroupDefaultsEditorGroups.value = [];
   internalPartGroupDefaultsValues.value = {};
   internalPartGroupDefaultsActiveGroupId.value = "";
 }
@@ -8110,6 +8356,7 @@ function openInteriorLibrary() {
 
 function closeInteriorLibrary() {
   interiorLibraryOpen.value = false;
+  closeInteriorInstanceEditor();
 }
 
 function disable2dInput() {
@@ -11232,7 +11479,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="internalPartGroupDefaultsEditorOpen" class="appDialog" role="dialog" aria-modal="true">
+  <div v-if="internalPartGroupDefaultsEditorOpen" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeInternalPartGroupDefaultsEditor"></div>
     <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
       <div class="subCategoryPreview__header">
@@ -11355,7 +11602,7 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeInteriorLibrary">×</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        در این مرحله، سمت راست گروه‌های قطعات داخلی و پیش‌فرض‌های مرتبط ساب‌کت نمایش داده می‌شوند و سمت چپ نمای روبه‌روی خطیِ طرح اصلی دیده می‌شود.
+        در این مرحله، سمت راست کتابخانه گروه‌های قطعات داخلی، ستون میانی نمونه‌های اضافه‌شده به همین طرح، و سمت چپ نمای روبه‌روی خطی طرح اصلی دیده می‌شود.
       </div>
       <div class="subCategoryDesignEditor__layout subCategoryDesignEditor__layout--interiorLibrary">
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview subCategoryDesignEditor__panel--interiorPreview">
@@ -11405,10 +11652,48 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances">
+          <div class="subCategoryDesignEditor__panelTitle">نمونه‌های داخلی این طرح</div>
+          <div v-if="!subCategoryDesignEditorDraft?.id" class="designMenu__cabinetState">برای افزودن نمونه داخلی، ابتدا خود طرح ساب‌کت را ذخیره کنید.</div>
+          <div v-else-if="!interiorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز هیچ گروه داخلی به این طرح اضافه نشده است.</div>
+          <div v-else class="subCategoryDesignEditor__partList">
+            <div v-for="item in interiorLibraryInstanceCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+              <div class="subCategoryDesignEditor__interiorGroupHead">
+                <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                  <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
+                  <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
+                </span>
+                <div class="subCategoryDesignEditor__interiorGroupActions">
+                  <button
+                    type="button"
+                    class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
+                    title="تنظیمات این نمونه"
+                    @click="openInteriorInstanceEditor(item)"
+                  >
+                    <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                  </button>
+                  <button
+                    type="button"
+                    class="constructionDialog__iconBtn"
+                    title="حذف نمونه"
+                    @click="deleteInteriorInstanceFromDesign(item)"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+              <div class="subCategoryDesignEditor__chipRow">
+                <span class="constructionDialog__pill">ترتیب {{ toPersianDigits(item.ui_order + 1) }}</span>
+                <span class="constructionDialog__pill">{{ toPersianDigits(item.paramCount) }} پارامتر</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorSidebar">
           <div class="subCategoryDesignEditor__panelTitle">گروه‌های قطعات داخلی</div>
           <div v-if="constructionLoading" class="constructionDialog__loading">در حال خواندن گروه‌های داخلی...</div>
-          <div v-else-if="!interiorLibraryGroupCards.length" class="designMenu__cabinetState">هنوز گروه قطعات داخلی یا ساب‌کت انتخاب‌شده آماده نمایش نیست.</div>
+          <div v-else-if="!interiorLibraryGroupCards.length" class="designMenu__cabinetState">هنوز گروه قطعات داخلی برای استفاده ثبت نشده است.</div>
           <div v-else class="subCategoryDesignEditor__partList">
             <div v-for="item in interiorLibraryGroupCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
               <div class="subCategoryDesignEditor__interiorGroupHead">
@@ -11420,38 +11705,35 @@ onBeforeUnmount(() => {
                   <span class="constructionDialog__pill">{{ toPersianDigits(item.parts?.length || 0) }} قطعه</span>
                   <button
                     type="button"
+                    class="constructionDialog__textBtn constructionDialog__textBtn--compact"
+                    title="افزودن به طرح"
+                    @click="addInteriorGroupToDesign(item)"
+                  >
+                    افزودن
+                  </button>
+                  <button
+                    type="button"
                     class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
                     title="تنظیمات پیش‌فرض‌های این گروه"
-                    @click="openInteriorLibraryGroupDefaults(item)"
+                    @click="openInternalPartGroupDefaultsEditor(item)"
                   >
                     <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
                   </button>
                 </div>
               </div>
               <div v-if="item.relatedGroups.length" class="subCategoryDesignEditor__chipRow">
-                <button
+                <span
                   v-for="group in item.relatedGroups"
                   :key="`${item.id}-${group.id}`"
-                  type="button"
                   class="subCategoryDesignEditor__groupChip"
-                  @click="openInteriorLibraryGroupDefaults({ relatedGroups: [group] })"
                 >
                   <span>{{ group.title }}</span>
                   <span>{{ toPersianDigits(group.count) }}</span>
-                </button>
+                </span>
               </div>
-              <div class="subCategoryDesignEditor__interiorParams">
-                <div class="subCategoryDesignEditor__interiorParamsHead">
-                  <span>پیش‌فرض‌های درگیر این گروه</span>
-                  <span>{{ toPersianDigits(item.params.length) }} پارامتر</span>
-                </div>
-                <div style="margin-top:10px; display:grid; gap:8px;">
-                  <div v-if="item.params.length" v-for="param in item.params" :key="`${item.id}-${param.code}`" style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid rgba(120,86,92,0.14); border-radius:12px; background:#fff;">
-                    <span class="subCategoryDesignEditor__partTitle" style="font-size:14px;">{{ param.label }}</span>
-                    <span class="subCategoryDesignEditor__partCode" style="font-size:13px;">{{ param.value || "خالی" }}</span>
-                  </div>
-                  <div v-else class="designMenu__cabinetState" style="margin:0;">پارامتر مستقیمی از پیش‌فرض ساب‌کت برای این گروه پیدا نشد.</div>
-                </div>
+              <div class="subCategoryDesignEditor__interiorParamsHead">
+                <span>پیش‌فرض‌های منبع این گروه</span>
+                <span>{{ toPersianDigits(item.paramCount) }} پارامتر</span>
               </div>
             </div>
           </div>
@@ -11460,6 +11742,128 @@ onBeforeUnmount(() => {
 
       <div class="appDialog__actions">
         <button type="button" class="constructionDialog__textBtn" @click="closeInteriorLibrary">بستن</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="interiorInstanceEditorOpen && interiorInstanceEditorDraft" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeInteriorInstanceEditor"></div>
+    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
+      <div class="subCategoryPreview__header">
+        <div>
+          <div class="subCategoryPreview__title">تنظیمات نمونه داخلی</div>
+          <div class="subCategoryPreview__caption">
+            {{ constructionInternalPartGroupsById.get(String(interiorInstanceEditorDraft.internal_part_group_id))?.group_title || interiorInstanceEditorDraft.instance_code }}
+          </div>
+        </div>
+        <button type="button" class="constructionDialog__textBtn" @click="closeInteriorInstanceEditor">بستن</button>
+      </div>
+      <div class="subCategoryDesignEditor__meta subCategoryDesignEditor__meta--interiorInstance">
+        <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+          <span>کد نمونه</span>
+          <input v-model="interiorInstanceEditorDraft.instance_code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+        </label>
+        <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+          <span>ترتیب</span>
+          <input v-model.number="interiorInstanceEditorDraft.ui_order" class="constructionDialog__input" type="number" min="0" step="1" />
+        </label>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        تغییرات این پنجره فقط روی همین نمونه داخلی اعمال می‌شود و روی پیش‌فرض گروه مادر اثری ندارد.
+      </div>
+      <div class="subCategoryPreview__body">
+        <div class="subCategoryPreview__tree">
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--groups">
+            <div class="subCategoryPreview__selectorList">
+              <button
+                v-for="group in activeInteriorInstanceEditorGroups"
+                :key="group.id"
+                type="button"
+                class="subCategoryPreview__groupHead"
+                :class="{ 'is-active': String(activeInteriorInstanceEditorGroup?.id || '') === String(group.id) }"
+                @click="selectInteriorInstanceEditorGroup(group.id)"
+              >
+                <div class="subCategoryPreview__groupMeta">
+                  <div class="subCategoryPreview__groupTitle">{{ group.title }}</div>
+                  <div class="subCategoryPreview__groupCaption">{{ toPersianDigits(group.items.length) }} پارامتر</div>
+                </div>
+                <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !group.iconUrl }">
+                  <img
+                    v-if="group.iconUrl"
+                    :key="group.iconUrl"
+                    :src="group.iconUrl"
+                    :alt="group.title"
+                    class="subCategoryPreview__groupIcon"
+                    @error="handleSubCategoryDefaultIconError"
+                  />
+                  <span v-else class="subCategoryPreview__groupFallback">{{ toPersianDigits(group.items.length) }}</span>
+                </div>
+                <span class="subCategoryPreview__groupChevron" aria-hidden="true">‹</span>
+              </button>
+            </div>
+          </div>
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
+            <div v-if="activeInteriorInstanceEditorGroup" class="subCategoryPreview__panelHead">
+              <div class="subCategoryPreview__panelTitle">{{ activeInteriorInstanceEditorGroup.title }}</div>
+              <div class="subCategoryPreview__panelCaption">{{ toPersianDigits(activeInteriorInstanceEditorGroup.items.length) }} پارامتر در این گروه</div>
+            </div>
+            <div v-if="activeInteriorInstanceEditorGroup" class="subCategoryPreview__params">
+              <article v-for="column in activeInteriorInstanceEditorGroup.items" :key="column.key" class="subCategoryPreview__paramCard">
+                <template v-if="column.inputMode === 'binary'">
+                  <div class="subCategoryPreview__paramMeta">
+                    <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                    <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                  </div>
+                  <div class="subCategoryPreview__binaryChoices">
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': String(interiorInstanceEditorDraft.param_values?.[column.key] ?? '0') !== '1' }"
+                      @click="setInteriorInstanceBinaryValue(column.key, '0')"
+                    >
+                      <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOffLabel }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': String(interiorInstanceEditorDraft.param_values?.[column.key] ?? '0') === '1' }"
+                      @click="setInteriorInstanceBinaryValue(column.key, '1')"
+                    >
+                      <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOnLabel }}</span>
+                    </button>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="subCategoryPreview__valueHead">
+                    <div class="subCategoryPreview__valueIconBox">
+                      <img :src="column.iconUrl" :alt="column.displayTitle" class="subCategoryPreview__valueIcon" @error="handleSubCategoryDefaultIconError" />
+                    </div>
+                    <div class="subCategoryPreview__paramMeta">
+                      <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                      <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                    </div>
+                  </div>
+                  <input
+                    v-model="interiorInstanceEditorDraft.param_values[column.key]"
+                    class="constructionDialog__input subCategoryPreview__valueInput"
+                    type="number"
+                    inputmode="numeric"
+                    min="0"
+                    :placeholder="column.displayTitle"
+                  />
+                  <div class="subCategoryPreview__valueUnit">میلی‌متر</div>
+                </template>
+              </article>
+            </div>
+            <div v-else class="designMenu__cabinetState">برای این نمونه هنوز پارامتری قابل نمایش نیست.</div>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closeInteriorInstanceEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="applyInteriorInstanceEditor">اعمال</button>
       </div>
     </div>
   </div>

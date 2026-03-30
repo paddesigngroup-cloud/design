@@ -147,6 +147,21 @@ class SubCategoryDesignPreviewDraftRequest(BaseModel):
     admin_id: uuid.UUID
     sub_category_id: uuid.UUID
     parts: list[SubCategoryDesignPartSelectionPayload] = Field(default_factory=list)
+    interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
+
+
+class SubCategoryDesignInteriorInstanceDraftPayload(BaseModel):
+    id: uuid.UUID | None = None
+    internal_part_group_id: uuid.UUID
+    instance_code: str = Field(min_length=1, max_length=64)
+    ui_order: int = Field(ge=0)
+    placement_z: float = 0
+    interior_box_snapshot: dict[str, object] = Field(default_factory=dict)
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    param_meta: dict[str, dict[str, object]] = Field(default_factory=dict)
+
+
+SubCategoryDesignPreviewDraftRequest.model_rebuild()
 
 
 class SubCategoryDesignInteriorInstanceCreate(BaseModel):
@@ -534,6 +549,7 @@ async def preview_sub_category_design_draft(
         admin_id=payload.admin_id,
         sub_category=sub_category,
         part_selections=[item.model_dump() for item in payload.parts],
+        interior_instances=payload.interior_instances,
     )
     return _serialize_preview(
         design_id=None,
@@ -647,7 +663,6 @@ async def _next_interior_instance_state(
     base_boxes = [item.viewer_payload["box"] for item in (await preview_sub_category_design(design.id, session)).parts if isinstance(item.viewer_payload.get("box"), dict)]
     interior_box_snapshot = derive_interior_box_snapshot(base_boxes)
     normalized_values = _normalize_interior_param_values(param_values)
-    _, meta = await build_sub_category_param_display_snapshot(session, sub_category=sub_category, codes=set(normalized_values.keys()) or None)
     resolved = await resolve_internal_instance_preview(
         session,
         admin_id=design.admin_id,
@@ -659,7 +674,7 @@ async def _next_interior_instance_state(
         placement_z=placement_z,
         interior_box_snapshot=interior_box_snapshot,
         param_values=normalized_values,
-        param_meta=meta,
+        param_meta={},
     )
     return next_code, next_order, resolved.interior_box_snapshot, resolved.param_values, resolved.param_meta
 

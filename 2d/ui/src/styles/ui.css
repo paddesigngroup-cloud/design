@@ -2438,6 +2438,9 @@ textarea {
   inset: 0;
   z-index: 4000;
 }
+.appDialog--stacked {
+  z-index: 4100;
+}
 .constructionDialog {
   position: fixed;
   inset: 0;
@@ -3683,7 +3686,7 @@ textarea {
 }
 .subCategoryDesignEditor__layout--interiorLibrary {
   direction: ltr;
-  grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.9fr);
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.62fr) minmax(340px, 0.8fr);
   gap: 16px;
 }
 .subCategoryDesignEditor__layout--interiorLibrary > * {
@@ -3693,6 +3696,9 @@ textarea {
   min-height: 660px;
 }
 .subCategoryDesignEditor__panel--interiorSidebar {
+  min-height: 660px;
+}
+.subCategoryDesignEditor__panel--interiorInstances {
   min-height: 660px;
 }
 .subCategoryDesignEditor__previewBody {
@@ -3732,18 +3738,46 @@ textarea {
   display: block;
   padding: 14px;
   border-radius: 18px;
+  overflow: hidden;
+}
+.subCategoryDesignEditor__meta--interiorInstance {
+  margin-top: 14px;
 }
 .subCategoryDesignEditor__interiorGroupHead {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
 }
 .subCategoryDesignEditor__interiorGroupActions {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
   flex-shrink: 0;
+  margin-inline-start: auto;
+  max-width: 100%;
+}
+.subCategoryDesignEditor__partItem--interiorCard .subCategoryDesignEditor__partMeta {
+  flex: 1 1 220px;
+  min-width: 0;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.subCategoryDesignEditor__partItem--interiorCard .subCategoryDesignEditor__partTitle,
+.subCategoryDesignEditor__partItem--interiorCard .subCategoryDesignEditor__partCode {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.subCategoryDesignEditor__partItem--interiorCard .constructionDialog__pill,
+.subCategoryDesignEditor__partItem--interiorCard .constructionDialog__textBtn,
+.subCategoryDesignEditor__partItem--interiorCard .subCategoryDesignEditor__settingsBtn {
+  flex: 0 0 auto;
+}
+.subCategoryDesignEditor__interiorParamsHead {
+  flex-wrap: wrap;
 }
 .subCategoryDesignEditor__settingsBtn--mini {
   min-width: 42px;
@@ -3787,6 +3821,11 @@ textarea {
   font-size: 12px;
   font-weight: 700;
 }
+.constructionDialog__textBtn--compact {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+}
 .subCategoryDesignEditor__viewerOverlay {
   position: absolute;
   inset: 0;
@@ -3809,6 +3848,7 @@ textarea {
   }
 
   .subCategoryDesignEditor__panel--interiorPreview,
+  .subCategoryDesignEditor__panel--interiorInstances,
   .subCategoryDesignEditor__panel--interiorSidebar {
     min-height: unset;
   }

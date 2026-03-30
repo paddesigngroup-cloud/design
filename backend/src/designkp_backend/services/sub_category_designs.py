@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from designkp_backend.db.models.catalog import (
     BaseFormula,
     InternalPartGroup,
+    InternalPartGroupParamDefault,
     Param,
     ParamGroup,
     PartFormula,
@@ -369,6 +370,55 @@ async def build_sub_category_param_display_snapshot(
     return values, meta
 
 
+async def build_internal_group_param_display_snapshot(
+    session: AsyncSession,
+    *,
+    internal_group: InternalPartGroup,
+    codes: set[str] | None = None,
+) -> tuple[dict[str, str | None], dict[str, dict[str, object]]]:
+    rows = (
+        await session.execute(
+            select(
+                InternalPartGroupParamDefault,
+                Param.param_code,
+                Param.param_title_fa,
+                Param.param_id,
+                Param.ui_order,
+                ParamGroup,
+            )
+            .join(Param, Param.param_id == InternalPartGroupParamDefault.param_id)
+            .join(ParamGroup, ParamGroup.param_group_id == Param.param_group_id)
+            .where(InternalPartGroupParamDefault.internal_part_group_id == internal_group.id)
+            .order_by(ParamGroup.ui_order.asc(), Param.ui_order.asc(), Param.param_id.asc())
+        )
+    ).all()
+    values: dict[str, str | None] = {}
+    meta: dict[str, dict[str, object]] = {}
+    filter_codes = {str(item).strip() for item in (codes or set()) if str(item).strip()} if codes else None
+    for default_row, param_code, param_title_fa, param_id, param_ui_order, group in rows:
+        code = str(param_code or "").strip()
+        if not code or (filter_codes is not None and code not in filter_codes):
+            continue
+        values[code] = default_row.default_value
+        meta[code] = {
+            "label": str(default_row.display_title or param_title_fa or code).strip() or code,
+            "description_text": str(default_row.description_text or "").strip() or None,
+            "icon_path": str(default_row.icon_path or "").strip() or None,
+            "input_mode": default_row.input_mode if str(default_row.input_mode or "") == "binary" else "value",
+            "binary_off_label": str(default_row.binary_off_label or "0").strip() or "0",
+            "binary_on_label": str(default_row.binary_on_label or "1").strip() or "1",
+            "binary_off_icon_path": str(default_row.binary_off_icon_path or "").strip() or None,
+            "binary_on_icon_path": str(default_row.binary_on_icon_path or "").strip() or None,
+            "group_id": int(group.param_group_id or 0),
+            "group_title": str(group.org_param_group_title or group.title or group.param_group_code or "").strip() or None,
+            "group_ui_order": int(group.ui_order or 0),
+            "group_show_in_order_attrs": bool(group.show_in_order_attrs),
+            "param_id": int(param_id or 0),
+            "param_ui_order": int(param_ui_order or 0),
+        }
+    return values, meta
+
+
 async def require_accessible_internal_part_group(
     session: AsyncSession,
     *,
@@ -498,32 +548,45 @@ async def resolve_internal_instance_preview(
     param_values: dict[str, object] | None = None,
     param_meta: dict[str, dict[str, object]] | None = None,
 ) -> ResolvedInteriorInstanceSnapshot:
+    _, sub_category_numeric_params = await get_sub_category_resolved_params(session, sub_category)
     group_param_codes = await collect_internal_group_param_codes(session, admin_id=admin_id, group=internal_group)
-    copied_values, copied_meta = await build_sub_category_param_display_snapshot(
+    copied_values, copied_meta = await build_internal_group_param_display_snapshot(
         session,
-        sub_category=sub_category,
+        internal_group=internal_group,
         codes=group_param_codes,
     )
-    raw_values = {**copied_values, **{str(key): (None if value is None else str(value)) for key, value in dict(param_values or {}).items()}}
-    meta = {**copied_meta, **dict(param_meta or {})}
+    persisted_values = {
+        **copied_values,
+        **{str(key): (None if value is None else str(value)) for key, value in dict(param_values or {}).items()},
+    }
+    meta = {
+        **copied_meta,
+        **{
+            str(key): dict(value or {})
+            for key, value in dict(param_meta or {}).items()
+            if str(key or "").strip() in group_param_codes
+        },
+    }
     auto_param_codes = await get_auto_param_codes(session, admin_id=admin_id)
     auto_values: dict[str, float] = {}
+    formula_values = dict(persisted_values)
     width = _round_number(_coerce_numeric(interior_box_snapshot.get("width")))
     depth = _round_number(_coerce_numeric(interior_box_snapshot.get("depth")))
     placement = _round_number(placement_z)
     if "u_i_w" in auto_param_codes:
         auto_values["u_i_w"] = width
-        raw_values["u_i_w"] = str(width)
+        formula_values["u_i_w"] = str(width)
     if "u_i_d" in auto_param_codes:
         auto_values["u_i_d"] = depth
-        raw_values["u_i_d"] = str(depth)
+        formula_values["u_i_d"] = str(depth)
     if "f_s_cz" in auto_param_codes:
         auto_values["f_s_cz"] = placement
-        raw_values["f_s_cz"] = str(placement)
+        formula_values["f_s_cz"] = str(placement)
     if "m_s_cz" in auto_param_codes:
         auto_values["m_s_cz"] = placement
-        raw_values["m_s_cz"] = str(placement)
-    numeric_params = {str(key): _round_number(_coerce_numeric(value)) for key, value in raw_values.items()}
+        formula_values["m_s_cz"] = str(placement)
+    numeric_params = dict(sub_category_numeric_params)
+    numeric_params.update({str(key): _round_number(_coerce_numeric(value)) for key, value in formula_values.items()})
     numeric_params.update(auto_values)
     resolved_base_formulas = await resolve_base_formula_values(session, admin_id=admin_id, params=numeric_params)
     selected_ids = [
@@ -567,7 +630,7 @@ async def resolve_internal_instance_preview(
         ui_order=int(ui_order),
         placement_z=placement,
         interior_box_snapshot={str(key): value for key, value in dict(interior_box_snapshot or {}).items()},
-        param_values={str(key): (None if value is None else str(value)) for key, value in raw_values.items()},
+        param_values={str(key): (None if value is None else str(value)) for key, value in persisted_values.items()},
         param_meta={str(key): dict(value or {}) for key, value in meta.items()},
         auto_params=auto_values,
         part_snapshots=part_snapshots,
