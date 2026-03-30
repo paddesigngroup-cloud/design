@@ -294,6 +294,10 @@ const subCategoryDesignPreviewRequestSeq = ref(0);
 const internalPartGroupEditorOpen = ref(false);
 const internalPartGroupEditorDraft = ref(null);
 const internalPartGroupParamGroupsOpen = ref(false);
+const internalPartGroupDefaultsEditorOpen = ref(false);
+const internalPartGroupDefaultsEditorRowId = ref(null);
+const internalPartGroupDefaultsValues = ref({});
+const internalPartGroupDefaultsActiveGroupId = ref("");
 const baseFormulaBuilderOpen = ref(false);
 const baseFormulaBuilderMode = ref("create");
 const baseFormulaBuilderEntity = ref("base_formulas");
@@ -609,6 +613,47 @@ const activeSubCategoryDefaultsGroup = computed(() =>
 );
 const activeSubCategoryDefaultsCount = computed(() =>
   Object.values(subCategoryDefaultsEditorDraft.value || {}).filter((value) => String(value || "").trim()).length
+);
+const activeInternalPartGroupDefaultsRow = computed(() =>
+  editableInternalPartGroups.value.find((item) => String(item.id) === String(internalPartGroupDefaultsEditorRowId.value)) || null
+);
+const activeInternalPartGroupDefaultsGroups = computed(() => {
+  const row = activeInternalPartGroupDefaultsRow.value;
+  if (!row) return [];
+  ensureInternalPartGroupParamDefaults(row);
+  const selectedParamGroupIds = new Set(
+    (Array.isArray(row.param_groups) ? row.param_groups : [])
+      .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
+      .map((group) => String(Number(group.param_group_id)))
+  );
+  return constructionSubCategoryParamTree.value
+    .filter((group) => selectedParamGroupIds.has(String(group.id)))
+    .map((group) => ({
+      ...group,
+      items: group.items.map((column) => {
+        const override = row.param_overrides?.[column.key] || {};
+        const displayTitle = String(override.display_title || column.label || column.key).trim() || column.key;
+        const descriptionText = String(override.description_text || "").trim();
+        const inputMode = override.input_mode === "binary" ? "binary" : "value";
+        return {
+          ...column,
+          displayTitle,
+          descriptionText,
+          iconUrl: getSubCategoryDefaultIconUrl(override.icon_path),
+          inputMode,
+          binaryOffLabel: String(override.binary_off_label || "").trim() || "0",
+          binaryOnLabel: String(override.binary_on_label || "").trim() || "1",
+          binaryOffIconUrl: getSubCategoryDefaultIconUrl(override.binary_off_icon_path),
+          binaryOnIconUrl: getSubCategoryDefaultIconUrl(override.binary_on_icon_path),
+        };
+      }),
+    }))
+    .filter((group) => group.items.length > 0);
+});
+const activeInternalPartGroupDefaultsGroup = computed(() =>
+  activeInternalPartGroupDefaultsGroups.value.find((group) => String(group.id) === String(internalPartGroupDefaultsActiveGroupId.value))
+  || activeInternalPartGroupDefaultsGroups.value[0]
+  || null
 );
 const constructionSubCategoryDesignSubCategoryOptions = computed(() =>
   constructionSubCategories.value.map((item) => ({
@@ -1108,6 +1153,17 @@ function normalizePartKindPayload(item) {
 }
 
 function normalizeInternalPartGroupPayload(item) {
+  const selectedParamGroupIds = new Set(
+    (Array.isArray(item.param_groups) ? item.param_groups : [])
+      .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
+      .map((group) => Number(group.param_group_id))
+  );
+  const allowedParamCodes = new Set(
+    constructionParams.value
+      .filter((param) => selectedParamGroupIds.has(Number(param?.param_group_id)))
+      .map((param) => String(param.param_code || "").trim())
+      .filter(Boolean)
+  );
   return {
     admin_id: item.admin_id,
     group_id: Number(item.group_id),
@@ -1129,6 +1185,28 @@ function normalizeInternalPartGroupPayload(item) {
         enabled: group.enabled !== false,
         ui_order: Number.isFinite(Number(group.ui_order)) ? Number(group.ui_order) : index,
       })),
+    param_defaults: Object.fromEntries(
+      Object.entries(item.param_defaults || {})
+        .filter(([key]) => allowedParamCodes.has(String(key || "").trim()))
+        .map(([key, value]) => [String(key || "").trim(), value == null ? null : String(value)])
+    ),
+    param_overrides: Object.fromEntries(
+      Object.entries(item.param_overrides || {})
+        .filter(([key]) => allowedParamCodes.has(String(key || "").trim()))
+        .map(([key, override]) => {
+          const baseLabel = constructionSubCategoryParamMetaByCode.value[String(key || "").trim()]?.label || String(key || "").trim();
+          return [String(key || "").trim(), {
+            display_title: String(override?.display_title || "").trim() || baseLabel,
+            description_text: String(override?.description_text || "").trim(),
+            icon_path: normalizeIconFileName(override?.icon_path) || "",
+            input_mode: override?.input_mode === "binary" ? "binary" : "value",
+            binary_off_label: String(override?.binary_off_label || "").trim() || "0",
+            binary_on_label: String(override?.binary_on_label || "").trim() || "1",
+            binary_off_icon_path: normalizeIconFileName(override?.binary_off_icon_path) || "",
+            binary_on_icon_path: normalizeIconFileName(override?.binary_on_icon_path) || "",
+          }];
+        })
+    ),
   };
 }
 
@@ -1998,6 +2076,8 @@ function buildNewInternalPartGroupDraft() {
     is_system: true,
     parts: [],
     param_groups: [],
+    param_defaults: {},
+    param_overrides: {},
   };
 }
 
@@ -2013,6 +2093,35 @@ function closeInternalPartGroupEditor() {
   internalPartGroupEditorOpen.value = false;
   internalPartGroupEditorDraft.value = null;
   internalPartGroupParamGroupsOpen.value = false;
+}
+
+function hasInternalPartGroupDefaultsChanges() {
+  const row = activeInternalPartGroupDefaultsRow.value;
+  if (!row) return false;
+  return getInternalPartGroupSelectedParamColumns(row).some((column) => {
+    const override = row.param_overrides?.[column.key] || {};
+    const nextValue = String(internalPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
+    const prevValue = String(row.param_defaults?.[column.key] ?? "").trim();
+    if (override.input_mode === "binary") {
+      return (nextValue === "1" ? "1" : "0") !== (prevValue === "1" ? "1" : "0");
+    }
+    return nextValue !== prevValue;
+  });
+}
+
+async function closeInternalPartGroupDefaultsEditor() {
+  if (hasInternalPartGroupDefaultsChanges()) {
+    const ok = await showConfirm("تغییرات پیش‌فرض‌های گروه داخلی اعمال نشده‌اند. پنجره بسته شود؟", {
+      title: "بستن پیش‌فرض‌ها",
+      confirmText: "بستن",
+      cancelText: "بازگشت",
+    });
+    if (!ok) return;
+  }
+  internalPartGroupDefaultsEditorOpen.value = false;
+  internalPartGroupDefaultsEditorRowId.value = null;
+  internalPartGroupDefaultsValues.value = {};
+  internalPartGroupDefaultsActiveGroupId.value = "";
 }
 
 
@@ -2318,7 +2427,7 @@ async function loadConstructionInternalPartGroups() {
     const res = await fetch(url);
     if (!res.ok) throw new Error("load-failed");
     editableInternalPartGroups.value = (await res.json()).map((item) =>
-      withConstructionDraftState({
+      ensureInternalPartGroupParamDefaults(withConstructionDraftState({
         ...item,
         param_groups: Array.isArray(item.param_groups) ? item.param_groups.map((group) => ({
           ...group,
@@ -2329,7 +2438,22 @@ async function loadConstructionInternalPartGroups() {
           enabled: group.enabled !== false,
           ui_order: Number(group.ui_order) || 0,
         })) : [],
-      })
+        param_defaults: Object.fromEntries(
+          Object.entries(item.param_defaults || {}).map(([key, value]) => [String(key || "").trim(), value == null ? "" : String(value)])
+        ),
+        param_overrides: Object.fromEntries(
+          Object.entries(item.param_overrides || {}).map(([key, override]) => [String(key || "").trim(), {
+            display_title: String(override?.display_title || "").trim(),
+            description_text: String(override?.description_text || "").trim(),
+            icon_path: normalizeIconFileName(override?.icon_path) || "",
+            input_mode: override?.input_mode === "binary" ? "binary" : "value",
+            binary_off_label: String(override?.binary_off_label || "").trim() || "0",
+            binary_on_label: String(override?.binary_on_label || "").trim() || "1",
+            binary_off_icon_path: normalizeIconFileName(override?.binary_off_icon_path) || "",
+            binary_on_icon_path: normalizeIconFileName(override?.binary_on_icon_path) || "",
+          }])
+        ),
+      }))
     );
   } catch (_) {
     showAlert("خواندن جدول گروه قطعات داخلی از دیتابیس انجام نشد.", { title: "خطا" });
@@ -3242,10 +3366,52 @@ function openInternalPartGroupEditor(item = null) {
           enabled: group.enabled !== false,
           ui_order: Number(group.ui_order) || 0,
         })) : [],
+        param_defaults: Object.fromEntries(
+          Object.entries(item.param_defaults || {}).map(([key, value]) => [String(key || "").trim(), value == null ? "" : String(value)])
+        ),
+        param_overrides: Object.fromEntries(
+          Object.entries(item.param_overrides || {}).map(([key, override]) => [String(key || "").trim(), {
+            display_title: String(override?.display_title || "").trim(),
+            description_text: String(override?.description_text || "").trim(),
+            icon_path: normalizeIconFileName(override?.icon_path) || "",
+            input_mode: override?.input_mode === "binary" ? "binary" : "value",
+            binary_off_label: String(override?.binary_off_label || "").trim() || "0",
+            binary_on_label: String(override?.binary_on_label || "").trim() || "1",
+            binary_off_icon_path: normalizeIconFileName(override?.binary_off_icon_path) || "",
+            binary_on_icon_path: normalizeIconFileName(override?.binary_on_icon_path) || "",
+          }])
+        ),
       }
     : buildNewInternalPartGroupDraft();
+  ensureInternalPartGroupParamDefaults(internalPartGroupEditorDraft.value);
   internalPartGroupParamGroupsOpen.value = false;
   internalPartGroupEditorOpen.value = true;
+}
+
+function openInternalPartGroupDefaultsEditor(item) {
+  if (!item?.id) return;
+  ensureInternalPartGroupParamDefaults(item);
+  const selectedColumns = getInternalPartGroupSelectedParamColumns(item);
+  if (!selectedColumns.length) {
+    showAlert("برای این گروه داخلی هنوز گروه پارامتری انتخاب نشده است.", { title: "پیش‌فرض گروه داخلی" });
+    return;
+  }
+  internalPartGroupDefaultsEditorRowId.value = item.id;
+  internalPartGroupDefaultsValues.value = Object.fromEntries(
+    selectedColumns.map((column) => {
+      const override = item.param_overrides?.[column.key] || {};
+      const value = String(item.param_defaults?.[column.key] ?? "").trim();
+      return [
+        column.key,
+        override.input_mode === "binary" ? (value === "1" ? "1" : "0") : value,
+      ];
+    })
+  );
+  internalPartGroupDefaultsActiveGroupId.value = String(item.param_groups?.find((group) => group?.enabled !== false)?.param_group_id || "");
+  if (!internalPartGroupDefaultsActiveGroupId.value) {
+    internalPartGroupDefaultsActiveGroupId.value = activeInternalPartGroupDefaultsGroups.value[0]?.id || "";
+  }
+  internalPartGroupDefaultsEditorOpen.value = true;
 }
 
 function onSubCategoryDesignSubCategoryChange() {
@@ -3827,6 +3993,73 @@ function cloneSubCategoryDefaultsSeed(source) {
   };
 }
 
+function getInternalPartGroupSelectedParamColumns(item) {
+  const selectedParamGroupIds = new Set(
+    (Array.isArray(item?.param_groups) ? item.param_groups : [])
+      .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
+      .map((group) => Number(group.param_group_id))
+  );
+  if (!selectedParamGroupIds.size) return [];
+  return constructionParams.value
+    .filter((param) => selectedParamGroupIds.has(Number(param?.param_group_id)))
+    .map((param) => ({
+      key: String(param.param_code || "").trim(),
+      label: String(param.param_title_fa || param.title || param.param_code || "").trim(),
+    }))
+    .filter((item) => item.key);
+}
+
+function ensureInternalPartGroupParamDefaults(item) {
+  if (!item) return item;
+  if (!item.param_defaults || typeof item.param_defaults !== "object") {
+    item.param_defaults = {};
+  }
+  if (!item.param_overrides || typeof item.param_overrides !== "object") {
+    item.param_overrides = {};
+  }
+  for (const column of getInternalPartGroupSelectedParamColumns(item)) {
+    if (!(column.key in item.param_defaults)) {
+      item.param_defaults[column.key] = "";
+    }
+    const baseLabel = constructionSubCategoryParamMetaByCode.value[column.key]?.label || column.key;
+    if (!item.param_overrides[column.key] || typeof item.param_overrides[column.key] !== "object") {
+      item.param_overrides[column.key] = {
+        display_title: baseLabel,
+        description_text: "",
+        icon_path: "",
+        input_mode: "value",
+        binary_off_label: "0",
+        binary_on_label: "1",
+        binary_off_icon_path: "",
+        binary_on_icon_path: "",
+      };
+      continue;
+    }
+    item.param_overrides[column.key] = {
+      display_title: String(item.param_overrides[column.key].display_title || "").trim() || baseLabel,
+      description_text: String(item.param_overrides[column.key].description_text || "").trim(),
+      icon_path: normalizeIconFileName(item.param_overrides[column.key].icon_path) || "",
+      input_mode: item.param_overrides[column.key].input_mode === "binary" ? "binary" : "value",
+      binary_off_label: String(item.param_overrides[column.key].binary_off_label || "").trim() || "0",
+      binary_on_label: String(item.param_overrides[column.key].binary_on_label || "").trim() || "1",
+      binary_off_icon_path: normalizeIconFileName(item.param_overrides[column.key].binary_off_icon_path) || "",
+      binary_on_icon_path: normalizeIconFileName(item.param_overrides[column.key].binary_on_icon_path) || "",
+    };
+  }
+  return item;
+}
+
+function getInternalPartGroupDefaultsSummary(item) {
+  const columns = getInternalPartGroupSelectedParamColumns(item);
+  const total = columns.length;
+  const filled = columns.filter((column) => String(item?.param_defaults?.[column.key] ?? "").trim()).length;
+  return {
+    filled,
+    total,
+    text: total ? `${toPersianDigits(filled)} / ${toPersianDigits(total)}` : "بدون پارامتر",
+  };
+}
+
 function getSubCategoryDefaultsSummary(item) {
   const total = constructionSubCategoryParamColumns.value.length;
   const filled = Object.values(item?.param_defaults || {}).filter((value) => String(value || "").trim()).length;
@@ -4055,6 +4288,61 @@ function setSubCategoryUserPreviewBinaryValue(paramCode, value) {
 
 function selectSubCategoryUserPreviewGroup(groupId) {
   subCategoryUserPreviewActiveGroupId.value = String(groupId || "");
+}
+
+function selectInternalPartGroupDefaultsGroup(groupId) {
+  internalPartGroupDefaultsActiveGroupId.value = String(groupId || "");
+}
+
+function setInternalPartGroupBinaryDefault(paramCode, value) {
+  const key = String(paramCode || "").trim();
+  if (!key) return;
+  internalPartGroupDefaultsValues.value = {
+    ...internalPartGroupDefaultsValues.value,
+    [key]: String(value) === "1" ? "1" : "0",
+  };
+}
+
+async function persistInternalPartGroupRow(row) {
+  if (!row?.id) throw new Error("Internal part group row is missing.");
+  const payload = normalizeInternalPartGroupPayload(row);
+  const res = await fetch(`/api/internal-part-groups/${encodeURIComponent(String(row.id))}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(await readApiErrorMessage(res, "ذخیره پیش‌فرض‌های گروه قطعات داخلی انجام نشد."));
+  }
+  const savedRow = withConstructionDraftState(await res.json());
+  ensureInternalPartGroupParamDefaults(savedRow);
+  editableInternalPartGroups.value = editableInternalPartGroups.value.map((item) =>
+    String(item.id) === String(savedRow.id) ? savedRow : item
+  );
+  return savedRow;
+}
+
+async function applyInternalPartGroupDefaultsEditor() {
+  const row = activeInternalPartGroupDefaultsRow.value;
+  if (!row) return;
+  ensureInternalPartGroupParamDefaults(row);
+  for (const column of getInternalPartGroupSelectedParamColumns(row)) {
+    const override = row.param_overrides?.[column.key] || {};
+    const nextValue = String(internalPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
+    row.param_defaults[column.key] = override.input_mode === "binary"
+      ? (nextValue === "1" ? "1" : "0")
+      : nextValue;
+  }
+  try {
+    await persistInternalPartGroupRow(row);
+  } catch (error) {
+    showAlert(error?.message || "ذخیره پیش‌فرض‌های گروه قطعات داخلی انجام نشد.", { title: "خطا" });
+    return;
+  }
+  internalPartGroupDefaultsEditorOpen.value = false;
+  internalPartGroupDefaultsEditorRowId.value = null;
+  internalPartGroupDefaultsValues.value = {};
+  internalPartGroupDefaultsActiveGroupId.value = "";
 }
 
 function setSubCategoryDefaultInputMode(paramCode, mode) {
@@ -10354,6 +10642,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--code">کد گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--defaults">پیش‌فرض‌ها</th>
                     <th class="constructionDialog__col constructionDialog__col--id">تعداد قطعات</th>
                     <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
                   </tr>
@@ -10371,6 +10660,16 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.group_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--code">{{ item.code }}</td>
                     <td class="constructionDialog__col constructionDialog__col--title">{{ item.group_title }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--defaults">
+                      <div class="constructionDialog__defaultsActions">
+                        <button type="button" class="constructionDialog__defaultsBtn" :title="'پیش‌فرض پارامترهای گروه داخلی'" @click="openInternalPartGroupDefaultsEditor(item)">
+                          <span class="constructionDialog__defaultsBtnValue">{{ getInternalPartGroupDefaultsSummary(item).text }}</span>
+                          <span class="constructionDialog__defaultsBtnLabel">
+                            <span class="constructionDialog__defaultsBtnIcon" aria-hidden="true">💡</span>
+                          </span>
+                        </button>
+                      </div>
+                    </td>
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.parts?.length || 0) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--actions">
                       <div class="constructionDialog__actionsCell">
@@ -10380,7 +10679,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionInternalPartGroups.length">
-                    <td class="constructionDialog__col constructionDialog__col--title" colspan="6">هنوز گروهی برای قطعات داخلی ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="7">هنوز گروهی برای قطعات داخلی ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -10929,6 +11228,121 @@ onBeforeUnmount(() => {
       </div>
       <div class="appDialog__actions">
         <button type="button" class="constructionDialog__textBtn" @click="toggleInternalPartGroupParamGroupsPanel">بستن</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="internalPartGroupDefaultsEditorOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeInternalPartGroupDefaultsEditor"></div>
+    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
+      <div class="subCategoryPreview__header">
+        <div>
+          <div class="subCategoryPreview__title">پیش‌فرض‌های گروه داخلی</div>
+          <div class="subCategoryPreview__caption">
+            {{ activeInternalPartGroupDefaultsRow?.group_title || "گروه داخلی" }}
+            <span v-if="activeInternalPartGroupDefaultsRow">
+              {{ toPersianDigits(activeInternalPartGroupDefaultsRow.group_id) }}
+            </span>
+          </div>
+        </div>
+        <button type="button" class="constructionDialog__textBtn" @click="closeInternalPartGroupDefaultsEditor">بستن</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        در این بخش پیش‌فرض پارامترهای مرتبط با گروه‌های پارامتری همین گروه قطعات داخلی را به‌صورت مستقل مقداردهی می‌کنید.
+      </div>
+      <div class="subCategoryPreview__body">
+        <div class="subCategoryPreview__tree">
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--groups">
+            <div class="subCategoryPreview__selectorList">
+              <button
+                v-for="group in activeInternalPartGroupDefaultsGroups"
+                :key="group.id"
+                type="button"
+                class="subCategoryPreview__groupHead"
+                :class="{ 'is-active': String(activeInternalPartGroupDefaultsGroup?.id || '') === String(group.id) }"
+                @click="selectInternalPartGroupDefaultsGroup(group.id)"
+              >
+                <div class="subCategoryPreview__groupMeta">
+                  <div class="subCategoryPreview__groupTitle">{{ group.title }}</div>
+                  <div class="subCategoryPreview__groupCaption">{{ toPersianDigits(group.items.length) }} پارامتر</div>
+                </div>
+                <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !group.iconUrl }">
+                  <img
+                    v-if="group.iconUrl"
+                    :key="group.iconUrl"
+                    :src="group.iconUrl"
+                    :alt="group.title"
+                    class="subCategoryPreview__groupIcon"
+                    @error="handleSubCategoryDefaultIconError"
+                  />
+                  <span v-else class="subCategoryPreview__groupFallback">{{ toPersianDigits(group.items.length) }}</span>
+                </div>
+                <span class="subCategoryPreview__groupChevron" aria-hidden="true">‹</span>
+              </button>
+            </div>
+          </div>
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
+            <div v-if="activeInternalPartGroupDefaultsGroup" class="subCategoryPreview__panelHead">
+              <div class="subCategoryPreview__panelTitle">{{ activeInternalPartGroupDefaultsGroup.title }}</div>
+              <div class="subCategoryPreview__panelCaption">{{ toPersianDigits(activeInternalPartGroupDefaultsGroup.items.length) }} پارامتر در این گروه</div>
+            </div>
+            <div v-if="activeInternalPartGroupDefaultsGroup" class="subCategoryPreview__params">
+              <article v-for="column in activeInternalPartGroupDefaultsGroup.items" :key="column.key" class="subCategoryPreview__paramCard">
+                <template v-if="column.inputMode === 'binary'">
+                  <div class="subCategoryPreview__paramMeta">
+                    <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                    <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                  </div>
+                  <div class="subCategoryPreview__binaryChoices">
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': String(internalPartGroupDefaultsValues[column.key] ?? '0') !== '1' }"
+                      @click="setInternalPartGroupBinaryDefault(column.key, '0')"
+                    >
+                      <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOffLabel }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': String(internalPartGroupDefaultsValues[column.key] ?? '0') === '1' }"
+                      @click="setInternalPartGroupBinaryDefault(column.key, '1')"
+                    >
+                      <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOnLabel }}</span>
+                    </button>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="subCategoryPreview__valueHead">
+                    <div class="subCategoryPreview__valueIconBox">
+                      <img :src="column.iconUrl" :alt="column.displayTitle" class="subCategoryPreview__valueIcon" @error="handleSubCategoryDefaultIconError" />
+                    </div>
+                    <div class="subCategoryPreview__paramMeta">
+                      <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                      <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                    </div>
+                  </div>
+                  <input
+                    v-model="internalPartGroupDefaultsValues[column.key]"
+                    class="constructionDialog__input subCategoryPreview__valueInput"
+                    type="number"
+                    inputmode="numeric"
+                    min="0"
+                    :placeholder="column.displayTitle"
+                  />
+                  <div class="subCategoryPreview__valueUnit">میلی‌متر</div>
+                </template>
+              </article>
+            </div>
+            <div v-else class="designMenu__cabinetState">برای این گروه داخلی هنوز پارامتری قابل نمایش نیست.</div>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closeInternalPartGroupDefaultsEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="applyInternalPartGroupDefaultsEditor">اعمال</button>
       </div>
     </div>
   </div>

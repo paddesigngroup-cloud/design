@@ -87,6 +87,7 @@ class Param(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
     part_kind: Mapped["PartKind"] = relationship(back_populates="params")
     param_group: Mapped["ParamGroup"] = relationship(back_populates="params")
     sub_category_defaults: Mapped[list["SubCategoryParamDefault"]] = relationship(back_populates="param")
+    internal_part_group_defaults: Mapped[list["InternalPartGroupParamDefault"]] = relationship(back_populates="param")
 
 
 class BaseFormula(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -365,6 +366,10 @@ class InternalPartGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
         back_populates="group",
         cascade="all, delete-orphan",
     )
+    param_defaults: Mapped[list["InternalPartGroupParamDefault"]] = relationship(
+        back_populates="internal_part_group",
+        cascade="all, delete-orphan",
+    )
 
 
 class InternalPartGroupItem(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -417,6 +422,34 @@ class InternalPartGroupParamGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDelet
 
     group: Mapped["InternalPartGroup"] = relationship(back_populates="param_groups")
     param_group: Mapped["ParamGroup"] = relationship(back_populates="internal_part_group_links")
+
+
+class InternalPartGroupParamDefault(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "internal_part_group_param_defaults"
+
+    internal_part_group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("internal_part_groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    param_id: Mapped[int] = mapped_column(
+        ForeignKey("params.param_id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    display_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    input_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="value", server_default="value")
+    binary_off_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    binary_on_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    binary_off_icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    binary_on_icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    internal_part_group: Mapped["InternalPartGroup"] = relationship(back_populates="param_defaults")
+    param: Mapped["Param"] = relationship(back_populates="internal_part_group_defaults")
 
 
 class SubCategoryDesignInteriorInstance(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
