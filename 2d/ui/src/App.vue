@@ -26,7 +26,7 @@ const showDimensions = ref(true);
 const showOffsetWalls = ref(true);
 const showObjectAxes = ref(false);
 const currentEditorDisplayUnitState = ref("cm");
-const orderDesignGeometryCache = new WeakMap();
+const orderDesignGeometryCache = new Map();
 const walls3dSnapshot = ref({
   nodes: [],
   walls: [],
@@ -2287,13 +2287,14 @@ function buildModel2dOutlineFromBoxes(boxes) {
 
 function getCachedOrderDesignGeometry(item) {
   if (!item) return { lines: [], outline: [] };
-  const cached = orderDesignGeometryCache.get(item);
+  const cacheKey = `${String(item.id || "").trim()}::${String(item.snapshot_checksum || "").trim()}::${Array.isArray(item.viewer_boxes) ? item.viewer_boxes.length : 0}`;
+  const cached = orderDesignGeometryCache.get(cacheKey);
   if (cached) return cached;
   const next = {
     lines: buildModel2dLinesFromBoxes(item.viewer_boxes || []),
     outline: buildModel2dOutlineFromBoxes(item.viewer_boxes || []),
   };
-  orderDesignGeometryCache.set(item, next);
+  orderDesignGeometryCache.set(cacheKey, next);
   return next;
 }
 
@@ -2401,6 +2402,7 @@ function normalizeOrderDesignRecord(item) {
     instance_code: String(item.instance_code || "").trim(),
     status: String(item.status || "draft").trim() || "draft",
     sort_order: Number(item.sort_order) || 0,
+    snapshot_checksum: String(item.snapshot_checksum || "").trim(),
     order_attr_values: Object.fromEntries(
       Object.entries(item.order_attr_values || {}).map(([key, value]) => [key, value == null ? "" : String(value)])
     ),
@@ -2463,7 +2465,7 @@ async function loadOrderDesignCatalog(force = false) {
   try {
     const res = await fetch(`/api/order-designs?order_id=${encodeURIComponent(orderId)}`);
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "خواندن طرح‌های سفارش انجام نشد."));
-    orderDesignCatalog.value = (await res.json()).map(normalizeOrderDesignRecord).filter(Boolean);
+    orderDesignCatalog.value = sortOrderDesignCatalogRecords((await res.json()).map(normalizeOrderDesignRecord).filter(Boolean));
     const validIds = new Set(orderDesignCatalog.value.map((item) => String(item.id)));
     orderDesignPlacements.value = orderDesignPlacements.value.filter((placement) => validIds.has(String(placement.orderDesignId)));
     orderDesignCatalogLoadedForOrderId.value = orderId;
@@ -2547,13 +2549,9 @@ async function createOrderDesignFromSource(sourceDesign, { instanceCode = "", de
     }),
   });
   if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن طرح به سفارش انجام نشد."));
-  const created = normalizeOrderDesignRecord(await res.json());
-  const createdId = String(created?.id || "").trim();
-  await loadOrderDesignCatalog(true);
-  const freshCreated = orderDesignCatalog.value.find((item) => String(item.id) === createdId) || null;
-  if (!freshCreated) {
-    throw new Error("طرح سفارش ساخته شد اما نسخه تازه آن در فهرست پیدا نشد.");
-  }
+  const freshCreated = upsertOrderDesignCatalogItem(await res.json());
+  if (!freshCreated) throw new Error("طرح سفارش ساخته شد اما پاسخ معتبر برنگشت.");
+  orderDesignCatalogLoadedForOrderId.value = orderId;
   if (String(activeCabinetDesignId.value || "") === String(freshCreated.id)) {
     stageCabinetPlaceholderBoxes.value = (freshCreated.viewer_boxes || []).map(normalizeCabinetBox);
   }
@@ -2670,9 +2668,7 @@ async function updateActiveOrderDesignAttr({ key, value }) {
     for (const item of changedTargets) {
       const fresh = await persistOrderDesignRecord(item, nextValuesById.get(String(item.id)) || {});
       if (fresh) {
-        orderDesignCatalog.value = orderDesignCatalog.value.map((row) =>
-          String(row.id) === String(fresh.id) ? fresh : row
-        );
+        upsertOrderDesignCatalogItem(fresh);
         if (String(activeCabinetDesignId.value || "") === String(fresh.id)) {
           stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
           restoreActiveOrderDesignToEditor(fresh, placementById.get(String(fresh.id)) || null);
@@ -2717,9 +2713,7 @@ async function saveOrderDesignEditor() {
       instance_code: instanceCode,
     });
     if (fresh) {
-      orderDesignCatalog.value = orderDesignCatalog.value.map((item) =>
-        String(item.id) === String(fresh.id) ? fresh : item
-      );
+      upsertOrderDesignCatalogItem(fresh);
       if (String(activeCabinetDesignId.value || "") === String(fresh.id)) {
         stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
         restoreActiveOrderDesignToEditor(fresh, activePlacement);
@@ -3078,6 +3072,15 @@ function captureOrderDesignHistoryState() {
     orderDesignIds: orderDesignCatalog.value.map((item) => String(item.id || "").trim()).filter(Boolean),
     orderDesignPlacements: orderDesignPlacements.value.map((item) => ({ ...(item || {}) })),
   };
+}
+
+function upsertOrderDesignCatalogItem(item) {
+  const normalized = normalizeOrderDesignRecord(item);
+  if (!normalized?.id) return null;
+  const nextItems = orderDesignCatalog.value.filter((row) => String(row.id) !== String(normalized.id));
+  nextItems.push(normalized);
+  orderDesignCatalog.value = sortOrderDesignCatalogRecords(nextItems);
+  return normalized;
 }
 
 async function restoreOrderDesignHistoryState(snapshot = null) {

@@ -21,6 +21,7 @@ from designkp_backend.services.order_designs import (
     next_order_design_instance_code,
     next_order_design_sort_order,
     normalize_order_attr_value,
+    order_design_snapshot_marker,
     read_order_design_snapshot_checksum,
     require_accessible_order,
     require_accessible_sub_category_design,
@@ -52,6 +53,7 @@ class OrderDesignItem(BaseModel):
     part_snapshots: list[dict[str, object]]
     viewer_boxes: list[dict[str, object]]
     interior_instances: list[dict[str, object]]
+    snapshot_checksum: str
 
 
 class OrderDesignCreate(BaseModel):
@@ -90,6 +92,8 @@ def _merge_viewer_boxes(
     root_boxes: list[dict[str, object]] | None,
     interior_payloads: list[dict[str, object]] | None,
 ) -> list[dict[str, object]]:
+    if not interior_payloads:
+        return [dict(box or {}) for box in list(root_boxes or [])]
     merged: list[dict[str, object]] = []
     seen: set[str] = set()
     for box in list(root_boxes or []):
@@ -161,6 +165,7 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
         part_snapshots=[dict(row or {}) for row in list(item.part_snapshots or [])],
         viewer_boxes=_merge_viewer_boxes(list(item.viewer_boxes or []), interior_payloads),
         interior_instances=interior_payloads,
+        snapshot_checksum=str(item.snapshot_checksum or "").strip(),
     )
 
 
@@ -196,7 +201,7 @@ async def _require_item_any_status(session: AsyncSession, item_id: uuid.UUID) ->
             admin_id=order.admin_id,
             design_id=item.sub_category_design_id,
         )
-        if await sync_order_design_snapshot(session, item=item, order=order, source_design=source_design, force=True):
+        if await sync_order_design_snapshot(session, item=item, order=order, source_design=source_design):
             await session.commit()
             item = await session.scalar(stmt.where(and_(OrderDesign.id == item_id, OrderDesign.deleted_at.is_(None))))
             if not item:
@@ -392,7 +397,7 @@ async def list_order_designs(
                     design_id=item.sub_category_design_id,
                 )
                 source_design_cache[source_key] = source_design
-            if await sync_order_design_snapshot(session, item=item, order=order, source_design=source_design, force=True):
+            if await sync_order_design_snapshot(session, item=item, order=order, source_design=source_design):
                 changed = True
         if changed:
             await session.commit()
@@ -423,6 +428,16 @@ async def create_order_design(payload: OrderDesignCreate, session: AsyncSession 
         override_attr_values=payload.order_attr_values,
         interior_instances=list(source_design.interior_instances or []) if include_interior else [],
     )
+    snapshot_checksum = build_order_design_snapshot_checksum(
+        source_design=source_design,
+        order_attr_values=snapshot["order_attr_values"],
+        interior_instances=list(source_design.interior_instances or []) if include_interior else [],
+        source_state=dict(snapshot.get("source_state") or {}),
+    )
+    snapshot_marker = order_design_snapshot_marker(
+        source_design=source_design,
+        interior_instances=list(source_design.interior_instances or []) if include_interior else [],
+    )
     instance_code = str(payload.instance_code or "").strip() or await next_order_design_instance_code(
         session,
         order_id=order.id,
@@ -446,21 +461,13 @@ async def create_order_design(payload: OrderDesignCreate, session: AsyncSession 
         order_attr_values=snapshot["order_attr_values"],
         order_attr_meta=with_order_design_snapshot_checksum(
             snapshot["order_attr_meta"],
-            checksum=build_order_design_snapshot_checksum(
-                source_design=source_design,
-                order_attr_values=snapshot["order_attr_values"],
-                interior_instances=list(source_design.interior_instances or []) if include_interior else [],
-                source_state=dict(snapshot.get("source_state") or {}),
-            ),
+            checksum=snapshot_checksum,
+            marker=snapshot_marker,
+            source_state_signature=str(dict(snapshot.get("source_state") or {}).get("signature") or ""),
         ),
         part_snapshots=snapshot["part_snapshots"],
         viewer_boxes=snapshot["viewer_boxes"],
-        snapshot_checksum=build_order_design_snapshot_checksum(
-            source_design=source_design,
-            order_attr_values=snapshot["order_attr_values"],
-            interior_instances=list(source_design.interior_instances or []) if include_interior else [],
-            source_state=dict(snapshot.get("source_state") or {}),
-        ),
+        snapshot_checksum=snapshot_checksum,
     )
     session.add(item)
     await session.flush()
@@ -521,6 +528,17 @@ async def update_order_design(
         override_attr_values=next_attr_values,
         interior_instances=list(item.interior_instances or []) if include_interior else [],
     )
+    current_interior_instances = list(item.interior_instances or []) if include_interior else []
+    snapshot_checksum = build_order_design_snapshot_checksum(
+        source_design=source_design,
+        order_attr_values=snapshot["order_attr_values"],
+        interior_instances=current_interior_instances,
+        source_state=dict(snapshot.get("source_state") or {}),
+    )
+    snapshot_marker = order_design_snapshot_marker(
+        source_design=source_design,
+        interior_instances=current_interior_instances,
+    )
     item.design_title = title
     item.instance_code = instance_code
     item.sort_order = payload.sort_order
@@ -528,23 +546,15 @@ async def update_order_design(
     item.order_attr_values = snapshot["order_attr_values"]
     item.order_attr_meta = with_order_design_snapshot_checksum(
         snapshot["order_attr_meta"],
-        checksum=build_order_design_snapshot_checksum(
-            source_design=source_design,
-            order_attr_values=snapshot["order_attr_values"],
-            interior_instances=list(item.interior_instances or []) if include_interior else [],
-            source_state=dict(snapshot.get("source_state") or {}),
-        ),
+        checksum=snapshot_checksum,
+        marker=snapshot_marker,
+        source_state_signature=str(dict(snapshot.get("source_state") or {}).get("signature") or ""),
     )
     item.part_snapshots = snapshot["part_snapshots"]
     item.viewer_boxes = snapshot["viewer_boxes"]
     if include_interior:
         _apply_resolved_interior_snapshot(item, snapshot=snapshot)
-    item.snapshot_checksum = build_order_design_snapshot_checksum(
-        source_design=source_design,
-        order_attr_values=snapshot["order_attr_values"],
-        interior_instances=list(item.interior_instances or []) if include_interior else [],
-        source_state=dict(snapshot.get("source_state") or {}),
-    )
+    item.snapshot_checksum = snapshot_checksum
     await session.commit()
     item = await _require_item(session, item.id)
     return _serialize_item(item, include_interior=include_interior)
@@ -626,24 +636,27 @@ async def update_order_design_interior_instance(
         override_attr_values=dict(item.order_attr_values or {}),
         interior_instances=list(item.interior_instances or []),
     )
+    current_interior_instances = list(item.interior_instances or [])
+    snapshot_checksum = build_order_design_snapshot_checksum(
+        source_design=source_design,
+        order_attr_values=dict(item.order_attr_values or {}),
+        interior_instances=current_interior_instances,
+        source_state=dict(snapshot.get("source_state") or {}),
+    )
+    snapshot_marker = order_design_snapshot_marker(
+        source_design=source_design,
+        interior_instances=current_interior_instances,
+    )
     item.part_snapshots = snapshot["part_snapshots"]
     item.viewer_boxes = snapshot["viewer_boxes"]
     _apply_resolved_interior_snapshot(item, snapshot=snapshot)
     item.order_attr_meta = with_order_design_snapshot_checksum(
         dict(item.order_attr_meta or {}),
-        checksum=build_order_design_snapshot_checksum(
-            source_design=source_design,
-            order_attr_values=dict(item.order_attr_values or {}),
-            interior_instances=list(item.interior_instances or []),
-            source_state=dict(snapshot.get("source_state") or {}),
-        ),
+        checksum=snapshot_checksum,
+        marker=snapshot_marker,
+        source_state_signature=str(dict(snapshot.get("source_state") or {}).get("signature") or ""),
     )
-    item.snapshot_checksum = build_order_design_snapshot_checksum(
-        source_design=source_design,
-        order_attr_values=dict(item.order_attr_values or {}),
-        interior_instances=list(item.interior_instances or []),
-        source_state=dict(snapshot.get("source_state") or {}),
-    )
+    item.snapshot_checksum = snapshot_checksum
     await session.commit()
     item = await _require_item(session, item.id)
     return _serialize_item(item, include_interior=True)

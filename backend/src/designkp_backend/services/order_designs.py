@@ -94,10 +94,86 @@ def read_order_design_snapshot_checksum(meta: dict[str, object] | None) -> str:
     return str(state.get("checksum") or "")
 
 
-def with_order_design_snapshot_checksum(meta: dict[str, dict[str, object]], *, checksum: str) -> dict[str, dict[str, object]]:
+def read_order_design_snapshot_state(meta: dict[str, object] | None) -> dict[str, object]:
+    return dict((meta or {}).get(SNAPSHOT_META_KEY) or {})
+
+
+def _normalize_snapshot_marker(
+    *,
+    source_design: SubCategoryDesign,
+    interior_instances: list[OrderDesignInteriorInstance | SubCategoryDesignInteriorInstance] | None,
+) -> dict[str, object]:
+    return {
+        "sub_category_design_version": int(getattr(source_design, "version_id", 0) or 0),
+        "sub_category_design_updated_at": str(getattr(source_design, "updated_at", "") or ""),
+        "interior_instances": [
+            {
+                "id": str(getattr(instance, "id", "") or ""),
+                "version_id": int(getattr(instance, "version_id", 0) or 0),
+                "updated_at": str(getattr(instance, "updated_at", "") or ""),
+            }
+            for instance in sorted(
+                list(interior_instances or []),
+                key=lambda row: (
+                    int(getattr(row, "ui_order", 0) or 0),
+                    str(getattr(row, "instance_code", "") or ""),
+                    str(getattr(row, "id", "") or ""),
+                ),
+            )
+        ],
+    }
+
+
+def order_design_snapshot_marker(
+    *,
+    source_design: SubCategoryDesign,
+    interior_instances: list[OrderDesignInteriorInstance | SubCategoryDesignInteriorInstance] | None,
+) -> str:
+    payload = _normalize_snapshot_marker(
+        source_design=source_design,
+        interior_instances=interior_instances,
+    )
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def with_order_design_snapshot_checksum(
+    meta: dict[str, dict[str, object]],
+    *,
+    checksum: str,
+    marker: str | None = None,
+    source_state_signature: str | None = None,
+) -> dict[str, dict[str, object]]:
     next_meta = strip_snapshot_state_from_meta(meta)
-    next_meta[SNAPSHOT_META_KEY] = {"version": 1, "checksum": checksum}
+    state: dict[str, object] = {"version": 2, "checksum": checksum}
+    if marker:
+        state["marker"] = marker
+    if source_state_signature:
+        state["source_state_signature"] = source_state_signature
+    next_meta[SNAPSHOT_META_KEY] = state
     return next_meta
+
+
+def order_design_snapshot_looks_fresh(
+    *,
+    meta: dict[str, object] | None,
+    snapshot_checksum: str | None,
+    source_design: SubCategoryDesign,
+    interior_instances: list[OrderDesignInteriorInstance | SubCategoryDesignInteriorInstance] | None,
+) -> bool:
+    state = read_order_design_snapshot_state(meta)
+    expected_marker = order_design_snapshot_marker(
+        source_design=source_design,
+        interior_instances=interior_instances,
+    )
+    stored_marker = str(state.get("marker") or "")
+    stored_checksum = str(state.get("checksum") or "")
+    current_checksum = str(snapshot_checksum or "").strip()
+    if not stored_marker or stored_marker != expected_marker:
+        return False
+    if not stored_checksum:
+        return False
+    return not current_checksum or current_checksum == stored_checksum
 
 
 async def require_accessible_order(session: AsyncSession, *, order_id: uuid.UUID) -> Order:
@@ -489,23 +565,35 @@ async def sync_order_design_snapshot(
 ) -> bool:
     current_order = order or await require_accessible_order(session, order_id=item.order_id)
     schema_ready = await interior_instance_tables_ready(session)
+    current_interior_instances = list(item.interior_instances or []) if schema_ready else []
     current_source_design = source_design or await require_accessible_sub_category_design(
         session,
         admin_id=current_order.admin_id,
         design_id=item.sub_category_design_id,
     )
+    if not force and order_design_snapshot_looks_fresh(
+        meta=dict(item.order_attr_meta or {}),
+        snapshot_checksum=str(item.snapshot_checksum or ""),
+        source_design=current_source_design,
+        interior_instances=current_interior_instances,
+    ):
+        return False
     snapshot = await build_order_design_snapshot(
         session,
         order=current_order,
         source_design=current_source_design,
         override_attr_values=dict(item.order_attr_values or {}),
-        interior_instances=list(item.interior_instances or []) if schema_ready else [],  
+        interior_instances=current_interior_instances,
     )
     next_checksum = build_order_design_snapshot_checksum(
         source_design=current_source_design,
         order_attr_values=dict(item.order_attr_values or {}),
-        interior_instances=list(item.interior_instances or []) if schema_ready else [],
+        interior_instances=current_interior_instances,
         source_state=dict(snapshot.get("source_state") or {}),
+    )
+    next_marker = order_design_snapshot_marker(
+        source_design=current_source_design,
+        interior_instances=current_interior_instances,
     )
     if not force and read_order_design_snapshot_checksum(dict(item.order_attr_meta or {})) == next_checksum:
         return False
@@ -514,7 +602,12 @@ async def sync_order_design_snapshot(
         item.order_attr_values = snapshot["order_attr_values"]
         changed = True
     if strip_snapshot_state_from_meta(dict(item.order_attr_meta or {})) != snapshot["order_attr_meta"]:
-        item.order_attr_meta = with_order_design_snapshot_checksum(snapshot["order_attr_meta"], checksum=next_checksum)
+        item.order_attr_meta = with_order_design_snapshot_checksum(
+            snapshot["order_attr_meta"],
+            checksum=next_checksum,
+            marker=next_marker,
+            source_state_signature=str(dict(snapshot.get("source_state") or {}).get("signature") or ""),
+        )
         changed = True
     if list(item.part_snapshots or []) != snapshot["part_snapshots"]:
         item.part_snapshots = snapshot["part_snapshots"]
@@ -550,7 +643,12 @@ async def sync_order_design_snapshot(
         item.design_code = snapshot["design_code"]
         changed = True
     if read_order_design_snapshot_checksum(dict(item.order_attr_meta or {})) != next_checksum:
-        item.order_attr_meta = with_order_design_snapshot_checksum(dict(item.order_attr_meta or {}), checksum=next_checksum)
+        item.order_attr_meta = with_order_design_snapshot_checksum(
+            dict(item.order_attr_meta or {}),
+            checksum=next_checksum,
+            marker=next_marker,
+            source_state_signature=str(dict(snapshot.get("source_state") or {}).get("signature") or ""),
+        )
         changed = True
     if str(item.snapshot_checksum or "") != next_checksum:
         item.snapshot_checksum = next_checksum

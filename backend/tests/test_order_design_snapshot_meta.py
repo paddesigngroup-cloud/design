@@ -10,6 +10,8 @@ from designkp_backend.services.order_designs import (
     SNAPSHOT_META_KEY,
     build_order_design_snapshot_checksum,
     next_order_design_instance_code,
+    order_design_snapshot_looks_fresh,
+    order_design_snapshot_marker,
     read_order_design_snapshot_checksum,
     strip_snapshot_state_from_meta,
     with_order_design_snapshot_checksum,
@@ -34,6 +36,49 @@ def test_snapshot_meta_helpers_round_trip() -> None:
 
     updated = with_order_design_snapshot_checksum(cleaned, checksum="new-checksum")
     assert read_order_design_snapshot_checksum(updated) == "new-checksum"
+
+
+def test_snapshot_freshness_uses_marker_and_checksum() -> None:
+    source = _source_design()
+    interior = SimpleNamespace(
+        id=uuid4(),
+        version_id=3,
+        updated_at=datetime(2026, 3, 31, 9, 0, tzinfo=timezone.utc),
+        internal_part_group_id=uuid4(),
+        instance_code="inner-01",
+        ui_order=1,
+        placement_z=1.0,
+        param_values={"k": "2"},
+    )
+    checksum = build_order_design_snapshot_checksum(
+        source_design=source,
+        order_attr_values={"width": "200"},
+        interior_instances=[interior],
+        source_state={"signature": "sig-a"},
+    )
+    marker = order_design_snapshot_marker(
+        source_design=source,
+        interior_instances=[interior],
+    )
+    meta = with_order_design_snapshot_checksum({}, checksum=checksum, marker=marker, source_state_signature="sig-a")
+
+    assert order_design_snapshot_looks_fresh(
+        meta=meta,
+        snapshot_checksum=checksum,
+        source_design=source,
+        interior_instances=[interior],
+    ) is True
+
+    changed_interior = SimpleNamespace(
+        **interior.__dict__,
+        version_id=4,
+    )
+    assert order_design_snapshot_looks_fresh(
+        meta=meta,
+        snapshot_checksum=checksum,
+        source_design=source,
+        interior_instances=[changed_interior],
+    ) is False
 
 
 def test_checksum_is_stable_for_reordered_inputs() -> None:
