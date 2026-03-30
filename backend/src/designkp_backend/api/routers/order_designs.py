@@ -79,8 +79,64 @@ class OrderDesignInteriorInstanceUpdate(BaseModel):
     param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
+def _box_signature(box: dict[str, object]) -> str:
+    return "|".join(
+        str(round(float(box.get(key) or 0), 6))
+        for key in ("width", "depth", "height", "cx", "cy", "cz")
+    )
+
+
+def _merge_viewer_boxes(
+    root_boxes: list[dict[str, object]] | None,
+    interior_payloads: list[dict[str, object]] | None,
+) -> list[dict[str, object]]:
+    merged: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for box in list(root_boxes or []):
+        payload = dict(box or {})
+        signature = _box_signature(payload)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        merged.append(payload)
+    for interior in list(interior_payloads or []):
+        for box in list(interior.get("viewer_boxes") or []):
+            payload = dict(box or {})
+            signature = _box_signature(payload)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            merged.append(payload)
+    return merged
+
+
 def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> OrderDesignItem:
     category = getattr(getattr(item.sub_category_design, "sub_category", None), "category", None)
+    interior_payloads = (
+        [
+            {
+                "id": instance.id,
+                "internal_part_group_id": instance.internal_part_group_id,
+                "instance_code": str(instance.instance_code or "").strip(),
+                "ui_order": int(instance.ui_order or 0),
+                "placement_z": float(instance.placement_z or 0),
+                "interior_box_snapshot": dict(instance.interior_box_snapshot or {}),
+                "param_values": {
+                    str(key): (None if value is None else str(value))
+                    for key, value in dict(instance.param_values or {}).items()
+                },
+                "param_meta": {
+                    str(key): dict(value or {})
+                    for key, value in dict(instance.param_meta or {}).items()
+                },
+                "part_snapshots": [dict(row or {}) for row in list(instance.part_snapshots or [])],
+                "viewer_boxes": [dict(row or {}) for row in list(instance.viewer_boxes or [])],
+                "status": str(instance.status or "draft").strip() or "draft",
+            }
+            for instance in sorted(item.interior_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
+        ]
+        if include_interior else []
+    )
     return OrderDesignItem(
         id=item.id,
         order_id=item.order_id,
@@ -103,32 +159,8 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
             for key, value in strip_snapshot_state_from_meta(dict(item.order_attr_meta or {})).items()
         },
         part_snapshots=[dict(row or {}) for row in list(item.part_snapshots or [])],
-        viewer_boxes=[dict(row or {}) for row in list(item.viewer_boxes or [])],
-        interior_instances=(
-            [
-                {
-                    "id": instance.id,
-                    "internal_part_group_id": instance.internal_part_group_id,
-                    "instance_code": str(instance.instance_code or "").strip(),
-                    "ui_order": int(instance.ui_order or 0),
-                    "placement_z": float(instance.placement_z or 0),
-                    "interior_box_snapshot": dict(instance.interior_box_snapshot or {}),
-                    "param_values": {
-                        str(key): (None if value is None else str(value))
-                        for key, value in dict(instance.param_values or {}).items()
-                    },
-                    "param_meta": {
-                        str(key): dict(value or {})
-                        for key, value in dict(instance.param_meta or {}).items()
-                    },
-                    "part_snapshots": [dict(row or {}) for row in list(instance.part_snapshots or [])],
-                    "viewer_boxes": [dict(row or {}) for row in list(instance.viewer_boxes or [])],
-                    "status": str(instance.status or "draft").strip() or "draft",
-                }
-                for instance in sorted(item.interior_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
-            ]
-            if include_interior else []
-        ),
+        viewer_boxes=_merge_viewer_boxes(list(item.viewer_boxes or []), interior_payloads),
+        interior_instances=interior_payloads,
     )
 
 
@@ -156,7 +188,19 @@ async def _require_item_any_status(session: AsyncSession, item_id: uuid.UUID) ->
     item = await session.scalar(stmt.where(OrderDesign.id == item_id))
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design not found.")
-    await require_accessible_order(session, order_id=item.order_id)
+    order = await require_accessible_order(session, order_id=item.order_id)
+    include_interior = await interior_instance_tables_ready(session)
+    if include_interior and list(item.interior_instances or []):
+        source_design = await require_accessible_sub_category_design(
+            session,
+            admin_id=order.admin_id,
+            design_id=item.sub_category_design_id,
+        )
+        if await sync_order_design_snapshot(session, item=item, order=order, source_design=source_design, force=True):
+            await session.commit()
+            item = await session.scalar(stmt.where(and_(OrderDesign.id == item_id, OrderDesign.deleted_at.is_(None))))
+            if not item:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design not found.")
     return item
 
 
@@ -225,6 +269,27 @@ def _clone_order_design_json(value: object) -> object:
     if isinstance(value, list):
         return [_clone_order_design_json(inner) for inner in value]
     return value
+
+
+def _apply_resolved_interior_snapshot(
+    item: OrderDesign,
+    *,
+    snapshot: dict[str, object],
+) -> None:
+    resolved_by_id = {
+        str(row.get("id") or ""): row
+        for row in list(snapshot.get("interior_instances") or [])
+        if str(row.get("id") or "").strip()
+    }
+    for instance in list(item.interior_instances or []):
+        resolved = resolved_by_id.get(str(instance.id))
+        if not resolved:
+            continue
+        instance.interior_box_snapshot = dict(resolved.get("interior_box_snapshot") or {})
+        instance.param_values = dict(resolved.get("param_values") or {})
+        instance.param_meta = dict(resolved.get("param_meta") or {})
+        instance.part_snapshots = list(resolved.get("part_snapshots") or [])
+        instance.viewer_boxes = list(resolved.get("viewer_boxes") or [])
 
 
 async def _duplicate_order_design_record(
@@ -302,7 +367,7 @@ async def list_order_designs(
     order_id: uuid.UUID = Query(...),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[OrderDesignItem]:
-    await require_accessible_order(session, order_id=order_id)
+    order = await require_accessible_order(session, order_id=order_id)
     include_interior = await interior_instance_tables_ready(session)
     items = (
         await session.scalars(
@@ -312,6 +377,33 @@ async def list_order_designs(
             .order_by(OrderDesign.sort_order.asc(), OrderDesign.instance_code.asc())
         )
     ).all()
+    if include_interior:
+        changed = False
+        source_design_cache: dict[str, SubCategoryDesign] = {}
+        for item in items:
+            if not list(item.interior_instances or []):
+                continue
+            source_key = str(item.sub_category_design_id)
+            source_design = source_design_cache.get(source_key)
+            if source_design is None:
+                source_design = await require_accessible_sub_category_design(
+                    session,
+                    admin_id=order.admin_id,
+                    design_id=item.sub_category_design_id,
+                )
+                source_design_cache[source_key] = source_design
+            if await sync_order_design_snapshot(session, item=item, order=order, source_design=source_design, force=True):
+                changed = True
+        if changed:
+            await session.commit()
+            items = (
+                await session.scalars(
+                    (select(OrderDesign).options(selectinload(OrderDesign.interior_instances)) if include_interior else select(OrderDesign))
+                    .options(selectinload(OrderDesign.sub_category_design).selectinload(SubCategoryDesign.sub_category).selectinload(SubCategory.category))
+                    .where(and_(OrderDesign.order_id == order_id, OrderDesign.deleted_at.is_(None)))
+                    .order_by(OrderDesign.sort_order.asc(), OrderDesign.instance_code.asc())
+                )
+            ).all()
     return [_serialize_item(item, include_interior=include_interior) for item in items]
 
 
@@ -358,6 +450,7 @@ async def create_order_design(payload: OrderDesignCreate, session: AsyncSession 
                 source_design=source_design,
                 order_attr_values=snapshot["order_attr_values"],
                 interior_instances=list(source_design.interior_instances or []) if include_interior else [],
+                source_state=dict(snapshot.get("source_state") or {}),
             ),
         ),
         part_snapshots=snapshot["part_snapshots"],
@@ -366,26 +459,32 @@ async def create_order_design(payload: OrderDesignCreate, session: AsyncSession 
             source_design=source_design,
             order_attr_values=snapshot["order_attr_values"],
             interior_instances=list(source_design.interior_instances or []) if include_interior else [],
+            source_state=dict(snapshot.get("source_state") or {}),
         ),
     )
     session.add(item)
     await session.flush()
     if include_interior:
-        for interior in list(source_design.interior_instances or []):
+        source_interiors_by_id = {
+            str(interior.id): interior
+            for interior in list(source_design.interior_instances or [])
+        }
+        for interior in list(snapshot["interior_instances"] or []):
+            source_interior = source_interiors_by_id.get(str(interior.get("id") or ""))
             session.add(
                 OrderDesignInteriorInstance(
                     order_design_id=item.id,
-                    source_instance_id=interior.id,
-                    internal_part_group_id=interior.internal_part_group_id,
-                    instance_code=str(interior.instance_code or "").strip(),
-                    ui_order=int(interior.ui_order or 0),
-                    placement_z=float(interior.placement_z or 0),
-                    interior_box_snapshot=dict(interior.interior_box_snapshot or {}),
-                    param_values=dict(interior.param_values or {}),
-                    param_meta=dict(interior.param_meta or {}),
-                    part_snapshots=list(interior.part_snapshots or []),
-                    viewer_boxes=list(interior.viewer_boxes or []),
-                    status=str(interior.status or "draft").strip() or "draft",
+                    source_instance_id=getattr(source_interior, "id", None),
+                    internal_part_group_id=uuid.UUID(str(interior.get("internal_part_group_id"))),
+                    instance_code=str(interior.get("instance_code") or "").strip(),
+                    ui_order=int(interior.get("ui_order") or 0),
+                    placement_z=float(interior.get("placement_z") or 0),
+                    interior_box_snapshot=dict(interior.get("interior_box_snapshot") or {}),
+                    param_values=dict(interior.get("param_values") or {}),
+                    param_meta=dict(interior.get("param_meta") or {}),
+                    part_snapshots=list(interior.get("part_snapshots") or []),
+                    viewer_boxes=list(interior.get("viewer_boxes") or []),
+                    status=str(interior.get("status") or getattr(source_interior, "status", "draft") or "draft").strip() or "draft",
                 )
             )
     await session.commit()
@@ -433,14 +532,18 @@ async def update_order_design(
             source_design=source_design,
             order_attr_values=snapshot["order_attr_values"],
             interior_instances=list(item.interior_instances or []) if include_interior else [],
+            source_state=dict(snapshot.get("source_state") or {}),
         ),
     )
     item.part_snapshots = snapshot["part_snapshots"]
     item.viewer_boxes = snapshot["viewer_boxes"]
+    if include_interior:
+        _apply_resolved_interior_snapshot(item, snapshot=snapshot)
     item.snapshot_checksum = build_order_design_snapshot_checksum(
         source_design=source_design,
         order_attr_values=snapshot["order_attr_values"],
         interior_instances=list(item.interior_instances or []) if include_interior else [],
+        source_state=dict(snapshot.get("source_state") or {}),
     )
     await session.commit()
     item = await _require_item(session, item.id)
@@ -525,13 +628,21 @@ async def update_order_design_interior_instance(
     )
     item.part_snapshots = snapshot["part_snapshots"]
     item.viewer_boxes = snapshot["viewer_boxes"]
+    _apply_resolved_interior_snapshot(item, snapshot=snapshot)
     item.order_attr_meta = with_order_design_snapshot_checksum(
         dict(item.order_attr_meta or {}),
         checksum=build_order_design_snapshot_checksum(
             source_design=source_design,
             order_attr_values=dict(item.order_attr_values or {}),
             interior_instances=list(item.interior_instances or []),
+            source_state=dict(snapshot.get("source_state") or {}),
         ),
+    )
+    item.snapshot_checksum = build_order_design_snapshot_checksum(
+        source_design=source_design,
+        order_attr_values=dict(item.order_attr_values or {}),
+        interior_instances=list(item.interior_instances or []),
+        source_state=dict(snapshot.get("source_state") or {}),
     )
     await session.commit()
     item = await _require_item(session, item.id)

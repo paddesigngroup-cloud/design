@@ -69,6 +69,32 @@ def test_checksum_is_stable_for_reordered_inputs() -> None:
     assert checksum_1 == checksum_2
 
 
+def test_checksum_changes_when_source_state_changes() -> None:
+    source = _source_design()
+    interior = SimpleNamespace(
+        id=uuid4(),
+        internal_part_group_id=uuid4(),
+        instance_code="A",
+        ui_order=1,
+        placement_z=1.0,
+        param_values={"k": "2"},
+    )
+    checksum_1 = build_order_design_snapshot_checksum(
+        source_design=source,
+        order_attr_values={"width": "200"},
+        interior_instances=[interior],
+        source_state={"signature": "sig-a"},
+    )
+    checksum_2 = build_order_design_snapshot_checksum(
+        source_design=source,
+        order_attr_values={"width": "200"},
+        interior_instances=[interior],
+        source_state={"signature": "sig-b"},
+    )
+
+    assert checksum_1 != checksum_2
+
+
 class _FakeScalarResult:
     def __init__(self, values: list[str]) -> None:
         self._values = values

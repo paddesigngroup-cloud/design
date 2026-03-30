@@ -2548,27 +2548,16 @@ async function createOrderDesignFromSource(sourceDesign, { instanceCode = "", de
   });
   if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن طرح به سفارش انجام نشد."));
   const created = normalizeOrderDesignRecord(await res.json());
-  const hasInvalidPayload = !created?.id || String(created.order_id || "") !== orderId;
-  const hasDuplicateId = !hasInvalidPayload
-    && orderDesignCatalog.value.some((item) => String(item.id) === String(created.id));
-  if (hasInvalidPayload || hasDuplicateId) {
-    await loadOrderDesignCatalog(true);
-    const fallbackCreated = !hasInvalidPayload
-      ? orderDesignCatalog.value.find((item) => String(item.id) === String(created.id)) || null
-      : null;
-    if (!fallbackCreated) {
-      throw new Error("داده طرح سفارش ناسازگار است. فهرست دوباره بارگیری شد.");
-    }
-    if (String(activeCabinetDesignId.value || "") === String(fallbackCreated.id)) {
-      stageCabinetPlaceholderBoxes.value = (fallbackCreated.viewer_boxes || []).map(normalizeCabinetBox);
-    }
-    return fallbackCreated;
+  const createdId = String(created?.id || "").trim();
+  await loadOrderDesignCatalog(true);
+  const freshCreated = orderDesignCatalog.value.find((item) => String(item.id) === createdId) || null;
+  if (!freshCreated) {
+    throw new Error("طرح سفارش ساخته شد اما نسخه تازه آن در فهرست پیدا نشد.");
   }
-  orderDesignCatalog.value = sortOrderDesignCatalogRecords([...orderDesignCatalog.value, created]);
-  if (String(activeCabinetDesignId.value || "") === String(created.id)) {
-    stageCabinetPlaceholderBoxes.value = (created.viewer_boxes || []).map(normalizeCabinetBox);
+  if (String(activeCabinetDesignId.value || "") === String(freshCreated.id)) {
+    stageCabinetPlaceholderBoxes.value = (freshCreated.viewer_boxes || []).map(normalizeCabinetBox);
   }
-  return created;
+  return freshCreated;
 }
 
 function openOrderDesignEditor(item) {
@@ -3719,6 +3708,10 @@ async function saveSubCategoryDesignEditor() {
     );
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره طرح ساب‌کت انجام نشد."));
     await loadConstructionSubCategoryDesigns();
+    await loadCabinetDesignCatalog(true);
+    if (activeOrder.value?.id) {
+      await loadOrderDesignCatalog(true);
+    }
     closeSubCategoryDesignEditor();
     showAlert("طرح ساب‌کت با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
   } catch (error) {
@@ -4243,6 +4236,70 @@ function ensureInternalPartGroupParamDefaults(item) {
       binary_off_icon_path: normalizeIconFileName(item.param_overrides[column.key].binary_off_icon_path) || "",
       binary_on_icon_path: normalizeIconFileName(item.param_overrides[column.key].binary_on_icon_path) || "",
     };
+  }
+  const seededByCode = new Map();
+  const selectedColumns = getInternalPartGroupSelectedParamColumns(item);
+  for (const subCategory of constructionSubCategories.value) {
+    ensureSubCategoryParamDefaults(subCategory);
+    for (const column of selectedColumns) {
+      if (seededByCode.has(column.key)) continue;
+      const baseLabel = constructionSubCategoryParamMetaByCode.value[column.key]?.label || column.key;
+      const override = subCategory.param_overrides?.[column.key] || {};
+      seededByCode.set(column.key, {
+        value: String(subCategory.param_defaults?.[column.key] ?? "").trim(),
+        override: {
+          display_title: String(override.display_title || "").trim() || baseLabel,
+          description_text: String(override.description_text || "").trim(),
+          icon_path: normalizeIconFileName(override.icon_path) || "",
+          input_mode: override.input_mode === "binary" ? "binary" : "value",
+          binary_off_label: String(override.binary_off_label || "").trim() || "0",
+          binary_on_label: String(override.binary_on_label || "").trim() || "1",
+          binary_off_icon_path: normalizeIconFileName(override.binary_off_icon_path) || "",
+          binary_on_icon_path: normalizeIconFileName(override.binary_on_icon_path) || "",
+        },
+      });
+    }
+    if (seededByCode.size >= selectedColumns.length) break;
+  }
+  for (const column of selectedColumns) {
+    const baseLabel = constructionSubCategoryParamMetaByCode.value[column.key]?.label || column.key;
+    const seeded = seededByCode.get(column.key);
+    if (!seeded) continue;
+    const currentValue = String(item.param_defaults?.[column.key] ?? "").trim();
+    const currentOverride = normalizeInternalPartGroupParamOverride(item.param_overrides?.[column.key], baseLabel);
+    const currentDisplayTitle = String(currentOverride.display_title || "").trim() || baseLabel;
+    if (!currentValue && seeded.value) {
+      item.param_defaults[column.key] = seeded.value;
+    }
+    if (!currentDisplayTitle || currentDisplayTitle === baseLabel) {
+      currentOverride.display_title = String(seeded.override.display_title || "").trim() || baseLabel;
+    }
+    if (!currentOverride.description_text && seeded.override.description_text) {
+      currentOverride.description_text = seeded.override.description_text;
+    }
+    if (!currentOverride.icon_path && seeded.override.icon_path) {
+      currentOverride.icon_path = seeded.override.icon_path;
+    }
+    if (currentOverride.input_mode !== "binary" && seeded.override.input_mode === "binary") {
+      currentOverride.input_mode = "binary";
+    }
+    if ((String(currentOverride.binary_off_label || "").trim() || "0") === "0" && seeded.override.binary_off_label && seeded.override.binary_off_label !== "0") {
+      currentOverride.binary_off_label = seeded.override.binary_off_label;
+    }
+    if ((String(currentOverride.binary_on_label || "").trim() || "1") === "1" && seeded.override.binary_on_label && seeded.override.binary_on_label !== "1") {
+      currentOverride.binary_on_label = seeded.override.binary_on_label;
+    }
+    if (!currentOverride.binary_off_icon_path && seeded.override.binary_off_icon_path) {
+      currentOverride.binary_off_icon_path = seeded.override.binary_off_icon_path;
+    }
+    if (!currentOverride.binary_on_icon_path && seeded.override.binary_on_icon_path) {
+      currentOverride.binary_on_icon_path = seeded.override.binary_on_icon_path;
+    }
+    item.param_overrides[column.key] = currentOverride;
+    if (currentOverride.input_mode === "binary") {
+      const normalizedBinaryValue = String(item.param_defaults?.[column.key] ?? "").trim();
+      item.param_defaults[column.key] = normalizedBinaryValue === "1" ? "1" : "0";
+    }
   }
   return item;
 }
@@ -7994,6 +8051,7 @@ function toggleParamGroupInInternalGroup(paramGroupId) {
       },
     ];
   }
+  ensureInternalPartGroupParamDefaults(draft);
 }
 
 async function archiveOrder(item) {

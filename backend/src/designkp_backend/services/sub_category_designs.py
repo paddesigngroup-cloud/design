@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 
@@ -64,6 +66,29 @@ class ResolvedInteriorInstanceSnapshot:
     viewer_boxes: list[dict[str, object]]
 
 
+@dataclass(slots=True)
+class DesignExecutionContext:
+    session: AsyncSession
+    admin_id: uuid.UUID | None
+    sub_category: SubCategory
+    sub_category_raw_params: dict[str, str | None]
+    sub_category_numeric_params: dict[str, float]
+    sub_category_display_values: dict[str, str | None]
+    sub_category_display_meta: dict[str, dict[str, object]]
+    param_codes: set[str]
+    auto_param_codes: set[str]
+    base_formula_map: dict[str, str]
+    base_formula_order: list[str]
+    part_formulas_by_id: dict[int, PartFormula]
+    internal_groups_by_id: dict[uuid.UUID, InternalPartGroup]
+    internal_group_param_codes: dict[uuid.UUID, set[str]]
+    internal_group_display_values: dict[uuid.UUID, dict[str, str | None]]
+    internal_group_display_meta: dict[uuid.UUID, dict[str, dict[str, object]]]
+    parsed_expression_cache: dict[str, ast.Expression]
+    expression_name_cache: dict[str, set[str]]
+    source_state: dict[str, object]
+
+
 def _round_number(value: float | int) -> float:
     return round(float(value), 6)
 
@@ -118,20 +143,57 @@ def _evaluate_ast(node: ast.AST, values: dict[str, float]) -> float:
 
 
 def extract_expression_names(expression: str) -> set[str]:
+    return extract_expression_names_cached(expression)
+
+
+def _parse_expression_cached(
+    expression: str,
+    *,
+    cache: dict[str, ast.Expression] | None = None,
+) -> ast.Expression:
+    normalized = str(expression or "").strip()
+    store = cache if cache is not None else {}
+    cached = store.get(normalized)
+    if cached is not None:
+        return cached
+    parsed = ast.parse(normalized, mode="eval")
+    if cache is not None:
+        cache[normalized] = parsed
+    return parsed
+
+
+def extract_expression_names_cached(
+    expression: str,
+    *,
+    cache: dict[str, set[str]] | None = None,
+    parsed_cache: dict[str, ast.Expression] | None = None,
+) -> set[str]:
+    normalized = str(expression or "").strip()
+    store = cache if cache is not None else {}
+    cached = store.get(normalized)
+    if cached is not None:
+        return set(cached)
     try:
-        parsed = ast.parse(str(expression or "").strip(), mode="eval")
+        parsed = _parse_expression_cached(normalized, cache=parsed_cache)
     except Exception:  # noqa: BLE001
         return set()
     names: set[str] = set()
     for node in ast.walk(parsed):
         if isinstance(node, ast.Name):
             names.add(str(node.id))
+    if cache is not None:
+        cache[normalized] = set(names)
     return names
 
 
-def evaluate_formula_expression(expression: str, values: dict[str, float]) -> float:
+def evaluate_formula_expression(
+    expression: str,
+    values: dict[str, float],
+    *,
+    parsed_cache: dict[str, ast.Expression] | None = None,
+) -> float:
     try:
-        parsed = ast.parse(str(expression or "").strip(), mode="eval")
+        parsed = _parse_expression_cached(str(expression or "").strip(), cache=parsed_cache)
         return _round_number(_evaluate_ast(parsed, values))
     except NameError:
         raise
@@ -218,14 +280,50 @@ async def get_sub_category_resolved_params(
 
 
 async def resolve_base_formula_values(session: AsyncSession, *, admin_id: uuid.UUID | None, params: dict[str, float]) -> dict[str, float]:
-    stmt = select(BaseFormula)
-    if admin_id is not None:
-        stmt = stmt.where(or_(BaseFormula.admin_id.is_(None), BaseFormula.admin_id == admin_id))
-    formulas = (await session.scalars(
-        stmt.order_by(BaseFormula.sort_order.asc(), BaseFormula.fo_id.asc())
-    )).all()
+    formulas = await list_accessible_base_formulas(session, admin_id=admin_id)
+    context = DesignExecutionContext(
+        session=session,
+        admin_id=admin_id,
+        sub_category=SubCategory(),  # type: ignore[call-arg]
+        sub_category_raw_params={},
+        sub_category_numeric_params={},
+        sub_category_display_values={},
+        sub_category_display_meta={},
+        param_codes=set(),
+        auto_param_codes=set(),
+        base_formula_map={
+            str(item.param_formula).strip(): str(item.formula or "")
+            for item in formulas
+            if str(item.param_formula or "").strip()
+        },
+        base_formula_order=[
+            str(item.param_formula).strip()
+            for item in formulas
+            if str(item.param_formula or "").strip()
+        ],
+        part_formulas_by_id={},
+        internal_groups_by_id={},
+        internal_group_param_codes={},
+        internal_group_display_values={},
+        internal_group_display_meta={},
+        parsed_expression_cache={},
+        expression_name_cache={},
+        source_state={},
+    )
+    return resolve_base_formula_values_with_context(context, params=params)
+
+
+def resolve_base_formula_values_with_context(
+    context: DesignExecutionContext,
+    *,
+    params: dict[str, float],
+) -> dict[str, float]:
     resolved: dict[str, float] = {}
-    pending = {str(item.param_formula): str(item.formula) for item in formulas}
+    pending = {
+        code: context.base_formula_map[code]
+        for code in context.base_formula_order
+        if code in context.base_formula_map
+    }
     max_passes = max(1, len(pending) * 2)
     for _ in range(max_passes):
         if not pending:
@@ -233,7 +331,11 @@ async def resolve_base_formula_values(session: AsyncSession, *, admin_id: uuid.U
         progressed = False
         for code, expression in list(pending.items()):
             try:
-                resolved[code] = evaluate_formula_expression(expression, {**params, **resolved})
+                resolved[code] = evaluate_formula_expression(
+                    expression,
+                    {**params, **resolved},
+                    parsed_cache=context.parsed_expression_cache,
+                )
             except NameError:
                 continue
             pending.pop(code, None)
@@ -331,12 +433,70 @@ def derive_interior_box_snapshot(viewer_boxes: list[dict[str, object]]) -> dict[
     return {key: _round_number(value) for key, value in bounds.items()}
 
 
+def _normalize_raw_param_values(values: dict[str, object] | None) -> dict[str, str | None]:
+    return {
+        str(key): (None if value is None else str(value))
+        for key, value in dict(values or {}).items()
+        if str(key or "").strip()
+    }
+
+
+def _normalize_param_meta(meta: dict[str, dict[str, object]] | None) -> dict[str, dict[str, object]]:
+    return {
+        str(key): dict(value or {})
+        for key, value in dict(meta or {}).items()
+        if str(key or "").strip()
+    }
+
+
+def _merge_param_value_layers(*layers: dict[str, str | None]) -> dict[str, str | None]:
+    merged: dict[str, str | None] = {}
+    for layer in layers:
+        for key, value in dict(layer or {}).items():
+            code = str(key or "").strip()
+            if code:
+                merged[code] = value
+    return merged
+
+
+def strip_inherited_param_values(
+    *,
+    inherited_values: dict[str, str | None],
+    param_values: dict[str, object] | None,
+) -> dict[str, str | None]:
+    stripped: dict[str, str | None] = {}
+    for code, value in _normalize_raw_param_values(param_values).items():
+        if code in inherited_values and value == inherited_values.get(code):
+            continue
+        stripped[code] = value
+    return stripped
+
+
+def build_source_state_signature(payload: dict[str, object]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 async def build_sub_category_param_display_snapshot(
     session: AsyncSession,
     *,
     sub_category: SubCategory,
     codes: set[str] | None = None,
+    context: DesignExecutionContext | None = None,
 ) -> tuple[dict[str, str | None], dict[str, dict[str, object]]]:
+    if context is not None:
+        filter_codes = {str(item).strip() for item in (codes or set()) if str(item).strip()} if codes else None
+        values = {
+            code: value
+            for code, value in context.sub_category_display_values.items()
+            if filter_codes is None or code in filter_codes
+        }
+        meta = {
+            code: dict(value or {})
+            for code, value in context.sub_category_display_meta.items()
+            if filter_codes is None or code in filter_codes
+        }
+        return values, meta
     rows = (
         await session.execute(
             select(SubCategoryParamDefault, Param.param_code, Param.param_title_fa, Param.param_id, Param.ui_order, ParamGroup)
@@ -375,7 +535,21 @@ async def build_internal_group_param_display_snapshot(
     *,
     internal_group: InternalPartGroup,
     codes: set[str] | None = None,
+    context: DesignExecutionContext | None = None,
 ) -> tuple[dict[str, str | None], dict[str, dict[str, object]]]:
+    if context is not None:
+        filter_codes = {str(item).strip() for item in (codes or set()) if str(item).strip()} if codes else None
+        values = {
+            code: value
+            for code, value in context.internal_group_display_values.get(internal_group.id, {}).items()
+            if filter_codes is None or code in filter_codes
+        }
+        meta = {
+            code: dict(value or {})
+            for code, value in context.internal_group_display_meta.get(internal_group.id, {}).items()
+            if filter_codes is None or code in filter_codes
+        }
+        return values, meta
     rows = (
         await session.execute(
             select(
@@ -443,7 +617,10 @@ async def collect_internal_group_param_codes(
     *,
     admin_id: uuid.UUID | None,
     group: InternalPartGroup,
+    context: DesignExecutionContext | None = None,
 ) -> set[str]:
+    if context is not None:
+        return set(context.internal_group_param_codes.get(group.id, set()))
     part_formula_ids = [
         int(item.part_formula_id)
         for item in list(group.__dict__.get("parts") or [])
@@ -478,17 +655,327 @@ async def collect_internal_group_param_codes(
     return resolved
 
 
+async def _load_internal_groups_for_context(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    group_ids: set[uuid.UUID],
+) -> dict[uuid.UUID, InternalPartGroup]:
+    if not group_ids:
+        return {}
+    stmt = (
+        select(InternalPartGroup)
+        .options(selectinload(InternalPartGroup.parts))
+        .where(InternalPartGroup.id.in_(list(group_ids)))
+    )
+    if admin_id is not None:
+        stmt = stmt.where(or_(InternalPartGroup.admin_id.is_(None), InternalPartGroup.admin_id == admin_id))
+    groups = (await session.scalars(stmt)).all()
+    groups_by_id = {item.id: item for item in groups}
+    missing = [group_id for group_id in group_ids if group_id not in groups_by_id]
+    if missing:
+        await require_accessible_internal_part_group(session, admin_id=admin_id, group_id=missing[0])
+    return groups_by_id
+
+
+async def _load_internal_group_display_snapshots(
+    session: AsyncSession,
+    *,
+    group_ids: set[uuid.UUID],
+) -> tuple[dict[uuid.UUID, dict[str, str | None]], dict[uuid.UUID, dict[str, dict[str, object]]]]:
+    if not group_ids:
+        return {}, {}
+    rows = (
+        await session.execute(
+            select(
+                InternalPartGroupParamDefault.internal_part_group_id,
+                InternalPartGroupParamDefault,
+                Param.param_code,
+                Param.param_title_fa,
+                Param.param_id,
+                Param.ui_order,
+                ParamGroup,
+            )
+            .join(Param, Param.param_id == InternalPartGroupParamDefault.param_id)
+            .join(ParamGroup, ParamGroup.param_group_id == Param.param_group_id)
+            .where(InternalPartGroupParamDefault.internal_part_group_id.in_(list(group_ids)))
+            .order_by(
+                InternalPartGroupParamDefault.internal_part_group_id.asc(),
+                ParamGroup.ui_order.asc(),
+                Param.ui_order.asc(),
+                Param.param_id.asc(),
+            )
+        )
+    ).all()
+    values_by_group: dict[uuid.UUID, dict[str, str | None]] = {}
+    meta_by_group: dict[uuid.UUID, dict[str, dict[str, object]]] = {}
+    for group_id, default_row, param_code, param_title_fa, param_id, param_ui_order, group in rows:
+        code = str(param_code or "").strip()
+        if not code:
+            continue
+        values_by_group.setdefault(group_id, {})[code] = default_row.default_value
+        meta_by_group.setdefault(group_id, {})[code] = {
+            "label": str(default_row.display_title or param_title_fa or code).strip() or code,
+            "description_text": str(default_row.description_text or "").strip() or None,
+            "icon_path": str(default_row.icon_path or "").strip() or None,
+            "input_mode": default_row.input_mode if str(default_row.input_mode or "") == "binary" else "value",
+            "binary_off_label": str(default_row.binary_off_label or "0").strip() or "0",
+            "binary_on_label": str(default_row.binary_on_label or "1").strip() or "1",
+            "binary_off_icon_path": str(default_row.binary_off_icon_path or "").strip() or None,
+            "binary_on_icon_path": str(default_row.binary_on_icon_path or "").strip() or None,
+            "group_id": int(group.param_group_id or 0),
+            "group_title": str(group.org_param_group_title or group.title or group.param_group_code or "").strip() or None,
+            "group_ui_order": int(group.ui_order or 0),
+            "group_show_in_order_attrs": bool(group.show_in_order_attrs),
+            "param_id": int(param_id or 0),
+            "param_ui_order": int(param_ui_order or 0),
+        }
+    return values_by_group, meta_by_group
+
+
+def _collect_internal_group_param_codes_from_context(
+    *,
+    group: InternalPartGroup,
+    param_codes: set[str],
+    base_formula_map: dict[str, str],
+    part_formulas_by_id: dict[int, PartFormula],
+    expression_name_cache: dict[str, set[str]],
+    parsed_expression_cache: dict[str, ast.Expression],
+) -> set[str]:
+    pending: list[str] = []
+    for selection in list(group.__dict__.get("parts") or []):
+        if not bool(selection.enabled):
+            continue
+        formula = part_formulas_by_id.get(int(selection.part_formula_id or 0))
+        if not formula:
+            continue
+        for field_name in PART_FORMULA_FIELDS:
+            pending.extend(
+                extract_expression_names_cached(
+                    str(getattr(formula, field_name) or ""),
+                    cache=expression_name_cache,
+                    parsed_cache=parsed_expression_cache,
+                )
+            )
+    resolved: set[str] = set()
+    seen: set[str] = set()
+    while pending:
+        name = str(pending.pop()).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        if name in param_codes:
+            resolved.add(name)
+            continue
+        expression = base_formula_map.get(name)
+        if expression:
+            pending.extend(
+                extract_expression_names_cached(
+                    expression,
+                    cache=expression_name_cache,
+                    parsed_cache=parsed_expression_cache,
+                )
+            )
+    return resolved
+
+
+async def build_design_execution_context(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    sub_category: SubCategory | None,
+    part_formula_ids: set[int] | None = None,
+    internal_group_ids: set[uuid.UUID] | None = None,
+    include_sub_category_display: bool = False,
+) -> DesignExecutionContext:
+    effective_sub_category = sub_category or SubCategory(id=uuid.uuid4())  # type: ignore[call-arg]
+    raw_params, numeric_params = (
+        await get_sub_category_resolved_params(session, effective_sub_category)
+        if sub_category is not None else
+        ({}, {})
+    )
+    display_values: dict[str, str | None] = {}
+    display_meta: dict[str, dict[str, object]] = {}
+    if sub_category is not None and include_sub_category_display:
+        display_values, display_meta = await build_sub_category_param_display_snapshot(
+            session,
+            sub_category=effective_sub_category,
+        )
+    params = await list_accessible_params(session, admin_id=admin_id)
+    param_codes = {str(item.param_code).strip() for item in params if str(item.param_code or "").strip()}
+    auto_param_codes = {
+        str(item.param_code).strip()
+        for item in params
+        if str(item.interior_value_mode or "").strip().lower() == "auto" and str(item.param_code or "").strip()
+    }
+    base_formulas = await list_accessible_base_formulas(session, admin_id=admin_id)
+    base_formula_map = {
+        str(item.param_formula).strip(): str(item.formula or "")
+        for item in base_formulas
+        if str(item.param_formula or "").strip()
+    }
+    base_formula_order = [
+        str(item.param_formula).strip()
+        for item in base_formulas
+        if str(item.param_formula or "").strip()
+    ]
+    parsed_expression_cache: dict[str, ast.Expression] = {}
+    expression_name_cache: dict[str, set[str]] = {}
+    groups_by_id = await _load_internal_groups_for_context(
+        session,
+        admin_id=admin_id,
+        group_ids=set(internal_group_ids or set()),
+    )
+    all_formula_ids = {int(item) for item in set(part_formula_ids or set()) if int(item) > 0}
+    for group in groups_by_id.values():
+        for selection in list(group.__dict__.get("parts") or []):
+            if bool(selection.enabled) and int(selection.part_formula_id or 0) > 0:
+                all_formula_ids.add(int(selection.part_formula_id))
+    part_formulas = await require_accessible_part_formulas(
+        session,
+        admin_id=admin_id,
+        part_formula_ids=sorted(all_formula_ids),
+    )
+    part_formulas_by_id = {int(item.part_formula_id): item for item in part_formulas}
+    group_display_values, group_display_meta = await _load_internal_group_display_snapshots(
+        session,
+        group_ids=set(groups_by_id.keys()),
+    )
+    group_param_codes = {
+        group_id: _collect_internal_group_param_codes_from_context(
+            group=group,
+            param_codes=param_codes,
+            base_formula_map=base_formula_map,
+            part_formulas_by_id=part_formulas_by_id,
+            expression_name_cache=expression_name_cache,
+            parsed_expression_cache=parsed_expression_cache,
+        )
+        for group_id, group in groups_by_id.items()
+    }
+    source_state_payload = {
+        "sub_category_id": str(getattr(sub_category, "id", "") or ""),
+        "sub_category_defaults": {key: value for key, value in sorted(raw_params.items())},
+        "base_formulas": {code: base_formula_map[code] for code in base_formula_order},
+        "internal_groups": [
+            {
+                "id": str(group.id),
+                "code": str(group.code or "").strip(),
+                "version_id": int(getattr(group, "version_id", 0) or 0),
+                "updated_at": str(getattr(group, "updated_at", "") or ""),
+                "parts": [
+                    {
+                        "part_formula_id": int(selection.part_formula_id or 0),
+                        "enabled": bool(selection.enabled),
+                        "ui_order": int(selection.ui_order or 0),
+                    }
+                    for selection in sorted(
+                        list(group.__dict__.get("parts") or []),
+                        key=lambda item: (int(item.ui_order or 0), int(item.part_formula_id or 0)),
+                    )
+                ],
+                "param_defaults": {
+                    code: group_display_values.get(group.id, {}).get(code)
+                    for code in sorted(group_display_values.get(group.id, {}))
+                },
+            }
+            for group in sorted(groups_by_id.values(), key=lambda item: str(item.id))
+        ],
+    }
+    return DesignExecutionContext(
+        session=session,
+        admin_id=admin_id,
+        sub_category=effective_sub_category,
+        sub_category_raw_params=_normalize_raw_param_values(raw_params),
+        sub_category_numeric_params={str(key): float(value) for key, value in dict(numeric_params).items()},
+        sub_category_display_values=display_values,
+        sub_category_display_meta=display_meta,
+        param_codes=param_codes,
+        auto_param_codes=auto_param_codes,
+        base_formula_map=base_formula_map,
+        base_formula_order=base_formula_order,
+        part_formulas_by_id=part_formulas_by_id,
+        internal_groups_by_id=groups_by_id,
+        internal_group_param_codes=group_param_codes,
+        internal_group_display_values=group_display_values,
+        internal_group_display_meta=group_display_meta,
+        parsed_expression_cache=parsed_expression_cache,
+        expression_name_cache=expression_name_cache,
+        source_state={
+            "payload": source_state_payload,
+            "signature": build_source_state_signature(source_state_payload),
+        },
+    )
+
+
+async def _build_legacy_execution_context(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    sub_category: SubCategory,
+    internal_group: InternalPartGroup,
+) -> DesignExecutionContext:
+    raw_params, numeric_params = await get_sub_category_resolved_params(session, sub_category)
+    group_param_codes = await collect_internal_group_param_codes(session, admin_id=admin_id, group=internal_group)
+    group_values, group_meta = await build_internal_group_param_display_snapshot(
+        session,
+        internal_group=internal_group,
+        codes=group_param_codes,
+    )
+    auto_param_codes = await get_auto_param_codes(session, admin_id=admin_id)
+    base_formulas = await list_accessible_base_formulas(session, admin_id=admin_id)
+    part_formula_ids = [
+        int(item.part_formula_id)
+        for item in list(internal_group.__dict__.get("parts") or [])
+        if bool(item.enabled)
+    ]
+    formulas = await require_accessible_part_formulas(session, admin_id=admin_id, part_formula_ids=part_formula_ids)
+    return DesignExecutionContext(
+        session=session,
+        admin_id=admin_id,
+        sub_category=sub_category,
+        sub_category_raw_params=_normalize_raw_param_values(raw_params),
+        sub_category_numeric_params={str(key): float(value) for key, value in dict(numeric_params).items()},
+        sub_category_display_values={},
+        sub_category_display_meta={},
+        param_codes=set(),
+        auto_param_codes=set(auto_param_codes),
+        base_formula_map={
+            str(item.param_formula).strip(): str(item.formula or "")
+            for item in base_formulas
+            if str(item.param_formula or "").strip()
+        },
+        base_formula_order=[
+            str(item.param_formula).strip()
+            for item in base_formulas
+            if str(item.param_formula or "").strip()
+        ],
+        part_formulas_by_id={int(item.part_formula_id): item for item in formulas},
+        internal_groups_by_id={internal_group.id: internal_group},
+        internal_group_param_codes={internal_group.id: set(group_param_codes)},
+        internal_group_display_values={internal_group.id: dict(group_values)},
+        internal_group_display_meta={internal_group.id: {str(key): dict(value or {}) for key, value in group_meta.items()}},
+        parsed_expression_cache={},
+        expression_name_cache={},
+        source_state={},
+    )
+
+
 def resolve_part_formula_values(
     part_formula: PartFormula,
     *,
     params: dict[str, float],
     base_formulas: dict[str, float],
+    context: DesignExecutionContext | None = None,
 ) -> dict[str, float]:
     values = {**params, **base_formulas}
     resolved: dict[str, float] = {}
     for field_name in PART_FORMULA_FIELDS:
         expression = str(getattr(part_formula, field_name) or "").strip()
-        resolved[field_name] = evaluate_formula_expression(expression, values)
+        resolved[field_name] = evaluate_formula_expression(
+            expression,
+            values,
+            parsed_cache=context.parsed_expression_cache if context is not None else None,
+        )
     return resolved
 
 
@@ -547,29 +1034,70 @@ async def resolve_internal_instance_preview(
     interior_box_snapshot: dict[str, object],
     param_values: dict[str, object] | None = None,
     param_meta: dict[str, dict[str, object]] | None = None,
+    base_raw_values: dict[str, str | None] | None = None,
+    base_numeric_params: dict[str, float] | None = None,
+    prefer_base_params: bool = False,
+    context: DesignExecutionContext | None = None,
 ) -> ResolvedInteriorInstanceSnapshot:
-    _, sub_category_numeric_params = await get_sub_category_resolved_params(session, sub_category)
-    group_param_codes = await collect_internal_group_param_codes(session, admin_id=admin_id, group=internal_group)
+    resolved_context = context or (
+        await build_design_execution_context(
+            session,
+            admin_id=admin_id,
+            sub_category=sub_category,
+            internal_group_ids={internal_group.id},
+        )
+        if session is not None else
+        await _build_legacy_execution_context(
+            session,
+            admin_id=admin_id,
+            sub_category=sub_category,
+            internal_group=internal_group,
+        )
+    )
+    sub_category_raw_params = dict(resolved_context.sub_category_raw_params)
+    sub_category_numeric_params = dict(resolved_context.sub_category_numeric_params)
+    group_param_codes = await collect_internal_group_param_codes(
+        session,
+        admin_id=admin_id,
+        group=internal_group,
+        context=resolved_context,
+    )
     copied_values, copied_meta = await build_internal_group_param_display_snapshot(
         session,
         internal_group=internal_group,
         codes=group_param_codes,
+        context=resolved_context,
     )
-    persisted_values = {
-        **copied_values,
-        **{str(key): (None if value is None else str(value)) for key, value in dict(param_values or {}).items()},
-    }
+    normalized_input_values = _normalize_raw_param_values(param_values)
+    effective_base_raw_values = _normalize_raw_param_values(base_raw_values or sub_category_raw_params)
+    inherited_group_values = _merge_param_value_layers(
+        {code: effective_base_raw_values.get(code) for code in group_param_codes if code in effective_base_raw_values},
+        copied_values,
+    )
+    effective_formula_values = _merge_param_value_layers(
+        effective_base_raw_values,
+        copied_values,
+        normalized_input_values,
+    )
+    persisted_values = (
+        strip_inherited_param_values(
+            inherited_values=inherited_group_values,
+            param_values=normalized_input_values,
+        )
+        if prefer_base_params else
+        _merge_param_value_layers(copied_values, normalized_input_values)
+    )
     meta = {
         **copied_meta,
         **{
             str(key): dict(value or {})
-            for key, value in dict(param_meta or {}).items()
+            for key, value in _normalize_param_meta(param_meta).items()
             if str(key or "").strip() in group_param_codes
         },
     }
-    auto_param_codes = await get_auto_param_codes(session, admin_id=admin_id)
+    auto_param_codes = set(resolved_context.auto_param_codes)
     auto_values: dict[str, float] = {}
-    formula_values = dict(persisted_values)
+    formula_values = dict(effective_formula_values)
     width = _round_number(_coerce_numeric(interior_box_snapshot.get("width")))
     depth = _round_number(_coerce_numeric(interior_box_snapshot.get("depth")))
     placement = _round_number(placement_z)
@@ -579,26 +1107,29 @@ async def resolve_internal_instance_preview(
     if "u_i_d" in auto_param_codes:
         auto_values["u_i_d"] = depth
         formula_values["u_i_d"] = str(depth)
-    numeric_params = dict(sub_category_numeric_params)
+    numeric_params = dict(base_numeric_params or sub_category_numeric_params)
     numeric_params.update({str(key): _round_number(_coerce_numeric(value)) for key, value in formula_values.items()})
     numeric_params.update(auto_values)
-    resolved_base_formulas = await resolve_base_formula_values(session, admin_id=admin_id, params=numeric_params)
+    resolved_base_formulas = resolve_base_formula_values_with_context(resolved_context, params=numeric_params)
     selected_ids = [
         int(item.part_formula_id)
         for item in list(internal_group.__dict__.get("parts") or [])
         if bool(item.enabled)
     ]
-    formulas = await require_accessible_part_formulas(session, admin_id=admin_id, part_formula_ids=selected_ids)
-    formula_by_id = {int(item.part_formula_id): item for item in formulas}
     part_snapshots: list[dict[str, object]] = []
     viewer_boxes: list[dict[str, object]] = []
     for selection in sorted(list(internal_group.__dict__.get("parts") or []), key=lambda item: (int(item.ui_order or 0), int(item.part_formula_id or 0))):
         if not bool(selection.enabled):
             continue
-        formula = formula_by_id.get(int(selection.part_formula_id))
+        formula = resolved_context.part_formulas_by_id.get(int(selection.part_formula_id))
         if not formula:
             continue
-        resolved_part_formulas = resolve_part_formula_values(formula, params=numeric_params, base_formulas=resolved_base_formulas)
+        resolved_part_formulas = resolve_part_formula_values(
+            formula,
+            params=numeric_params,
+            base_formulas=resolved_base_formulas,
+            context=resolved_context,
+        )
         viewer_payload = build_part_viewer_payload(formula, resolved_part_formulas)
         part_snapshots.append(
             {
@@ -640,22 +1171,32 @@ async def compose_sub_category_design_preview(
     part_selections: list[dict[str, object]],
     interior_instances: list[SubCategoryDesignInteriorInstance] | None = None,
 ) -> tuple[dict[str, str | None], dict[str, float], list[ResolvedPartSnapshot], list[ResolvedInteriorInstanceSnapshot]]:
-    raw_params, numeric_params = await get_sub_category_resolved_params(session, sub_category)
-    resolved_base_formulas = await resolve_base_formula_values(session, admin_id=admin_id, params=numeric_params)
-
     selected_ids = [int(item["part_formula_id"]) for item in part_selections if int(item.get("part_formula_id") or 0) > 0 and bool(item.get("enabled", True))]
-    formulas = await require_accessible_part_formulas(session, admin_id=admin_id, part_formula_ids=selected_ids)
-    formula_by_id = {int(item.part_formula_id): item for item in formulas}
+    context = await build_design_execution_context(
+        session,
+        admin_id=admin_id,
+        sub_category=sub_category,
+        part_formula_ids=set(selected_ids),
+        internal_group_ids={item.internal_part_group_id for item in list(interior_instances or [])},
+    )
+    raw_params = dict(context.sub_category_raw_params)
+    numeric_params = dict(context.sub_category_numeric_params)
+    resolved_base_formulas = resolve_base_formula_values_with_context(context, params=numeric_params)
 
     snapshots: list[ResolvedPartSnapshot] = []
     for selection in sorted(part_selections, key=lambda item: (int(item.get("ui_order") or 0), int(item.get("part_formula_id") or 0))):
         formula_id = int(selection.get("part_formula_id") or 0)
         if not formula_id or not bool(selection.get("enabled", True)):
             continue
-        formula = formula_by_id.get(formula_id)
+        formula = context.part_formulas_by_id.get(formula_id)
         if not formula:
             continue
-        resolved_part_formulas = resolve_part_formula_values(formula, params=numeric_params, base_formulas=resolved_base_formulas)
+        resolved_part_formulas = resolve_part_formula_values(
+            formula,
+            params=numeric_params,
+            base_formulas=resolved_base_formulas,
+            context=context,
+        )
         snapshots.append(
             ResolvedPartSnapshot(
                 part_formula=formula,
@@ -669,11 +1210,13 @@ async def compose_sub_category_design_preview(
     interior_box_snapshot = derive_interior_box_snapshot(base_boxes)
     resolved_interior: list[ResolvedInteriorInstanceSnapshot] = []
     for instance in sorted(list(interior_instances or []), key=lambda item: (int(item.ui_order or 0), str(item.instance_code or ""))):
-        internal_group = await require_accessible_internal_part_group(
-            session,
-            admin_id=admin_id,
-            group_id=instance.internal_part_group_id,
-        )
+        internal_group = context.internal_groups_by_id.get(instance.internal_part_group_id)
+        if internal_group is None:
+            internal_group = await require_accessible_internal_part_group(
+                session,
+                admin_id=admin_id,
+                group_id=instance.internal_part_group_id,
+            )
         resolved_interior.append(
             await resolve_internal_instance_preview(
                 session,
@@ -687,6 +1230,7 @@ async def compose_sub_category_design_preview(
                 interior_box_snapshot=dict(instance.interior_box_snapshot or {}) or dict(interior_box_snapshot),
                 param_values=dict(instance.param_values or {}),
                 param_meta={str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()},
+                context=context,
             )
         )
     return raw_params, resolved_base_formulas, snapshots, resolved_interior

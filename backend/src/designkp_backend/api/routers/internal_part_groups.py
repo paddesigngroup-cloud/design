@@ -406,24 +406,37 @@ async def _load_first_sub_category_default_seed(
 ) -> dict[int, SubCategoryParamDefault]:
     if not param_ids:
         return {}
-    sub_category_stmt = select(SubCategory.id).where(SubCategory.deleted_at.is_(None))
+    sub_category_stmt = (
+        select(SubCategory.id)
+        .where(SubCategory.deleted_at.is_(None))
+        .order_by(SubCategory.sort_order.asc(), SubCategory.sub_cat_id.asc())
+    )
     if admin_id is None:
         sub_category_stmt = sub_category_stmt.where(SubCategory.admin_id.is_(None))
     else:
         sub_category_stmt = sub_category_stmt.where(or_(SubCategory.admin_id.is_(None), SubCategory.admin_id == admin_id))
-    sub_category_stmt = sub_category_stmt.order_by(SubCategory.sort_order.asc(), SubCategory.sub_cat_id.asc()).limit(1)
-    first_sub_category_id = await session.scalar(sub_category_stmt)
-    if not first_sub_category_id:
+    sub_category_ids = list((await session.scalars(sub_category_stmt)).all())
+    if not sub_category_ids:
         return {}
     rows = (
         await session.scalars(
             select(SubCategoryParamDefault).where(
-                SubCategoryParamDefault.sub_category_id == first_sub_category_id,
+                SubCategoryParamDefault.sub_category_id.in_(sub_category_ids),
                 SubCategoryParamDefault.param_id.in_(sorted(param_ids)),
             )
         )
     ).all()
-    return {int(row.param_id): row for row in rows}
+    rows_by_sub_category_id: dict[uuid.UUID, dict[int, SubCategoryParamDefault]] = {}
+    for row in rows:
+        rows_by_sub_category_id.setdefault(row.sub_category_id, {})[int(row.param_id)] = row
+    seeded_by_param_id: dict[int, SubCategoryParamDefault] = {}
+    for sub_category_id in sub_category_ids:
+        rows_for_sub_category = rows_by_sub_category_id.get(sub_category_id, {})
+        for param_id, row in rows_for_sub_category.items():
+            seeded_by_param_id.setdefault(param_id, row)
+        if len(seeded_by_param_id) >= len(param_ids):
+            break
+    return seeded_by_param_id
 
 
 async def _sync_group_param_defaults(session: AsyncSession, group: InternalPartGroup) -> bool:
@@ -447,13 +460,15 @@ async def _sync_group_param_defaults(session: AsyncSession, group: InternalPartG
             changed = True
     for param in params:
         param_id = int(param.param_id)
+        fallback_display_title = str(param.param_title_fa or param.title or param.param_code).strip() or param.param_code
         if param_id in defaults_by_param_id:
             row = defaults_by_param_id[param_id]
             seed_row = seed_rows_by_param_id.get(param_id)
-            if not row.display_title:
+            current_display_title = str(row.display_title or "").strip()
+            if not current_display_title or current_display_title == fallback_display_title:
                 row.display_title = str(
-                    (seed_row.display_title if seed_row else None) or param.param_title_fa or param.title or param.param_code
-                ).strip() or param.param_code
+                    (seed_row.display_title if seed_row else None) or fallback_display_title
+                ).strip() or fallback_display_title
                 changed = True
             if (row.default_value is None or str(row.default_value).strip() == "") and seed_row and seed_row.default_value is not None:
                 row.default_value = seed_row.default_value
@@ -493,8 +508,8 @@ async def _sync_group_param_defaults(session: AsyncSession, group: InternalPartG
                 param_id=param_id,
                 default_value=seed_row.default_value if seed_row else None,
                 display_title=str(
-                    (seed_row.display_title if seed_row else None) or param.param_title_fa or param.title or param.param_code
-                ).strip() or param.param_code,
+                    (seed_row.display_title if seed_row else None) or fallback_display_title
+                ).strip() or fallback_display_title,
                 description_text=(seed_row.description_text if seed_row else None) or None,
                 icon_path=normalize_icon_file_name(seed_row.icon_path) if seed_row else None,
                 input_mode=seed_row.input_mode if seed_row and seed_row.input_mode in {"value", "binary"} else "value",

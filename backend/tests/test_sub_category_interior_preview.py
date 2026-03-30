@@ -105,3 +105,63 @@ def test_resolve_internal_instance_preview_falls_back_to_sub_category_defaults(m
 
     assert result.param_values["u_th"] == "18"
     assert result.part_snapshots[0]["resolved_part_formulas"]["formula_width"] == 36.0
+
+
+def test_resolve_internal_instance_preview_strips_inherited_group_defaults_for_order_state(monkeypatch) -> None:
+    async def fake_get_sub_category_resolved_params(_session, _sub_category):
+        raw = {"u_th": "16", "p_th": "16"}
+        return raw, {key: float(value) for key, value in raw.items()}
+
+    async def fake_collect_internal_group_param_codes(_session, **_kwargs):
+        return {"u_th"}
+
+    async def fake_build_internal_group_param_display_snapshot(_session, **_kwargs):
+        return (
+            {"u_th": "18"},
+            {"u_th": {"label": "ضخامت یونیت"}},
+        )
+
+    async def fake_get_auto_param_codes(_session, **_kwargs):
+        return set()
+
+    async def fake_list_accessible_base_formulas(_session, **_kwargs):
+        return []
+
+    async def fake_require_accessible_part_formulas(_session, **_kwargs):
+        return []
+
+    monkeypatch.setattr(service, "get_sub_category_resolved_params", fake_get_sub_category_resolved_params)
+    monkeypatch.setattr(service, "collect_internal_group_param_codes", fake_collect_internal_group_param_codes)
+    monkeypatch.setattr(service, "build_internal_group_param_display_snapshot", fake_build_internal_group_param_display_snapshot)
+    monkeypatch.setattr(service, "get_auto_param_codes", fake_get_auto_param_codes)
+    monkeypatch.setattr(service, "list_accessible_base_formulas", fake_list_accessible_base_formulas)
+    monkeypatch.setattr(service, "require_accessible_part_formulas", fake_require_accessible_part_formulas)
+
+    internal_group = SimpleNamespace(
+        id=uuid4(),
+        code="inner-group",
+        group_title="گروه داخلی",
+        title="گروه داخلی",
+    )
+    internal_group.__dict__["parts"] = []
+
+    result = asyncio.run(
+        service.resolve_internal_instance_preview(
+            None,
+            admin_id=uuid4(),
+            sub_category=SimpleNamespace(id=uuid4()),
+            internal_group=internal_group,
+            instance_id=None,
+            instance_code="inner-01",
+            ui_order=0,
+            placement_z=0,
+            interior_box_snapshot={"width": 600, "depth": 500},
+            param_values={"u_th": "18", "p_th": "20"},
+            param_meta={},
+            base_raw_values={"u_th": "16", "p_th": "16"},
+            base_numeric_params={"u_th": 16.0, "p_th": 16.0},
+            prefer_base_params=True,
+        )
+    )
+
+    assert result.param_values == {"p_th": "20"}
