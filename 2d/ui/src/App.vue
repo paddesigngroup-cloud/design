@@ -295,6 +295,7 @@ const subCategoryDesignEditorPreview = ref(null);
 const subCategoryDesignPreviewLoading = ref(false);
 const subCategoryDesignPreviewError = ref("");
 const subCategoryDesignPreviewRequestSeq = ref(0);
+const subCategoryDesignEditorSaving = ref(false);
 const internalPartGroupEditorOpen = ref(false);
 const internalPartGroupEditorDraft = ref(null);
 const internalPartGroupParamGroupsOpen = ref(false);
@@ -2222,12 +2223,18 @@ function buildNewInternalPartGroupDraft() {
   };
 }
 
-function closeSubCategoryDesignEditor() {
+function resetSubCategoryDesignEditorState() {
   subCategoryDesignEditorOpen.value = false;
   subCategoryDesignEditorDraft.value = null;
   subCategoryDesignEditorPreview.value = null;
   subCategoryDesignPreviewLoading.value = false;
   subCategoryDesignPreviewError.value = "";
+  subCategoryDesignEditorSaving.value = false;
+}
+
+function closeSubCategoryDesignEditor() {
+  if (subCategoryDesignEditorSaving.value) return;
+  resetSubCategoryDesignEditorState();
 }
 
 function closeInternalPartGroupEditor() {
@@ -3975,7 +3982,7 @@ function togglePartFormulaInInternalGroup(partFormulaId) {
 
 async function saveSubCategoryDesignEditor() {
   const draft = subCategoryDesignEditorDraft.value;
-  if (!draft) return;
+  if (!draft || subCategoryDesignEditorSaving.value) return;
   const designId = Number(draft.design_id);
   if (!Number.isInteger(designId) || designId < 1) {
     showAlert("شناسه طرح باید معتبر و بزرگ‌تر از صفر باشد.", { title: "اعتبارسنجی" });
@@ -4006,6 +4013,7 @@ async function saveSubCategoryDesignEditor() {
     return;
   }
   const payload = normalizeSubCategoryDesignPayload(draft);
+  subCategoryDesignEditorSaving.value = true;
   try {
     const res = await fetch(
       draft.id ? `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}` : "/api/sub-category-designs",
@@ -4021,10 +4029,12 @@ async function saveSubCategoryDesignEditor() {
     if (activeOrder.value?.id) {
       await loadOrderDesignCatalog(true);
     }
-    closeSubCategoryDesignEditor();
+    resetSubCategoryDesignEditorState();
     showAlert("طرح ساب‌کت با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
   } catch (error) {
     showAlert(error?.message || "ذخیره طرح ساب‌کت انجام نشد.", { title: "خطا" });
+  } finally {
+    subCategoryDesignEditorSaving.value = false;
   }
 }
 
@@ -11724,8 +11734,11 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="appDialog__actions">
-        <button type="button" class="constructionDialog__textBtn" @click="closeSubCategoryDesignEditor">انصراف</button>
-        <button type="button" class="constructionDialog__textBtn is-primary" @click="saveSubCategoryDesignEditor">ذخیره طرح</button>
+        <button type="button" class="constructionDialog__textBtn" :disabled="subCategoryDesignEditorSaving" @click="closeSubCategoryDesignEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" :disabled="subCategoryDesignEditorSaving" @click="saveSubCategoryDesignEditor">
+          <span v-if="subCategoryDesignEditorSaving" class="constructionDialog__spinner"></span>
+          <span>{{ subCategoryDesignEditorSaving ? "در حال ذخیره..." : "ذخیره طرح" }}</span>
+        </button>
       </div>
     </div>
   </div>
