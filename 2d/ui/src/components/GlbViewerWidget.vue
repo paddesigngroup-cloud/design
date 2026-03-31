@@ -1301,7 +1301,7 @@ function fitCameraToBounds(bounds, viewDir = null) {
 
   if (axesHelper) {
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    const a = THREE.MathUtils.clamp(maxDim * 0.35, 0.25, 6);
+    const a = THREE.MathUtils.clamp(maxDim * 0.18, 0.16, 2.4);
     axesHelper.scale.setScalar(a);
   }
 }
