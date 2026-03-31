@@ -243,6 +243,92 @@ def test_order_design_add_refreshes_incrementally_and_keeps_defaults(monkeypatch
     assert session.added[0].source_instance_id is None
 
 
+def test_order_design_add_uses_created_instance_when_reloaded_collection_is_empty(monkeypatch) -> None:
+    item = SimpleNamespace(
+        id=uuid4(),
+        order_id=uuid4(),
+        sub_category_design_id=uuid4(),
+        interior_instances=[],
+        order_attr_values={},
+        order_attr_meta={},
+        part_snapshots=[],
+        viewer_boxes=[],
+    )
+    group = SimpleNamespace(id=uuid4(), code="grp")
+    order = SimpleNamespace(id=item.order_id, admin_id=uuid4())
+    source_design = SimpleNamespace(id=item.sub_category_design_id)
+    session = _FakeMutationSession()
+    refreshed_instances: list[object] = []
+
+    async def fake_interior_ready(_session) -> bool:
+        return True
+
+    async def fake_require_item(_session, _item_id):
+        return item
+
+    async def fake_require_order(_session, *, order_id):
+        assert order_id == item.order_id
+        return order
+
+    async def fake_require_group(_session, *, admin_id, group_id):
+        assert admin_id == order.admin_id
+        assert group_id == payload.internal_part_group_id
+        return group
+
+    async def fake_require_source_design(_session, *, admin_id, design_id):
+        assert admin_id == order.admin_id
+        assert design_id == item.sub_category_design_id
+        return source_design
+
+    async def fake_refresh(_session, *, item, order, source_design, instance, internal_group=None):
+        refreshed_instances.append(instance)
+        instance.param_values = {"depth": "550"}
+        instance.part_snapshots = [{"part_code": "inner-A"}]
+        instance.viewer_boxes = [{"width": 10}]
+
+    def fake_refresh_aggregates(*, item, source_design):
+        assert len(item.interior_instances) == 1
+
+    def fake_refresh_snapshot_state(*, item, source_design):
+        assert len(item.interior_instances) == 1
+
+    def fake_serialize_instance(instance):
+        return {
+            "id": str(instance.id),
+            "instance_code": str(instance.instance_code),
+            "param_values": dict(instance.param_values),
+        }
+
+    monkeypatch.setattr(order_router, "interior_instance_tables_ready", fake_interior_ready)
+    monkeypatch.setattr(order_router, "_require_item", fake_require_item)
+    monkeypatch.setattr(order_router, "require_accessible_order", fake_require_order)
+    monkeypatch.setattr(order_router, "require_accessible_internal_part_group", fake_require_group)
+    monkeypatch.setattr(order_router, "require_accessible_sub_category_design", fake_require_source_design)
+    monkeypatch.setattr(order_router, "refresh_order_design_interior_instance", fake_refresh)
+    monkeypatch.setattr(order_router, "refresh_order_design_aggregate_snapshots", fake_refresh_aggregates)
+    monkeypatch.setattr(order_router, "refresh_order_design_snapshot_state", fake_refresh_snapshot_state)
+    monkeypatch.setattr(order_router, "_serialize_interior_instance_item", fake_serialize_instance)
+
+    payload = order_router.OrderDesignInteriorInstanceCreate(
+        internal_part_group_id=uuid4(),
+        placement_z=12,
+        param_values={"depth": 550},
+    )
+    result = asyncio.run(
+        order_router.create_order_design_interior_instance(
+            item.id,
+            payload,
+            session,
+        )
+    )
+
+    assert len(refreshed_instances) == 1
+    assert refreshed_instances[0] is session.added[0]
+    assert len(item.interior_instances) == 1
+    assert result["instance_code"] == "grp-01"
+    assert session.commit_count == 1
+
+
 def test_order_design_delete_rebuilds_full_snapshot(monkeypatch) -> None:
     target = SimpleNamespace(id=uuid4())
     item = SimpleNamespace(id=uuid4(), order_id=uuid4(), sub_category_design_id=uuid4(), interior_instances=[target])

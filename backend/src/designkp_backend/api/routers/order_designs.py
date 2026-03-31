@@ -765,30 +765,25 @@ async def create_order_design_interior_instance(
     existing_instances = list(item.interior_instances or [])
     next_order = payload.ui_order if payload.ui_order is not None else (max([int(row.ui_order or 0) for row in existing_instances], default=-1) + 1)
     next_code = str(payload.instance_code or "").strip() or f"{str(group.code or 'interior').strip() or 'interior'}-{next_order + 1:02d}"
-    session.add(
-        OrderDesignInteriorInstance(
-            order_design_id=item.id,
-            source_instance_id=None,
-            internal_part_group_id=group.id,
-            instance_code=next_code,
-            ui_order=int(next_order),
-            placement_z=float(payload.placement_z or 0),
-            interior_box_snapshot={},
-            param_values=_normalize_interior_param_values(payload.param_values),
-            param_meta={},
-            part_snapshots=[],
-            viewer_boxes=[],
-            status="draft",
-        )
+    target = OrderDesignInteriorInstance(
+        order_design_id=item.id,
+        source_instance_id=None,
+        internal_part_group_id=group.id,
+        instance_code=next_code,
+        ui_order=int(next_order),
+        placement_z=float(payload.placement_z or 0),
+        interior_box_snapshot={},
+        param_values=_normalize_interior_param_values(payload.param_values),
+        param_meta={},
+        part_snapshots=[],
+        viewer_boxes=[],
+        status="draft",
     )
+    session.add(target)
     await session.flush()
     item = await _require_item(session, item.id)
-    target = next((instance for instance in item.interior_instances if str(instance.instance_code or "") == next_code and instance.internal_part_group_id == group.id), None)
-    if target is None:
-        target = max(
-            list(item.interior_instances or []),
-            key=lambda instance: (int(instance.ui_order or 0), str(instance.instance_code or ""), str(instance.id or "")),
-        )
+    if target not in list(item.interior_instances or []):
+        item.interior_instances = [*list(item.interior_instances or []), target]
     await refresh_order_design_interior_instance(
         session,
         item=item,

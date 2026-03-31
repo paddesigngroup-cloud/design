@@ -907,17 +907,22 @@ function buildInteriorInstanceGroups(instance) {
     const code = String(key || "").trim();
     if (!code) continue;
     const groupId = String(meta?.group_id || "").trim() || "__ungrouped__";
+    const sourceGroup = constructionSubCategoryParamTree.value.find((row) => String(row.id) === groupId);
+    const groupIconFileName = normalizeIconFileName(meta?.group_icon_path) || sourceGroup?.iconFileName || "";
     if (!groupsById.has(groupId)) {
-      const sourceGroup = constructionSubCategoryParamTree.value.find((row) => String(row.id) === groupId);
       groupsById.set(groupId, {
         id: groupId,
         title: String(meta?.group_title || sourceGroup?.title || "بدون گروه").trim(),
-        iconUrl: sourceGroup?.iconUrl || "",
+        iconUrl: groupIconFileName ? getSubCategoryDefaultIconUrl(groupIconFileName) : "",
         order: Number(meta?.group_ui_order) || 0,
         items: [],
       });
     }
-    groupsById.get(groupId).items.push({
+    const groupEntry = groupsById.get(groupId);
+    if (groupEntry && !groupEntry.iconUrl && groupIconFileName) {
+      groupEntry.iconUrl = getSubCategoryDefaultIconUrl(groupIconFileName);
+    }
+    groupEntry.items.push({
       key: code,
       displayTitle: String(meta?.label || constructionSubCategoryParamMetaByCode.value[code]?.label || code).trim() || code,
       descriptionText: String(meta?.description_text || "").trim(),

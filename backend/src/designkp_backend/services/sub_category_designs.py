@@ -745,6 +745,7 @@ async def _load_internal_group_display_snapshots(
             "binary_on_icon_path": str(default_row.binary_on_icon_path or "").strip() or None,
             "group_id": int(group.param_group_id or 0),
             "group_title": str(group.org_param_group_title or group.title or group.param_group_code or "").strip() or None,
+            "group_icon_path": str(group.param_group_icon_path or "").strip() or None,
             "group_ui_order": int(group.ui_order or 0),
             "group_show_in_order_attrs": bool(group.show_in_order_attrs),
             "param_id": int(param_id or 0),

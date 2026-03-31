@@ -160,6 +160,7 @@ def test_resolve_internal_instance_preview_keeps_group_icon_when_subcategory_met
             {
                 "u_th": {
                     "label": "ضخامت یونیت",
+                    "group_icon_path": "group-badge.webp",
                     "icon_path": "group-icon.webp",
                     "binary_off_icon_path": "off.webp",
                     "binary_on_icon_path": "on.webp",
@@ -222,6 +223,7 @@ def test_resolve_internal_instance_preview_keeps_group_icon_when_subcategory_met
     )
 
     assert result.param_meta["u_th"]["icon_path"] == "group-icon.webp"
+    assert result.param_meta["u_th"]["group_icon_path"] == "group-badge.webp"
     assert result.param_meta["u_th"]["binary_off_icon_path"] == "off.webp"
     assert result.param_meta["u_th"]["binary_on_icon_path"] == "on.webp"
 
