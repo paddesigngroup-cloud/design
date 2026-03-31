@@ -11924,6 +11924,7 @@ onBeforeUnmount(() => {
                 <template v-if="column.inputMode === 'binary'">
                   <div class="subCategoryPreview__paramMeta">
                     <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                    <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
                   </div>
                   <div class="subCategoryPreview__binaryChoices">
                     <button
@@ -11932,6 +11933,7 @@ onBeforeUnmount(() => {
                       :class="{ 'is-active': String(internalPartGroupDefaultsValues[column.key] ?? '0') !== '1' }"
                       @click="setInternalPartGroupBinaryDefault(column.key, '0')"
                     >
+                      <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
                       <span class="subCategoryPreview__binaryLabel">{{ column.binaryOffLabel }}</span>
                     </button>
                     <button
@@ -11940,13 +11942,20 @@ onBeforeUnmount(() => {
                       :class="{ 'is-active': String(internalPartGroupDefaultsValues[column.key] ?? '0') === '1' }"
                       @click="setInternalPartGroupBinaryDefault(column.key, '1')"
                     >
+                      <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
                       <span class="subCategoryPreview__binaryLabel">{{ column.binaryOnLabel }}</span>
                     </button>
                   </div>
                 </template>
                 <template v-else>
-                  <div class="subCategoryPreview__paramMeta">
-                    <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                  <div class="subCategoryPreview__valueHead">
+                    <div class="subCategoryPreview__valueIconBox">
+                      <img :src="column.iconUrl" :alt="column.displayTitle" class="subCategoryPreview__valueIcon" @error="handleSubCategoryDefaultIconError" />
+                    </div>
+                    <div class="subCategoryPreview__paramMeta">
+                      <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                      <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                    </div>
                   </div>
                   <input
                     v-model="internalPartGroupDefaultsValues[column.key]"
