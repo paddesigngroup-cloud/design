@@ -2671,6 +2671,10 @@ textarea {
   flex-wrap: wrap;
 }
 .constructionDialog__textBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-height: 34px;
   padding: 7px 11px;
   border: 1px solid rgba(52, 20, 31, 0.12);
@@ -2680,6 +2684,10 @@ textarea {
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
+}
+.constructionDialog__textBtn:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 .constructionDialog__textBtn.is-primary {
   background: rgba(243, 222, 230, 0.92);

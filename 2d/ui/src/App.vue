@@ -303,6 +303,7 @@ const internalPartGroupDefaultsEditorRowId = ref(null);
 const internalPartGroupDefaultsEditorGroups = ref([]);
 const internalPartGroupDefaultsValues = ref({});
 const internalPartGroupDefaultsActiveGroupId = ref("");
+const internalPartGroupDefaultsApplying = ref(false);
 const baseFormulaBuilderOpen = ref(false);
 const baseFormulaBuilderMode = ref("create");
 const baseFormulaBuilderEntity = ref("base_formulas");
@@ -327,10 +328,20 @@ const constructionDeletedBaseFormulaIds = ref([]);
 const constructionDeletedPartFormulaIds = ref([]);
 const constructionImportInputEl = ref(null);
 const constructionParamsTableWrapEl = ref(null);
+const interiorLibraryAddingGroupKey = ref("");
+const interiorInstanceEditorApplying = ref(false);
 
 function isOrderDesignSaving(designId) {
   const key = String(designId || "").trim();
   return !!key && orderDesignSavingIds.value.includes(key);
+}
+function getInteriorLibraryAddingGroupKey(group) {
+  const groupId = String(group?.id || "").trim();
+  if (!groupId) return "";
+  return `${subCategoryDesignEditorOpen.value ? "subcat" : "order"}:${groupId}`;
+}
+function isAddingInteriorGroup(group) {
+  return String(interiorLibraryAddingGroupKey.value || "") === getInteriorLibraryAddingGroupKey(group);
 }
 const paramGroupIconInputEl = ref(null);
 const constructionImportPreviewRows = ref([]);
@@ -2240,6 +2251,7 @@ function hasInternalPartGroupDefaultsChanges() {
 }
 
 async function closeInternalPartGroupDefaultsEditor() {
+  if (internalPartGroupDefaultsApplying.value) return;
   if (hasInternalPartGroupDefaultsChanges()) {
     const ok = await showConfirm("تغییرات پیش‌فرض‌های گروه داخلی اعمال نشده‌اند. پنجره بسته شود؟", {
       title: "بستن پیش‌فرض‌ها",
@@ -2253,6 +2265,7 @@ async function closeInternalPartGroupDefaultsEditor() {
   internalPartGroupDefaultsEditorGroups.value = [];
   internalPartGroupDefaultsValues.value = {};
   internalPartGroupDefaultsActiveGroupId.value = "";
+  internalPartGroupDefaultsApplying.value = false;
 }
 
 function findEditableInternalPartGroupById(value) {
@@ -3690,12 +3703,15 @@ function removeInteriorInstanceFromOrderDesignCollection(orderDesignId, instance
 }
 
 async function addInteriorGroupToDesign(group) {
+  if (isAddingInteriorGroup(group)) return;
+  const loadingKey = getInteriorLibraryAddingGroupKey(group);
   if (subCategoryDesignEditorOpen.value) {
     const draft = subCategoryDesignEditorDraft.value;
     if (!draft?.id) {
       showAlert("ابتدا خود طرح ساب‌کت را ذخیره کنید، سپس گروه داخلی را به آن اضافه کنید.", { title: "قطعات داخلی" });
       return;
     }
+    interiorLibraryAddingGroupKey.value = loadingKey;
     try {
       const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances`, {
         method: "POST",
@@ -3711,6 +3727,8 @@ async function addInteriorGroupToDesign(group) {
       await refreshSubCategoryDesignPreview();
     } catch (error) {
       showAlert(error?.message || "افزودن گروه داخلی به طرح انجام نشد.", { title: "خطا" });
+    } finally {
+      interiorLibraryAddingGroupKey.value = "";
     }
     return;
   }
@@ -3719,6 +3737,7 @@ async function addInteriorGroupToDesign(group) {
     showAlert("ابتدا یک طرح ثبت‌شده را انتخاب کنید.", { title: "قطعات داخلی" });
     return;
   }
+  interiorLibraryAddingGroupKey.value = loadingKey;
   try {
     const res = await fetch(`/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances`, {
       method: "POST",
@@ -3733,6 +3752,8 @@ async function addInteriorGroupToDesign(group) {
     await refreshOrderDesignGeometryFromServer(orderDesign.id);
   } catch (error) {
     showAlert(error?.message || "افزودن گروه داخلی به طرح ثبت‌شده انجام نشد.", { title: "خطا" });
+  } finally {
+    interiorLibraryAddingGroupKey.value = "";
   }
 }
 
@@ -3758,17 +3779,23 @@ function openInteriorInstanceEditor(instance) {
 }
 
 function closeInteriorInstanceEditor() {
+  if (interiorInstanceEditorApplying.value) return;
   interiorInstanceEditorOpen.value = false;
   interiorInstanceEditorDraft.value = null;
   interiorInstanceEditorActiveGroupId.value = "";
+  interiorInstanceEditorApplying.value = false;
 }
 
 async function applyInteriorInstanceEditor() {
   const instance = interiorInstanceEditorDraft.value;
-  if (!instance?.id) return;
+  if (!instance?.id || interiorInstanceEditorApplying.value) return;
+  interiorInstanceEditorApplying.value = true;
   if (subCategoryDesignEditorOpen.value) {
     const draft = subCategoryDesignEditorDraft.value;
-    if (!draft?.id) return;
+    if (!draft?.id) {
+      interiorInstanceEditorApplying.value = false;
+      return;
+    }
     try {
       const res = await fetch(
         `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
@@ -3792,11 +3819,16 @@ async function applyInteriorInstanceEditor() {
       await refreshSubCategoryDesignPreview();
     } catch (error) {
       showAlert(error?.message || "ذخیره تنظیمات نمونه داخلی انجام نشد.", { title: "خطا" });
+    } finally {
+      interiorInstanceEditorApplying.value = false;
     }
     return;
   }
   const orderDesign = activeInteriorLibraryOrderDesign.value;
-  if (!orderDesign?.id) return;
+  if (!orderDesign?.id) {
+    interiorInstanceEditorApplying.value = false;
+    return;
+  }
   try {
     const res = await fetch(
       `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
@@ -3819,6 +3851,8 @@ async function applyInteriorInstanceEditor() {
     closeInteriorInstanceEditor();
   } catch (error) {
     showAlert(error?.message || "ذخیره تنظیمات نمونه داخلی طرح ثبت‌شده انجام نشد.", { title: "خطا" });
+  } finally {
+    interiorInstanceEditorApplying.value = false;
   }
 }
 
@@ -4893,7 +4927,8 @@ async function persistInternalPartGroupRow(row) {
 
 async function applyInternalPartGroupDefaultsEditor() {
   const row = activeInternalPartGroupDefaultsRow.value;
-  if (!row) return;
+  if (!row || internalPartGroupDefaultsApplying.value) return;
+  internalPartGroupDefaultsApplying.value = true;
   ensureInternalPartGroupParamDefaults(row);
   for (const column of getInternalPartGroupSelectedParamColumns(row)) {
     const override = row.param_overrides?.[column.key] || {};
@@ -4906,6 +4941,7 @@ async function applyInternalPartGroupDefaultsEditor() {
     await persistInternalPartGroupRow(row);
   } catch (error) {
     showAlert(error?.message || "ذخیره پیش‌فرض‌های گروه قطعات داخلی انجام نشد.", { title: "خطا" });
+    internalPartGroupDefaultsApplying.value = false;
     return;
   }
   internalPartGroupDefaultsEditorOpen.value = false;
@@ -4913,6 +4949,7 @@ async function applyInternalPartGroupDefaultsEditor() {
   internalPartGroupDefaultsEditorGroups.value = [];
   internalPartGroupDefaultsValues.value = {};
   internalPartGroupDefaultsActiveGroupId.value = "";
+  internalPartGroupDefaultsApplying.value = false;
 }
 
 function setSubCategoryDefaultInputMode(paramCode, mode) {
@@ -11912,8 +11949,11 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="appDialog__actions">
-        <button type="button" class="constructionDialog__textBtn" @click="closeInternalPartGroupDefaultsEditor">انصراف</button>
-        <button type="button" class="constructionDialog__textBtn is-primary" @click="applyInternalPartGroupDefaultsEditor">اعمال</button>
+        <button type="button" class="constructionDialog__textBtn" :disabled="internalPartGroupDefaultsApplying" @click="closeInternalPartGroupDefaultsEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" :disabled="internalPartGroupDefaultsApplying" @click="applyInternalPartGroupDefaultsEditor">
+          <span v-if="internalPartGroupDefaultsApplying" class="constructionDialog__spinner"></span>
+          <span>{{ internalPartGroupDefaultsApplying ? "در حال اعمال..." : "اعمال" }}</span>
+        </button>
       </div>
     </div>
   </div>
@@ -12031,9 +12071,11 @@ onBeforeUnmount(() => {
                     type="button"
                     class="constructionDialog__textBtn constructionDialog__textBtn--compact"
                     title="افزودن به طرح"
+                    :disabled="isAddingInteriorGroup(item)"
                     @click="addInteriorGroupToDesign(item)"
                   >
-                    افزودن
+                    <span v-if="isAddingInteriorGroup(item)" class="constructionDialog__spinner"></span>
+                    <span>{{ isAddingInteriorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
                   </button>
                 </div>
               </div>
@@ -12178,8 +12220,11 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="appDialog__actions">
-        <button type="button" class="constructionDialog__textBtn" @click="closeInteriorInstanceEditor">انصراف</button>
-        <button type="button" class="constructionDialog__textBtn is-primary" @click="applyInteriorInstanceEditor">اعمال</button>
+        <button type="button" class="constructionDialog__textBtn" :disabled="interiorInstanceEditorApplying" @click="closeInteriorInstanceEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" :disabled="interiorInstanceEditorApplying" @click="applyInteriorInstanceEditor">
+          <span v-if="interiorInstanceEditorApplying" class="constructionDialog__spinner"></span>
+          <span>{{ interiorInstanceEditorApplying ? "در حال اعمال..." : "اعمال" }}</span>
+        </button>
       </div>
     </div>
   </div>
