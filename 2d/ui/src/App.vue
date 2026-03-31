@@ -2250,6 +2250,15 @@ function hasInternalPartGroupDefaultsChanges() {
   });
 }
 
+function resetInternalPartGroupDefaultsEditorState() {
+  internalPartGroupDefaultsEditorOpen.value = false;
+  internalPartGroupDefaultsEditorRowId.value = null;
+  internalPartGroupDefaultsEditorGroups.value = [];
+  internalPartGroupDefaultsValues.value = {};
+  internalPartGroupDefaultsActiveGroupId.value = "";
+  internalPartGroupDefaultsApplying.value = false;
+}
+
 async function closeInternalPartGroupDefaultsEditor() {
   if (internalPartGroupDefaultsApplying.value) return;
   if (hasInternalPartGroupDefaultsChanges()) {
@@ -2260,12 +2269,7 @@ async function closeInternalPartGroupDefaultsEditor() {
     });
     if (!ok) return;
   }
-  internalPartGroupDefaultsEditorOpen.value = false;
-  internalPartGroupDefaultsEditorRowId.value = null;
-  internalPartGroupDefaultsEditorGroups.value = [];
-  internalPartGroupDefaultsValues.value = {};
-  internalPartGroupDefaultsActiveGroupId.value = "";
-  internalPartGroupDefaultsApplying.value = false;
+  resetInternalPartGroupDefaultsEditorState();
 }
 
 function findEditableInternalPartGroupById(value) {
@@ -3778,12 +3782,16 @@ function openInteriorInstanceEditor(instance) {
   interiorInstanceEditorOpen.value = true;
 }
 
-function closeInteriorInstanceEditor() {
-  if (interiorInstanceEditorApplying.value) return;
+function resetInteriorInstanceEditorState() {
   interiorInstanceEditorOpen.value = false;
   interiorInstanceEditorDraft.value = null;
   interiorInstanceEditorActiveGroupId.value = "";
   interiorInstanceEditorApplying.value = false;
+}
+
+function closeInteriorInstanceEditor() {
+  if (interiorInstanceEditorApplying.value) return;
+  resetInteriorInstanceEditorState();
 }
 
 async function applyInteriorInstanceEditor() {
@@ -3815,7 +3823,7 @@ async function applyInteriorInstanceEditor() {
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه داخلی انجام نشد."));
       syncInteriorInstanceInDraft(await res.json());
       syncOpenSubCategoryDesignDraftToCollection();
-      closeInteriorInstanceEditor();
+      resetInteriorInstanceEditorState();
       await refreshSubCategoryDesignPreview();
     } catch (error) {
       showAlert(error?.message || "ذخیره تنظیمات نمونه داخلی انجام نشد.", { title: "خطا" });
@@ -3848,7 +3856,7 @@ async function applyInteriorInstanceEditor() {
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه داخلی طرح ثبت‌شده انجام نشد."));
     syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
     await refreshOrderDesignGeometryFromServer(orderDesign.id);
-    closeInteriorInstanceEditor();
+    resetInteriorInstanceEditorState();
   } catch (error) {
     showAlert(error?.message || "ذخیره تنظیمات نمونه داخلی طرح ثبت‌شده انجام نشد.", { title: "خطا" });
   } finally {
@@ -4944,12 +4952,7 @@ async function applyInternalPartGroupDefaultsEditor() {
     internalPartGroupDefaultsApplying.value = false;
     return;
   }
-  internalPartGroupDefaultsEditorOpen.value = false;
-  internalPartGroupDefaultsEditorRowId.value = null;
-  internalPartGroupDefaultsEditorGroups.value = [];
-  internalPartGroupDefaultsValues.value = {};
-  internalPartGroupDefaultsActiveGroupId.value = "";
-  internalPartGroupDefaultsApplying.value = false;
+  resetInternalPartGroupDefaultsEditorState();
 }
 
 function setSubCategoryDefaultInputMode(paramCode, mode) {

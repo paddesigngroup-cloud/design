@@ -10258,7 +10258,8 @@ function onDblClick(e) {
     !!tool.getStatus()?.isDrawing;
   if (isDrawing) return;
   e.preventDefault();
-  fitViewToAll();
+  if (isSceneEmpty()) resetCameraToOriginCenter();
+  else fitViewToAll();
 }
 
 function zoomAtScreen(sx, sy, mul) {

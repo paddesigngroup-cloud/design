@@ -88,6 +88,7 @@ let wallsRoot = null;
 let placeholderBoxesRoot = null;
 
 let axesHelper = null;
+let lastMiddleClickMs = 0;
 const PREVIEW_VIEW_DIR = new THREE.Vector3(1, 0.78, 1.18);
 
 const DEFAULT_WALL_HEIGHT_M = 2.8;
@@ -1263,6 +1264,13 @@ function computeRenderableSceneBounds() {
   return bounds;
 }
 
+function has2dDrawingContent() {
+  const normalized = normalizeLinearMembers(props.walls2d);
+  const nodes = Array.isArray(normalized?.nodes) ? normalized.nodes : [];
+  const walls = Array.isArray(normalized?.walls) ? normalized.walls : [];
+  return nodes.length > 0 && walls.length > 0;
+}
+
 function fitCameraToBounds(bounds, viewDir = null) {
   if (!camera || !controls || !bounds) return;
 
@@ -1299,7 +1307,21 @@ function fitCameraToBounds(bounds, viewDir = null) {
 }
 
 function fitCameraToAll(viewDir = null) {
-  fitCameraToBounds(computeRenderableSceneBounds(), viewDir);
+  const bounds = computeRenderableSceneBounds();
+  if (!bounds) {
+    centerCameraOnOrigin(viewDir);
+    return;
+  }
+  fitCameraToBounds(bounds, viewDir);
+}
+
+function centerCameraOnOrigin(viewDir = null) {
+  const halfSpanM = 3;
+  const bounds = new THREE.Box3(
+    new THREE.Vector3(-halfSpanM, 0, -halfSpanM),
+    new THREE.Vector3(halfSpanM, 0.01, halfSpanM)
+  );
+  fitCameraToBounds(bounds, viewDir);
 }
 
 function computeSelectionBounds() {
@@ -1468,7 +1490,27 @@ function setViewDir(dx, dy, dz) {
 }
 
 function onCanvasDoubleClick() {
+  if (!has2dDrawingContent()) {
+    centerCameraOnOrigin();
+    return;
+  }
   fitCameraToAll();
+}
+
+function onCanvasMouseDown(event) {
+  if (event.button !== 1) return;
+  const now = performance.now();
+  if (now - lastMiddleClickMs <= 300) {
+    lastMiddleClickMs = 0;
+    event.preventDefault();
+    if (!has2dDrawingContent()) {
+      centerCameraOnOrigin();
+      return;
+    }
+    fitCameraToAll();
+    return;
+  }
+  lastMiddleClickMs = now;
 }
 
 function toggleViewMenu() {
@@ -1693,6 +1735,7 @@ onMounted(async () => {
   });
   widgetRo.observe(widgetEl.value);
 
+  canvas.addEventListener("mousedown", onCanvasMouseDown);
   canvas.addEventListener("dblclick", onCanvasDoubleClick);
 
   const loop = () => {
@@ -1705,6 +1748,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stop();
+  canvasEl.value?.removeEventListener?.("mousedown", onCanvasMouseDown);
   canvasEl.value?.removeEventListener?.("dblclick", onCanvasDoubleClick);
   if (ro) ro.disconnect();
   ro = null;
