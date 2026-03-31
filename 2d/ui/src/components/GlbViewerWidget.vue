@@ -1054,7 +1054,7 @@ function normalizePlaceholderColor(value, fallback = "#7A4A2B") {
 
 function buildPlaceholderPalette(outlineColor) {
   const fill = new THREE.Color(normalizePlaceholderColor(outlineColor)).lerp(new THREE.Color("#FFFFFF"), 0.76);
-  const edge = new THREE.Color("#5F5A52");
+  const edge = new THREE.Color("#000000");
   return { edge, fill };
 }
 
@@ -1069,17 +1069,17 @@ function applyPlaceholderInstanceVisualState(instanceRoot, state = "default") {
 
   const solidOpacityFactor =
     state === "selected" ? 1
-      : state === "ready" ? 0.96
+      : state === "ready" ? 1
       : state === "drag-preview" ? 0.94
-      : 0.72;
+      : 1;
   const edgeOpacity =
     state === "selected" ? 1
-      : state === "ready" ? 1
+      : state === "ready" ? 0.95
       : state === "drag-preview" ? 0.96
-      : 0.9;
+      : 0.95;
   const emissiveIntensity =
     state === "selected" ? 0.62
-      : state === "ready" ? 0.18
+      : state === "ready" ? 0
       : state === "drag-preview" ? 0.08
       : 0;
 
@@ -1091,12 +1091,12 @@ function applyPlaceholderInstanceVisualState(instanceRoot, state = "default") {
         const baseColor = cloneColor(obj.userData?.basePlaceholderColor, mat.color);
         mat.color.copy(baseColor);
         if (mat.emissive?.isColor) {
-          mat.emissive.set(state === "selected" ? "#FFF6E6" : state === "ready" ? "#FFF3D6" : "#000000");
+          mat.emissive.set(state === "selected" ? "#FFF6E6" : "#000000");
           mat.emissiveIntensity = emissiveIntensity;
         }
         mat.roughness =
           state === "selected" ? 0.48
-            : state === "ready" ? 0.68
+            : state === "ready" ? 0.82
             : state === "drag-preview" ? 0.78
             : 0.82;
         mat.metalness = state === "selected" ? 0.1 : 0.04;
