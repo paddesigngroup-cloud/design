@@ -382,9 +382,16 @@ async def _replace_group_param_groups(
 
 
 async def _params_for_internal_group(session: AsyncSession, group: InternalPartGroup) -> list[Param]:
+    await session.flush()
     selected_param_group_ids = sorted({
         int(row.param_group_id)
-        for row in list(group.__dict__.get("param_groups") or [])
+        for row in (
+            await session.scalars(
+                select(InternalPartGroupParamGroup).where(
+                    InternalPartGroupParamGroup.group_ref_id == group.id
+                )
+            )
+        ).all()
         if row.enabled is not False and row.param_group_id is not None
     })
     if not selected_param_group_ids:

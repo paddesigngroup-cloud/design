@@ -693,9 +693,52 @@ const activeInteriorLibrarySubCategory = computed(() => {
   if (!subCategoryId) return null;
   return constructionSubCategories.value.find((item) => String(item.id) === subCategoryId) || null;
 });
+const activeInteriorLibraryOrderDesign = computed(() =>
+  subCategoryDesignEditorOpen.value ? null : selectedOrderDesignSource.value || null
+);
+const activeInteriorLibrarySourceDesign = computed(() => {
+  if (subCategoryDesignEditorOpen.value) return null;
+  const sourceId = String(activeInteriorLibraryOrderDesign.value?.sub_category_design_id || "").trim();
+  if (!sourceId) return null;
+  return editableSubCategoryDesigns.value.find((item) => String(item.id) === sourceId)
+    || cabinetDesignCatalog.value.find((item) => String(item.id) === sourceId)
+    || null;
+});
+const activeInteriorLibraryTargetId = computed(() =>
+  subCategoryDesignEditorOpen.value
+    ? String(subCategoryDesignEditorDraft.value?.id || "").trim()
+    : String(activeInteriorLibraryOrderDesign.value?.id || "").trim()
+);
+const activeInteriorLibraryInstances = computed(() =>
+  subCategoryDesignEditorOpen.value
+    ? (subCategoryDesignEditorDraft.value?.interior_instances || [])
+    : (activeInteriorLibraryOrderDesign.value?.interior_instances || [])
+);
+const activeInteriorLibraryBaseParamValues = computed(() => {
+  if (subCategoryDesignEditorOpen.value) {
+    if (subCategoryDesignEditorPreview.value?.resolved_params) {
+      return Object.fromEntries(
+        Object.entries(subCategoryDesignEditorPreview.value.resolved_params || {}).map(([key, value]) => [String(key), value == null ? "" : String(value)])
+      );
+    }
+    return Object.fromEntries(
+      Object.entries(activeInteriorLibrarySubCategory.value?.param_defaults || {}).map(([key, value]) => [String(key), value == null ? "" : String(value)])
+    );
+  }
+  return Object.fromEntries(
+    Object.entries(activeInteriorLibraryOrderDesign.value?.order_attr_values || {}).map(([key, value]) => [String(key), value == null ? "" : String(value)])
+  );
+});
 const FRONT_VIEW_WIDTH = 760;
 const FRONT_VIEW_HEIGHT = 460;
 const FRONT_VIEW_PAD = 28;
+
+function getViewerBoxesFromPartSnapshots(partSnapshots) {
+  return (Array.isArray(partSnapshots) ? partSnapshots : [])
+    .map((row) => row?.viewer_payload?.box)
+    .filter((box) => box && typeof box === "object")
+    .map((box) => ({ ...(box || {}) }));
+}
 
 function buildFrontViewLinesFromBoxes(boxes) {
   const normalized = Array.isArray(boxes) ? boxes.map(normalizeCabinetBox) : [];
@@ -735,8 +778,15 @@ function buildFrontViewLinesFromBoxes(boxes) {
   return { outer, inner, bounds };
 }
 
+const activeInteriorLibraryViewerBoxes = computed(() => {
+  if (subCategoryDesignEditorOpen.value) {
+    return subCategoryDesignEditorPreview.value?.viewer_boxes || [];
+  }
+  return activeInteriorLibrarySourceDesign.value?.preview?.viewer_boxes
+    || getViewerBoxesFromPartSnapshots(activeInteriorLibraryOrderDesign.value?.part_snapshots || []);
+});
 const interiorLibraryFrontView = computed(() =>
-  buildFrontViewLinesFromBoxes(subCategoryDesignEditorPreview.value?.viewer_boxes || [])
+  buildFrontViewLinesFromBoxes(activeInteriorLibraryViewerBoxes.value || [])
 );
 const interiorLibraryPreviewSvgLines = computed(() => {
   const data = interiorLibraryFrontView.value;
@@ -868,7 +918,7 @@ function buildInteriorInstanceGroups(instance) {
       binaryOnLabel: String(meta?.binary_on_label || "").trim() || "1",
       binaryOffIconUrl: getSubCategoryDefaultIconUrl(meta?.binary_off_icon_path),
       binaryOnIconUrl: getSubCategoryDefaultIconUrl(meta?.binary_on_icon_path),
-      value: String(instance?.param_values?.[code] ?? "").trim(),
+      value: getInteriorInstanceEffectiveValue(instance, code),
       order: Number(meta?.param_ui_order) || 0,
     });
   }
@@ -880,8 +930,37 @@ function buildInteriorInstanceGroups(instance) {
     .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title, "fa"));
 }
 
-const interiorLibraryGroupCards = computed(() =>
-  constructionInternalPartGroups.value.map((group) => {
+function getInteriorInstanceEffectiveValue(instance, code) {
+  const key = String(code || "").trim();
+  if (!key) return "";
+  const ownValues = instance?.param_values || {};
+  if (Object.prototype.hasOwnProperty.call(ownValues, key)) {
+    const ownValue = ownValues[key];
+    if (ownValue != null && String(ownValue).trim() !== "") {
+      return String(ownValue).trim();
+    }
+    if (String(ownValue) === "0") return "0";
+  }
+  const group = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
+  const groupDefaults = group?.param_defaults || {};
+  if (Object.prototype.hasOwnProperty.call(groupDefaults, key)) {
+    const groupValue = groupDefaults[key];
+    if (groupValue != null && String(groupValue).trim() !== "") {
+      return String(groupValue).trim();
+    }
+    if (String(groupValue) === "0") return "0";
+  }
+  const baseValue = activeInteriorLibraryBaseParamValues.value?.[key];
+  if (baseValue != null && String(baseValue).trim() !== "") {
+    return String(baseValue).trim();
+  }
+  if (String(baseValue) === "0") return "0";
+  return "";
+}
+
+const interiorLibraryGroupCards = computed(() => {
+  const groups = constructionInternalPartGroups.value;
+  return groups.map((group) => {
     const groupTree = buildInternalGroupDefaultsTree(group);
     return {
       ...group,
@@ -889,10 +968,10 @@ const interiorLibraryGroupCards = computed(() =>
       relatedGroups: groupTree.map((row) => ({ id: String(row.id), title: row.title, count: row.items.length })),
       paramCount: groupTree.reduce((sum, row) => sum + row.items.length, 0),
     };
-  })
-);
+  });
+});
 const interiorLibraryInstanceCards = computed(() =>
-  (subCategoryDesignEditorDraft.value?.interior_instances || [])
+  activeInteriorLibraryInstances.value
     .slice()
     .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
     .map((instance) => {
@@ -3503,14 +3582,52 @@ function syncOpenSubCategoryDesignDraftToCollection() {
   );
 }
 
+function syncOrderDesignInCollection(item) {
+  const normalized = normalizeOrderDesignRecord(item);
+  if (!normalized?.id) return null;
+  const existingIndex = orderDesignCatalog.value.findIndex((row) => String(row.id) === String(normalized.id));
+  if (existingIndex === -1) {
+    orderDesignCatalog.value = sortOrderDesignCatalogRecords([...orderDesignCatalog.value, normalized]);
+    return normalized;
+  }
+  orderDesignCatalog.value = sortOrderDesignCatalogRecords(
+    orderDesignCatalog.value.map((row, index) => index === existingIndex ? normalized : row)
+  );
+  return normalized;
+}
+
 async function addInteriorGroupToDesign(group) {
-  const draft = subCategoryDesignEditorDraft.value;
-  if (!draft?.id) {
-    showAlert("ابتدا خود طرح ساب‌کت را ذخیره کنید، سپس گروه داخلی را به آن اضافه کنید.", { title: "قطعات داخلی" });
+  if (subCategoryDesignEditorOpen.value) {
+    const draft = subCategoryDesignEditorDraft.value;
+    if (!draft?.id) {
+      showAlert("ابتدا خود طرح ساب‌کت را ذخیره کنید، سپس گروه داخلی را به آن اضافه کنید.", { title: "قطعات داخلی" });
+      return;
+    }
+    try {
+      const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          internal_part_group_id: group.id,
+          placement_z: 0,
+        }),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه داخلی به طرح انجام نشد."));
+      syncInteriorInstanceInDraft(await res.json());
+      syncOpenSubCategoryDesignDraftToCollection();
+      await refreshSubCategoryDesignPreview();
+    } catch (error) {
+      showAlert(error?.message || "افزودن گروه داخلی به طرح انجام نشد.", { title: "خطا" });
+    }
+    return;
+  }
+  const orderDesign = activeInteriorLibraryOrderDesign.value;
+  if (!orderDesign?.id) {
+    showAlert("ابتدا یک طرح ثبت‌شده را انتخاب کنید.", { title: "قطعات داخلی" });
     return;
   }
   try {
-    const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances`, {
+    const res = await fetch(`/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -3518,22 +3635,26 @@ async function addInteriorGroupToDesign(group) {
         placement_z: 0,
       }),
     });
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه داخلی به طرح انجام نشد."));
-    syncInteriorInstanceInDraft(await res.json());
-    syncOpenSubCategoryDesignDraftToCollection();
-    await refreshSubCategoryDesignPreview();
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه داخلی به طرح ثبت‌شده انجام نشد."));
+    syncOrderDesignInCollection(await res.json());
   } catch (error) {
-    showAlert(error?.message || "افزودن گروه داخلی به طرح انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || "افزودن گروه داخلی به طرح ثبت‌شده انجام نشد.", { title: "خطا" });
   }
 }
 
 function openInteriorInstanceEditor(instance) {
   const normalized = normalizeInteriorInstanceRecord(instance);
   if (!normalized) return;
+  const effectiveParamValues = Object.fromEntries(
+    Object.keys(normalized.param_meta || {}).map((key) => [key, getInteriorInstanceEffectiveValue(normalized, key)])
+  );
   interiorInstanceEditorDraft.value = {
     ...normalized,
     interior_box_snapshot: { ...(normalized.interior_box_snapshot || {}) },
-    param_values: Object.fromEntries(Object.entries(normalized.param_values || {}).map(([key, value]) => [key, String(value ?? "")])),
+    param_values: {
+      ...effectiveParamValues,
+      ...Object.fromEntries(Object.entries(normalized.param_values || {}).map(([key, value]) => [key, String(value ?? "")])),
+    },
     param_meta: Object.fromEntries(Object.entries(normalized.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])),
     part_snapshots: Array.isArray(normalized.part_snapshots) ? normalized.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
     viewer_boxes: Array.isArray(normalized.viewer_boxes) ? normalized.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
@@ -3549,12 +3670,42 @@ function closeInteriorInstanceEditor() {
 }
 
 async function applyInteriorInstanceEditor() {
-  const draft = subCategoryDesignEditorDraft.value;
   const instance = interiorInstanceEditorDraft.value;
-  if (!draft?.id || !instance?.id) return;
+  if (!instance?.id) return;
+  if (subCategoryDesignEditorOpen.value) {
+    const draft = subCategoryDesignEditorDraft.value;
+    if (!draft?.id) return;
+    try {
+      const res = await fetch(
+        `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            placement_z: Number(instance.placement_z) || 0,
+            ui_order: Math.max(0, Number(instance.ui_order) || 0),
+            instance_code: String(instance.instance_code || "").trim() || "interior",
+            param_values: Object.fromEntries(
+              Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+            ),
+          }),
+        }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه داخلی انجام نشد."));
+      syncInteriorInstanceInDraft(await res.json());
+      syncOpenSubCategoryDesignDraftToCollection();
+      closeInteriorInstanceEditor();
+      await refreshSubCategoryDesignPreview();
+    } catch (error) {
+      showAlert(error?.message || "ذخیره تنظیمات نمونه داخلی انجام نشد.", { title: "خطا" });
+    }
+    return;
+  }
+  const orderDesign = activeInteriorLibraryOrderDesign.value;
+  if (!orderDesign?.id) return;
   try {
     const res = await fetch(
-      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
+      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -3568,39 +3719,56 @@ async function applyInteriorInstanceEditor() {
         }),
       }
     );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه داخلی انجام نشد."));
-    syncInteriorInstanceInDraft(await res.json());
-    syncOpenSubCategoryDesignDraftToCollection();
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه داخلی طرح ثبت‌شده انجام نشد."));
+    syncOrderDesignInCollection(await res.json());
     closeInteriorInstanceEditor();
-    await refreshSubCategoryDesignPreview();
   } catch (error) {
-    showAlert(error?.message || "ذخیره تنظیمات نمونه داخلی انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || "ذخیره تنظیمات نمونه داخلی طرح ثبت‌شده انجام نشد.", { title: "خطا" });
   }
 }
 
 async function deleteInteriorInstanceFromDesign(instance) {
-  const draft = subCategoryDesignEditorDraft.value;
-  if (!draft?.id || !instance?.id) return;
+  if (!instance?.id) return;
   const ok = await showConfirm("این نمونه داخلی از طرح حذف شود؟", {
     title: "حذف نمونه داخلی",
     confirmText: "حذف",
     cancelText: "انصراف",
   });
   if (!ok) return;
+  if (subCategoryDesignEditorOpen.value) {
+    const draft = subCategoryDesignEditorDraft.value;
+    if (!draft?.id) return;
+    try {
+      const res = await fetch(
+        `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه داخلی انجام نشد."));
+      draft.interior_instances = (draft.interior_instances || []).filter((row) => String(row.id) !== String(instance.id));
+      syncOpenSubCategoryDesignDraftToCollection();
+      if (String(interiorInstanceEditorDraft.value?.id || "") === String(instance.id)) {
+        closeInteriorInstanceEditor();
+      }
+      await refreshSubCategoryDesignPreview();
+    } catch (error) {
+      showAlert(error?.message || "حذف نمونه داخلی انجام نشد.", { title: "خطا" });
+    }
+    return;
+  }
+  const orderDesign = activeInteriorLibraryOrderDesign.value;
+  if (!orderDesign?.id) return;
   try {
     const res = await fetch(
-      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
+      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
       { method: "DELETE" }
     );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه داخلی انجام نشد."));
-    draft.interior_instances = (draft.interior_instances || []).filter((row) => String(row.id) !== String(instance.id));
-    syncOpenSubCategoryDesignDraftToCollection();
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه داخلی طرح ثبت‌شده انجام نشد."));
+    syncOrderDesignInCollection(await res.json());
     if (String(interiorInstanceEditorDraft.value?.id || "") === String(instance.id)) {
       closeInteriorInstanceEditor();
     }
-    await refreshSubCategoryDesignPreview();
   } catch (error) {
-    showAlert(error?.message || "حذف نمونه داخلی انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || "حذف نمونه داخلی طرح ثبت‌شده انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -8397,9 +8565,13 @@ function closeMenuPanel() {
   scheduleSubRailPosition();
 }
 
-function openInteriorLibrary() {
+async function openInteriorLibrary() {
   if (interiorLibraryOpen.value) {
     closeInteriorLibrary();
+    return;
+  }
+  if (!subCategoryDesignEditorOpen.value && !selectedOrderDesignSource.value?.id) {
+    showAlert("ابتدا یک طرح ثبت‌شده را انتخاب کنید.", { title: "قطعات داخلی" });
     return;
   }
   interiorLibraryOpen.value = true;
@@ -8407,10 +8579,17 @@ function openInteriorLibrary() {
   openMenuPanel.value = null;
   activeSubRail.value = null;
   openMode.value = "menu";
-  loadConstructionPartKinds();
-  loadConstructionPartFormulas();
+  await Promise.allSettled([
+    loadConstructionInternalPartGroups(),
+    loadConstructionSubCategoryDesigns(),
+    loadConstructionPartKinds(),
+    loadConstructionPartFormulas(),
+  ]);
+  if (!subCategoryDesignEditorOpen.value && activeOrder.value?.id) {
+    await loadOrderDesignCatalog(true);
+  }
   if (subCategoryDesignEditorOpen.value && !subCategoryDesignPreviewLoading.value) {
-    refreshSubCategoryDesignPreview();
+    await refreshSubCategoryDesignPreview();
   }
   scheduleSubRailPosition();
 }
@@ -11715,7 +11894,7 @@ onBeforeUnmount(() => {
 
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances">
           <div class="subCategoryDesignEditor__panelTitle">نمونه‌های داخلی این طرح</div>
-          <div v-if="!subCategoryDesignEditorDraft?.id" class="designMenu__cabinetState">برای افزودن نمونه داخلی، ابتدا خود طرح ساب‌کت را ذخیره کنید.</div>
+          <div v-if="!activeInteriorLibraryTargetId" class="designMenu__cabinetState">برای افزودن نمونه داخلی، ابتدا یک طرح معتبر را باز یا انتخاب کنید.</div>
           <div v-else-if="!interiorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز هیچ گروه داخلی به این طرح اضافه نشده است.</div>
           <div v-else class="subCategoryDesignEditor__partList">
             <div v-for="item in interiorLibraryInstanceCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
