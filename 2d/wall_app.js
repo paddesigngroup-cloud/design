@@ -9858,6 +9858,17 @@ async function onWindowKeyDown(e) {
     return;
   }
 
+  if (ctrl && !e.shiftKey && !e.altKey && (code === "KeyS" || key.toLowerCase() === "s")) {
+    if (isEditableTarget(e.target)) return;
+    e.preventDefault();
+    try {
+      window.dispatchEvent(new CustomEvent("designkp:save-project"));
+    } catch (_) {
+      // no-op
+    }
+    return;
+  }
+
   // Ctrl+Y redo (Windows) and Ctrl+Shift+Z redo
   if (ctrl && !e.shiftKey && (code === "KeyY" || key.toLowerCase() === "y")) {
     if (isEditableTarget(e.target)) return;

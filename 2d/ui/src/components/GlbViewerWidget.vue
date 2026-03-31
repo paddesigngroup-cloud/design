@@ -1058,6 +1058,74 @@ function buildPlaceholderPalette(outlineColor) {
   return { edge, fill };
 }
 
+function cloneColor(color, fallback = "#FFFFFF") {
+  if (color?.isColor) return color.clone();
+  return new THREE.Color(color || fallback);
+}
+
+function applyPlaceholderInstanceVisualState(instanceRoot, state = "default") {
+  if (!instanceRoot) return;
+  const DRAG_EDGE = "#4B5563";
+
+  const solidOpacityFactor =
+    state === "selected" ? 1
+      : state === "ready" ? 0.96
+      : state === "drag-preview" ? 0.94
+      : 0.72;
+  const edgeOpacity =
+    state === "selected" ? 1
+      : state === "ready" ? 1
+      : state === "drag-preview" ? 0.96
+      : 0.9;
+  const emissiveIntensity =
+    state === "selected" ? 0.62
+      : state === "ready" ? 0.18
+      : state === "drag-preview" ? 0.08
+      : 0;
+
+  instanceRoot.traverse((obj) => {
+    if (obj?.userData?.isPlaceholderSolid) {
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats) {
+        if (!mat) continue;
+        const baseColor = cloneColor(obj.userData?.basePlaceholderColor, mat.color);
+        mat.color.copy(baseColor);
+        if (mat.emissive?.isColor) {
+          mat.emissive.set(state === "selected" ? "#FFF6E6" : state === "ready" ? "#FFF3D6" : "#000000");
+          mat.emissiveIntensity = emissiveIntensity;
+        }
+        mat.roughness =
+          state === "selected" ? 0.48
+            : state === "ready" ? 0.68
+            : state === "drag-preview" ? 0.78
+            : 0.82;
+        mat.metalness = state === "selected" ? 0.1 : 0.04;
+        const baseOpacity = Number.isFinite(Number(obj.userData?.basePlaceholderOpacity))
+          ? Number(obj.userData.basePlaceholderOpacity)
+          : 1;
+        const nextOpacity = Math.max(0.08, Math.min(1, baseOpacity * solidOpacityFactor));
+        mat.transparent = nextOpacity < 0.999;
+        mat.opacity = nextOpacity;
+        mat.needsUpdate = true;
+      }
+      return;
+    }
+
+    if (obj?.userData?.isPlaceholderEdge) {
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats) {
+        if (!mat) continue;
+        const baseEdgeColor = cloneColor(obj.userData?.basePlaceholderEdgeColor, mat.color);
+        const nextEdgeColor = baseEdgeColor.clone();
+        if (state === "drag-preview") nextEdgeColor.copy(new THREE.Color(DRAG_EDGE));
+        mat.color.copy(nextEdgeColor);
+        mat.opacity = edgeOpacity;
+        mat.needsUpdate = true;
+      }
+    }
+  });
+}
+
 function rebuildPlaceholderBoxes() {
   if (!scene) return;
   clearPlaceholderBoxes();
@@ -1087,6 +1155,7 @@ function rebuildPlaceholderBoxes() {
     instanceRoot.name = `placeholder-instance-${String(instance?.orderDesignId || "item")}`;
     instanceRoot.userData.orderDesignId = String(instance?.orderDesignId || "item").trim() || "item";
     instanceRoot.userData.isActivePlaceholderInstance = !!instance?.active;
+    instanceRoot.userData.isDragPreviewInstance = !!instance?.dragPreview;
     instanceRoot.position.set(tx * 0.001, 0, -ty * 0.001);
     instanceRoot.rotation.y = rotRad;
 
@@ -1108,6 +1177,8 @@ function rebuildPlaceholderBoxes() {
       });
       const mesh = new THREE.Mesh(geometry, material);
       mesh.userData.isPlaceholderSolid = true;
+      mesh.userData.basePlaceholderColor = palette.fill.clone();
+      mesh.userData.basePlaceholderOpacity = 1;
       const edges = new THREE.EdgesGeometry(geometry);
       const edgeLines = new THREE.LineSegments(
         edges,
@@ -1120,6 +1191,7 @@ function rebuildPlaceholderBoxes() {
         })
       );
       edgeLines.userData.isPlaceholderEdge = true;
+      edgeLines.userData.basePlaceholderEdgeColor = palette.edge.clone();
 
       mesh.position.set(cxM, czM, -cyM);
       edgeLines.position.copy(mesh.position);
@@ -1148,6 +1220,7 @@ function rebuildPlaceholderBoxes() {
 
   syncPlaceholderEdgeVisibility();
   syncPlaceholderOpacity();
+  syncSelectionHighlight();
 }
 
 function syncPlaceholderEdgeVisibility() {
@@ -1170,11 +1243,39 @@ function syncPlaceholderOpacity() {
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
     for (const mat of mats) {
       if (!mat) continue;
+      obj.userData.basePlaceholderOpacity = nextOpacity;
       mat.transparent = nextOpacity < 1;
       mat.opacity = nextOpacity;
       mat.needsUpdate = true;
     }
   });
+  syncSelectionHighlight();
+}
+
+function syncSelectionHighlight() {
+  if (!placeholderBoxesRoot) return;
+  if (props.embedded) {
+    for (const child of placeholderBoxesRoot.children) {
+      applyPlaceholderInstanceVisualState(child, "default");
+    }
+    return;
+  }
+  const selection = props.walls2d?.selection || {};
+  const selectedIds = new Set(
+    (Array.isArray(props.selectedOrderDesignIds) ? props.selectedOrderDesignIds : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean)
+  );
+  const hasActiveModelSelection = !!selection.selectedModelOutline;
+
+  for (const child of placeholderBoxesRoot.children) {
+    const orderDesignId = String(child?.userData?.orderDesignId || "").trim();
+    const isActive = !!child?.userData?.isActivePlaceholderInstance;
+    const isDragPreview = !!child?.userData?.isDragPreviewInstance;
+    const isSelected = (!!orderDesignId && selectedIds.has(orderDesignId)) || (hasActiveModelSelection && isActive);
+    const state = isDragPreview ? "drag-preview" : (isSelected ? "selected" : (isActive ? "ready" : "default"));
+    applyPlaceholderInstanceVisualState(child, state);
+  }
 }
 
 function normalizeLinearMembers(snapshot) {
@@ -1569,6 +1670,20 @@ watch(
   () => props.model2dTransform,
   (t) => {
     applyModel2dTransformTo3d(t);
+  },
+  { immediate: true }
+);
+
+watch(
+  () => [
+    props.walls2d?.selection?.selectedModelOutline,
+    ...(Array.isArray(props.selectedOrderDesignIds) ? props.selectedOrderDesignIds : []),
+    ...(Array.isArray(props.placeholderInstances)
+      ? props.placeholderInstances.map((item) => `${String(item?.orderDesignId || "").trim()}:${item?.active ? 1 : 0}`)
+      : []),
+  ],
+  () => {
+    syncSelectionHighlight();
   },
   { immediate: true }
 );

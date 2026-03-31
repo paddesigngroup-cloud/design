@@ -7975,6 +7975,7 @@ const draggedCabinetPreviewInstance = computed(() => {
       rotRad: 0,
     },
     active: false,
+    dragPreview: true,
   };
 });
 const stageOrderDesignInstances = computed(() =>
@@ -9241,6 +9242,7 @@ let _raf = 0;
 let _shiftPx = 0;
 let _quickSyncTimer = 0;
 let _quickOutsidePointerDown = null;
+let _lastShortcutSaveAt = 0;
 function updateTopbarShift() {
   if (!topbarEl.value || !homeBtnEl.value) return;
   const stageHost = stageCardEl.value || stageEl.value;
@@ -9319,18 +9321,29 @@ onMounted(() => {
     _ro.observe(stageEl.value);
   }
 
+  const triggerShortcutSave = () => {
+    const now = Date.now();
+    if (now - _lastShortcutSaveAt < 700) return;
+    _lastShortcutSaveAt = now;
+    if (route.path === "/settings") {
+      window.dispatchEvent(new CustomEvent("designkp:save-settings"));
+      return;
+    }
+    doSaveProject();
+  };
   const onSaveShortcut = (e) => {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && String(e.key || "").toLowerCase() === "s") {
       e.preventDefault();
-      if (route.path === "/settings") {
-        window.dispatchEvent(new CustomEvent("designkp:save-settings"));
-        return;
-      }
-      doSaveProject();
+      triggerShortcutSave();
     }
   };
+  const onSaveShortcutEvent = () => {
+    triggerShortcutSave();
+  };
   window.addEventListener("keydown", onSaveShortcut, true);
+  window.addEventListener("designkp:save-project", onSaveShortcutEvent, true);
   window.__designkpOnSaveShortcut = onSaveShortcut;
+  window.__designkpOnSaveShortcutEvent = onSaveShortcutEvent;
 
   const onEsc = (e) => {
     if (String(e.key || "") !== "Escape") return;
@@ -9492,6 +9505,10 @@ onBeforeUnmount(() => {
   if (window.__designkpOnSaveShortcut) {
     window.removeEventListener("keydown", window.__designkpOnSaveShortcut, true);
     delete window.__designkpOnSaveShortcut;
+  }
+  if (window.__designkpOnSaveShortcutEvent) {
+    window.removeEventListener("designkp:save-project", window.__designkpOnSaveShortcutEvent, true);
+    delete window.__designkpOnSaveShortcutEvent;
   }
   if (window.__designkpOnFocus) {
     window.removeEventListener("focus", window.__designkpOnFocus, true);
