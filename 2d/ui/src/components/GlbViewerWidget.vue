@@ -68,7 +68,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords", "update:orderDesignAttr"]);
+const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords", "update:orderDesignAttr", "openInteriorLibraryForDesign"]);
 
 const widgetEl = ref(null);
 const hostEl = ref(null);
@@ -258,6 +258,46 @@ const activeOrderDesignIdentity = computed(() => {
   if (!title && !code && !name) return null;
   return { title, code, name };
 });
+const showOrderDesignTools = computed(() =>
+  showOrderDesignAttrPanel.value
+  && selectedOrderDesignCount.value <= 1
+  && !!activeOrderDesign.value
+);
+
+function normalizeGroupSearchText(group) {
+  return `${String(group?.title || "")} ${String(group?.key || "")}`.trim().toLowerCase();
+}
+
+function findOrderDesignGroupKey(tokens = []) {
+  const normalizedTokens = (Array.isArray(tokens) ? tokens : [])
+    .map((token) => String(token || "").trim().toLowerCase())
+    .filter(Boolean);
+  if (!normalizedTokens.length) return "";
+  const match = orderDesignAttrGroups.value.find((group) => {
+    const haystack = normalizeGroupSearchText(group);
+    return normalizedTokens.some((token) => haystack.includes(token));
+  });
+  return String(match?.key || "");
+}
+
+function openDoorAttrsForActiveDesign() {
+  const doorKey = findOrderDesignGroupKey(["door", "درب"]);
+  if (doorKey) {
+    openOrderDesignGroupKey.value = doorKey;
+    return;
+  }
+  openOrderDesignGroupKey.value = String(orderDesignAttrGroups.value?.[0]?.key || "");
+}
+
+function focusActiveDesign3d() {
+  fitCameraToSelectionOrAll();
+}
+
+function openInteriorLibraryForActiveDesign() {
+  const designId = String(activeOrderDesign.value?.id || "").trim();
+  if (!designId) return;
+  emit("openInteriorLibraryForDesign", designId);
+}
 const mmToCm = (v) => Math.round((Number(v || 0) * 0.1) * 10) / 10;
 const cmToMm = (v) => Number(v) * 10;
 function cmToDisplay(v) {
@@ -1789,19 +1829,38 @@ defineExpose({
         <div class="glbWallAttrs__titleUnit">({{ displayUnitLabel }})</div>
         <div v-if="isGroupEditMode || selectedOrderDesignCount > 1" class="glbWallAttrs__groupLabel">ویرایش گروهی</div>
       </div>
+      <div v-if="showOrderDesignTools" class="glbWallAttrs__tools">
+        <button type="button" class="glbWallAttrs__toolBtn" title="درب" @click="openDoorAttrsForActiveDesign">
+          <img src="/icons/door_styles.png" alt="" class="glbWallAttrs__toolIcon" />
+        </button>
+        <button type="button" class="glbWallAttrs__toolBtn" title="سه بعدی" @click="focusActiveDesign3d">
+          <img src="/icons/3d_viewer.png" alt="" class="glbWallAttrs__toolIcon" />
+        </button>
+        <button type="button" class="glbWallAttrs__toolBtn" title="داخلی" @click="openInteriorLibraryForActiveDesign">
+          <img src="/icons/enternal.png" alt="" class="glbWallAttrs__toolIcon" />
+        </button>
+      </div>
       <div class="glbWallAttrs__sep"></div>
     </div>
 
     <template v-if="showOrderDesignAttrPanel">
       <div class="glbWallAttrs__objectTitle glbWallAttrs__objectTitle--design">
-        <div class="glbWallAttrs__objectTitleTop">
-          <div class="glbWallAttrs__objectTitleMain">
-            {{ selectedOrderDesignCount > 1 ? `${selectedOrderDesignCount} طرح سفارش` : (activeOrderDesignIdentity.title || "طرح سفارش") }}
-          </div>
-          <div v-if="activeOrderDesignIdentity.code" class="glbWallAttrs__objectTitleMeta">کد طرح: {{ activeOrderDesignIdentity.code }}</div>
+        <div v-if="selectedOrderDesignCount > 1" class="glbWallAttrs__objectTitleMain">
+          {{ `${selectedOrderDesignCount} طرح سفارش` }}
         </div>
-        <div v-if="activeOrderDesignIdentity.name && selectedOrderDesignCount <= 1" class="glbWallAttrs__objectTitleName">
-          نام طرح: {{ activeOrderDesignIdentity.name }}
+        <div v-else class="glbWallAttrs__designIdentity">
+          <div v-if="activeOrderDesignIdentity?.title" class="glbWallAttrs__identityRow">
+            <span class="glbWallAttrs__identityLabel">عنوان طرح</span>
+            <span class="glbWallAttrs__identityValue">{{ activeOrderDesignIdentity.title }}</span>
+          </div>
+          <div v-if="activeOrderDesignIdentity?.name" class="glbWallAttrs__identityRow">
+            <span class="glbWallAttrs__identityLabel">نام طرح</span>
+            <span class="glbWallAttrs__identityValue glbWallAttrs__identityValue--mono">{{ activeOrderDesignIdentity.name }}</span>
+          </div>
+          <div v-if="activeOrderDesignIdentity?.code" class="glbWallAttrs__identityRow">
+            <span class="glbWallAttrs__identityLabel">کد طرح</span>
+            <span class="glbWallAttrs__identityValue glbWallAttrs__identityValue--mono">{{ activeOrderDesignIdentity.code }}</span>
+          </div>
         </div>
       </div>
       <div v-for="group in orderDesignAttrGroups" :key="group.key" class="glbWallAttrs__attrGroup">

@@ -232,6 +232,7 @@ const orderDesignCatalog = ref([]);
 const orderDesignCatalogLoading = ref(false);
 const orderDesignCatalogLoadedForOrderId = ref("");
 const interiorLibraryOpen = ref(false);
+const interiorLibraryForcedOrderDesignId = ref("");
 const interiorInstanceEditorOpen = ref(false);
 const interiorInstanceEditorDraft = ref(null);
 const interiorInstanceEditorActiveGroupId = ref("");
@@ -695,6 +696,8 @@ const activeInteriorLibrarySubCategory = computed(() => {
 });
 const activeInteriorLibraryOrderDesignId = computed(() => {
   if (subCategoryDesignEditorOpen.value) return "";
+  const forcedId = String(interiorLibraryForcedOrderDesignId.value || "").trim();
+  if (forcedId) return forcedId;
   return String(selectedOrderDesignSource.value?.id || activeCabinetDesignId.value || "").trim();
 });
 const activeInteriorLibraryOrderDesign = computed(() => {
@@ -8640,7 +8643,7 @@ watch(
 function setMenu(menuId) {
   activeMenu.value = menuId;
   openMenuPanel.value = menuId;
-  interiorLibraryOpen.value = false;
+  closeInteriorLibrary();
 }
 
 function closeMenuPanel() {
@@ -8652,18 +8655,31 @@ function closeMenuPanel() {
   openMenuPanel.value = null;
   activeMenu.value = null;
   activeSubRail.value = null;
-  interiorLibraryOpen.value = false;
+  closeInteriorLibrary();
   openMode.value = "menu";
   editorRef.value?.setInputEnabled?.(true);
   scheduleSubRailPosition();
 }
 
-async function openInteriorLibrary() {
-  if (interiorLibraryOpen.value) {
+async function openInteriorLibrary(targetOrderDesignId = "") {
+  const nextTargetOrderDesignId = String(targetOrderDesignId || "").trim();
+  const currentTargetOrderDesignId = String(activeInteriorLibraryOrderDesignId.value || "").trim();
+  if (interiorLibraryOpen.value && (!nextTargetOrderDesignId || nextTargetOrderDesignId === currentTargetOrderDesignId)) {
     closeInteriorLibrary();
     return;
   }
-  if (!subCategoryDesignEditorOpen.value && !selectedOrderDesignSource.value?.id) {
+  if (!subCategoryDesignEditorOpen.value) {
+    const fallbackTargetId = String(selectedOrderDesignSource.value?.id || "").trim();
+    const resolvedTargetId = nextTargetOrderDesignId || fallbackTargetId;
+    if (!resolvedTargetId) {
+      showAlert("ابتدا یک طرح ثبت‌شده را انتخاب کنید.", { title: "قطعات داخلی" });
+      return;
+    }
+    interiorLibraryForcedOrderDesignId.value = resolvedTargetId;
+  } else {
+    interiorLibraryForcedOrderDesignId.value = "";
+  }
+  if (!subCategoryDesignEditorOpen.value && !activeInteriorLibraryOrderDesign.value?.id) {
     showAlert("ابتدا یک طرح ثبت‌شده را انتخاب کنید.", { title: "قطعات داخلی" });
     return;
   }
@@ -8687,8 +8703,13 @@ async function openInteriorLibrary() {
   scheduleSubRailPosition();
 }
 
+function openInteriorLibraryForDesign(orderDesignId) {
+  return openInteriorLibrary(orderDesignId);
+}
+
 function closeInteriorLibrary() {
   interiorLibraryOpen.value = false;
+  interiorLibraryForcedOrderDesignId.value = "";
   closeInteriorInstanceEditor();
 }
 
@@ -9065,7 +9086,7 @@ function positionSubRail() {
 
 function setSubRail(id) {
   activeSubRail.value = id;
-  interiorLibraryOpen.value = false;
+  closeInteriorLibrary();
   // Selecting a design toolbar item behaves like opening the Design menu.
   activeMenu.value = "design";
   openMenuPanel.value = "design";
@@ -9394,17 +9415,6 @@ onBeforeUnmount(() => {
         <button class="iconbtn" :class="{ 'is-active': isSettings }" title="تنظیمات" @click="goSettings">
           <img src="/icons/setting.png" alt="" />
         </button>
-        <button class="iconbtn" title="چسباندن">
-          <img src="/icons/paste.png" alt="" />
-        </button>
-        <!--
-        <button class="iconbtn" title="کپی JSON دیباگ" @click="doCopyWallsJson">
-          <img src="/icons/copy.png" alt="" />
-        </button>
-        -->
-        <button class="iconbtn" title="لایه ها">
-          <img src="/icons/layers.png" alt="" />
-        </button>
         <button class="iconbtn" title="بازگردانی" @click="doUndo">
           <img src="/icons/undo.png" alt="" />
         </button>
@@ -9413,15 +9423,6 @@ onBeforeUnmount(() => {
         </button>
         <button class="iconbtn" title="باز انجام" @click="doRedo">
           <img src="/icons/redo.png" alt="" />
-        </button>
-        <button class="iconbtn" title="درب">
-          <img src="/icons/door_styles.png" alt="" />
-        </button>
-        <button class="iconbtn" :class="{ 'is-active': interiorLibraryOpen }" title="داخلی" @click="openInteriorLibrary">
-          <img src="/icons/enternal.png" alt="" />
-        </button>
-        <button class="iconbtn" title="سه بعدی">
-          <img src="/icons/3d_viewer.png" alt="" />
         </button>
         <button class="iconbtn" title="شیت بندی">
           <img src="/icons/sheet.png" alt="" />
@@ -9912,6 +9913,7 @@ onBeforeUnmount(() => {
             @update:wallStyleDraft="updateWallStyleDraft"
             @update:selectedWallCoords="updateSelectedWallCoords"
             @update:orderDesignAttr="updateActiveOrderDesignAttr"
+            @openInteriorLibraryForDesign="openInteriorLibraryForDesign"
             @model2d="onGlbModel2d"
             @mouseenter="disable2dInput"
             @mouseleave="enable2dInput"
