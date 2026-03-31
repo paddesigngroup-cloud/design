@@ -782,8 +782,10 @@ const activeInteriorLibraryViewerBoxes = computed(() => {
   if (subCategoryDesignEditorOpen.value) {
     return subCategoryDesignEditorPreview.value?.viewer_boxes || [];
   }
-  return activeInteriorLibrarySourceDesign.value?.preview?.viewer_boxes
-    || getViewerBoxesFromPartSnapshots(activeInteriorLibraryOrderDesign.value?.part_snapshots || []);
+  return activeInteriorLibraryOrderDesign.value?.viewer_boxes
+    || getViewerBoxesFromPartSnapshots(activeInteriorLibraryOrderDesign.value?.part_snapshots || [])
+    || activeInteriorLibrarySourceDesign.value?.preview?.viewer_boxes
+    || [];
 });
 const interiorLibraryFrontView = computed(() =>
   buildFrontViewLinesFromBoxes(activeInteriorLibraryViewerBoxes.value || [])

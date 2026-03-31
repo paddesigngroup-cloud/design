@@ -598,7 +598,10 @@ async def require_accessible_internal_part_group(
 ) -> InternalPartGroup:
     stmt = (
         select(InternalPartGroup)
-        .options(selectinload(InternalPartGroup.parts))
+        .options(
+            selectinload(InternalPartGroup.parts),
+            selectinload(InternalPartGroup.param_groups),
+        )
         .where(InternalPartGroup.id == group_id)
     )
     if admin_id is not None:
@@ -607,6 +610,30 @@ async def require_accessible_internal_part_group(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Internal part group not found for this admin scope.")
     return item
+
+
+async def collect_internal_group_selected_param_codes(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    group: InternalPartGroup,
+) -> set[str]:
+    selected_param_group_ids = {
+        int(item.param_group_id)
+        for item in list(group.__dict__.get("param_groups") or [])
+        if bool(item.enabled) and int(item.param_group_id or 0) > 0
+    }
+    if not selected_param_group_ids:
+        return set()
+    stmt = select(Param).where(Param.param_group_id.in_(sorted(selected_param_group_ids)))
+    if admin_id is not None:
+        stmt = stmt.where(or_(Param.admin_id.is_(None), Param.admin_id == admin_id))
+    params = (await session.scalars(stmt.order_by(Param.ui_order.asc(), Param.param_id.asc()))).all()
+    return {
+        str(item.param_code).strip()
+        for item in params
+        if str(item.param_code or "").strip()
+    }
 
 
 async def collect_internal_group_param_codes(
@@ -618,38 +645,11 @@ async def collect_internal_group_param_codes(
 ) -> set[str]:
     if context is not None:
         return set(context.internal_group_param_codes.get(group.id, set()))
-    part_formula_ids = [
-        int(item.part_formula_id)
-        for item in list(group.__dict__.get("parts") or [])
-        if bool(item.enabled)
-    ]
-    formulas = await require_accessible_part_formulas(session, admin_id=admin_id, part_formula_ids=part_formula_ids)
-    params = await list_accessible_params(session, admin_id=admin_id)
-    param_codes = {str(item.param_code).strip() for item in params if str(item.param_code or "").strip()}
-    base_formulas = await list_accessible_base_formulas(session, admin_id=admin_id)
-    base_formula_map = {
-        str(item.param_formula).strip(): str(item.formula or "")
-        for item in base_formulas
-        if str(item.param_formula or "").strip()
-    }
-    pending: list[str] = []
-    for formula in formulas:
-        for field_name in PART_FORMULA_FIELDS:
-            pending.extend(extract_expression_names(str(getattr(formula, field_name) or "")))
-    resolved: set[str] = set()
-    seen: set[str] = set()
-    while pending:
-        name = str(pending.pop()).strip()
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        if name in param_codes:
-            resolved.add(name)
-            continue
-        expression = base_formula_map.get(name)
-        if expression:
-            pending.extend(extract_expression_names(expression))
-    return resolved
+    return await collect_internal_group_selected_param_codes(
+        session,
+        admin_id=admin_id,
+        group=group,
+    )
 
 
 async def _load_internal_groups_for_context(
@@ -662,7 +662,10 @@ async def _load_internal_groups_for_context(
         return {}
     stmt = (
         select(InternalPartGroup)
-        .options(selectinload(InternalPartGroup.parts))
+        .options(
+            selectinload(InternalPartGroup.parts),
+            selectinload(InternalPartGroup.param_groups),
+        )
         .where(InternalPartGroup.id.in_(list(group_ids)))
     )
     if admin_id is not None:
@@ -733,47 +736,20 @@ async def _load_internal_group_display_snapshots(
 def _collect_internal_group_param_codes_from_context(
     *,
     group: InternalPartGroup,
-    param_codes: set[str],
-    base_formula_map: dict[str, str],
-    part_formulas_by_id: dict[int, PartFormula],
-    expression_name_cache: dict[str, set[str]],
-    parsed_expression_cache: dict[str, ast.Expression],
+    params: list[Param],
 ) -> set[str]:
-    pending: list[str] = []
-    for selection in list(group.__dict__.get("parts") or []):
-        if not bool(selection.enabled):
-            continue
-        formula = part_formulas_by_id.get(int(selection.part_formula_id or 0))
-        if not formula:
-            continue
-        for field_name in PART_FORMULA_FIELDS:
-            pending.extend(
-                extract_expression_names_cached(
-                    str(getattr(formula, field_name) or ""),
-                    cache=expression_name_cache,
-                    parsed_cache=parsed_expression_cache,
-                )
-            )
-    resolved: set[str] = set()
-    seen: set[str] = set()
-    while pending:
-        name = str(pending.pop()).strip()
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        if name in param_codes:
-            resolved.add(name)
-            continue
-        expression = base_formula_map.get(name)
-        if expression:
-            pending.extend(
-                extract_expression_names_cached(
-                    expression,
-                    cache=expression_name_cache,
-                    parsed_cache=parsed_expression_cache,
-                )
-            )
-    return resolved
+    selected_param_group_ids = {
+        int(item.param_group_id)
+        for item in list(group.__dict__.get("param_groups") or [])
+        if bool(item.enabled) and int(item.param_group_id or 0) > 0
+    }
+    if not selected_param_group_ids:
+        return set()
+    return {
+        str(item.param_code).strip()
+        for item in params
+        if int(item.param_group_id or 0) in selected_param_group_ids and str(item.param_code or "").strip()
+    }
 
 
 async def build_design_execution_context(
@@ -841,11 +817,7 @@ async def build_design_execution_context(
     group_param_codes = {
         group_id: _collect_internal_group_param_codes_from_context(
             group=group,
-            param_codes=param_codes,
-            base_formula_map=base_formula_map,
-            part_formulas_by_id=part_formulas_by_id,
-            expression_name_cache=expression_name_cache,
-            parsed_expression_cache=parsed_expression_cache,
+            params=params,
         )
         for group_id, group in groups_by_id.items()
     }
@@ -1042,6 +1014,7 @@ async def resolve_internal_instance_preview(
             admin_id=admin_id,
             sub_category=sub_category,
             internal_group_ids={internal_group.id},
+            include_sub_category_display=True,
         )
         if session is not None else
         await _build_legacy_execution_context(
