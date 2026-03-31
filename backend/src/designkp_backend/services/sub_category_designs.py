@@ -544,12 +544,7 @@ async def build_internal_group_param_display_snapshot(
             for code, value in context.internal_group_display_values.get(internal_group.id, {}).items()
             if filter_codes is None or code in filter_codes
         }
-        meta = {
-            code: dict(value or {})
-            for code, value in context.internal_group_display_meta.get(internal_group.id, {}).items()
-            if filter_codes is None or code in filter_codes
-        }
-        return values, meta
+        return values, {}
     rows = (
         await session.execute(
             select(
@@ -567,30 +562,32 @@ async def build_internal_group_param_display_snapshot(
         )
     ).all()
     values: dict[str, str | None] = {}
-    meta: dict[str, dict[str, object]] = {}
     filter_codes = {str(item).strip() for item in (codes or set()) if str(item).strip()} if codes else None
     for default_row, param_code, param_title_fa, param_id, param_ui_order, group in rows:
         code = str(param_code or "").strip()
         if not code or (filter_codes is not None and code not in filter_codes):
             continue
         values[code] = default_row.default_value
-        meta[code] = {
-            "label": str(default_row.display_title or param_title_fa or code).strip() or code,
-            "description_text": str(default_row.description_text or "").strip() or None,
-            "icon_path": str(default_row.icon_path or "").strip() or None,
-            "input_mode": default_row.input_mode if str(default_row.input_mode or "") == "binary" else "value",
-            "binary_off_label": str(default_row.binary_off_label or "0").strip() or "0",
-            "binary_on_label": str(default_row.binary_on_label or "1").strip() or "1",
-            "binary_off_icon_path": str(default_row.binary_off_icon_path or "").strip() or None,
-            "binary_on_icon_path": str(default_row.binary_on_icon_path or "").strip() or None,
-            "group_id": int(group.param_group_id or 0),
-            "group_title": str(group.org_param_group_title or group.title or group.param_group_code or "").strip() or None,
-            "group_ui_order": int(group.ui_order or 0),
-            "group_show_in_order_attrs": bool(group.show_in_order_attrs),
-            "param_id": int(param_id or 0),
-            "param_ui_order": int(param_ui_order or 0),
-        }
-    return values, meta
+    return values, {}
+
+
+def merge_subcategory_and_internal_group_defaults(
+    *,
+    base_values: dict[str, str | None],
+    group_param_codes: set[str],
+    group_default_values: dict[str, str | None],
+    instance_values: dict[str, str | None] | None = None,
+) -> tuple[dict[str, str | None], dict[str, str | None]]:
+    inherited_group_values = _merge_param_value_layers(
+        {code: base_values.get(code) for code in group_param_codes if code in base_values},
+        {code: value for code, value in group_default_values.items() if code in group_param_codes},
+    )
+    effective_values = _merge_param_value_layers(
+        base_values,
+        {code: value for code, value in group_default_values.items() if code in group_param_codes},
+        _normalize_raw_param_values(instance_values),
+    )
+    return inherited_group_values, effective_values
 
 
 async def require_accessible_internal_part_group(
@@ -1062,22 +1059,25 @@ async def resolve_internal_instance_preview(
         group=internal_group,
         context=resolved_context,
     )
-    copied_values, copied_meta = await build_internal_group_param_display_snapshot(
+    copied_values, _ = await build_internal_group_param_display_snapshot(
         session,
         internal_group=internal_group,
         codes=group_param_codes,
         context=resolved_context,
     )
+    copied_meta_values, copied_meta = await build_sub_category_param_display_snapshot(
+        session,
+        sub_category=sub_category,
+        codes=group_param_codes,
+        context=resolved_context,
+    )
     normalized_input_values = _normalize_raw_param_values(param_values)
     effective_base_raw_values = _normalize_raw_param_values(base_raw_values or sub_category_raw_params)
-    inherited_group_values = _merge_param_value_layers(
-        {code: effective_base_raw_values.get(code) for code in group_param_codes if code in effective_base_raw_values},
-        copied_values,
-    )
-    effective_formula_values = _merge_param_value_layers(
-        effective_base_raw_values,
-        copied_values,
-        normalized_input_values,
+    inherited_group_values, effective_formula_values = merge_subcategory_and_internal_group_defaults(
+        base_values=effective_base_raw_values,
+        group_param_codes=group_param_codes,
+        group_default_values=copied_values,
+        instance_values=normalized_input_values,
     )
     persisted_values = (
         strip_inherited_param_values(
@@ -1085,7 +1085,10 @@ async def resolve_internal_instance_preview(
             param_values=normalized_input_values,
         )
         if prefer_base_params else
-        _merge_param_value_layers(copied_values, normalized_input_values)
+        strip_inherited_param_values(
+            inherited_values=_merge_param_value_layers(copied_meta_values, copied_values),
+            param_values=normalized_input_values,
+        )
     )
     meta = {
         **copied_meta,

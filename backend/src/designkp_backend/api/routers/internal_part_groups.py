@@ -22,7 +22,7 @@ from designkp_backend.db.models.catalog import (
     SubCategoryParamDefault,
 )
 from designkp_backend.services.admin_access import require_admin_if_present
-from designkp_backend.services.admin_storage import admin_icon_exists, finalize_param_group_icon, normalize_icon_file_name
+from designkp_backend.services.admin_storage import normalize_icon_file_name
 from designkp_backend.services.sub_category_defaults import normalize_default_value
 
 router = APIRouter(prefix="/internal-part-groups", tags=["internal_part_groups"])
@@ -185,34 +185,14 @@ def _serialize_group(
     include_param_defaults: bool = True,
 ) -> InternalPartGroupItemResponse:
     defaults_map: dict[str, str | None] = {}
-    overrides_map: dict[str, InternalPartGroupParamOverrideItem] = {}
     for row in sorted(
         item.param_defaults if include_param_defaults else [],
-        key=lambda current: (int(current.param_id), str(current.display_title or "")),
+        key=lambda current: int(current.param_id),
     ):
         param_code = getattr(getattr(row, "param", None), "param_code", None)
         if not param_code:
             continue
-        icon_path = normalize_icon_file_name(row.icon_path)
-        binary_off_icon_path = normalize_icon_file_name(row.binary_off_icon_path)
-        binary_on_icon_path = normalize_icon_file_name(row.binary_on_icon_path)
-        if item.admin_id and icon_path and not admin_icon_exists(item.admin_id, icon_path):
-            icon_path = None
-        if item.admin_id and binary_off_icon_path and not admin_icon_exists(item.admin_id, binary_off_icon_path):
-            binary_off_icon_path = None
-        if item.admin_id and binary_on_icon_path and not admin_icon_exists(item.admin_id, binary_on_icon_path):
-            binary_on_icon_path = None
         defaults_map[str(param_code)] = row.default_value
-        overrides_map[str(param_code)] = InternalPartGroupParamOverrideItem(
-            display_title=row.display_title,
-            description_text=row.description_text,
-            icon_path=icon_path,
-            input_mode=row.input_mode if row.input_mode in {"value", "binary"} else "value",
-            binary_off_label=(row.binary_off_label or "0").strip() or "0",
-            binary_on_label=(row.binary_on_label or "1").strip() or "1",
-            binary_off_icon_path=binary_off_icon_path,
-            binary_on_icon_path=binary_on_icon_path,
-        )
     return InternalPartGroupItemResponse(
         id=item.id,
         admin_id=item.admin_id,
@@ -231,7 +211,7 @@ def _serialize_group(
             for param_group in sorted(item.param_groups, key=lambda row: (int(row.ui_order), int(row.param_group_id)))
         ] if include_param_groups else [],
         param_defaults=defaults_map,
-        param_overrides=overrides_map,
+        param_overrides={},
     )
 
 
@@ -467,45 +447,11 @@ async def _sync_group_param_defaults(session: AsyncSession, group: InternalPartG
             changed = True
     for param in params:
         param_id = int(param.param_id)
-        fallback_display_title = str(param.param_title_fa or param.title or param.param_code).strip() or param.param_code
         if param_id in defaults_by_param_id:
             row = defaults_by_param_id[param_id]
             seed_row = seed_rows_by_param_id.get(param_id)
-            current_display_title = str(row.display_title or "").strip()
-            if not current_display_title or current_display_title == fallback_display_title:
-                row.display_title = str(
-                    (seed_row.display_title if seed_row else None) or fallback_display_title
-                ).strip() or fallback_display_title
-                changed = True
             if (row.default_value is None or str(row.default_value).strip() == "") and seed_row and seed_row.default_value is not None:
                 row.default_value = seed_row.default_value
-                changed = True
-            if not normalize_icon_file_name(row.icon_path) and seed_row and normalize_icon_file_name(seed_row.icon_path):
-                row.icon_path = normalize_icon_file_name(seed_row.icon_path)
-                changed = True
-            row.icon_path = normalize_icon_file_name(row.icon_path)
-            row.input_mode = row.input_mode if row.input_mode in {"value", "binary"} else "value"
-            if row.input_mode == "value" and seed_row and seed_row.input_mode in {"value", "binary"}:
-                row.input_mode = seed_row.input_mode
-                changed = True
-            row.binary_off_label = str(row.binary_off_label or "0").strip() or "0"
-            row.binary_on_label = str(row.binary_on_label or "1").strip() or "1"
-            if row.binary_off_label == "0" and seed_row and str(seed_row.binary_off_label or "").strip():
-                row.binary_off_label = str(seed_row.binary_off_label or "").strip() or "0"
-                changed = True
-            if row.binary_on_label == "1" and seed_row and str(seed_row.binary_on_label or "").strip():
-                row.binary_on_label = str(seed_row.binary_on_label or "").strip() or "1"
-                changed = True
-            row.binary_off_icon_path = normalize_icon_file_name(row.binary_off_icon_path)
-            row.binary_on_icon_path = normalize_icon_file_name(row.binary_on_icon_path)
-            if not row.binary_off_icon_path and seed_row and normalize_icon_file_name(seed_row.binary_off_icon_path):
-                row.binary_off_icon_path = normalize_icon_file_name(seed_row.binary_off_icon_path)
-                changed = True
-            if not row.binary_on_icon_path and seed_row and normalize_icon_file_name(seed_row.binary_on_icon_path):
-                row.binary_on_icon_path = normalize_icon_file_name(seed_row.binary_on_icon_path)
-                changed = True
-            if not row.description_text and seed_row and str(seed_row.description_text or "").strip():
-                row.description_text = str(seed_row.description_text or "").strip() or None
                 changed = True
             continue
         seed_row = seed_rows_by_param_id.get(param_id)
@@ -514,16 +460,6 @@ async def _sync_group_param_defaults(session: AsyncSession, group: InternalPartG
                 internal_part_group_id=group.id,
                 param_id=param_id,
                 default_value=seed_row.default_value if seed_row else None,
-                display_title=str(
-                    (seed_row.display_title if seed_row else None) or fallback_display_title
-                ).strip() or fallback_display_title,
-                description_text=(seed_row.description_text if seed_row else None) or None,
-                icon_path=normalize_icon_file_name(seed_row.icon_path) if seed_row else None,
-                input_mode=seed_row.input_mode if seed_row and seed_row.input_mode in {"value", "binary"} else "value",
-                binary_off_label=(seed_row.binary_off_label if seed_row else "0") or "0",
-                binary_on_label=(seed_row.binary_on_label if seed_row else "1") or "1",
-                binary_off_icon_path=normalize_icon_file_name(seed_row.binary_off_icon_path) if seed_row else None,
-                binary_on_icon_path=normalize_icon_file_name(seed_row.binary_on_icon_path) if seed_row else None,
             )
         )
         changed = True
@@ -556,29 +492,6 @@ async def _apply_group_param_defaults(
         if not param:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown param code for this internal group scope: {param_code}")
         defaults_by_param_id[int(param.param_id)].default_value = normalize_default_value(raw_value)
-    for param_code, override in param_overrides.items():
-        param = params_by_code.get(str(param_code or "").strip())
-        if not param:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown param code for this internal group scope: {param_code}")
-        row = defaults_by_param_id[int(param.param_id)]
-        next_icon = normalize_icon_file_name(override.icon_path)
-        next_binary_off_icon = normalize_icon_file_name(override.binary_off_icon_path)
-        next_binary_on_icon = normalize_icon_file_name(override.binary_on_icon_path)
-        if group.admin_id:
-            next_icon = finalize_param_group_icon(group.admin_id, next_icon, previous_file_name=row.icon_path)
-            next_binary_off_icon = finalize_param_group_icon(group.admin_id, next_binary_off_icon, previous_file_name=row.binary_off_icon_path)
-            next_binary_on_icon = finalize_param_group_icon(group.admin_id, next_binary_on_icon, previous_file_name=row.binary_on_icon_path)
-        row.display_title = (override.display_title or "").strip() or str(param.param_title_fa or param.title or param.param_code).strip() or param.param_code
-        row.description_text = (override.description_text or "").strip() or None
-        row.icon_path = next_icon
-        row.input_mode = override.input_mode if override.input_mode in {"value", "binary"} else "value"
-        row.binary_off_label = (override.binary_off_label or "").strip() or "0"
-        row.binary_on_label = (override.binary_on_label or "").strip() or "1"
-        row.binary_off_icon_path = next_binary_off_icon
-        row.binary_on_icon_path = next_binary_on_icon
-        if row.input_mode == "binary":
-            normalized_value = normalize_default_value(param_defaults.get(param_code))
-            row.default_value = normalized_value if normalized_value in {"0", "1"} else "0"
 
 
 @router.get("", response_model=list[InternalPartGroupItemResponse])

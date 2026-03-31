@@ -30,6 +30,12 @@ def test_resolve_internal_instance_preview_falls_back_to_sub_category_defaults(m
     async def fake_build_internal_group_param_display_snapshot(_session, **_kwargs):
         return (
             {"u_th": "18"},
+            {},
+        )
+
+    async def fake_build_sub_category_param_display_snapshot(_session, **_kwargs):
+        return (
+            {"u_th": "16"},
             {
                 "u_th": {
                     "label": "ضخامت یونیت",
@@ -75,6 +81,7 @@ def test_resolve_internal_instance_preview_falls_back_to_sub_category_defaults(m
     monkeypatch.setattr(service, "get_sub_category_resolved_params", fake_get_sub_category_resolved_params)
     monkeypatch.setattr(service, "collect_internal_group_param_codes", fake_collect_internal_group_param_codes)
     monkeypatch.setattr(service, "build_internal_group_param_display_snapshot", fake_build_internal_group_param_display_snapshot)
+    monkeypatch.setattr(service, "build_sub_category_param_display_snapshot", fake_build_sub_category_param_display_snapshot)
     monkeypatch.setattr(service, "get_auto_param_codes", fake_get_auto_param_codes)
     monkeypatch.setattr(service, "list_accessible_base_formulas", fake_list_accessible_base_formulas)
     monkeypatch.setattr(service, "require_accessible_part_formulas", fake_require_accessible_part_formulas)
@@ -118,6 +125,12 @@ def test_resolve_internal_instance_preview_strips_inherited_group_defaults_for_o
     async def fake_build_internal_group_param_display_snapshot(_session, **_kwargs):
         return (
             {"u_th": "18"},
+            {},
+        )
+
+    async def fake_build_sub_category_param_display_snapshot(_session, **_kwargs):
+        return (
+            {"u_th": "16"},
             {"u_th": {"label": "ضخامت یونیت"}},
         )
 
@@ -133,6 +146,7 @@ def test_resolve_internal_instance_preview_strips_inherited_group_defaults_for_o
     monkeypatch.setattr(service, "get_sub_category_resolved_params", fake_get_sub_category_resolved_params)
     monkeypatch.setattr(service, "collect_internal_group_param_codes", fake_collect_internal_group_param_codes)
     monkeypatch.setattr(service, "build_internal_group_param_display_snapshot", fake_build_internal_group_param_display_snapshot)
+    monkeypatch.setattr(service, "build_sub_category_param_display_snapshot", fake_build_sub_category_param_display_snapshot)
     monkeypatch.setattr(service, "get_auto_param_codes", fake_get_auto_param_codes)
     monkeypatch.setattr(service, "list_accessible_base_formulas", fake_list_accessible_base_formulas)
     monkeypatch.setattr(service, "require_accessible_part_formulas", fake_require_accessible_part_formulas)

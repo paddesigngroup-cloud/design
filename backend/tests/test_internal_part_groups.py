@@ -37,7 +37,7 @@ class _FakeSession:
         raise AssertionError("No new rows should be added in this test")
 
 
-def test_sync_group_param_defaults_replaces_generic_titles_with_seeded_sub_category_values(monkeypatch) -> None:
+def test_sync_group_param_defaults_only_seeds_default_values(monkeypatch) -> None:
     param = SimpleNamespace(param_id=10, param_code="u_th", param_title_fa="ضخامت یونیت", title="Unit Thickness")
     seed_row = SimpleNamespace(
         param_id=10,
@@ -80,12 +80,7 @@ def test_sync_group_param_defaults_replaces_generic_titles_with_seeded_sub_categ
     changed = asyncio.run(router._sync_group_param_defaults(_FakeSession([existing_row]), group))
 
     assert changed is True
-    assert existing_row.display_title == "ضخامت بدنه"
     assert existing_row.default_value == "18"
-    assert existing_row.icon_path == "seed-icon.webp"
-    assert existing_row.input_mode == "binary"
-    assert existing_row.binary_off_label == "خاموش"
-    assert existing_row.binary_on_label == "روشن"
-    assert existing_row.binary_off_icon_path == "off.webp"
-    assert existing_row.binary_on_icon_path == "on.webp"
-    assert existing_row.description_text == "توضیح نمونه"
+    assert existing_row.display_title == "ضخامت یونیت"
+    assert existing_row.icon_path is None
+    assert existing_row.input_mode == "value"

@@ -11151,9 +11151,7 @@ onBeforeUnmount(() => {
                       <div class="constructionDialog__defaultsActions">
                         <button type="button" class="constructionDialog__defaultsBtn" :title="'پیش‌فرض پارامترهای گروه داخلی'" @click="openInternalPartGroupDefaultsEditor(item)">
                           <span class="constructionDialog__defaultsBtnValue">{{ getInternalPartGroupDefaultsSummary(item).text }}</span>
-                          <span class="constructionDialog__defaultsBtnLabel">
-                            <span class="constructionDialog__defaultsBtnIcon" aria-hidden="true">💡</span>
-                          </span>
+                          <span class="constructionDialog__defaultsBtnLabel">مقادیر</span>
                         </button>
                       </div>
                     </td>
@@ -11735,7 +11733,7 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__textBtn" @click="closeInternalPartGroupDefaultsEditor">بستن</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        در این بخش پیش‌فرض پارامترهای مرتبط با گروه‌های پارامتری همین گروه قطعات داخلی را به‌صورت مستقل مقداردهی می‌کنید.
+        در این بخش فقط مقدار پیش‌فرض پارامترهای همان گروه قطعات داخلی ثبت می‌شود. عنوان، آیکون و نوع نمایش از پیش‌فرض‌های ساب‌کت/طرح خوانده می‌شود.
       </div>
       <div class="subCategoryPreview__body">
         <div class="subCategoryPreview__tree">
@@ -11778,7 +11776,6 @@ onBeforeUnmount(() => {
                 <template v-if="column.inputMode === 'binary'">
                   <div class="subCategoryPreview__paramMeta">
                     <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
-                    <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
                   </div>
                   <div class="subCategoryPreview__binaryChoices">
                     <button
@@ -11787,7 +11784,6 @@ onBeforeUnmount(() => {
                       :class="{ 'is-active': String(internalPartGroupDefaultsValues[column.key] ?? '0') !== '1' }"
                       @click="setInternalPartGroupBinaryDefault(column.key, '0')"
                     >
-                      <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
                       <span class="subCategoryPreview__binaryLabel">{{ column.binaryOffLabel }}</span>
                     </button>
                     <button
@@ -11796,20 +11792,13 @@ onBeforeUnmount(() => {
                       :class="{ 'is-active': String(internalPartGroupDefaultsValues[column.key] ?? '0') === '1' }"
                       @click="setInternalPartGroupBinaryDefault(column.key, '1')"
                     >
-                      <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
                       <span class="subCategoryPreview__binaryLabel">{{ column.binaryOnLabel }}</span>
                     </button>
                   </div>
                 </template>
                 <template v-else>
-                  <div class="subCategoryPreview__valueHead">
-                    <div class="subCategoryPreview__valueIconBox">
-                      <img :src="column.iconUrl" :alt="column.displayTitle" class="subCategoryPreview__valueIcon" @error="handleSubCategoryDefaultIconError" />
-                    </div>
-                    <div class="subCategoryPreview__paramMeta">
-                      <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
-                      <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
-                    </div>
+                  <div class="subCategoryPreview__paramMeta">
+                    <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
                   </div>
                   <input
                     v-model="internalPartGroupDefaultsValues[column.key]"
@@ -11951,14 +11940,6 @@ onBeforeUnmount(() => {
                   >
                     افزودن
                   </button>
-                  <button
-                    type="button"
-                    class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
-                    title="تنظیمات پیش‌فرض‌های این گروه"
-                    @click="openInternalPartGroupDefaultsEditor(item)"
-                  >
-                    <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-                  </button>
                 </div>
               </div>
               <div v-if="item.relatedGroups.length" class="subCategoryDesignEditor__chipRow">
@@ -11972,7 +11953,7 @@ onBeforeUnmount(() => {
                 </span>
               </div>
               <div class="subCategoryDesignEditor__interiorParamsHead">
-                <span>پیش‌فرض‌های منبع این گروه</span>
+                <span>گروه‌های پارامتری این مجموعه</span>
                 <span>{{ toPersianDigits(item.paramCount) }} پارامتر</span>
               </div>
             </div>

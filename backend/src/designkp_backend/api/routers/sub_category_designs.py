@@ -653,6 +653,48 @@ def _normalize_interior_param_values(payload: dict[str, str | int | float | bool
     }
 
 
+def _design_base_boxes(design: SubCategoryDesign) -> list[dict[str, object]]:
+    boxes: list[dict[str, object]] = []
+    for part in sorted(list(design.parts or []), key=lambda row: (int(row.ui_order or 0), int(row.part_formula_id or 0))):
+        snapshot = next((snap for snap in list(part.snapshots or []) if snap.viewer_payload), None)
+        viewer_payload = snapshot.viewer_payload if snapshot else {}
+        box = viewer_payload.get("box") if isinstance(viewer_payload, dict) else None
+        if isinstance(box, dict):
+            boxes.append(dict(box))
+    return boxes
+
+
+async def _refresh_design_interior_instance(
+    session: AsyncSession,
+    *,
+    design: SubCategoryDesign,
+    instance: SubCategoryDesignInteriorInstance,
+) -> None:
+    sub_category = await require_accessible_sub_category(session, admin_id=design.admin_id, sub_category_id=design.sub_category_id)
+    group = await require_accessible_internal_part_group(session, admin_id=design.admin_id, group_id=instance.internal_part_group_id)
+    interior_box_snapshot = dict(instance.interior_box_snapshot or {})
+    if not interior_box_snapshot:
+        interior_box_snapshot = derive_interior_box_snapshot(_design_base_boxes(design))
+    resolved = await resolve_internal_instance_preview(
+        session,
+        admin_id=design.admin_id,
+        sub_category=sub_category,
+        internal_group=group,
+        instance_id=instance.id,
+        instance_code=str(instance.instance_code or ""),
+        ui_order=int(instance.ui_order or 0),
+        placement_z=float(instance.placement_z or 0),
+        interior_box_snapshot=interior_box_snapshot,
+        param_values=dict(instance.param_values or {}),
+        param_meta=dict(instance.param_meta or {}),
+    )
+    instance.interior_box_snapshot = resolved.interior_box_snapshot
+    instance.param_values = resolved.param_values
+    instance.param_meta = resolved.param_meta
+    instance.part_snapshots = resolved.part_snapshots
+    instance.viewer_boxes = resolved.viewer_boxes
+
+
 async def _next_interior_instance_state(
     session: AsyncSession,
     *,
@@ -668,7 +710,7 @@ async def _next_interior_instance_state(
     existing = list(design.interior_instances or [])
     next_order = ui_order if ui_order is not None else (max([int(item.ui_order or 0) for item in existing], default=-1) + 1)
     next_code = str(instance_code or "").strip() or f"{str(group.code or 'interior').strip() or 'interior'}-{next_order + 1:02d}"
-    base_boxes = [item.viewer_payload["box"] for item in (await preview_sub_category_design(design.id, session)).parts if isinstance(item.viewer_payload.get("box"), dict)]
+    base_boxes = _design_base_boxes(design)
     interior_box_snapshot = derive_interior_box_snapshot(base_boxes)
     normalized_values = _normalize_interior_param_values(param_values)
     resolved = await resolve_internal_instance_preview(
@@ -719,7 +761,8 @@ async def create_sub_category_design_interior_instance(
     session.add(item)
     await session.flush()
     design = await _load_design(session, design.id)
-    await rebuild_design_snapshots(session, design)
+    target = next(instance for instance in design.interior_instances if instance.id == item.id)
+    await _refresh_design_interior_instance(session, design=design, instance=target)
     await session.commit()
     design = await _load_design(session, design.id)
     target = next(instance for instance in design.interior_instances if instance.id == item.id)
@@ -745,7 +788,8 @@ async def update_sub_category_design_interior_instance(
     item.param_values = _normalize_interior_param_values(payload.param_values)
     await session.flush()
     design = await _load_design(session, design.id)
-    await rebuild_design_snapshots(session, design)
+    target = next(instance for instance in design.interior_instances if instance.id == item.id)
+    await _refresh_design_interior_instance(session, design=design, instance=target)
     await session.commit()
     design = await _load_design(session, design.id)
     target = next(instance for instance in design.interior_instances if instance.id == item.id)
@@ -766,7 +810,5 @@ async def delete_sub_category_design_interior_instance(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design interior instance not found.")
     await session.delete(item)
     await session.flush()
-    design = await _load_design(session, design.id)
-    await rebuild_design_snapshots(session, design)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
