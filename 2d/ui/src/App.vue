@@ -231,6 +231,8 @@ const cabinetDesignCatalogLoadedForAdmin = ref("");
 const orderDesignCatalog = ref([]);
 const orderDesignCatalogLoading = ref(false);
 const orderDesignCatalogLoadedForOrderId = ref("");
+let orderDesignCatalogLoadRequestSeq = 0;
+let orderDesignCatalogReloadQueued = false;
 const interiorLibraryOpen = ref(false);
 const interiorLibraryForcedOrderDesignId = ref("");
 const interiorInstanceEditorOpen = ref(false);
@@ -2579,22 +2581,33 @@ async function loadOrderDesignCatalog(force = false) {
     selectedStageOrderDesignIds.value = [];
     return;
   }
-  if (orderDesignCatalogLoading.value) return;
+  if (orderDesignCatalogLoading.value) {
+    if (force) orderDesignCatalogReloadQueued = true;
+    return;
+  }
   if (!force && orderDesignCatalogLoadedForOrderId.value === orderId) return;
   orderDesignCatalogLoading.value = true;
+  const requestSeq = ++orderDesignCatalogLoadRequestSeq;
   try {
     const res = await fetch(`/api/order-designs?order_id=${encodeURIComponent(orderId)}`);
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "خواندن طرح‌های سفارش انجام نشد."));
-    orderDesignCatalog.value = sortOrderDesignCatalogRecords((await res.json()).map(normalizeOrderDesignRecord).filter(Boolean));
+    const nextItems = sortOrderDesignCatalogRecords((await res.json()).map(normalizeOrderDesignRecord).filter(Boolean));
+    if (requestSeq !== orderDesignCatalogLoadRequestSeq) return;
+    orderDesignCatalog.value = nextItems;
     const validIds = new Set(orderDesignCatalog.value.map((item) => String(item.id)));
     orderDesignPlacements.value = orderDesignPlacements.value.filter((placement) => validIds.has(String(placement.orderDesignId)));
     orderDesignCatalogLoadedForOrderId.value = orderId;
   } catch (error) {
+    if (requestSeq !== orderDesignCatalogLoadRequestSeq) return;
     orderDesignCatalog.value = [];
     orderDesignCatalogLoadedForOrderId.value = "";
     showAlert(error?.message || "خواندن طرح‌های سفارش انجام نشد.", { title: "خطا" });
   } finally {
     orderDesignCatalogLoading.value = false;
+    if (orderDesignCatalogReloadQueued) {
+      orderDesignCatalogReloadQueued = false;
+      await loadOrderDesignCatalog(true);
+    }
   }
 }
 
@@ -3186,11 +3199,58 @@ async function duplicateOrderDesignById(orderDesignId) {
   return normalizeOrderDesignRecord(await res.json());
 }
 
+function cloneOrderDesignHistoryRecord(item) {
+  return normalizeOrderDesignRecord(item);
+}
+
+function buildOrderDesignHistoryRestorePayload(item) {
+  const target = normalizeOrderDesignRecord(item);
+  if (!target?.id) return null;
+  return {
+    design_title: String(target.design_title || "").trim(),
+    instance_code: String(target.instance_code || "").trim(),
+    sort_order: Number(target.sort_order) || 0,
+    status: String(target.status || "draft").trim() || "draft",
+    order_attr_values: { ...(target.order_attr_values || {}) },
+    interior_instances: (Array.isArray(target.interior_instances) ? target.interior_instances : [])
+      .map((instance) => normalizeInteriorInstanceRecord(instance))
+      .filter(Boolean)
+      .map((instance) => ({
+        id: String(instance.id),
+        internal_part_group_id: String(instance.internal_part_group_id || ""),
+        instance_code: String(instance.instance_code || "").trim(),
+        ui_order: Number(instance.ui_order) || 0,
+        placement_z: Number(instance.placement_z) || 0,
+        param_values: { ...(instance.param_values || {}) },
+        status: String(instance.status || "draft").trim() || "draft",
+      })),
+  };
+}
+
+async function restoreOrderDesignSnapshotRecord(item) {
+  const target = normalizeOrderDesignRecord(item);
+  if (!target?.id) return null;
+  const payload = buildOrderDesignHistoryRestorePayload(target);
+  if (!payload) return null;
+  const res = await fetch(`/api/order-designs/${encodeURIComponent(String(target.id))}/history-restore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, "بازگردانی وضعیت طرح سفارش انجام نشد."));
+  return normalizeOrderDesignRecord(await res.json());
+}
+
 function captureOrderDesignHistoryState() {
   return {
     orderId: String(activeOrder.value?.id || "").trim() || null,
     orderDesignIds: orderDesignCatalog.value.map((item) => String(item.id || "").trim()).filter(Boolean),
+    orderDesigns: orderDesignCatalog.value.map((item) => cloneOrderDesignHistoryRecord(item)).filter(Boolean),
     orderDesignPlacements: orderDesignPlacements.value.map((item) => ({ ...(item || {}) })),
+    activeCabinetDesignId: String(activeCabinetDesignId.value || "").trim() || null,
+    selectedStageOrderDesignIds: selectedOrderDesignIds.value.map((id) => String(id || "").trim()).filter(Boolean),
+    activeStageOrderDesignSelected: !!activeStageOrderDesignSelected.value,
+    stageCabinetPlaceholderBoxes: (Array.isArray(stageCabinetPlaceholderBoxes.value) ? stageCabinetPlaceholderBoxes.value : []).map((box) => ({ ...(box || {}) })),
   };
 }
 
@@ -3208,30 +3268,58 @@ async function restoreOrderDesignHistoryState(snapshot = null) {
   const currentOrderId = String(activeOrder.value?.id || "").trim();
   if (!targetOrderId || !currentOrderId || targetOrderId !== currentOrderId) return;
 
-  const targetIds = [...new Set(normalizeSelectionIds(snapshot?.orderDesignIds))];
+  const targetDesigns = Array.isArray(snapshot?.orderDesigns)
+    ? snapshot.orderDesigns.map((item) => cloneOrderDesignHistoryRecord(item)).filter(Boolean)
+    : [];
+  await loadOrderDesignCatalog(true);
   const currentIds = orderDesignCatalog.value.map((item) => String(item.id || "").trim()).filter(Boolean);
   const currentIdSet = new Set(currentIds);
+  const targetIds = targetDesigns.length
+    ? targetDesigns.map((item) => String(item.id || "").trim()).filter((id) => currentIdSet.has(id))
+    : [...new Set(normalizeSelectionIds(snapshot?.orderDesignIds))].filter((id) => currentIdSet.has(id));
   const targetIdSet = new Set(targetIds);
 
-  for (const id of targetIds) {
-    if (currentIdSet.has(id)) continue;
-    await restoreOrderDesignById(id);
-  }
-  for (const id of currentIds) {
-    if (!targetIdSet.has(id)) {
-      const res = await fetch(`/api/order-designs/${encodeURIComponent(id)}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف طرح سفارش انجام نشد."));
+  if (targetDesigns.length) {
+    const restoredItems = [];
+    for (const design of sortOrderDesignCatalogRecords(targetDesigns.filter((item) => currentIdSet.has(String(item.id || "").trim())))) {
+      const restored = await restoreOrderDesignSnapshotRecord(design);
+      if (restored) restoredItems.push(restored);
+    }
+    if (restoredItems.length) {
+      const byId = new Map(orderDesignCatalog.value.map((item) => [String(item.id), item]));
+      for (const item of restoredItems) {
+        byId.set(String(item.id), item);
+      }
+      orderDesignCatalog.value = sortOrderDesignCatalogRecords([...byId.values()]);
     }
   }
-
-  await loadOrderDesignCatalog(true);
   const nextPlacements = Array.isArray(snapshot?.orderDesignPlacements)
     ? snapshot.orderDesignPlacements
         .map(normalizeOrderDesignPlacement)
         .filter((item) => item && targetIdSet.has(String(item.orderDesignId || "")))
     : [];
   orderDesignPlacements.value = nextPlacements;
-  syncQuickStateFromEditor();
+  const nextActiveDesignId = targetIdSet.has(String(snapshot?.activeCabinetDesignId || "").trim())
+    ? String(snapshot?.activeCabinetDesignId || "").trim()
+    : null;
+  activeCabinetDesignId.value = nextActiveDesignId;
+  activeStageOrderDesignSelected.value = !!snapshot?.activeStageOrderDesignSelected && !!nextActiveDesignId;
+  selectedStageOrderDesignIds.value = Array.isArray(snapshot?.selectedStageOrderDesignIds)
+    ? snapshot.selectedStageOrderDesignIds
+        .map((id) => String(id || "").trim())
+        .filter((id) => targetIdSet.has(id))
+    : [];
+  stageCabinetPlaceholderBoxes.value = Array.isArray(snapshot?.stageCabinetPlaceholderBoxes)
+    ? snapshot.stageCabinetPlaceholderBoxes.map((box) => normalizeCabinetBox(box)).filter(Boolean)
+    : [];
+  await nextTick();
+  if (!reconcileActiveOrderDesignSelection()) {
+    stageCabinetPlaceholderBoxes.value = [];
+    activeCabinetDesignId.value = null;
+    activeStageOrderDesignSelected.value = false;
+    selectedStageOrderDesignIds.value = [];
+    editorRef.value?.clearModel2dLines?.(false);
+  }
 }
 
 async function handleStageOrderDesignDuplicateRequest(payload = null) {

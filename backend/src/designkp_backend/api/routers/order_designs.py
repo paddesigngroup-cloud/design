@@ -109,6 +109,25 @@ class OrderDesignInteriorInstanceItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class OrderDesignHistoryRestoreInteriorInstance(BaseModel):
+    id: uuid.UUID
+    internal_part_group_id: uuid.UUID
+    instance_code: str = Field(min_length=1, max_length=64)
+    ui_order: int = Field(ge=0)
+    placement_z: float = 0
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    status: str = Field(default="draft", max_length=32)
+
+
+class OrderDesignHistoryRestorePayload(BaseModel):
+    design_title: str = Field(min_length=1, max_length=255)
+    instance_code: str = Field(min_length=1, max_length=64)
+    sort_order: int = Field(ge=0)
+    status: str = Field(default="draft", max_length=32)
+    order_attr_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    interior_instances: list[OrderDesignHistoryRestoreInteriorInstance] = Field(default_factory=list)
+
+
 def _box_signature(box: dict[str, object]) -> str:
     return "|".join(
         str(round(float(box.get(key) or 0), 6))
@@ -702,6 +721,80 @@ async def restore_order_design(item_id: uuid.UUID, session: AsyncSession = Depen
     await session.commit()
     item = await _require_item(session, item_id)
     include_interior = await interior_instance_tables_ready(session)
+    return _serialize_item(item, include_interior=include_interior)
+
+
+@router.post("/{item_id}/history-restore", response_model=OrderDesignItem)
+async def restore_order_design_history_state(
+    item_id: uuid.UUID,
+    payload: OrderDesignHistoryRestorePayload,
+    session: AsyncSession = Depends(get_db_session),
+) -> OrderDesignItem:
+    item = await _require_item(session, item_id)
+    include_interior = await interior_instance_tables_ready(session)
+    order = await require_accessible_order(session, order_id=item.order_id)
+    source_design = await require_accessible_sub_category_design(
+        session,
+        admin_id=order.admin_id,
+        design_id=item.sub_category_design_id,
+    )
+
+    item.design_title = str(payload.design_title or "").strip()
+    item.instance_code = str(payload.instance_code or "").strip()
+    item.sort_order = int(payload.sort_order)
+    item.status = str(payload.status or "draft").strip() or "draft"
+    item.order_attr_values = _normalize_attr_values(payload.order_attr_values, dict(item.order_attr_meta or {}))
+
+    if include_interior:
+        existing_instances = {str(instance.id): instance for instance in list(item.interior_instances or [])}
+        target_instances: list[OrderDesignInteriorInstance] = []
+        target_ids: set[str] = set()
+        for snapshot in sorted(payload.interior_instances, key=lambda row: (int(row.ui_order), str(row.instance_code or ""))):
+            key = str(snapshot.id)
+            target_ids.add(key)
+            instance = existing_instances.get(key)
+            if instance is None:
+                instance = OrderDesignInteriorInstance(
+                    id=snapshot.id,
+                    order_design_id=item.id,
+                    source_instance_id=None,
+                    internal_part_group_id=snapshot.internal_part_group_id,
+                    instance_code=str(snapshot.instance_code or "").strip(),
+                    ui_order=int(snapshot.ui_order),
+                    placement_z=float(snapshot.placement_z or 0),
+                    interior_box_snapshot={},
+                    param_values=_normalize_interior_param_values(snapshot.param_values),
+                    param_meta={},
+                    part_snapshots=[],
+                    viewer_boxes=[],
+                    status=str(snapshot.status or "draft").strip() or "draft",
+                )
+                session.add(instance)
+            else:
+                instance.internal_part_group_id = snapshot.internal_part_group_id
+                instance.instance_code = str(snapshot.instance_code or "").strip()
+                instance.ui_order = int(snapshot.ui_order)
+                instance.placement_z = float(snapshot.placement_z or 0)
+                instance.param_values = _normalize_interior_param_values(snapshot.param_values)
+                instance.status = str(snapshot.status or "draft").strip() or "draft"
+            target_instances.append(instance)
+
+        for instance in list(item.interior_instances or []):
+            if str(instance.id) not in target_ids:
+                await session.delete(instance)
+
+        await session.flush()
+        item.interior_instances = target_instances
+
+    await sync_order_design_snapshot(
+        session,
+        item=item,
+        order=order,
+        source_design=source_design,
+        force=True,
+    )
+    await session.commit()
+    item = await _require_item(session, item.id)
     return _serialize_item(item, include_interior=include_interior)
 
 
