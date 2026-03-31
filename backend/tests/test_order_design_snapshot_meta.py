@@ -69,10 +69,9 @@ def test_snapshot_freshness_uses_marker_and_checksum() -> None:
         interior_instances=[interior],
     ) is True
 
-    changed_interior = SimpleNamespace(
-        **interior.__dict__,
-        version_id=4,
-    )
+    changed_payload = dict(interior.__dict__)
+    changed_payload["version_id"] = 4
+    changed_interior = SimpleNamespace(**changed_payload)
     assert order_design_snapshot_looks_fresh(
         meta=meta,
         snapshot_checksum=checksum,

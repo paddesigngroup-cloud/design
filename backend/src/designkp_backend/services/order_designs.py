@@ -31,12 +31,14 @@ from designkp_backend.services.sub_category_designs import (
     build_part_viewer_payload,
     build_source_state_signature,
     interior_instance_tables_ready,
+    merge_subcategory_and_internal_group_defaults,
     require_accessible_internal_part_group,
     require_accessible_sub_category,
     resolve_internal_instance_preview,
     resolve_base_formula_values_with_context,
     resolve_part_formula_values,
     strip_inherited_param_values,
+    derive_interior_box_snapshot,
 )
 
 SNAPSHOT_META_KEY = "__snapshot_state"
@@ -338,6 +340,62 @@ def _strip_inherited_internal_param_values(
     )
 
 
+def _enabled_source_part_formula_ids(source_design: SubCategoryDesign) -> set[int]:
+    return {
+        int(part.part_formula_id)
+        for part in list(source_design.parts or [])
+        if bool(part.enabled) and int(part.part_formula_id or 0) > 0
+    }
+
+
+def _root_part_snapshots_for_order_item(
+    *,
+    item: OrderDesign,
+    source_design: SubCategoryDesign,
+) -> list[dict[str, object]]:
+    root_formula_ids = _enabled_source_part_formula_ids(source_design)
+    return [
+        dict(snapshot or {})
+        for snapshot in list(item.part_snapshots or [])
+        if int(dict(snapshot or {}).get("part_formula_id") or 0) in root_formula_ids
+    ]
+
+
+def _root_viewer_boxes_for_order_item(
+    *,
+    item: OrderDesign,
+    source_design: SubCategoryDesign,
+) -> list[dict[str, object]]:
+    boxes: list[dict[str, object]] = []
+    for snapshot in _root_part_snapshots_for_order_item(item=item, source_design=source_design):
+        viewer_payload = dict(snapshot.get("viewer_payload") or {})
+        box = viewer_payload.get("box")
+        if isinstance(box, dict):
+            boxes.append(dict(box))
+    return boxes
+
+
+def build_effective_order_design_interior_param_values(
+    *,
+    context: DesignExecutionContext,
+    internal_group: InternalPartGroup,
+    base_raw_values: dict[str, str | None],
+    param_values: dict[str, object] | None,
+) -> dict[str, str | None]:
+    group_param_codes = set(context.internal_group_param_codes.get(internal_group.id, set()))
+    _, effective_values = merge_subcategory_and_internal_group_defaults(
+        base_values={str(key): (None if value is None else str(value)) for key, value in dict(base_raw_values or {}).items()},
+        group_param_codes=group_param_codes,
+        group_default_values=dict(context.internal_group_display_values.get(internal_group.id, {})),
+        instance_values={str(key): value for key, value in dict(param_values or {}).items()},
+    )
+    return {
+        code: effective_values.get(code)
+        for code in sorted(group_param_codes)
+        if code in effective_values
+    }
+
+
 def _build_order_source_state(
     *,
     context: DesignExecutionContext,
@@ -485,16 +543,22 @@ async def build_order_design_snapshot(
             **source_base_raw_params,
             **context.internal_group_display_values.get(internal_group.id, {}),
         }
-        param_values = _strip_inherited_internal_param_values(
+        persisted_param_values = _strip_inherited_internal_param_values(
             source_base_values=inherited_values,
             param_values={str(key): value for key, value in dict(instance.param_values or {}).items()},
         )
+        effective_param_values = build_effective_order_design_interior_param_values(
+            context=context,
+            internal_group=internal_group,
+            base_raw_values=raw_params,
+            param_values={str(key): value for key, value in dict(instance.param_values or {}).items()},
+        )
         param_meta = {str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()}
-        if not param_meta and param_values:
+        if not param_meta and effective_param_values:
             _, resolved_param_meta = await build_sub_category_param_display_snapshot(
                 session,
                 sub_category=sub_category,
-                codes=set(param_values.keys()) or None,
+                codes=set(effective_param_values.keys()) or None,
                 context=context,
             )
             param_meta = {str(key): dict(value or {}) for key, value in resolved_param_meta.items()}
@@ -508,7 +572,7 @@ async def build_order_design_snapshot(
             ui_order=int(instance.ui_order or 0),
             placement_z=float(instance.placement_z or 0),
             interior_box_snapshot=dict(instance.interior_box_snapshot or {}),
-            param_values=param_values,
+            param_values=persisted_param_values,
             param_meta=param_meta,
             base_raw_values=raw_params,
             base_numeric_params=numeric_params,
@@ -525,7 +589,7 @@ async def build_order_design_snapshot(
                 "ui_order": resolved.ui_order,
                 "placement_z": resolved.placement_z,
                 "interior_box_snapshot": resolved.interior_box_snapshot,
-                "param_values": resolved.param_values,
+                "param_values": effective_param_values,
                 "param_meta": resolved.param_meta,
                 "auto_params": resolved.auto_params,
                 "part_snapshots": resolved.part_snapshots,
@@ -654,6 +718,128 @@ async def sync_order_design_snapshot(
         item.snapshot_checksum = next_checksum
         changed = True
     return changed
+
+
+async def refresh_order_design_interior_instance(
+    session: AsyncSession,
+    *,
+    item: OrderDesign,
+    order: Order,
+    source_design: SubCategoryDesign,
+    instance: OrderDesignInteriorInstance,
+    internal_group: InternalPartGroup | None = None,
+) -> None:
+    sub_category = await require_accessible_sub_category(
+        session,
+        admin_id=order.admin_id,
+        sub_category_id=source_design.sub_category_id,
+    )
+    current_group = internal_group or await require_accessible_internal_part_group(
+        session,
+        admin_id=order.admin_id,
+        group_id=instance.internal_part_group_id,
+    )
+    context = await build_design_execution_context(
+        session,
+        admin_id=order.admin_id,
+        sub_category=sub_category,
+        part_formula_ids=_enabled_source_part_formula_ids(source_design),
+        internal_group_ids={row.internal_part_group_id for row in list(item.interior_instances or [])},
+        include_sub_category_display=False,
+    )
+    raw_params = dict(context.sub_category_raw_params)
+    numeric_params = dict(context.sub_category_numeric_params)
+    for code, value in dict(item.order_attr_values or {}).items():
+        normalized = None if value is None else str(value)
+        raw_params[str(code)] = normalized
+        numeric_params[str(code)] = _round_number(_coerce_numeric(normalized))
+    interior_box_snapshot = dict(instance.interior_box_snapshot or {})
+    if not interior_box_snapshot:
+        interior_box_snapshot = derive_interior_box_snapshot(
+            _root_viewer_boxes_for_order_item(item=item, source_design=source_design)
+        )
+    persisted_input_values = {str(key): value for key, value in dict(instance.param_values or {}).items()}
+    resolved = await resolve_internal_instance_preview(
+        session,
+        admin_id=order.admin_id,
+        sub_category=sub_category,
+        internal_group=current_group,
+        instance_id=getattr(instance, "id", None),
+        instance_code=str(instance.instance_code or ""),
+        ui_order=int(instance.ui_order or 0),
+        placement_z=float(instance.placement_z or 0),
+        interior_box_snapshot=interior_box_snapshot,
+        param_values=persisted_input_values,
+        param_meta={str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()},
+        base_raw_values=raw_params,
+        base_numeric_params=numeric_params,
+        prefer_base_params=True,
+        context=context,
+    )
+    instance.interior_box_snapshot = resolved.interior_box_snapshot
+    instance.param_values = build_effective_order_design_interior_param_values(
+        context=context,
+        internal_group=current_group,
+        base_raw_values=raw_params,
+        param_values=persisted_input_values,
+    )
+    instance.param_meta = resolved.param_meta
+    instance.part_snapshots = resolved.part_snapshots
+    instance.viewer_boxes = resolved.viewer_boxes
+
+
+def refresh_order_design_aggregate_snapshots(
+    *,
+    item: OrderDesign,
+    source_design: SubCategoryDesign,
+) -> None:
+    root_part_snapshots = _root_part_snapshots_for_order_item(item=item, source_design=source_design)
+    root_boxes = _root_viewer_boxes_for_order_item(item=item, source_design=source_design)
+    sorted_interiors = sorted(
+        list(item.interior_instances or []),
+        key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")),
+    )
+    item.part_snapshots = list(root_part_snapshots) + [
+        dict(snapshot or {})
+        for interior in sorted_interiors
+        for snapshot in list(interior.part_snapshots or [])
+    ]
+    interior_payloads = [
+        {
+            "viewer_boxes": [dict(box or {}) for box in list(interior.viewer_boxes or [])],
+        }
+        for interior in sorted_interiors
+    ]
+    from designkp_backend.api.routers.order_designs import _merge_viewer_boxes  # local import avoids cycle at module load
+
+    item.viewer_boxes = _merge_viewer_boxes(root_boxes, interior_payloads)
+
+
+def refresh_order_design_snapshot_state(
+    *,
+    item: OrderDesign,
+    source_design: SubCategoryDesign,
+) -> None:
+    state = read_order_design_snapshot_state(dict(item.order_attr_meta or {}))
+    source_state_signature = str(state.get("source_state_signature") or "")
+    current_interior_instances = list(item.interior_instances or [])
+    checksum = build_order_design_snapshot_checksum(
+        source_design=source_design,
+        order_attr_values=dict(item.order_attr_values or {}),
+        interior_instances=current_interior_instances,
+        source_state={"signature": source_state_signature} if source_state_signature else None,
+    )
+    marker = order_design_snapshot_marker(
+        source_design=source_design,
+        interior_instances=current_interior_instances,
+    )
+    item.order_attr_meta = with_order_design_snapshot_checksum(
+        dict(item.order_attr_meta or {}),
+        checksum=checksum,
+        marker=marker,
+        source_state_signature=source_state_signature or None,
+    )
+    item.snapshot_checksum = checksum
 
 
 async def next_order_design_instance_code(

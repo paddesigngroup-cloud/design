@@ -23,6 +23,9 @@ from designkp_backend.services.order_designs import (
     normalize_order_attr_value,
     order_design_snapshot_marker,
     read_order_design_snapshot_checksum,
+    refresh_order_design_aggregate_snapshots,
+    refresh_order_design_interior_instance,
+    refresh_order_design_snapshot_state,
     require_accessible_order,
     require_accessible_sub_category_design,
     strip_snapshot_state_from_meta,
@@ -88,6 +91,22 @@ class OrderDesignInteriorInstanceCreate(BaseModel):
     ui_order: int | None = Field(default=None, ge=0)
     instance_code: str | None = Field(default=None, max_length=64)
     param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
+class OrderDesignInteriorInstanceItem(BaseModel):
+    id: uuid.UUID
+    internal_part_group_id: uuid.UUID
+    instance_code: str
+    ui_order: int
+    placement_z: float
+    interior_box_snapshot: dict[str, object]
+    param_values: dict[str, str | None]
+    param_meta: dict[str, dict[str, object]]
+    part_snapshots: list[dict[str, object]]
+    viewer_boxes: list[dict[str, object]]
+    status: str
+
+    model_config = {"from_attributes": True}
 
 
 def _box_signature(box: dict[str, object]) -> str:
@@ -314,6 +333,28 @@ def _normalize_interior_param_values(
         for key, value in dict(payload or {}).items()
         if str(key or "").strip()
     }
+
+
+def _serialize_interior_instance_item(instance: OrderDesignInteriorInstance) -> OrderDesignInteriorInstanceItem:
+    return OrderDesignInteriorInstanceItem(
+        id=instance.id,
+        internal_part_group_id=instance.internal_part_group_id,
+        instance_code=str(instance.instance_code or "").strip(),
+        ui_order=int(instance.ui_order or 0),
+        placement_z=float(instance.placement_z or 0),
+        interior_box_snapshot=dict(instance.interior_box_snapshot or {}),
+        param_values={
+            str(key): (None if value is None else str(value))
+            for key, value in dict(instance.param_values or {}).items()
+        },
+        param_meta={
+            str(key): dict(value or {})
+            for key, value in dict(instance.param_meta or {}).items()
+        },
+        part_snapshots=[dict(row or {}) for row in list(instance.part_snapshots or [])],
+        viewer_boxes=[dict(row or {}) for row in list(instance.viewer_boxes or [])],
+        status=str(instance.status or "draft").strip() or "draft",
+    )
 
 
 async def _rebuild_order_design_after_interior_change(
@@ -664,13 +705,13 @@ async def restore_order_design(item_id: uuid.UUID, session: AsyncSession = Depen
     return _serialize_item(item, include_interior=include_interior)
 
 
-@router.patch("/{item_id}/interior-instances/{instance_id}", response_model=OrderDesignItem)
+@router.patch("/{item_id}/interior-instances/{instance_id}", response_model=OrderDesignInteriorInstanceItem)
 async def update_order_design_interior_instance(
     item_id: uuid.UUID,
     instance_id: uuid.UUID,
     payload: OrderDesignInteriorInstanceUpdate,
     session: AsyncSession = Depends(get_db_session),
-) -> OrderDesignItem:
+) -> OrderDesignInteriorInstanceItem:
     if not await interior_instance_tables_ready(session):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interior-instance tables are not available yet. Run database migrations first.")
     item = await _require_item(session, item_id)
@@ -681,16 +722,32 @@ async def update_order_design_interior_instance(
     target.ui_order = int(payload.ui_order)
     target.placement_z = float(payload.placement_z or 0)
     target.param_values = _normalize_interior_param_values(payload.param_values)
-    item = await _rebuild_order_design_after_interior_change(session, item=item)
-    return _serialize_item(item, include_interior=True)
+    order = await require_accessible_order(session, order_id=item.order_id)
+    source_design = await require_accessible_sub_category_design(
+        session,
+        admin_id=order.admin_id,
+        design_id=item.sub_category_design_id,
+    )
+    await refresh_order_design_interior_instance(
+        session,
+        item=item,
+        order=order,
+        source_design=source_design,
+        instance=target,
+    )
+    refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
+    refresh_order_design_snapshot_state(item=item, source_design=source_design)
+    response = _serialize_interior_instance_item(target)
+    await session.commit()
+    return response
 
 
-@router.post("/{item_id}/interior-instances", response_model=OrderDesignItem, status_code=status.HTTP_201_CREATED)
+@router.post("/{item_id}/interior-instances", response_model=OrderDesignInteriorInstanceItem, status_code=status.HTTP_201_CREATED)
 async def create_order_design_interior_instance(
     item_id: uuid.UUID,
     payload: OrderDesignInteriorInstanceCreate,
     session: AsyncSession = Depends(get_db_session),
-) -> OrderDesignItem:
+) -> OrderDesignInteriorInstanceItem:
     if not await interior_instance_tables_ready(session):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interior-instance tables are not available yet. Run database migrations first.")
     item = await _require_item(session, item_id)
@@ -699,6 +756,11 @@ async def create_order_design_interior_instance(
         session,
         admin_id=order.admin_id,
         group_id=payload.internal_part_group_id,
+    )
+    source_design = await require_accessible_sub_category_design(
+        session,
+        admin_id=order.admin_id,
+        design_id=item.sub_category_design_id,
     )
     existing_instances = list(item.interior_instances or [])
     next_order = payload.ui_order if payload.ui_order is not None else (max([int(row.ui_order or 0) for row in existing_instances], default=-1) + 1)
@@ -721,27 +783,55 @@ async def create_order_design_interior_instance(
     )
     await session.flush()
     item = await _require_item(session, item.id)
-    item = await _rebuild_order_design_after_interior_change(session, item=item)
-    return _serialize_item(item, include_interior=True)
+    target = next((instance for instance in item.interior_instances if str(instance.instance_code or "") == next_code and instance.internal_part_group_id == group.id), None)
+    if target is None:
+        target = max(
+            list(item.interior_instances or []),
+            key=lambda instance: (int(instance.ui_order or 0), str(instance.instance_code or ""), str(instance.id or "")),
+        )
+    await refresh_order_design_interior_instance(
+        session,
+        item=item,
+        order=order,
+        source_design=source_design,
+        instance=target,
+        internal_group=group,
+    )
+    refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
+    refresh_order_design_snapshot_state(item=item, source_design=source_design)
+    response = _serialize_interior_instance_item(target)
+    await session.commit()
+    return response
 
 
-@router.delete("/{item_id}/interior-instances/{instance_id}", response_model=OrderDesignItem)
+@router.delete("/{item_id}/interior-instances/{instance_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_order_design_interior_instance(
     item_id: uuid.UUID,
     instance_id: uuid.UUID,
     session: AsyncSession = Depends(get_db_session),
-) -> OrderDesignItem:
+) -> Response:
     if not await interior_instance_tables_ready(session):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interior-instance tables are not available yet. Run database migrations first.")
     item = await _require_item(session, item_id)
     target = next((instance for instance in item.interior_instances if instance.id == instance_id), None)
     if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design interior instance not found.")
+    order = await require_accessible_order(session, order_id=item.order_id)
+    source_design = await require_accessible_sub_category_design(
+        session,
+        admin_id=order.admin_id,
+        design_id=item.sub_category_design_id,
+    )
     await session.delete(target)
     await session.flush()
-    item = await _require_item(session, item.id)
-    item = await _rebuild_order_design_after_interior_change(session, item=item)
-    return _serialize_item(item, include_interior=True)
+    item.interior_instances = [
+        instance for instance in list(item.interior_instances or [])
+        if instance.id != target.id
+    ]
+    refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
+    refresh_order_design_snapshot_state(item=item, source_design=source_design)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{item_id}/recompute", response_model=OrderDesignItem)

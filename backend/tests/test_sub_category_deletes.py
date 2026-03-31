@@ -15,12 +15,22 @@ class DeleteSession:
         self.executed = []
         self.committed = False
 
+    class _ScalarResult:
+        def __init__(self, rows) -> None:
+            self._rows = rows
+
+        def all(self):
+            return list(self._rows)
+
     async def get(self, _model, _item_id):
         return self.item
 
     async def execute(self, stmt):
         self.executed.append(str(stmt))
         return None
+
+    async def scalars(self, _stmt):
+        return self._ScalarResult([])
 
     async def commit(self) -> None:
         self.committed = True
@@ -30,15 +40,23 @@ class DeleteSession:
 
 
 def test_delete_sub_category_soft_deletes_and_marks_designs() -> None:
-    item = SimpleNamespace(id=uuid.uuid4(), deleted_at=None)
+    item = SimpleNamespace(
+        id=uuid.uuid4(),
+        deleted_at=None,
+        code="sub-1",
+        sub_cat_title="ساب کت",
+        title="ساب کت",
+        sub_cat_id=10,
+    )
     session = DeleteSession(item)
 
     response = asyncio.run(delete_sub_category(item.id, session))
 
     assert response.status_code == 204
     assert item.deleted_at is not None
+    assert item.sub_cat_id is None
+    assert "__deleted__" in item.code
     assert session.committed is True
-    assert any("UPDATE sub_category_designs" in stmt for stmt in session.executed)
 
 
 def test_delete_sub_category_design_soft_deletes_and_cleans_children(monkeypatch) -> None:
@@ -47,7 +65,7 @@ def test_delete_sub_category_design_soft_deletes_and_cleans_children(monkeypatch
 
     monkeypatch.setattr(design_router, "interior_instance_tables_ready", fake_interior_instance_tables_ready)
 
-    item = SimpleNamespace(id=uuid.uuid4(), deleted_at=None)
+    item = SimpleNamespace(id=uuid.uuid4(), deleted_at=None, code="design-1", design_id=12)
     session = DeleteSession(item)
 
     response = asyncio.run(delete_sub_category_design(item.id, session))

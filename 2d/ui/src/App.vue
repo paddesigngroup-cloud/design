@@ -693,9 +693,16 @@ const activeInteriorLibrarySubCategory = computed(() => {
   if (!subCategoryId) return null;
   return constructionSubCategories.value.find((item) => String(item.id) === subCategoryId) || null;
 });
-const activeInteriorLibraryOrderDesign = computed(() =>
-  subCategoryDesignEditorOpen.value ? null : selectedOrderDesignSource.value || null
-);
+const activeInteriorLibraryOrderDesignId = computed(() => {
+  if (subCategoryDesignEditorOpen.value) return "";
+  return String(selectedOrderDesignSource.value?.id || activeCabinetDesignId.value || "").trim();
+});
+const activeInteriorLibraryOrderDesign = computed(() => {
+  if (subCategoryDesignEditorOpen.value) return null;
+  const targetId = activeInteriorLibraryOrderDesignId.value;
+  if (!targetId) return null;
+  return orderDesignCatalog.value.find((item) => String(item.id) === targetId) || selectedOrderDesignSource.value || null;
+});
 const activeInteriorLibrarySourceDesign = computed(() => {
   if (subCategoryDesignEditorOpen.value) return null;
   const sourceId = String(activeInteriorLibraryOrderDesign.value?.sub_category_design_id || "").trim();
@@ -3598,6 +3605,82 @@ function syncOrderDesignInCollection(item) {
   return normalized;
 }
 
+async function refreshOrderDesignGeometryFromServer(orderDesignId, { updateStage = true } = {}) {
+  const key = String(orderDesignId || "").trim();
+  if (!key) return null;
+  const res = await fetch(`/api/order-designs/${encodeURIComponent(key)}/recompute`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, "بازسازی نمایش طرح سفارش انجام نشد."));
+  const fresh = syncOrderDesignInCollection(await res.json());
+  if (!fresh) return null;
+  if (updateStage && String(activeCabinetDesignId.value || "") === String(fresh.id)) {
+    const placement = getOrderDesignPlacement(fresh.id) || getCurrentEditorModelPlacement();
+    stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
+    restoreActiveOrderDesignToEditor(fresh, placement);
+  }
+  return fresh;
+}
+
+function syncInteriorInstanceInOrderDesignCollection(orderDesignId, instance) {
+  const targetId = String(orderDesignId || "").trim();
+  const normalized = normalizeInteriorInstanceRecord(instance);
+  if (!targetId || !normalized?.id) return null;
+  orderDesignCatalog.value = sortOrderDesignCatalogRecords(
+    orderDesignCatalog.value.map((item) => {
+      if (String(item.id) !== targetId) return item;
+      const interiors = Array.isArray(item.interior_instances) ? item.interior_instances : [];
+      const existingIndex = interiors.findIndex((row) => String(row.id) === String(normalized.id));
+      const nextInteriors = existingIndex === -1
+        ? [...interiors, normalized]
+        : interiors.map((row, index) => index === existingIndex ? normalized : row);
+      return {
+        ...item,
+        interior_instances: nextInteriors
+          .slice()
+          .sort((a, b) => {
+            const orderDelta = (Number(a.ui_order) || 0) - (Number(b.ui_order) || 0);
+            if (orderDelta !== 0) return orderDelta;
+            return String(a.instance_code || "").localeCompare(String(b.instance_code || ""), "fa");
+          }),
+      };
+    })
+  );
+  if (String(orderDesignEditorDraft.value?.id || "") === targetId) {
+    const interiors = Array.isArray(orderDesignEditorDraft.value?.interior_instances) ? orderDesignEditorDraft.value.interior_instances : [];
+    const existingIndex = interiors.findIndex((row) => String(row.id) === String(normalized.id));
+    orderDesignEditorDraft.value = {
+      ...orderDesignEditorDraft.value,
+      interior_instances: existingIndex === -1
+        ? [...interiors, normalized]
+        : interiors.map((row, index) => index === existingIndex ? normalized : row),
+    };
+  }
+  return normalized;
+}
+
+function removeInteriorInstanceFromOrderDesignCollection(orderDesignId, instanceId) {
+  const targetId = String(orderDesignId || "").trim();
+  const interiorId = String(instanceId || "").trim();
+  if (!targetId || !interiorId) return;
+  orderDesignCatalog.value = sortOrderDesignCatalogRecords(
+    orderDesignCatalog.value.map((item) =>
+      String(item.id) === targetId
+        ? {
+            ...item,
+            interior_instances: (item.interior_instances || []).filter((row) => String(row.id) !== interiorId),
+          }
+        : item
+    )
+  );
+  if (String(orderDesignEditorDraft.value?.id || "") === targetId) {
+    orderDesignEditorDraft.value = {
+      ...orderDesignEditorDraft.value,
+      interior_instances: (orderDesignEditorDraft.value?.interior_instances || []).filter((row) => String(row.id) !== interiorId),
+    };
+  }
+}
+
 async function addInteriorGroupToDesign(group) {
   if (subCategoryDesignEditorOpen.value) {
     const draft = subCategoryDesignEditorDraft.value;
@@ -3638,7 +3721,8 @@ async function addInteriorGroupToDesign(group) {
       }),
     });
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه داخلی به طرح ثبت‌شده انجام نشد."));
-    syncOrderDesignInCollection(await res.json());
+    syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
+    await refreshOrderDesignGeometryFromServer(orderDesign.id);
   } catch (error) {
     showAlert(error?.message || "افزودن گروه داخلی به طرح ثبت‌شده انجام نشد.", { title: "خطا" });
   }
@@ -3722,7 +3806,8 @@ async function applyInteriorInstanceEditor() {
       }
     );
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه داخلی طرح ثبت‌شده انجام نشد."));
-    syncOrderDesignInCollection(await res.json());
+    syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
+    await refreshOrderDesignGeometryFromServer(orderDesign.id);
     closeInteriorInstanceEditor();
   } catch (error) {
     showAlert(error?.message || "ذخیره تنظیمات نمونه داخلی طرح ثبت‌شده انجام نشد.", { title: "خطا" });
@@ -3765,7 +3850,8 @@ async function deleteInteriorInstanceFromDesign(instance) {
       { method: "DELETE" }
     );
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه داخلی طرح ثبت‌شده انجام نشد."));
-    syncOrderDesignInCollection(await res.json());
+    removeInteriorInstanceFromOrderDesignCollection(orderDesign.id, instance.id);
+    await refreshOrderDesignGeometryFromServer(orderDesign.id);
     if (String(interiorInstanceEditorDraft.value?.id || "") === String(instance.id)) {
       closeInteriorInstanceEditor();
     }

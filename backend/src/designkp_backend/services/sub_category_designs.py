@@ -449,6 +449,21 @@ def _normalize_param_meta(meta: dict[str, dict[str, object]] | None) -> dict[str
     }
 
 
+def _merge_param_meta_layers(*layers: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+    merged: dict[str, dict[str, object]] = {}
+    for layer in layers:
+        for key, value in _normalize_param_meta(layer).items():
+            current = dict(merged.get(key) or {})
+            for meta_key, meta_value in dict(value or {}).items():
+                if meta_value is None:
+                    continue
+                if isinstance(meta_value, str) and not meta_value.strip():
+                    continue
+                current[str(meta_key)] = meta_value
+            merged[key] = current
+    return merged
+
+
 def _merge_param_value_layers(*layers: dict[str, str | None]) -> dict[str, str | None]:
     merged: dict[str, str | None] = {}
     for layer in layers:
@@ -544,7 +559,12 @@ async def build_internal_group_param_display_snapshot(
             for code, value in context.internal_group_display_values.get(internal_group.id, {}).items()
             if filter_codes is None or code in filter_codes
         }
-        return values, {}
+        meta = {
+            code: dict(value or {})
+            for code, value in context.internal_group_display_meta.get(internal_group.id, {}).items()
+            if filter_codes is None or code in filter_codes
+        }
+        return values, meta
     rows = (
         await session.execute(
             select(
@@ -1032,7 +1052,7 @@ async def resolve_internal_instance_preview(
         group=internal_group,
         context=resolved_context,
     )
-    copied_values, _ = await build_internal_group_param_display_snapshot(
+    copied_values, copied_group_meta = await build_internal_group_param_display_snapshot(
         session,
         internal_group=internal_group,
         codes=group_param_codes,
@@ -1063,14 +1083,15 @@ async def resolve_internal_instance_preview(
             param_values=normalized_input_values,
         )
     )
-    meta = {
-        **copied_meta,
-        **{
+    meta = _merge_param_meta_layers(
+        copied_group_meta,
+        copied_meta,
+        {
             str(key): dict(value or {})
             for key, value in _normalize_param_meta(param_meta).items()
             if str(key or "").strip() in group_param_codes
         },
-    }
+    )
     auto_param_codes = set(resolved_context.auto_param_codes)
     auto_values: dict[str, float] = {}
     formula_values = dict(effective_formula_values)
