@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { DEFAULT_DOOR_MODEL_URL, cloneDoorModelSceneSync, getFallbackDoorModelBoundsMm, loadDoorModelAsset } from "../features/door_model_asset.js";
 
 const props = defineProps({
   src: { type: String, required: true },
@@ -46,6 +47,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  assetInstances: {
+    type: Array,
+    default: () => [],
+  },
   showAttrsPanel: {
     type: Boolean,
     default: true,
@@ -86,6 +91,7 @@ let modelBasePosition = null;
 let modelBaseRotationY = 0;
 let wallsRoot = null;
 let placeholderBoxesRoot = null;
+let assetInstancesRoot = null;
 
 let axesHelper = null;
 let lastMiddleClickMs = 0;
@@ -124,8 +130,14 @@ const PLACEHOLDER_BOX_SPECS_MM = [
   { width: 1600, depth: 16, height: 138, cx: 800, cy: 58, cz: 69 },
 ];
 const attrsSnapshot = computed(() => props.walls2d?.metrics || props.walls2d || {});
+const hasActiveDoorAssetSelection = computed(() =>
+  !!attrsSnapshot.value?.selection?.selectedModelOutline && props.selectedWallStyle?.entityType === "door"
+);
 const selectedEntityType = computed(
-  () => attrsSnapshot.value?.entityType || props.selectedWallStyle?.entityType || "wall"
+  () => {
+    if (hasActiveDoorAssetSelection.value) return "door";
+    return props.selectedWallStyle?.entityType || attrsSnapshot.value?.entityType || "wall";
+  }
 );
 const displayUnit = computed(() => {
   const unit = String(props.displayUnit || "").trim().toLowerCase();
@@ -137,11 +149,12 @@ const displayUnitLabel = computed(() => {
   return "سانتی‌متر";
 });
 const isBeamLikeEntity = computed(() => selectedEntityType.value === "beam" || selectedEntityType.value === "column");
+const isDoorEntity = computed(() => selectedEntityType.value === "door");
 const showLengthField = computed(() => selectedEntityType.value !== "hidden");
-const showThicknessField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
-const showHeightField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value);
-const showFloorDistanceField = computed(() => selectedEntityType.value === "beam");
-const lengthFieldLabel = computed(() => selectedEntityType.value === "column" ? "عرض" : "طول");
+const showThicknessField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value || isDoorEntity.value);
+const showHeightField = computed(() => selectedEntityType.value === "wall" || isBeamLikeEntity.value || isDoorEntity.value);
+const showFloorDistanceField = computed(() => selectedEntityType.value === "beam" || isDoorEntity.value);
+const lengthFieldLabel = computed(() => selectedEntityType.value === "column" || isDoorEntity.value ? "عرض" : "طول");
 const thicknessFieldLabel = computed(() => selectedEntityType.value === "column" ? "عمق" : "ضخامت");
 const colorFieldLabel = computed(() => {
   if (selectedEntityType.value === "column") return "رنگ سه بعدی ستون";
@@ -303,9 +316,10 @@ const mmToCm = (v) => Math.round((Number(v || 0) * 0.1) * 10) / 10;
 const cmToMm = (v) => Number(v) * 10;
 function cmToDisplay(v) {
   const numeric = Number(v || 0);
+  if (!Number.isFinite(numeric)) return 0;
   if (displayUnit.value === "mm") return Math.round(numeric * 10 * 10) / 10;
   if (displayUnit.value === "inch") return Math.round((numeric / 2.54) * 100) / 100;
-  return numeric;
+  return Math.round(numeric * 10) / 10;
 }
 function displayToCm(v) {
   const numeric = Number(v);
@@ -380,9 +394,11 @@ const selectedOrderDesignIds = computed(() => normalizeIds(props.selectedOrderDe
 const selectedOrderDesignCount = computed(() =>
   selectedOrderDesignIds.value.length > 0
     ? selectedOrderDesignIds.value.length
-    : (hasModelOutlineSelection.value && activeOrderDesign.value?.id ? 1 : 0)
+    : (!hasActiveDoorAssetSelection.value && hasModelOutlineSelection.value && activeOrderDesign.value?.id ? 1 : 0)
 );
-const hasOrderDesignSelection = computed(() => selectedOrderDesignCount.value > 0 || hasModelOutlineSelection.value);
+const hasOrderDesignSelection = computed(() =>
+  !hasActiveDoorAssetSelection.value && (selectedOrderDesignCount.value > 0 || hasModelOutlineSelection.value)
+);
 const openOrderDesignGroupKey = ref("");
 
 watch(
@@ -419,6 +435,7 @@ const selectionSummary = computed(() => {
   const beamSet = new Set(beamIds);
   const wallIds = rawWallIds.filter((id) => !beamSet.has(id));
   const hiddenIds = collectIds(selection.selectedHiddenId, selection.selectedHiddenIds);
+  const doorIds = collectIds(selection.selectedDoorId, selection.selectedDoorIds);
   const passiveDesignIds = collectIds(selection.selectedPassiveModelId, selection.selectedPassiveModelIds);
   const designIds = selectedOrderDesignIds.value.length
     ? selectedOrderDesignIds.value
@@ -427,15 +444,17 @@ const selectionSummary = computed(() => {
     wallIds.length > 0,
     beamIds.length > 0,
     hiddenIds.length > 0,
+    doorIds.length > 0,
     designIds.length > 0,
   ].filter(Boolean).length;
   return {
     wallIds,
     beamIds,
     hiddenIds,
+    doorIds,
     passiveDesignIds,
     designIds,
-    totalCount: wallIds.length + beamIds.length + hiddenIds.length + designIds.length,
+    totalCount: wallIds.length + beamIds.length + hiddenIds.length + doorIds.length + designIds.length,
     categoryCount,
     hasMixedSelection: categoryCount > 1,
   };
@@ -447,6 +466,7 @@ const hasNonDesignSelection = computed(() =>
   selectionSummary.value.wallIds.length > 0
   || selectionSummary.value.beamIds.length > 0
   || selectionSummary.value.hiddenIds.length > 0
+  || selectionSummary.value.doorIds.length > 0
 );
 const selectedObjectTitle = computed(() => {
   if (hasMixedSelection.value) return `انتخاب ترکیبی (${selectedEntityCount.value} مورد)`;
@@ -463,6 +483,7 @@ const showOrderDesignAttrPanel = computed(() =>
 const showObjectStyleEditor = computed(() => !!wallMetrics.value && !hasOrderDesignSelection.value && !hasMixedSelection.value);
 const wallMoveDeltaCm = ref({ x: 0, y: 0 });
 const coordInputDrafts = ref({});
+const styleInputDrafts = ref({});
 const showPlaceholderEdges = ref(true);
 const placeholderOpacity = ref(100);
 
@@ -470,12 +491,56 @@ const wallMetrics = computed(() => {
   const snapshot = attrsSnapshot.value || {};
   const nodes = Array.isArray(snapshot.nodes) ? snapshot.nodes : [];
   const walls = Array.isArray(snapshot.walls) ? snapshot.walls : [];
+  const doors = Array.isArray(snapshot.doors) ? snapshot.doors : [];
   const byId = new Map(nodes.map((n) => [n.id, n]));
 
   const selectedIds = Array.isArray(snapshot?.selection?.selectedWallIds)
     ? snapshot.selection.selectedWallIds
     : [];
   const selectedId = snapshot?.selection?.selectedWallId || selectedIds[0] || null;
+  const selectedDoorIds = Array.isArray(snapshot?.selection?.selectedDoorIds)
+    ? snapshot.selection.selectedDoorIds
+    : [];
+  const selectedDoorId = snapshot?.selection?.selectedDoorId || selectedDoorIds[0] || null;
+
+  if (snapshot?.entityType === "door" || selectedEntityType.value === "door") {
+    const door = selectedDoorId ? doors.find((item) => item.id === selectedDoorId) : null;
+    if (!door && props.selectedWallStyle?.entityType === "door") {
+      return {
+        id: String(props.selectedWallStyle?.id || "door").trim() || "door",
+        lengthCm: Number(props.selectedWallStyle?.lengthCm) || 90,
+        thicknessCm: Number(props.selectedWallStyle?.thicknessCm) || 12,
+        heightCm: Number(props.selectedWallStyle?.heightCm) || 220,
+        floorOffsetCm: Number(props.selectedWallStyle?.floorOffsetCm) || 0,
+        offsetCm: Number(props.selectedWallStyle?.offsetCm) || 0,
+        wallName: String(props.selectedWallStyle?.wallName || "").trim(),
+        a: { x: 0, y: 0 },
+        b: { x: 0, y: 0 },
+      };
+    }
+    if (!door) return null;
+    const wall = walls.find((item) => item.id === door.wallId);
+    const a = wall ? byId.get(wall.a) : null;
+    const b = wall ? byId.get(wall.b) : null;
+    const dx = a && b ? (b.x - a.x) : 0;
+    const dy = a && b ? (b.y - a.y) : 0;
+    const lenMm = Math.hypot(dx, dy) || 1;
+    const ux = dx / lenMm;
+    const uy = dy / lenMm;
+    const centerX = a ? a.x + ux * (Number(door.offsetMm) || 0) : 0;
+    const centerY = a ? a.y + uy * (Number(door.offsetMm) || 0) : 0;
+    return {
+      id: door.id,
+      lengthCm: mmToCm(Number(door.widthMm) || 900),
+      thicknessCm: mmToCm(Number(door?.modelBoundsMm?.depthMm) || Number(door.frameDepthMm) || 120),
+      heightCm: mmToCm(Number(door.heightMm) || 2200),
+      floorOffsetCm: mmToCm(Number(door.sillHeightMm) || 0),
+      offsetCm: mmToCm(Number(door.offsetMm) || 0),
+      wallName: String(wall?.name || wall?.id || "").trim(),
+      a: { x: mmToCm(centerX), y: mmToCm(centerY) },
+      b: { x: mmToCm(centerX), y: mmToCm(centerY) },
+    };
+  }
 
   const wall = selectedId ? walls.find((w) => w.id === selectedId) : null;
   if (!wall) return null;
@@ -577,6 +642,7 @@ const orderDesignMetrics = computed(() => {
 
 const wallCoordPoints = computed(() => {
   if (orderDesignMetrics.value) return orderDesignMetrics.value;
+  if (isDoorEntity.value) return null;
   if (!wallMetrics.value) return null;
   return {
     ...buildCornerMetrics(wallMetrics.value.a, wallMetrics.value.b),
@@ -584,7 +650,7 @@ const wallCoordPoints = computed(() => {
   };
 });
 const hasAnyAttrSelection = computed(() => selectedEntityCount.value > 0 || !!wallMetrics.value);
-const showCoordsEditor = computed(() => selectedEntityCount.value > 0);
+const showCoordsEditor = computed(() => selectedEntityCount.value > 0 && !isDoorEntity.value);
 
 const axisTagStyles = computed(() => {
   const st = props.walls2d?.state || {};
@@ -669,6 +735,32 @@ function patchByPointKey(pointKey, axis, value) {
 
 function patchWallStyleDraft(patch) {
   emit("update:wallStyleDraft", patch);
+}
+
+function getStyleFieldValue(key, fallbackCm) {
+  if (Object.prototype.hasOwnProperty.call(styleInputDrafts.value, key)) {
+    return styleInputDrafts.value[key];
+  }
+  if (fallbackCm == null || fallbackCm === "") return "";
+  return String(cmToDisplay(fallbackCm));
+}
+
+function setStyleFieldDraft(key, value) {
+  styleInputDrafts.value = { ...styleInputDrafts.value, [key]: String(value ?? "") };
+}
+
+function clearStyleFieldDraft(key) {
+  if (!Object.prototype.hasOwnProperty.call(styleInputDrafts.value, key)) return;
+  const next = { ...styleInputDrafts.value };
+  delete next[key];
+  styleInputDrafts.value = next;
+}
+
+function patchWallStyleDraftInput(key, rawValue) {
+  setStyleFieldDraft(key, rawValue);
+  const numeric = parseNumericInput(rawValue);
+  if (!Number.isFinite(numeric)) return;
+  patchWallStyleDraft({ [key]: displayToCm(numeric) });
 }
 
 function patchSelectedWallCoords(patch) {
@@ -841,6 +933,7 @@ watch(
   [() => wallMetrics.value?.id, () => orderDesignMetrics.value?.id, () => selectedEntityCount.value, () => isGroupEditMode.value],
   () => {
     coordInputDrafts.value = {};
+    styleInputDrafts.value = {};
   }
 );
 
@@ -996,6 +1089,152 @@ function computeTrimmedWallCorners(edge, byId, jointGammaMap) {
   return { AL, AR, BL, BR };
 }
 
+function createSegmentBoxMesh(lengthM, depthM, heightM, colorHex) {
+  const g = new THREE.BoxGeometry(Math.max(0.01, lengthM), Math.max(0.01, heightM), Math.max(0.01, depthM));
+  const m = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(colorHex),
+    roughness: 0.86,
+    metalness: 0.05,
+  });
+  return new THREE.Mesh(g, m);
+}
+
+function createDoorLeafMesh(widthM, depthM, heightM, colorHex = "#A06A43") {
+  const mesh = createSegmentBoxMesh(widthM, depthM, heightM, colorHex);
+  const mat = mesh.material;
+  if (mat && !Array.isArray(mat)) {
+    mat.roughness = 0.72;
+    mat.metalness = 0.03;
+  }
+  return mesh;
+}
+
+function getDoorRenderBoundsMm(door) {
+  const fallback = getFallbackDoorModelBoundsMm();
+  return {
+    widthMm: Math.max(10, Number(door?.modelBoundsMm?.widthMm) || Number(door?.widthMm) || fallback.widthMm),
+    heightMm: Math.max(10, Number(door?.modelBoundsMm?.heightMm) || Number(door?.heightMm) || fallback.heightMm),
+    depthMm: Math.max(10, Number(door?.modelBoundsMm?.depthMm) || Number(door?.frameDepthMm) || fallback.depthMm),
+  };
+}
+
+function buildDoorModelInstance(edge, door, angle, baseY, ux, uy, A) {
+  const modelUrl = String(door?.modelUrl || DEFAULT_DOOR_MODEL_URL).trim() || DEFAULT_DOOR_MODEL_URL;
+  const clone = cloneDoorModelSceneSync(modelUrl);
+  if (!clone?.scene) return null;
+  const boundsMm = getDoorRenderBoundsMm({ ...door, modelBoundsMm: clone.boundsMm });
+  const group = new THREE.Group();
+  group.position.set(
+    (Number(A.x) + ux * door.offsetMm) * 0.001,
+    baseY + Math.max(0, Number(door?.sillHeightMm) || 0) * 0.001,
+    -(Number(A.y) + uy * door.offsetMm) * 0.001,
+  );
+  group.rotation.y = angle;
+  const scene = clone.scene;
+  scene.userData.wallId = String(edge?.id || "").trim() || null;
+  scene.userData.entityType = "door";
+  group.userData.wallId = String(edge?.id || "").trim() || null;
+  group.userData.entityType = "door";
+  group.userData.modelBoundsMm = boundsMm;
+  group.add(scene);
+  return group;
+}
+
+function buildDoorAwareWallGroup(edge, byId, wallDoors = [], fallbackFillColor = "#C7CCD1") {
+  const A = byId.get(edge.a);
+  const B = byId.get(edge.b);
+  if (!A || !B) return null;
+  const dxMm = Number(B.x) - Number(A.x);
+  const dyMm = Number(B.y) - Number(A.y);
+  const lenMm = Math.hypot(dxMm, dyMm);
+  if (!Number.isFinite(lenMm) || lenMm < 1) return null;
+  const ux = dxMm / lenMm;
+  const uy = dyMm / lenMm;
+  const angle = Math.atan2(-dyMm, dxMm);
+  const thicknessM = Math.max(0.01, (Number(edge.thickness) || 120) * 0.001);
+  const heightMm = Number.isFinite(Number(edge?.heightMm)) ? Number(edge.heightMm) : 2800;
+  const heightM = Math.max(0.1, heightMm * 0.001);
+  const colorHex = (typeof edge?.color3d === "string" && edge.color3d)
+    ? edge.color3d
+    : ((typeof edge?.fillColor === "string" && edge.fillColor) ? edge.fillColor : fallbackFillColor);
+  const baseY = Math.max(0, (Number(edge?.floorOffsetMm) || 0) * 0.001);
+  const root = new THREE.Group();
+  const placedDoors = (Array.isArray(wallDoors) ? wallDoors : [])
+    .map((door) => ({
+      ...door,
+      modelUrl: String(door?.modelUrl || DEFAULT_DOOR_MODEL_URL).trim() || DEFAULT_DOOR_MODEL_URL,
+      modelBoundsMm: getDoorRenderBoundsMm(door),
+      widthMm: getDoorRenderBoundsMm(door).widthMm,
+      offsetMm: Number(door?.offsetMm) || 0,
+      heightMm: getDoorRenderBoundsMm(door).heightMm,
+      sillHeightMm: Math.max(0, Number(door?.sillHeightMm) || 0),
+      frameThicknessMm: Math.max(1, Number(door?.frameThicknessMm) || 50),
+      frameDepthMm: Math.max(1, Number(door?.frameDepthMm) || getDoorRenderBoundsMm(door).depthMm || 120),
+    }))
+    .sort((a, b) => a.offsetMm - b.offsetMm);
+  const spans = [];
+  let cursorMm = 0;
+  for (const door of placedDoors) {
+    const startMm = Math.max(0, door.offsetMm - door.widthMm * 0.5);
+    const endMm = Math.min(lenMm, door.offsetMm + door.widthMm * 0.5);
+    if (startMm > cursorMm + 1) spans.push([cursorMm, startMm]);
+    cursorMm = Math.max(cursorMm, endMm);
+  }
+  if (cursorMm < lenMm - 1) spans.push([cursorMm, lenMm]);
+
+  const placeBox = (centerMm, lengthMm, boxHeightMm, centerHeightMm, boxDepthMm, customColor = colorHex) => {
+    if (!(lengthMm > 0 && boxHeightMm > 0 && boxDepthMm > 0)) return;
+    const mesh = createSegmentBoxMesh(lengthMm * 0.001, boxDepthMm * 0.001, boxHeightMm * 0.001, customColor);
+    const worldX = Number(A.x) + ux * centerMm;
+    const worldY = Number(A.y) + uy * centerMm;
+    mesh.position.set(worldX * 0.001, baseY + centerHeightMm * 0.001, -worldY * 0.001);
+    mesh.rotation.y = angle;
+    mesh.userData.wallId = String(edge?.id || "").trim() || null;
+    root.add(mesh);
+  };
+
+  for (const [startMm, endMm] of spans) {
+    placeBox((startMm + endMm) * 0.5, endMm - startMm, heightMm, heightMm * 0.5, Number(edge.thickness) || 120);
+  }
+
+  for (const door of placedDoors) {
+    const openingTopMm = door.sillHeightMm + door.heightMm;
+    const headHeightMm = Math.max(0, heightMm - openingTopMm);
+    if (headHeightMm > 0) {
+      placeBox(door.offsetMm, door.widthMm, headHeightMm, openingTopMm + headHeightMm * 0.5, Number(edge.thickness) || 120);
+    }
+    const frameColor = "#7A563D";
+    const jambWidthMm = Math.min(door.frameThicknessMm, Math.max(20, door.widthMm * 0.2));
+    const jambCenterLeft = door.offsetMm - door.widthMm * 0.5 + jambWidthMm * 0.5;
+    const jambCenterRight = door.offsetMm + door.widthMm * 0.5 - jambWidthMm * 0.5;
+    placeBox(jambCenterLeft, jambWidthMm, door.heightMm, door.sillHeightMm + door.heightMm * 0.5, door.frameDepthMm, frameColor);
+    placeBox(jambCenterRight, jambWidthMm, door.heightMm, door.sillHeightMm + door.heightMm * 0.5, door.frameDepthMm, frameColor);
+    placeBox(door.offsetMm, door.widthMm, door.frameThicknessMm, openingTopMm - door.frameThicknessMm * 0.5, door.frameDepthMm, frameColor);
+    const modelInstance = buildDoorModelInstance(edge, door, angle, baseY, ux, uy, A);
+    if (modelInstance) {
+      root.add(modelInstance);
+    } else {
+      const fallbackLeaf = createDoorLeafMesh(
+        Math.max(0.08, door.widthMm * 0.001),
+        Math.max(0.03, Math.min(door.frameDepthMm, Number(edge.thickness) || 120) * 0.001),
+        Math.max(0.12, door.heightMm * 0.001),
+        "#A06A43",
+      );
+      fallbackLeaf.position.set(
+        (Number(A.x) + ux * door.offsetMm) * 0.001,
+        baseY + (door.sillHeightMm + door.heightMm * 0.5) * 0.001,
+        -(Number(A.y) + uy * door.offsetMm) * 0.001,
+      );
+      fallbackLeaf.rotation.y = angle;
+      fallbackLeaf.userData.wallId = String(edge?.id || "").trim() || null;
+      fallbackLeaf.userData.entityType = "door";
+      root.add(fallbackLeaf);
+    }
+  }
+
+  return root.children.length ? root : null;
+}
+
 function makeWallExtrudedMesh(corners, heightM, material) {
   const pts = [corners.AL, corners.BL, corners.BR, corners.AR];
   const h = Math.max(0.1, Number(heightM) || DEFAULT_WALL_HEIGHT_M);
@@ -1044,6 +1283,19 @@ function clearPlaceholderBoxes() {
   });
   scene.remove(placeholderBoxesRoot);
   placeholderBoxesRoot = null;
+}
+
+function clearAssetInstances() {
+  if (!scene || !assetInstancesRoot) return;
+  assetInstancesRoot.traverse((n) => {
+    if (n.geometry) n.geometry.dispose?.();
+    if (n.material) {
+      const mats = Array.isArray(n.material) ? n.material : [n.material];
+      for (const m of mats) m.dispose?.();
+    }
+  });
+  scene.remove(assetInstancesRoot);
+  assetInstancesRoot = null;
 }
 
 function normalizePlaceholderColor(value, fallback = "#7A4A2B") {
@@ -1223,6 +1475,67 @@ function rebuildPlaceholderBoxes() {
   syncSelectionHighlight();
 }
 
+function rebuildAssetInstances() {
+  if (!scene) return;
+  clearAssetInstances();
+  const instances = Array.isArray(props.assetInstances) ? props.assetInstances : [];
+  if (!instances.length) return;
+  const root = new THREE.Group();
+  root.name = "asset-instances";
+  for (const instance of instances) {
+    const modelUrl = String(instance?.modelUrl || "").trim();
+    if (!modelUrl) continue;
+    const cloned = cloneDoorModelSceneSync(modelUrl);
+    if (!cloned?.scene) continue;
+    const targetBounds = {
+      widthMm: Math.max(10, Number(instance?.modelBoundsMm?.widthMm) || Number(cloned?.boundsMm?.widthMm) || 900),
+      heightMm: Math.max(10, Number(instance?.modelBoundsMm?.heightMm) || Number(cloned?.boundsMm?.heightMm) || 2200),
+      depthMm: Math.max(10, Number(instance?.modelBoundsMm?.depthMm) || Number(cloned?.boundsMm?.depthMm) || 120),
+    };
+    const nativeBounds = {
+      widthMm: Math.max(10, Number(cloned?.boundsMm?.widthMm) || targetBounds.widthMm),
+      heightMm: Math.max(10, Number(cloned?.boundsMm?.heightMm) || targetBounds.heightMm),
+      depthMm: Math.max(10, Number(cloned?.boundsMm?.depthMm) || targetBounds.depthMm),
+    };
+    const tx = Number.isFinite(Number(instance?.transform?.x)) ? Number(instance.transform.x) : 0;
+    const ty = Number.isFinite(Number(instance?.transform?.y)) ? Number(instance.transform.y) : 0;
+    const rotRad = Number.isFinite(Number(instance?.transform?.rotRad)) ? Number(instance.transform.rotRad) : 0;
+    const floorOffsetMm = Math.max(0, Number(instance?.transform?.floorOffsetMm) || 0);
+    const opacity = instance?.dragPreview ? 0.72 : 1;
+
+    const instanceRoot = new THREE.Group();
+    instanceRoot.name = `asset-instance-${String(instance?.id || "asset")}`;
+    instanceRoot.userData.assetInstanceId = String(instance?.id || "asset").trim() || "asset";
+    instanceRoot.position.set(tx * 0.001, floorOffsetMm * 0.001, -ty * 0.001);
+    instanceRoot.rotation.y = rotRad;
+
+    cloned.scene.scale.set(
+      targetBounds.widthMm / nativeBounds.widthMm,
+      targetBounds.heightMm / nativeBounds.heightMm,
+      targetBounds.depthMm / nativeBounds.depthMm,
+    );
+    cloned.scene.position.x += (targetBounds.widthMm * 0.5) * 0.001;
+
+    cloned.scene.traverse((obj) => {
+      if (!obj?.isMesh) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats) {
+        if (!mat) continue;
+        mat.transparent = opacity < 0.999;
+        mat.opacity = opacity;
+        mat.depthWrite = opacity >= 0.999;
+        mat.needsUpdate = true;
+      }
+    });
+
+    instanceRoot.add(cloned.scene);
+    root.add(instanceRoot);
+  }
+  if (!root.children.length) return;
+  assetInstancesRoot = root;
+  scene.add(root);
+}
+
 function syncPlaceholderEdgeVisibility() {
   if (!placeholderBoxesRoot) return;
   placeholderBoxesRoot.traverse((obj) => {
@@ -1281,7 +1594,8 @@ function syncSelectionHighlight() {
 function normalizeLinearMembers(snapshot) {
   const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
   const walls = Array.isArray(snapshot?.walls) ? snapshot.walls : [];
-  return { nodes, walls };
+  const doors = Array.isArray(snapshot?.doors) ? snapshot.doors : [];
+  return { nodes, walls, doors };
 }
 
 function buildLinearMemberMesh(w, byId, jointGammaMap, fallbackFillColor = "#C7CCD1") {
@@ -1323,19 +1637,30 @@ function rebuildWalls3d(snapshot) {
           };
     const nodes = Array.isArray(normalized?.nodes) ? normalized.nodes : [];
     const walls = Array.isArray(normalized?.walls) ? normalized.walls : [];
+    const doors = Array.isArray(normalized?.doors) ? normalized.doors : [];
     if (!nodes.length || !walls.length) return;
 
     const byId = new Map(nodes.map((n) => [n.id, n]));
     const root = new THREE.Group();
     root.name = "walls2d-extruded";
     const fallbackFillColor = "#C7CCD1";
+    const doorsByWallId = new Map();
+    for (const door of doors) {
+      const wallId = String(door?.wallId || "").trim();
+      if (!wallId) continue;
+      if (!doorsByWallId.has(wallId)) doorsByWallId.set(wallId, []);
+      doorsByWallId.get(wallId).push(door);
+    }
 
     const jointGammaMap = buildJointGammaMap(walls, byId);
 
     for (const w of walls) {
-      const mesh = buildLinearMemberMesh(w, byId, jointGammaMap, fallbackFillColor);
+      const wallDoors = doorsByWallId.get(String(w?.id || "").trim()) || [];
+      const mesh = wallDoors.length
+        ? buildDoorAwareWallGroup(w, byId, wallDoors, fallbackFillColor)
+        : buildLinearMemberMesh(w, byId, jointGammaMap, fallbackFillColor);
       if (!mesh) continue;
-      mesh.userData.wallId = String(w?.id || "").trim() || null;
+      if (mesh.isObject3D && !mesh.userData.wallId) mesh.userData.wallId = String(w?.id || "").trim() || null;
       root.add(mesh);
     }
 
@@ -1344,6 +1669,26 @@ function rebuildWalls3d(snapshot) {
     scene.add(root);
   } catch (err) {
     console.error("[GlbViewerWidget] rebuildWalls3d failed", err);
+  }
+}
+
+function ensureDoorAssetsReady(snapshot) {
+  const doors = Array.isArray(snapshot?.doors) ? snapshot.doors : [];
+  const assetInstances = Array.isArray(props.assetInstances) ? props.assetInstances : [];
+  const urls = [...new Set([
+    ...doors.map((door) => String(door?.modelUrl || DEFAULT_DOOR_MODEL_URL).trim() || DEFAULT_DOOR_MODEL_URL),
+    ...assetInstances.map((instance) => String(instance?.modelUrl || DEFAULT_DOOR_MODEL_URL).trim() || DEFAULT_DOOR_MODEL_URL),
+  ])];
+  if (!urls.length) return;
+  for (const url of urls) {
+    loadDoorModelAsset(url)
+      .then(() => {
+        if (!scene) return;
+        rebuildWalls3d(props.walls2d);
+        rebuildAssetInstances();
+        if (props.previewOnly) fitCameraToAll(PREVIEW_VIEW_DIR);
+      })
+      .catch(() => {});
   }
 }
 
@@ -1477,6 +1822,11 @@ function computeSelectionBounds() {
       bounds.expandByObject(placeholderBoxesRoot);
       hasSelection = true;
     }
+  }
+
+  if (assetInstancesRoot?.children?.length) {
+    bounds.expandByObject(assetInstancesRoot);
+    hasSelection = true;
   }
 
   return hasSelection && !bounds.isEmpty() ? bounds : null;
@@ -1667,6 +2017,15 @@ watch(
 );
 
 watch(
+  () => props.assetInstances,
+  () => {
+    ensureDoorAssetsReady(props.walls2d);
+    rebuildAssetInstances();
+  },
+  { immediate: true, deep: true }
+);
+
+watch(
   () => props.model2dTransform,
   (t) => {
     applyModel2dTransformTo3d(t);
@@ -1691,6 +2050,7 @@ watch(
 watch(
   () => props.walls2d,
   (snap) => {
+    ensureDoorAssetsReady(snap);
     rebuildWalls3d(snap);
   },
   { immediate: true, deep: true }
@@ -1806,8 +2166,10 @@ onMounted(async () => {
   dir.position.set(3, 6, 4);
   scene.add(dir);
 
+  ensureDoorAssetsReady(props.walls2d);
   rebuildWalls3d(props.walls2d);
   rebuildPlaceholderBoxes();
+  rebuildAssetInstances();
 
   // GLB model loading is temporarily disabled.
   // This keeps the 3D widget active for generated walls while removing
@@ -1896,6 +2258,7 @@ onBeforeUnmount(() => {
   modelBasePosition = null;
   clearWalls3d();
   clearPlaceholderBoxes();
+  clearAssetInstances();
 
   try {
     axesHelper?.removeFromParent?.();
@@ -2107,12 +2470,12 @@ defineExpose({
           <div class="glbWallAttrs__fieldBody">
             <input
               class="glbWallAttrs__input"
-              type="number"
-              min="1"
-              step="0.1"
-              :value="isGroupEditMode ? '' : cmToDisplay(wallMetrics.lengthCm)"
+              type="text"
+              inputmode="decimal"
+              :value="isGroupEditMode ? '' : getStyleFieldValue('lengthCm', wallStyleDraft.lengthCm ?? wallMetrics.lengthCm)"
               :disabled="isGroupEditMode"
-              @input="patchWallStyleDraft({ lengthCm: displayToCm($event.target.value) })"
+              @input="patchWallStyleDraftInput('lengthCm', $event.target.value)"
+              @blur="clearStyleFieldDraft('lengthCm')"
             />
             <span class="glbWallAttrs__unit">{{ displayUnitLabel }}</span>
           </div>
@@ -2122,11 +2485,11 @@ defineExpose({
           <div class="glbWallAttrs__fieldBody">
             <input
               class="glbWallAttrs__input"
-              type="number"
-              min="0.1"
-              step="0.5"
-              :value="cmToDisplay(wallStyleDraft.thicknessCm)"
-              @input="patchWallStyleDraft({ thicknessCm: displayToCm($event.target.value) })"
+              type="text"
+              inputmode="decimal"
+              :value="getStyleFieldValue('thicknessCm', wallStyleDraft.thicknessCm)"
+              @input="patchWallStyleDraftInput('thicknessCm', $event.target.value)"
+              @blur="clearStyleFieldDraft('thicknessCm')"
             />
             <span class="glbWallAttrs__unit">{{ displayUnitLabel }}</span>
           </div>
@@ -2136,11 +2499,11 @@ defineExpose({
           <div class="glbWallAttrs__fieldBody">
             <input
               class="glbWallAttrs__input"
-              type="number"
-              min="1"
-              step="1"
-              :value="cmToDisplay(wallStyleDraft.heightCm)"
-              @input="patchWallStyleDraft({ heightCm: displayToCm($event.target.value) })"
+              type="text"
+              inputmode="decimal"
+              :value="getStyleFieldValue('heightCm', wallStyleDraft.heightCm)"
+              @input="patchWallStyleDraftInput('heightCm', $event.target.value)"
+              @blur="clearStyleFieldDraft('heightCm')"
             />
             <span class="glbWallAttrs__unit">{{ displayUnitLabel }}</span>
           </div>
@@ -2150,13 +2513,33 @@ defineExpose({
           <div class="glbWallAttrs__fieldBody">
             <input
               class="glbWallAttrs__input"
+              type="text"
+              inputmode="decimal"
+              :value="getStyleFieldValue('floorOffsetCm', wallStyleDraft.floorOffsetCm)"
+              @input="patchWallStyleDraftInput('floorOffsetCm', $event.target.value)"
+              @blur="clearStyleFieldDraft('floorOffsetCm')"
+            />
+            <span class="glbWallAttrs__unit">{{ displayUnitLabel }}</span>
+          </div>
+        </label>
+        <label v-if="isDoorEntity" class="glbWallAttrs__editRow">
+          <span class="glbWallAttrs__fieldTitle">فاصله از ابتدای دیوار</span>
+          <div class="glbWallAttrs__fieldBody">
+            <input
+              class="glbWallAttrs__input"
               type="number"
               min="0"
               step="0.1"
-              :value="cmToDisplay(wallStyleDraft.floorOffsetCm)"
-              @input="patchWallStyleDraft({ floorOffsetCm: displayToCm($event.target.value) })"
+              :value="cmToDisplay(wallMetrics?.offsetCm || 0)"
+              @input="patchSelectedWallCoords({ offsetCm: displayToCm($event.target.value) })"
             />
             <span class="glbWallAttrs__unit">{{ displayUnitLabel }}</span>
+          </div>
+        </label>
+        <label v-if="isDoorEntity" class="glbWallAttrs__editRow">
+          <span class="glbWallAttrs__fieldTitle">دیوار والد</span>
+          <div class="glbWallAttrs__fieldBody">
+            <input class="glbWallAttrs__input" type="text" :value="wallMetrics?.wallName || ''" disabled />
           </div>
         </label>
         <label v-if="showColorField" class="glbWallAttrs__editRow">
@@ -2290,7 +2673,7 @@ defineExpose({
       </div>
     </template>
 
-    <div v-else-if="!hasAnyAttrSelection" class="menuPanel__hint glbWallAttrs__hint--soft">ترسیم یا طرح سفارش خود را انتخاب نمایید</div>
-    <div v-else class="menuPanel__hint glbWallAttrs__hint--soft">برای مورد انتخاب‌شده صفتی نمایش داده نشد.</div>
+    <div v-else-if="!showObjectStyleEditor && !hasAnyAttrSelection" class="menuPanel__hint glbWallAttrs__hint--soft">ترسیم یا طرح سفارش خود را انتخاب نمایید</div>
+    <div v-else-if="!showObjectStyleEditor" class="menuPanel__hint glbWallAttrs__hint--soft">برای مورد انتخاب‌شده صفتی نمایش داده نشد.</div>
   </div>
 </template>

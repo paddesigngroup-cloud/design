@@ -108,6 +108,7 @@ export function createWallApp({
     hoverDimTextHiddenId = null;
     hoverWallId = null;
     hoverHiddenId = null;
+    hoverDoorId = null;
     hoverDimId = null;
     hoverObjectAxis = null;
     hoverPassiveModelId = null;
@@ -173,7 +174,7 @@ export function createWallApp({
   unit: "cm",
 
   // Modal tool selection (AutoCAD-like)
-  activeTool: "wall", // "select" | "wall" | "hidden" | "dim" | "beam"
+  activeTool: "wall", // "select" | "wall" | "hidden" | "dim" | "beam" | "door"
   // Object snap + guides overlay
   snapOn: true,
   snapCornerEnabled: true,
@@ -396,6 +397,268 @@ function dist2(ax, ay, bx, by) {
   const dx = bx - ax;
   const dy = by - ay;
   return dx * dx + dy * dy;
+}
+function nextDoorId() {
+  const id = `d${_doorId++}`;
+  return id;
+}
+function syncDoorCounterFromScene() {
+  let maxId = 0;
+  for (const door of doors) {
+    const m = String(door?.id || "").match(/^d(\d+)$/i);
+    if (!m) continue;
+    const value = Number(m[1]);
+    if (Number.isFinite(value) && value > maxId) maxId = value;
+  }
+  _doorId = maxId + 1;
+}
+function getWallSpan(edge) {
+  if (!edge || isBeamEdge(edge) || isColumnEdge(edge)) return null;
+  const A = graph.getNode(edge.a);
+  const B = graph.getNode(edge.b);
+  if (!A || !B) return null;
+  const dx = B.x - A.x;
+  const dy = B.y - A.y;
+  const lenMm = Math.hypot(dx, dy);
+  if (!Number.isFinite(lenMm) || lenMm < 1e-6) return null;
+  const ux = dx / lenMm;
+  const uy = dy / lenMm;
+  const nx = -uy;
+  const ny = ux;
+  return { A, B, lenMm, ux, uy, nx, ny };
+}
+function cloneDoor(door) {
+  const modelBoundsWidthMm = Math.max(10, Number(door?.modelBoundsMm?.widthMm) || 0);
+  const modelBoundsHeightMm = Math.max(10, Number(door?.modelBoundsMm?.heightMm) || 0);
+  const modelBoundsDepthMm = Math.max(10, Number(door?.modelBoundsMm?.depthMm) || 0);
+  const widthMm = Math.max(10, Number(door?.widthMm) || modelBoundsWidthMm || 900);
+  const heightMm = Math.max(10, Number(door?.heightMm) || modelBoundsHeightMm || 2200);
+  const frameDepthMm = Math.max(1, Number(door?.frameDepthMm) || modelBoundsDepthMm || 120);
+  return {
+    id: String(door?.id || "").trim(),
+    wallId: String(door?.wallId || "").trim(),
+    presetId: String(door?.presetId || "").trim(),
+    name: String(door?.name || "").trim() || "Door",
+    offsetMm: Number(door?.offsetMm) || 0,
+    widthMm,
+    heightMm,
+    sillHeightMm: Math.max(0, Number(door?.sillHeightMm) || 0),
+    frameThicknessMm: Math.max(1, Number(door?.frameThicknessMm) || 50),
+    frameDepthMm,
+    modelUrl: String(door?.modelUrl || "").trim(),
+    modelBoundsMm: {
+      widthMm,
+      heightMm,
+      depthMm: frameDepthMm,
+    },
+  };
+}
+function getDoorsForWall(wallId) {
+  const key = String(wallId || "").trim();
+  return doors.filter((door) => String(door?.wallId || "").trim() === key);
+}
+function computeDoorInterval(door) {
+  const widthMm = Math.max(10, Number(door?.widthMm) || 900);
+  const offsetMm = Number(door?.offsetMm) || 0;
+  return {
+    startMm: offsetMm - widthMm * 0.5,
+    endMm: offsetMm + widthMm * 0.5,
+  };
+}
+function clampDoorOffsetForWall(edge, widthMm, offsetMm) {
+  const span = getWallSpan(edge);
+  if (!span) return null;
+  const half = Math.max(5, Number(widthMm) || 0) * 0.5;
+  if (span.lenMm <= half * 2) return null;
+  return clamp(Number(offsetMm) || 0, half, span.lenMm - half);
+}
+function doorsOverlapOnWall(wallId, candidate, ignoreDoorId = null) {
+  const nextInterval = computeDoorInterval(candidate);
+  const ignoreKey = String(ignoreDoorId || "").trim();
+  return getDoorsForWall(wallId).some((door) => {
+    if (!door) return false;
+    if (ignoreKey && String(door.id || "").trim() === ignoreKey) return false;
+    const other = computeDoorInterval(door);
+    return nextInterval.startMm < other.endMm && nextInterval.endMm > other.startMm;
+  });
+}
+function normalizeDoorForWall(door) {
+  if (!door) return null;
+  const edge = graph.getWall(door.wallId);
+  if (!edge || isBeamEdge(edge) || isColumnEdge(edge)) return null;
+  const widthMm = Math.max(10, Number(door.widthMm) || 900);
+  const clampedOffset = clampDoorOffsetForWall(edge, widthMm, door.offsetMm);
+  if (!Number.isFinite(clampedOffset)) return null;
+  const next = cloneDoor({ ...door, offsetMm: clampedOffset });
+  if (doorsOverlapOnWall(next.wallId, next, next.id)) {
+    return next;
+  }
+  return next;
+}
+function normalizeDoorsForAllWalls() {
+  const normalized = [];
+  const byWall = new Map();
+  for (const raw of doors) {
+    const next = normalizeDoorForWall(raw);
+    if (!next) continue;
+    if (!byWall.has(next.wallId)) byWall.set(next.wallId, []);
+    byWall.get(next.wallId).push(next);
+  }
+  for (const [, list] of byWall) {
+    list.sort((a, b) => (a.offsetMm - b.offsetMm) || String(a.id).localeCompare(String(b.id)));
+    const placed = [];
+    for (const door of list) {
+      let next = { ...door };
+      const widthMm = Math.max(10, Number(next.widthMm) || 900);
+      const edge = graph.getWall(next.wallId);
+      const clampedOffset = clampDoorOffsetForWall(edge, widthMm, next.offsetMm);
+      if (!Number.isFinite(clampedOffset)) continue;
+      next.offsetMm = clampedOffset;
+      const interval = computeDoorInterval(next);
+      const overlaps = placed.some((other) => {
+        const otherInterval = computeDoorInterval(other);
+        return interval.startMm < otherInterval.endMm && interval.endMm > otherInterval.startMm;
+      });
+      if (overlaps) continue;
+      placed.push(next);
+      normalized.push(next);
+    }
+  }
+  doors = normalized;
+  syncDoorCounterFromScene();
+}
+function removeDoorsForWallIds(wallIds = []) {
+  const ids = new Set((Array.isArray(wallIds) ? wallIds : []).map((id) => String(id || "").trim()).filter(Boolean));
+  if (!ids.size) return;
+  doors = doors.filter((door) => !ids.has(String(door?.wallId || "").trim()));
+  const selectedIds = new Set((Array.isArray(selectedDoorIds) ? selectedDoorIds : []).map((id) => String(id || "").trim()));
+  if (selectedDoorId && selectedIds.size === 0) selectedIds.add(String(selectedDoorId || ""));
+  for (const doorId of [...selectedIds]) {
+    const exists = doors.some((door) => String(door?.id || "") === doorId);
+    if (exists) continue;
+    if (selectedDoorId === doorId) selectedDoorId = null;
+  }
+  selectedDoorIds = selectedDoorIds.filter((id) => doors.some((door) => String(door?.id || "") === String(id || "")));
+  if (hoverDoorId && !doors.some((door) => String(door?.id || "") === String(hoverDoorId || ""))) hoverDoorId = null;
+}
+function getDoorById(doorId) {
+  const key = String(doorId || "").trim();
+  return doors.find((door) => String(door?.id || "").trim() === key) || null;
+}
+function getDoorWorldGeometry(door) {
+  const edge = graph.getWall(door?.wallId);
+  const span = getWallSpan(edge);
+  if (!span) return null;
+  const widthMm = Math.max(10, Number(door?.widthMm) || 900);
+  const offsetMm = clampDoorOffsetForWall(edge, widthMm, door?.offsetMm);
+  if (!Number.isFinite(offsetMm)) return null;
+  const halfWidth = widthMm * 0.5;
+  const startMm = offsetMm - halfWidth;
+  const endMm = offsetMm + halfWidth;
+  const frameDepth = Math.min(Math.max(2, Number(door?.frameDepthMm) || span.lenMm), Math.max(10, Number(edge?.thickness) || 120));
+  const halfDepth = frameDepth * 0.5;
+  const center = {
+    x: span.A.x + span.ux * offsetMm,
+    y: span.A.y + span.uy * offsetMm,
+  };
+  const start = {
+    x: span.A.x + span.ux * startMm,
+    y: span.A.y + span.uy * startMm,
+  };
+  const end = {
+    x: span.A.x + span.ux * endMm,
+    y: span.A.y + span.uy * endMm,
+  };
+  const outer = [
+    { x: start.x + span.nx * halfDepth, y: start.y + span.ny * halfDepth },
+    { x: end.x + span.nx * halfDepth, y: end.y + span.ny * halfDepth },
+    { x: end.x - span.nx * halfDepth, y: end.y - span.ny * halfDepth },
+    { x: start.x - span.nx * halfDepth, y: start.y - span.ny * halfDepth },
+  ];
+  const screenPts = outer.map((pt) => worldToScreen(pt.x, pt.y));
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const pt of screenPts) {
+    minX = Math.min(minX, pt.x);
+    minY = Math.min(minY, pt.y);
+    maxX = Math.max(maxX, pt.x);
+    maxY = Math.max(maxY, pt.y);
+  }
+  return {
+    edge,
+    span,
+    widthMm,
+    offsetMm,
+    startMm,
+    endMm,
+    center,
+    start,
+    end,
+    halfDepth,
+    outer,
+    screenRect: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+  };
+}
+function computeDoorPlacementCandidate(clientX, clientY, preset) {
+  const rect = canvas.getBoundingClientRect();
+  const offsetX = clientX - rect.left;
+  const offsetY = clientY - rect.top;
+  const world = screenToWorld(offsetX, offsetY);
+  let best = null;
+  let bestD2 = 140 * 140;
+  for (const edge of graph.walls.values()) {
+    if (!edge || isBeamEdge(edge) || isColumnEdge(edge)) continue;
+    const span = getWallSpan(edge);
+    if (!span) continue;
+    const apx = world.x - span.A.x;
+    const apy = world.y - span.A.y;
+    let t = dot(apx, apy, span.ux, span.uy);
+    t = clamp(t, 0, span.lenMm);
+    const px = span.A.x + span.ux * t;
+    const py = span.A.y + span.uy * t;
+    const d2 = dist2(world.x, world.y, px, py);
+    if (d2 > bestD2) continue;
+    bestD2 = d2;
+    best = { edge, span, t, point: { x: px, y: py } };
+  }
+  const payload = preset || {};
+  const widthMm = Math.max(10, Number(payload.widthMm) || 900);
+  if (!best) {
+    return {
+      valid: false,
+      reason: "no_wall",
+      widthMm,
+      heightMm: Math.max(10, Number(payload.heightMm) || 2200),
+      sillHeightMm: Math.max(0, Number(payload.sillHeightMm) || 0),
+      frameThicknessMm: Math.max(1, Number(payload.frameThicknessMm) || 50),
+      frameDepthMm: Math.max(1, Number(payload.frameDepthMm) || 120),
+    };
+  }
+  const clampedOffset = clampDoorOffsetForWall(best.edge, widthMm, best.t);
+  if (!Number.isFinite(clampedOffset)) {
+    return { ...best, valid: false, reason: "too_wide", widthMm };
+  }
+  const candidate = cloneDoor({
+    id: "",
+    wallId: best.edge.id,
+    presetId: payload.presetId,
+    name: payload.name,
+    offsetMm: clampedOffset,
+    widthMm,
+    heightMm: Math.max(10, Number(payload.heightMm) || 2200),
+    sillHeightMm: Math.max(0, Number(payload.sillHeightMm) || 0),
+    frameThicknessMm: Math.max(1, Number(payload.frameThicknessMm) || 50),
+    frameDepthMm: Math.max(1, Number(payload.frameDepthMm) || 120),
+  });
+  const overlaps = doorsOverlapOnWall(best.edge.id, candidate, null);
+  return {
+    ...best,
+    ...candidate,
+    valid: !overlaps,
+    reason: overlaps ? "overlap" : null,
+  };
 }
 function isColumnEdge(edge) {
   if (String(edge?.elementType || "").toLowerCase() === "column") return true;
@@ -845,6 +1108,8 @@ const graph = new WallGraph();
 graph.clear();
 const hiddenGraph = new WallGraph();
 hiddenGraph.clear();
+let doors = [];
+let _doorId = 1;
 
 let selectedWallId = null;
 let hoverWallId = null;
@@ -856,9 +1121,27 @@ let hoverDimId = null;
 let selectedWallIds = [];
 let selectedHiddenIds = [];
 let selectedDimIds = [];
+let selectedDoorId = null;
+let hoverDoorId = null;
+let selectedDoorIds = [];
 let hoverDimTextWallId = null;
 let hoverDimTextHiddenId = null;
 let hoverWallHandle = null; // { type, wallId }
+const doorPlacement = {
+  active: false,
+  preset: null,
+  clientX: 0,
+  clientY: 0,
+  candidate: null,
+};
+const doorDrag = {
+  active: false,
+  doorId: null,
+  startClientX: 0,
+  startClientY: 0,
+  startOffsetMm: 0,
+  moved: false,
+};
 const wallDimDrag = {
   active: false,
   graphType: "wall", // "wall" | "hidden"
@@ -1029,6 +1312,7 @@ function clearGroupSelection() {
   selectedWallIds = [];
   selectedHiddenIds = [];
   selectedDimIds = [];
+  selectedDoorIds = [];
   selectedPassiveModelIds = [];
 }
 
@@ -1058,6 +1342,11 @@ function setSingleOrMultiSelection(kind, ids) {
   if (kind === "dim") {
     selectedDimId = next.length === 1 ? next[0] : null;
     selectedDimIds = next.length > 1 ? next : [];
+    return;
+  }
+  if (kind === "door") {
+    selectedDoorId = next.length === 1 ? next[0] : null;
+    selectedDoorIds = next.length > 1 ? next : [];
     return;
   }
   if (kind === "passive_model") {
@@ -2451,6 +2740,17 @@ function snapshotGraph(g) {
   return { _nid: g._nid, _wid: g._wid, nodes, walls };
 }
 
+function snapshotDoors(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((door) => cloneDoor(door))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+}
+
+function restoreDoors(snap) {
+  doors = (Array.isArray(snap) ? snap : []).map((door) => cloneDoor(door)).filter((door) => !!door.id && !!door.wallId);
+  normalizeDoorsForAllWalls();
+}
+
 function restoreGraph(g, snap) {
   g.nodes = new Map();
   g.walls = new Map();
@@ -2728,6 +3028,7 @@ function _stateSignature(snap) {
   return JSON.stringify({
     graph: snap.graphSnap,
     hiddenGraph: snap.hiddenGraphSnap,
+    doors: snap.doorsSnap,
     tool: snap.toolSnap,
     hiddenTool: snap.hiddenToolSnap,
     beamTool: snap.beamToolSnap,
@@ -2784,6 +3085,7 @@ class UndoManager {
     const dimToolSnap = snapshotDimTool(this.dimTool);
     const dimensionsSnap = snapshotDimensions(this.dimensions);
     const model2dSnap = snapshotModel2d(this.model2d);
+    const doorsSnap = snapshotDoors(doors);
     const passiveModelsSnap = snapshotPassiveModels(passiveModels);
     const externalHistoryState = this.captureExternalHistoryState?.() ?? null;
     return {
@@ -2795,6 +3097,7 @@ class UndoManager {
       dimToolSnap,
       dimensionsSnap,
       model2dSnap,
+      doorsSnap,
       passiveModelsSnap,
       externalHistoryState,
       selectedWallId: sel.selectedWallId,
@@ -2803,9 +3106,12 @@ class UndoManager {
       hoverHiddenId: sel.hoverHiddenId,
       selectedDimId: sel.selectedDimId,
       hoverDimId: sel.hoverDimId,
+      selectedDoorId: sel.selectedDoorId,
+      hoverDoorId: sel.hoverDoorId,
       selectedWallIds: Array.isArray(sel.selectedWallIds) ? sel.selectedWallIds.slice() : [],
       selectedHiddenIds: Array.isArray(sel.selectedHiddenIds) ? sel.selectedHiddenIds.slice() : [],
       selectedDimIds: Array.isArray(sel.selectedDimIds) ? sel.selectedDimIds.slice() : [],
+      selectedDoorIds: Array.isArray(sel.selectedDoorIds) ? sel.selectedDoorIds.slice() : [],
       selectedPassiveModelId: sel.selectedPassiveModelId ?? null,
       selectedPassiveModelIds: Array.isArray(sel.selectedPassiveModelIds) ? sel.selectedPassiveModelIds.slice() : [],
       selectedModelOutline: !!sel.selectedModelOutline,
@@ -2847,6 +3153,7 @@ class UndoManager {
     restoreDimTool(this.dimTool, snap.dimToolSnap);
     restoreDimensions(this.dimensions, snap.dimensionsSnap);
     restoreModel2d(this.model2d, snap.model2dSnap);
+    restoreDoors(snap.doorsSnap);
     restorePassiveModels(snap.passiveModelsSnap);
     if (typeof this.restoreExternalHistoryState === "function") {
       await this.restoreExternalHistoryState(snap.externalHistoryState ?? null, { direction: "undo" });
@@ -2878,6 +3185,14 @@ class UndoManager {
     const nextSelectedDims = Array.isArray(snap.selectedDimIds)
       ? snap.selectedDimIds.filter((id) => hasDim(id))
       : [];
+    let nextSelectedDoor = snap.selectedDoorId ?? null;
+    let nextHoverDoor = snap.hoverDoorId ?? null;
+    const hasDoor = (id) => !!getDoorById(id);
+    if (nextSelectedDoor && !hasDoor(nextSelectedDoor)) nextSelectedDoor = null;
+    if (nextHoverDoor && !hasDoor(nextHoverDoor)) nextHoverDoor = null;
+    const nextSelectedDoors = Array.isArray(snap.selectedDoorIds)
+      ? snap.selectedDoorIds.filter((id) => hasDoor(id))
+      : [];
     const validPassiveIds = new Set(passiveModels.map((model) => String(model?.id || "")));
     const nextSelectedPassiveModelId = validPassiveIds.has(String(snap.selectedPassiveModelId || ""))
       ? snap.selectedPassiveModelId
@@ -2893,9 +3208,12 @@ class UndoManager {
       hoverHiddenId: nextHoverHidden,
       selectedDimId: nextSelectedDim,
       hoverDimId: nextHoverDim,
+      selectedDoorId: nextSelectedDoor,
+      hoverDoorId: nextHoverDoor,
       selectedWallIds: nextSelectedWalls,
       selectedHiddenIds: nextSelectedHiddens,
       selectedDimIds: nextSelectedDims,
+      selectedDoorIds: nextSelectedDoors,
       selectedPassiveModelId: nextSelectedPassiveModelId,
       selectedPassiveModelIds: nextSelectedPassiveModelIds,
       selectedModelOutline: !!snap.selectedModelOutline,
@@ -2921,6 +3239,7 @@ class UndoManager {
     restoreDimTool(this.dimTool, snap.dimToolSnap);
     restoreDimensions(this.dimensions, snap.dimensionsSnap);
     restoreModel2d(this.model2d, snap.model2dSnap);
+    restoreDoors(snap.doorsSnap);
     restorePassiveModels(snap.passiveModelsSnap);
     if (typeof this.restoreExternalHistoryState === "function") {
       await this.restoreExternalHistoryState(snap.externalHistoryState ?? null, { direction: "redo" });
@@ -2951,6 +3270,14 @@ class UndoManager {
     const nextSelectedDims = Array.isArray(snap.selectedDimIds)
       ? snap.selectedDimIds.filter((id) => hasDim(id))
       : [];
+    let nextSelectedDoor = snap.selectedDoorId ?? null;
+    let nextHoverDoor = snap.hoverDoorId ?? null;
+    const hasDoor = (id) => !!getDoorById(id);
+    if (nextSelectedDoor && !hasDoor(nextSelectedDoor)) nextSelectedDoor = null;
+    if (nextHoverDoor && !hasDoor(nextHoverDoor)) nextHoverDoor = null;
+    const nextSelectedDoors = Array.isArray(snap.selectedDoorIds)
+      ? snap.selectedDoorIds.filter((id) => hasDoor(id))
+      : [];
     const validPassiveIds = new Set(passiveModels.map((model) => String(model?.id || "")));
     const nextSelectedPassiveModelId = validPassiveIds.has(String(snap.selectedPassiveModelId || ""))
       ? snap.selectedPassiveModelId
@@ -2966,9 +3293,12 @@ class UndoManager {
       hoverHiddenId: nextHoverHidden,
       selectedDimId: nextSelectedDim,
       hoverDimId: nextHoverDim,
+      selectedDoorId: nextSelectedDoor,
+      hoverDoorId: nextHoverDoor,
       selectedWallIds: nextSelectedWalls,
       selectedHiddenIds: nextSelectedHiddens,
       selectedDimIds: nextSelectedDims,
+      selectedDoorIds: nextSelectedDoors,
       selectedPassiveModelId: nextSelectedPassiveModelId,
       selectedPassiveModelIds: nextSelectedPassiveModelIds,
       selectedModelOutline: !!snap.selectedModelOutline,
@@ -3167,6 +3497,7 @@ function initCursorImagesOnce() {
   loadCursorImg("hidden", resolveIconUrls("hidden_wall_drawing.png"));
   loadCursorImg("dim", resolveIconUrls("dimention_drawimg.png"));
   loadCursorImg("beam", resolveIconUrls("beam_pointer.png"));
+  loadCursorImg("door", resolveIconUrls("door.png"));
   loadWallHandleImg("free", resolveIconUrls("arrow.png"));
   loadWallHandleImg("len", resolveIconUrls("double-arrow.png"));
   loadWallHandleImg("mid", resolveIconUrls("fix-arrow.png"));
@@ -3553,6 +3884,32 @@ function placeColumnAtClient(clientX, clientY, recordUndo = true) {
 
 const placeBeamPresetAtClientFn = (lines, clientX, clientY, recordUndo = true) =>
   placeWallPresetAtClient(lines, clientX, clientY, recordUndo, "beam");
+
+function beginDoorPlacementAtClient(preset, clientX, clientY) {
+  if (!preset || !isFinite(clientX) || !isFinite(clientY)) return false;
+  doorPlacement.active = true;
+  doorPlacement.preset = cloneDoor({
+    id: "",
+    wallId: "",
+    presetId: preset.presetId,
+    name: preset.name,
+    offsetMm: 0,
+    widthMm: preset.widthMm,
+    heightMm: preset.heightMm,
+    sillHeightMm: preset.sillHeightMm,
+    frameThicknessMm: preset.frameThicknessMm,
+    frameDepthMm: preset.frameDepthMm,
+    modelUrl: preset.modelUrl,
+    modelBoundsMm: preset.modelBoundsMm,
+  });
+  doorPlacement.clientX = clientX;
+  doorPlacement.clientY = clientY;
+  doorPlacement.candidate = computeDoorPlacementCandidate(clientX, clientY, doorPlacement.preset);
+  state.activeTool = "door";
+  setUiCursorMode("door");
+  updateCanvasCursor();
+  return true;
+}
 
 function placeModel2dPresetAtClient(lines, clientX, clientY, recordUndo = true) {
   if (!Array.isArray(lines) || lines.length === 0 || !isFinite(clientX) || !isFinite(clientY)) return;
@@ -6945,6 +7302,65 @@ function drawWallBodyFromCorners(c, edge) {
   ctx.restore();
 }
 
+function drawDoorGeometry(door, opts = {}) {
+  const geom = getDoorWorldGeometry(door);
+  if (!geom) return;
+  const frameColor = opts.frameColor || "#5B4636";
+  const openingColor = opts.openingColor || state.bgColor || "#FFFFFF";
+  const screenPts = geom.outer.map((pt) => worldToScreen(pt.x, pt.y));
+  const frameInset = Math.max(2, Math.min(geom.halfDepth * 0.5, Number(door?.frameThicknessMm) || 50));
+  const inner = [
+    { x: geom.start.x + geom.span.nx * frameInset, y: geom.start.y + geom.span.ny * frameInset },
+    { x: geom.end.x + geom.span.nx * frameInset, y: geom.end.y + geom.span.ny * frameInset },
+    { x: geom.end.x - geom.span.nx * frameInset, y: geom.end.y - geom.span.ny * frameInset },
+    { x: geom.start.x - geom.span.nx * frameInset, y: geom.start.y - geom.span.ny * frameInset },
+  ].map((pt) => worldToScreen(pt.x, pt.y));
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(screenPts[0].x, screenPts[0].y);
+  for (let i = 1; i < screenPts.length; i++) ctx.lineTo(screenPts[i].x, screenPts[i].y);
+  ctx.closePath();
+  ctx.fillStyle = openingColor;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = frameColor;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(inner[0].x, inner[0].y);
+  ctx.lineTo(inner[1].x, inner[1].y);
+  ctx.lineTo(inner[2].x, inner[2].y);
+  ctx.lineTo(inner[3].x, inner[3].y);
+  ctx.closePath();
+  ctx.strokeStyle = frameColor;
+  ctx.stroke();
+  ctx.beginPath();
+  const center = worldToScreen(geom.center.x, geom.center.y);
+  const swingEnd = worldToScreen(
+    geom.center.x + geom.span.nx * Math.max(10, geom.halfDepth * 0.8),
+    geom.center.y + geom.span.ny * Math.max(10, geom.halfDepth * 0.8)
+  );
+  ctx.moveTo(center.x, center.y);
+  ctx.lineTo(swingEnd.x, swingEnd.y);
+  ctx.strokeStyle = frameColor;
+  ctx.stroke();
+  if (!opts.skipHitTarget && geom.screenRect.w > 0 && geom.screenRect.h > 0) {
+    addRectTarget("door_body", door.id, geom.screenRect, { doorId: door.id });
+  }
+  ctx.restore();
+}
+
+function drawDoors2d() {
+  for (const door of doors) drawDoorGeometry(door);
+  if (doorPlacement.active && doorPlacement.candidate) {
+    const candidate = doorPlacement.candidate;
+    drawDoorGeometry(candidate, {
+      openingColor: candidate.valid ? "rgba(255,255,255,0.92)" : "rgba(255,210,210,0.9)",
+      frameColor: candidate.valid ? "#0F766E" : "#DC2626",
+      skipHitTarget: true,
+    });
+  }
+}
+
 function drawWallName(edge, ax, ay, bx, by) {
   const midW = { x: (ax + bx) / 2, y: (ay + by) / 2 };
   const midS = worldToScreen(midW.x, midW.y);
@@ -7488,18 +7904,20 @@ function drawToolCursor() {
     !!hoverObjectAxis || !!axisDrag.active ||
     !!hoverPassiveModelId ||
     !!hoverModelOutline ||
-    !!hoverWallId || !!hoverHiddenId || !!hoverDimId ||
-    !!selectedWallId || !!selectedHiddenId || !!selectedDimId || !!selectedModelOutline || !!selectedPassiveModelId ||
-    selectedWallIds.length > 0 || selectedHiddenIds.length > 0 || selectedDimIds.length > 0 || selectedPassiveModelIds.length > 0;
+    !!hoverWallId || !!hoverHiddenId || !!hoverDimId || !!hoverDoorId ||
+    !!selectedWallId || !!selectedHiddenId || !!selectedDimId || !!selectedDoorId || !!selectedModelOutline || !!selectedPassiveModelId ||
+    selectedWallIds.length > 0 || selectedHiddenIds.length > 0 || selectedDimIds.length > 0 || selectedDoorIds.length > 0 || selectedPassiveModelIds.length > 0;
 
   // Priority: explicit UI cursor mode (from Vue) -> drawing tool -> hover -> idle.
   let key = null;
   if (uiCursorMode === "beam") key = "beam";
   else if (uiCursorMode === "clicker") key = "clicker";
   else if (uiCursorMode === "wall") key = "wall";
+  else if (uiCursorMode === "door") key = "door";
   else if (uiCursorMode === "hidden") key = "hidden";
   else if (uiCursorMode === "dim") key = "dim";
   else if (state.activeTool === "wall") key = "wall";
+  else if (state.activeTool === "door") key = "door";
   else if (state.activeTool === "hidden") key = "hidden";
   else if (state.activeTool === "dim") key = "dim";
   else if (state.activeTool === "beam") key = "beam";
@@ -7508,7 +7926,7 @@ function drawToolCursor() {
 
   // If no draw tool is "selected" (UI mode null) but the engine tool is wall/hidden/dim,
   // fall back to idle/hover cursors to avoid showing a "start drawing" cursor unexpectedly.
-  if (!uiCursorMode && (state.activeTool === "wall" || state.activeTool === "hidden" || state.activeTool === "dim" || state.activeTool === "beam")) {
+  if (!uiCursorMode && (state.activeTool === "wall" || state.activeTool === "hidden" || state.activeTool === "dim" || state.activeTool === "beam" || state.activeTool === "door")) {
     key = isHoverAny ? "clicker" : "cursor";
   }
 
@@ -7665,6 +8083,7 @@ function drawWallsNodeBased(tool) {
 
   // 1) Wall bodies (geometry layer)
   for (const it of wallDrawList) drawWallBodyFromCorners(it.corners, it.edge);
+  drawDoors2d();
 
   // Guides are drawn above walls, but below dimensions.
   drawGuides();
@@ -7832,9 +8251,12 @@ const undo = new UndoManager({
     hoverHiddenId,
     selectedDimId,
     hoverDimId,
+    selectedDoorId,
+    hoverDoorId,
     selectedWallIds,
     selectedHiddenIds,
     selectedDimIds,
+    selectedDoorIds,
     selectedPassiveModelId,
     selectedPassiveModelIds,
     selectedModelOutline,
@@ -7861,9 +8283,12 @@ const undo = new UndoManager({
     hoverHiddenId = v.hoverHiddenId ?? null;
     selectedDimId = v.selectedDimId ?? null;
     hoverDimId = v.hoverDimId ?? null;
+    selectedDoorId = v.selectedDoorId ?? null;
+    hoverDoorId = v.hoverDoorId ?? null;
     selectedWallIds = Array.isArray(v.selectedWallIds) ? v.selectedWallIds.slice() : [];
     selectedHiddenIds = Array.isArray(v.selectedHiddenIds) ? v.selectedHiddenIds.slice() : [];
     selectedDimIds = Array.isArray(v.selectedDimIds) ? v.selectedDimIds.slice() : [];
+    selectedDoorIds = Array.isArray(v.selectedDoorIds) ? v.selectedDoorIds.slice() : [];
     selectedPassiveModelId = v.selectedPassiveModelId ?? null;
     selectedPassiveModelIds = Array.isArray(v.selectedPassiveModelIds) ? v.selectedPassiveModelIds.slice() : [];
     selectedModelOutline = !!v.selectedModelOutline;
@@ -9188,11 +9613,31 @@ function onMouseDown(e) {
       return;
     }
 
+    if (t.type === "door_body") {
+      const door = getDoorById(t.payload?.doorId || t.wallId);
+      if (!door) return;
+      clearGroupSelection();
+      selectedWallId = null;
+      selectedHiddenId = null;
+      selectedDimId = null;
+      selectedDoorId = door.id;
+      hoverDoorId = door.id;
+      doorDrag.active = true;
+      doorDrag.doorId = door.id;
+      doorDrag.startClientX = e.clientX;
+      doorDrag.startClientY = e.clientY;
+      doorDrag.startOffsetMm = Number(door.offsetMm) || 0;
+      doorDrag.moved = false;
+      return;
+    }
+
     const isHiddenTarget = String(t.type || "").startsWith("hidden_");
     const g = isHiddenTarget ? hiddenGraph : graph;
     const w = g.getWall(t.wallId);
     if (!w) return;
     clearGroupSelection();
+    selectedDoorId = null;
+    hoverDoorId = null;
 
     if (t.type === "wall_chain_a" || t.type === "wall_chain_b") {
       const nodeId = (t.type === "wall_chain_a") ? w.a : w.b;
@@ -9564,9 +10009,31 @@ function onMouseDown(e) {
     }
     setSingleOrMultiSelection("passive_model", []);
     clearGroupSelection();
+    selectedDoorId = null;
     selectedHiddenId = null;
     selectedWallId = hoverWallId;
     selectedDimId = null;
+    selectedModelOutline = false;
+    return;
+  }
+  if (hoverDoorId) {
+    clearPendingPassiveActivation();
+    if (isRemoveSelectModifier) {
+      const next = normalizeSelectionIds([selectedDoorId, ...selectedDoorIds]).filter((id) => id !== hoverDoorId);
+      setSingleOrMultiSelection("door", next);
+      return;
+    }
+    if (isAddSelectModifier) {
+      const next = normalizeSelectionIds([selectedDoorId, ...selectedDoorIds, hoverDoorId]);
+      setSingleOrMultiSelection("door", next);
+      return;
+    }
+    setSingleOrMultiSelection("passive_model", []);
+    clearGroupSelection();
+    selectedWallId = null;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    selectedDoorId = hoverDoorId;
     selectedModelOutline = false;
     return;
   }
@@ -9627,11 +10094,13 @@ function onMouseDown(e) {
     selectedWallId = null;
     selectedHiddenId = null;
     selectedDimId = null;
+    selectedDoorId = null;
     clearGroupSelection();
     selectedModelOutline = false;
   }
   hoverWallId = null;
   hoverHiddenId = null;
+  hoverDoorId = null;
   hoverDimId = null;
 
   if (effectiveMode === "select") {
@@ -9647,9 +10116,31 @@ function onMouseDown(e) {
     hoverDimTextWallId = null;
     hoverWallId = null;
     hoverHiddenId = null;
+    hoverDoorId = null;
     hoverDimId = null;
     hoverModelOutline = false;
     hoverObjectAxis = null;
+    return;
+  }
+
+  if (effectiveMode === "door") {
+    if (!doorPlacement.active) return;
+    const candidate = doorPlacement.candidate;
+    if (!candidate?.valid) return;
+    let createdDoorId = null;
+    undo.runAction(() => {
+      const created = cloneDoor({ ...candidate, id: nextDoorId() });
+      doors.push(created);
+      normalizeDoorsForAllWalls();
+      createdDoorId = created.id;
+    });
+    selectedWallId = null;
+    selectedHiddenId = null;
+    selectedDimId = null;
+    clearGroupSelection();
+    selectedDoorId = createdDoorId;
+    hoverDoorId = createdDoorId;
+    doorPlacement.candidate = computeDoorPlacementCandidate(e.clientX, e.clientY, doorPlacement.preset);
     return;
   }
 
@@ -9829,6 +10320,27 @@ function drawCopyDesignPreview() {
     ctx.stroke();
     ctx.restore();
   }
+
+  const doorIds = new Set();
+  const selectedDoorIdSet = new Set(selectedDoorIds);
+  if (hoverDoorId) doorIds.add(hoverDoorId);
+  if (selectedDoorId) doorIds.add(selectedDoorId);
+  for (const id of selectedDoorIds) doorIds.add(id);
+  for (const id of doorIds) {
+    const door = getDoorById(id);
+    const geom = getDoorWorldGeometry(door);
+    if (!geom) continue;
+    const rect = geom.screenRect;
+    const isSel = id === selectedDoorId || selectedDoorIdSet.has(id);
+    const glow = isSel ? SELECT_COLOR : HOVER_COLOR;
+    ctx.save();
+    ctx.strokeStyle = glow;
+    ctx.lineWidth = isSel ? 3 : 2;
+    ctx.shadowColor = glow;
+    ctx.shadowBlur = isSel ? 16 : 10;
+    ctx.strokeRect(rect.x - 2, rect.y - 2, rect.w + 4, rect.h + 4);
+    ctx.restore();
+  }
 }
 
 function onWindowMouseUp() {
@@ -9894,6 +10406,26 @@ function onWindowMouseUp() {
       restoreGraph(dragGraph, startSnap);
       undo.runAction(() => {
         restoreGraph(dragGraph, endSnap);
+      });
+    }
+  }
+  if (doorDrag.active) {
+    const doorId = doorDrag.doorId;
+    const startOffsetMm = doorDrag.startOffsetMm;
+    const moved = !!doorDrag.moved;
+    const door = getDoorById(doorId);
+    const finalOffsetMm = door ? Number(door.offsetMm) || 0 : startOffsetMm;
+    doorDrag.active = false;
+    doorDrag.doorId = null;
+    doorDrag.startClientX = 0;
+    doorDrag.startClientY = 0;
+    doorDrag.startOffsetMm = 0;
+    doorDrag.moved = false;
+    if (door && moved && Math.abs(finalOffsetMm - startOffsetMm) > 0.1) {
+      door.offsetMm = startOffsetMm;
+      undo.runAction(() => {
+        const current = getDoorById(doorId);
+        if (current) current.offsetMm = finalOffsetMm;
       });
     }
   }
@@ -10035,11 +10567,12 @@ function onWindowMouseMove(e) {
     (effectiveMode === "dim") ? !!dimTool.getStatus()?.isDrawing :
     (effectiveMode === "hidden") ? !!hiddenTool.getStatus()?.isDrawing :
     (effectiveMode === "beam") ? !!beamTool.getStatus()?.isDrawing :
+    (effectiveMode === "door") ? !!doorPlacement.active :
     !!tool.getStatus()?.isDrawing;
 
   // When integrated in Vue layout, ignore hover/move when pointer is outside the canvas,
   // except while panning or while an active draw command is in progress.
-  if (!inside && !isPanning && !isDrawing && !modelDrag.active && !wallDimDrag.active && !freeDimDrag.active && !wallHandleDrag.active && !boxSelect.active && moveCommand.mode === "idle" && rotateCommand.mode === "idle" && copyCommand.mode === "idle" && extendCommand.mode === "idle") {
+  if (!inside && !isPanning && !isDrawing && !modelDrag.active && !doorDrag.active && !wallDimDrag.active && !freeDimDrag.active && !wallHandleDrag.active && !boxSelect.active && moveCommand.mode === "idle" && rotateCommand.mode === "idle" && copyCommand.mode === "idle" && extendCommand.mode === "idle") {
     updateSnapPreview(NaN, NaN);
     hoverUi = null;
     hoverWallHandle = null;
@@ -10080,6 +10613,11 @@ function onWindowMouseMove(e) {
     return;
   }
   updateSnapPreview(ox, oy);
+  if (doorPlacement.active) {
+    doorPlacement.clientX = e.clientX;
+    doorPlacement.clientY = e.clientY;
+    doorPlacement.candidate = computeDoorPlacementCandidate(e.clientX, e.clientY, doorPlacement.preset);
+  }
 
   if (isPanning) {
     state.offsetX += e.movementX;
@@ -10162,6 +10700,34 @@ function onWindowMouseMove(e) {
     applyAxisDrag(target);
     hoverObjectAxis = axisDrag.axis;
     return;
+  }
+
+  if (doorDrag.active) {
+    const door = getDoorById(doorDrag.doorId);
+    const geom = getDoorWorldGeometry(door);
+    if (!door || !geom) {
+      doorDrag.active = false;
+    } else {
+      const candidate = computeDoorPlacementCandidate(e.clientX, e.clientY, door);
+      if (candidate?.valid && String(candidate.wallId || "") === String(door.wallId || "")) {
+        door.offsetMm = candidate.offsetMm;
+        if (Math.abs(candidate.offsetMm - doorDrag.startOffsetMm) > 0.5) doorDrag.moved = true;
+      } else {
+        const world = screenToWorld(ox, oy);
+        const dx = world.x - geom.center.x;
+        const dy = world.y - geom.center.y;
+        const along = dot(dx, dy, geom.span.ux, geom.span.uy);
+        const clampedOffset = clampDoorOffsetForWall(geom.edge, door.widthMm, doorDrag.startOffsetMm + along);
+        if (Number.isFinite(clampedOffset)) {
+          const nextDoor = { ...door, offsetMm: clampedOffset };
+          if (!doorsOverlapOnWall(door.wallId, nextDoor, door.id)) {
+            door.offsetMm = clampedOffset;
+            if (Math.abs(clampedOffset - doorDrag.startOffsetMm) > 0.5) doorDrag.moved = true;
+          }
+        }
+      }
+      return;
+    }
   }
 
   if (modelDrag.active) {
@@ -10266,6 +10832,7 @@ function onWindowMouseMove(e) {
         }
         dragGraph.mergeCloseNodes(1);
         dragGraph.deleteTinyEdges(1);
+        if (wallHandleDrag.graphType !== "hidden") normalizeDoorsForAllWalls();
         const movedMm = Math.hypot(snapW.x - p0.x, snapW.y - p0.y);
         if (movedMm > 0.5) wallHandleDrag.moved = true;
         return;
@@ -10381,6 +10948,9 @@ function onWindowMouseMove(e) {
       stepAngleDeg: Math.max(0.1, Number(state.stepAngleDeg || 10)),
     }
   );
+  else if (effectiveMode === "door") {
+    // Door placement/drag uses the editor-level states above.
+  }
   else tool.onPointerMove(
     { offsetX: ox, offsetY: oy, shiftKey: e.shiftKey },
     {
@@ -10421,6 +10991,7 @@ function onWindowMouseMove(e) {
   }
   hoverDimTextWallId = (ht && ht.type === "dim_text") ? ht.wallId : null;
   hoverDimTextHiddenId = (ht && ht.type === "hidden_dim_text") ? ht.wallId : null;
+  hoverDoorId = (ht && ht.type === "door_body") ? String(ht.payload?.doorId || ht.wallId || "") : null;
   if (ht && (ht.type === "dim_side" || ht.type === "off_side" || ht.type === "hidden_dim_side")) {
     hoverUi = { type: ht.type, wallId: ht.wallId };
   } else {
@@ -10429,14 +11000,20 @@ function onWindowMouseMove(e) {
 
   if (!isDrawing && inside) {
     updateHover(ox, oy);
+    if (hoverDoorId) {
+      hoverWallId = null;
+      hoverHiddenId = null;
+      hoverDimId = null;
+    }
     hoverPassiveModelId = hitTestPassiveModel(ox, oy);
     // Hover should activate anywhere inside the model outline, not only on edges.
     hoverModelOutline = !hoverPassiveModelId && (hitTestModelFill(ox, oy) || hitTestModelOutline(ox, oy));
   } else if (isDrawing) {
-    hoverWallId = null; hoverHiddenId = null; hoverDimId = null;
+    hoverWallId = null; hoverHiddenId = null; hoverDimId = null; hoverDoorId = null;
     hoverPassiveModelId = null;
     hoverModelOutline = false;
   } else {
+    hoverDoorId = null;
     hoverPassiveModelId = null;
     hoverModelOutline = false;
   }
@@ -10823,16 +11400,24 @@ async function onWindowKeyDown(e) {
           }
         }
         if (!designDeleteSucceeded) return;
-        if (wallIds.length > 0 || hiddenIds.length > 0 || dimIds.size > 0) {
+        const doorIds = [];
+        if (selectedDoorId) doorIds.push(selectedDoorId);
+        for (const id of selectedDoorIds) if (id && !doorIds.includes(id)) doorIds.push(id);
+        if (wallIds.length > 0 || hiddenIds.length > 0 || dimIds.size > 0 || doorIds.length > 0) {
           for (const wallId of wallIds) {
             const w = graph.getWall(wallId);
             if (!w) continue;
             graph.deleteWall(wallId);
           }
+          if (wallIds.length > 0) removeDoorsForWallIds(wallIds);
           for (const wallId of hiddenIds) {
             const w = hiddenGraph.getWall(wallId);
             if (!w) continue;
             hiddenGraph.deleteWall(wallId);
+          }
+          if (doorIds.length > 0) {
+            const doorIdSet = new Set(doorIds.map((id) => String(id || "").trim()));
+            doors = doors.filter((door) => !doorIdSet.has(String(door?.id || "").trim()));
           }
           if (dimIds.size) {
             for (let i = dimensions.length - 1; i >= 0; i--) {
@@ -10851,7 +11436,9 @@ async function onWindowKeyDown(e) {
         hoverWallId = null;
         selectedWallId = null;
         selectedHiddenId = null;
+        selectedDoorId = null;
         hoverHiddenId = null;
+        hoverDoorId = null;
         selectedDimId = null;
         hoverDimId = null;
         hoverModelOutline = deleteModel ? !deletedModel : false;
@@ -10870,6 +11457,7 @@ async function onWindowKeyDown(e) {
         const w = graph.getWall(wallId);
         if (!w) return;
         graph.deleteWall(wallId);
+        removeDoorsForWallIds([wallId]);
         deleteOrphanNodes(graph, tool.pendingStartNodeId ? new Set([tool.pendingStartNodeId]) : null);
         if (tool.pendingStartNodeId && !graph.getNode(tool.pendingStartNodeId)) tool.stopChaining();
         enforceLockedInsideLengths();
@@ -10878,7 +11466,9 @@ async function onWindowKeyDown(e) {
       hoverWallId = null;
       selectedWallId = null;
       selectedHiddenId = null;
+      selectedDoorId = null;
       hoverHiddenId = null;
+      hoverDoorId = null;
       selectedDimId = null;
       hoverDimId = null;
       clearGroupSelection();
@@ -10896,7 +11486,9 @@ async function onWindowKeyDown(e) {
       hoverHiddenId = null;
       selectedHiddenId = null;
       selectedWallId = null;
+      selectedDoorId = null;
       hoverWallId = null;
+      hoverDoorId = null;
       selectedDimId = null;
       hoverDimId = null;
       clearGroupSelection();
@@ -10914,6 +11506,17 @@ async function onWindowKeyDown(e) {
       hoverWallId = null;
       selectedHiddenId = null;
       hoverHiddenId = null;
+      selectedDoorId = null;
+      hoverDoorId = null;
+      clearGroupSelection();
+    } else if (selectedDoorId) {
+      e.preventDefault();
+      const doorId = selectedDoorId;
+      await undo.runAction(() => {
+        doors = doors.filter((door) => String(door?.id || "") !== String(doorId || ""));
+      });
+      hoverDoorId = null;
+      selectedDoorId = null;
       clearGroupSelection();
     }
     return;
@@ -11212,7 +11815,7 @@ const _ui = {
 function setActiveTool(name) {
   const next =
     (name === "select") ? "select" :
-    (name === "hidden" || name === "dim" || name === "wall" || name === "beam") ? name :
+    (name === "hidden" || name === "dim" || name === "wall" || name === "beam" || name === "door") ? name :
     "wall";
   if (state.activeTool === next) return;
 
@@ -11229,6 +11832,9 @@ function setActiveTool(name) {
   tool.stopChaining();
   hiddenTool.stopChaining();
   beamTool.stopChaining();
+  doorPlacement.active = false;
+  doorPlacement.preset = null;
+  doorPlacement.candidate = null;
   dimTool.cancel();
 
   state.activeTool = next;
@@ -11261,6 +11867,8 @@ function clearAll() {
   undo.runAction(() => {
     graph.clear();
     hiddenGraph.clear();
+    doors = [];
+    _doorId = 1;
     dimensions.length = 0;
     guides.length = 0;
     clearModel2dLines(false);
@@ -11276,6 +11884,8 @@ function clearAll() {
     hoverWallId = null;
     selectedHiddenId = null;
     hoverHiddenId = null;
+    selectedDoorId = null;
+    hoverDoorId = null;
     selectedDimId = null;
     hoverDimId = null;
     clearGroupSelection();
@@ -11285,6 +11895,7 @@ function clearAll() {
 function getState() {
   const graphSnap = snapshotGraph(graph);
   const hiddenGraphSnap = snapshotGraph(hiddenGraph);
+  const doorsSnap = snapshotDoors(doors);
   const toolSnap = snapshotTool(tool);
   const hiddenToolSnap = snapshotHiddenTool(hiddenTool);
   const beamToolSnap = snapshotBeamTool(beamTool);
@@ -11307,6 +11918,7 @@ function getState() {
     state: { ...state },
     graphSnap,
     hiddenGraphSnap,
+    doors: doorsSnap,
     beamGraphSnap,
     toolSnap,
     hiddenToolSnap,
@@ -11319,6 +11931,7 @@ function getState() {
       solidWalls: graphSnap.walls.length,
       hiddenNodes: hiddenGraphSnap.nodes.length,
       hiddenWalls: hiddenGraphSnap.walls.length,
+      doors: doorsSnap.length,
       dimensions: dimensions.length,
     },
     model2d: {
@@ -11385,6 +11998,8 @@ function getState() {
       selectedWallIds: selectedWallIds.slice(),
       selectedHiddenId,
       selectedHiddenIds: selectedHiddenIds.slice(),
+      selectedDoorId,
+      selectedDoorIds: selectedDoorIds.slice(),
       selectedBeamId: (selectedWallId && isBeamEdge(graph.getWall(selectedWallId))) ? selectedWallId : null,
       selectedBeamIds: selectedWallIds.filter((id) => isBeamEdge(graph.getWall(id))),
       selectedDimId,
@@ -11455,6 +12070,7 @@ function restoreSnapshot(snap) {
   if (!snap || typeof snap !== "object") return false;
   restoreGraph(graph, snap.graphSnap || { _nid: 1, _wid: 1, nodes: [], walls: [] });
   restoreGraph(hiddenGraph, snap.hiddenGraphSnap || { _nid: 1, _wid: 1, nodes: [], walls: [] });
+  restoreDoors(snap.doors || []);
   restoreTool(tool, graph, snap.toolSnap || null);
   restoreHiddenTool(hiddenTool, hiddenGraph, snap.hiddenToolSnap || null);
   restoreBeamTool(beamTool, graph, snap.beamToolSnap || null);
@@ -11462,12 +12078,18 @@ function restoreSnapshot(snap) {
   restoreDimensions(dimensions, Array.isArray(snap.dimensionsSnap) ? snap.dimensionsSnap : []);
   restoreModel2d(model2d, snap.model2dSnap || { lines: [], outline: [], offsetXmm: 0, offsetYmm: 0, rotationRad: 0 });
   setState(snap.state || {});
+  doorPlacement.active = false;
+  doorPlacement.preset = null;
+  doorPlacement.candidate = null;
   selectedWallId = null;
   hoverWallId = null;
   selectedWallIds = [];
   selectedHiddenId = null;
   hoverHiddenId = null;
   selectedHiddenIds = [];
+  selectedDoorId = null;
+  hoverDoorId = null;
+  selectedDoorIds = [];
   selectedDimId = null;
   hoverDimId = null;
   selectedDimIds = [];
@@ -11713,6 +12335,63 @@ function setSelectedBeamStyle({ thicknessMm = null, heightMm = null, fillColor =
   return false;
 }
 
+function setSelectedDoorStyle({ widthMm = null, heightMm = null, sillHeightMm = null } = {}) {
+  const ids = [];
+  if (selectedDoorId) ids.push(selectedDoorId);
+  for (const id of selectedDoorIds) if (id && !ids.includes(id)) ids.push(id);
+  if (ids.length === 0) return false;
+  let changed = false;
+  undo.runAction(() => {
+    for (const id of ids) {
+      const door = getDoorById(id);
+      if (!door) continue;
+      if (Number.isFinite(Number(widthMm)) && Number(widthMm) > 0) {
+        door.widthMm = Math.max(10, Number(widthMm));
+        door.modelBoundsMm = {
+          ...(door.modelBoundsMm || {}),
+          widthMm: door.widthMm,
+        };
+        changed = true;
+      }
+      if (Number.isFinite(Number(heightMm)) && Number(heightMm) > 0) {
+        door.heightMm = Math.max(10, Number(heightMm));
+        door.modelBoundsMm = {
+          ...(door.modelBoundsMm || {}),
+          heightMm: door.heightMm,
+        };
+        changed = true;
+      }
+      if (Number.isFinite(Number(sillHeightMm)) && Number(sillHeightMm) >= 0) {
+        door.sillHeightMm = Math.max(0, Number(sillHeightMm));
+        changed = true;
+      }
+    }
+    normalizeDoorsForAllWalls();
+  });
+  if (changed) {
+    saveSettings();
+    return true;
+  }
+  return false;
+}
+
+function setSelectedDoorOffset(offsetMm) {
+  const door = selectedDoorId ? getDoorById(selectedDoorId) : null;
+  if (!door) return false;
+  const edge = graph.getWall(door.wallId);
+  if (!edge) return false;
+  const clampedOffset = clampDoorOffsetForWall(edge, door.widthMm, offsetMm);
+  if (!Number.isFinite(clampedOffset)) return false;
+  const nextDoor = { ...door, offsetMm: clampedOffset };
+  if (doorsOverlapOnWall(door.wallId, nextDoor, door.id)) return false;
+  let changed = false;
+  undo.runAction(() => {
+    door.offsetMm = clampedOffset;
+    changed = true;
+  });
+  return changed;
+}
+
 function setSelectedWallLength(lengthMm) {
   const w = selectedWallId ? graph.getWall(selectedWallId) : null;
   if (!w) return false;
@@ -11738,6 +12417,7 @@ function setSelectedWallLength(lengthMm) {
     if (Math.hypot(B.x - nextBx, B.y - nextBy) > 1e-6) {
       B.x = nextBx;
       B.y = nextBy;
+      normalizeDoorsForAllWalls();
       changed = true;
     }
   });
@@ -11778,6 +12458,7 @@ function setSelectedWallCoords(coords = {}) {
     if (changed) {
       graph.mergeCloseNodes(1);
       graph.deleteTinyEdges(1);
+      normalizeDoorsForAllWalls();
     }
   });
 
@@ -11824,8 +12505,40 @@ function moveSelectedWallsBy(delta = {}) {
   let changed = false;
   undo.runAction(() => {
     changed = applySelectionDelta({ wallIds: snap.wallIds, hiddenIds: [], dimIds: [], hasModel: false }, { x: dx, y: dy }, { merge: false });
+    if (changed) normalizeDoorsForAllWalls();
   });
 
+  if (changed) {
+    saveSettings();
+    return true;
+  }
+  return false;
+}
+
+function moveSelectedDoorsBy(delta = {}) {
+  const dx = Number.isFinite(Number(delta.dxMm)) ? Number(delta.dxMm) : 0;
+  const dy = Number.isFinite(Number(delta.dyMm)) ? Number(delta.dyMm) : 0;
+  if (dx === 0 && dy === 0) return false;
+  const ids = [];
+  if (selectedDoorId) ids.push(selectedDoorId);
+  for (const id of selectedDoorIds) if (id && !ids.includes(id)) ids.push(id);
+  if (!ids.length) return false;
+  let changed = false;
+  undo.runAction(() => {
+    for (const id of ids) {
+      const door = getDoorById(id);
+      const edge = door ? graph.getWall(door.wallId) : null;
+      const span = edge ? getWallSpan(edge) : null;
+      if (!door || !span) continue;
+      const along = dot(dx, dy, span.ux, span.uy);
+      const clampedOffset = clampDoorOffsetForWall(edge, door.widthMm, (Number(door.offsetMm) || 0) + along);
+      if (!Number.isFinite(clampedOffset)) continue;
+      const nextDoor = { ...door, offsetMm: clampedOffset };
+      if (doorsOverlapOnWall(door.wallId, nextDoor, door.id)) continue;
+      door.offsetMm = clampedOffset;
+      changed = true;
+    }
+  });
   if (changed) {
     saveSettings();
     return true;
@@ -11979,6 +12692,7 @@ function moveSelectionBy(delta = {}) {
   let changed = false;
   undo.runAction(() => {
     changed = applySelectionDelta(snap, { x: dx, y: dy }, { merge: false });
+    if (changed) normalizeDoorsForAllWalls();
   });
 
   if (changed) {
@@ -12232,6 +12946,7 @@ return {
   placeWallPresetAtClient,
   placeBeamPresetAtClient: placeBeamPresetAtClientFn,
   placeColumnAtClient,
+  beginDoorPlacementAtClient,
   setUiCursorMode,
 
   undo: () => { performUndo(); },
@@ -12256,8 +12971,11 @@ return {
   setSelectedHiddenCoords,
   moveSelectedHiddenWallsBy,
   setSelectedBeamStyle,
+  setSelectedDoorStyle,
+  setSelectedDoorOffset,
   setSelectedBeamLength,
   setSelectedBeamCoords,
+  moveSelectedDoorsBy,
   moveSelectedBeamsBy,
   moveSelectionBy,
 };

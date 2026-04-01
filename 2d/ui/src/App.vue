@@ -19,6 +19,8 @@ import {
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
 import { useDialogService } from "./dialog_service.js";
 import { WALL_READY_PRESETS, buildPresetLines, getPresetIconWalls } from "./features/wall_preset_drag.js";
+import { DOOR_READY_PRESETS, buildDoorPresetPayloadAsync, buildDoorPresetPreviewLines, getDoorPresetIconLines, primeDoorPresetModel } from "./features/door_preset_drag.js";
+import { DEFAULT_DOOR_MODEL_URL, getDoorModelBoundsMm, getFallbackDoorModelBoundsMm } from "./features/door_model_asset.js";
 import { CURRENT_ADMIN_ID, CURRENT_BOOTSTRAP_USER_ID, CURRENT_BOOTSTRAP_USER_NAME, PART_KINDS_CATALOG } from "./features/part_kinds_catalog.js";
 
 const activeTool = ref("select");
@@ -31,11 +33,14 @@ const orderDesignGeometryCache = new Map();
 const walls3dSnapshot = ref({
   nodes: [],
   walls: [],
+  doors: [],
   selection: {
     selectedWallId: null,
     selectedWallIds: [],
     selectedHiddenId: null,
     selectedHiddenIds: [],
+    selectedDoorId: null,
+    selectedDoorIds: [],
     selectedPassiveModelId: null,
     selectedPassiveModelIds: [],
     selectedModelOutline: false,
@@ -171,14 +176,44 @@ const activeSubRailTitle = computed(() => {
 
 const designMenuTools = [
   { id: "wall", icon: "/icons/drawing_wall.png", title: "دیوار", mapsToTool: "wall" },
+  { id: "door", icon: "/icons/door.png", title: "درب", mapsToTool: "door" },
   { id: "hidden", icon: "/icons/drawing_hidden_wall.png", title: "خط راهنما", mapsToTool: "hidden" },
   { id: "dimension", icon: "/icons/drawing_dimension.png", title: "اندازه گذاری", mapsToTool: "dimension" },
   { id: "beam", icon: "/icons/beam.png", title: "تیر", mapsToTool: "beam" },
   { id: "column", icon: "/icons/column.png", title: "ستون", mapsToTool: null },
 ];
+const wallDesignMenuTools = designMenuTools.filter((it) => it.id !== "door");
 
 const wallPresets = WALL_READY_PRESETS;
+const doorPresets = DOOR_READY_PRESETS;
+const doorAssetLibrary = ref([
+  {
+    id: "door-glb-sample",
+    title: "نمونه درب سه بعدی",
+    modelUrl: DEFAULT_DOOR_MODEL_URL,
+    modelBoundsMm: getFallbackDoorModelBoundsMm(),
+    outlineColor: "#8B6B4A",
+  },
+]);
+const doorScenePlacements = ref([]);
+let doorScenePlacementSeed = 1;
 let presetDragSessionSeed = 0;
+function normalizeDoorDimensionMm(value, fallback, { min, max }) {
+  let next = Number(value);
+  if (!Number.isFinite(next) || next <= 0) next = fallback;
+  while (next > max * 10) next /= 10;
+  if (!Number.isFinite(next) || next < min || next > max) next = fallback;
+  return next;
+}
+
+function sanitizeDoorBoundsMm(boundsMm) {
+  return {
+    widthMm: normalizeDoorDimensionMm(boundsMm?.widthMm, 900, { min: 300, max: 3000 }),
+    heightMm: normalizeDoorDimensionMm(boundsMm?.heightMm, 2070, { min: 1500, max: 4000 }),
+    depthMm: normalizeDoorDimensionMm(boundsMm?.depthMm, 150, { min: 20, max: 500 }),
+  };
+}
+
 function createEmptyPresetDragState() {
   return {
     active: false,
@@ -245,8 +280,10 @@ const orderDesignSavingIds = ref([]);
 const orderDesignPlacements = ref([]);
 const stageCabinetPlaceholderBoxes = ref([]);
 const activeCabinetDesignId = ref(null);
+const activeDoorAssetId = ref(null);
 const activeStageOrderDesignSelected = ref(false);
 const selectedStageOrderDesignIds = ref([]);
+const selectedStageDoorAssetIds = ref([]);
 const hoveredCabinetDesignId = ref(null);
 const hoveredConstructionDesignId = ref(null);
 const cabinetDesignDropLoading = ref(false);
@@ -2980,6 +3017,153 @@ function getCurrentEditorModelPlacement() {
   return getCurrentModel2dTransform();
 }
 
+function normalizeDoorScenePlacement(item) {
+  const id = String(item?.id || "").trim();
+  const modelUrl = String(item?.modelUrl || "").trim();
+  if (!id || !modelUrl) return null;
+  const modelBoundsMm = sanitizeDoorBoundsMm(item?.modelBoundsMm || getFallbackDoorModelBoundsMm());
+  return {
+    id,
+    title: String(item?.title || "").trim() || "Door",
+    modelUrl,
+    modelBoundsMm,
+    outlineColor: normalizeHexColor(item?.outlineColor || "#8B6B4A"),
+    x: Number.isFinite(Number(item?.x)) ? Number(item.x) : 0,
+    y: Number.isFinite(Number(item?.y)) ? Number(item.y) : 0,
+    rotRad: Number.isFinite(Number(item?.rotRad)) ? Number(item.rotRad) : 0,
+    floorOffsetMm: Math.max(0, Number(item?.floorOffsetMm) || 0),
+    mirrorX: 1,
+  };
+}
+
+function upsertDoorScenePlacement(item) {
+  const next = normalizeDoorScenePlacement(item);
+  if (!next) return;
+  const index = doorScenePlacements.value.findIndex((placement) => String(placement.id) === String(next.id));
+  if (index >= 0) {
+    doorScenePlacements.value = doorScenePlacements.value.map((placement, placementIndex) =>
+      placementIndex === index ? { ...placement, ...next } : placement
+    );
+    return;
+  }
+  doorScenePlacements.value = [...doorScenePlacements.value, next];
+}
+
+function getDoorScenePlacement(id) {
+  const key = String(id || "").trim();
+  if (!key) return null;
+  return doorScenePlacements.value.find((placement) => String(placement.id) === key) || null;
+}
+
+function persistCurrentActiveDoorAssetPlacement() {
+  const activeId = String(activeDoorAssetId.value || "").trim();
+  if (!activeId) return;
+  const current = getDoorScenePlacement(activeId);
+  if (!current) return;
+  upsertDoorScenePlacement({
+    ...current,
+    ...getCurrentEditorModelPlacement(),
+  });
+}
+
+function syncActiveDoorAssetToEditor(item, placement = null) {
+  const target = normalizeDoorScenePlacement(item);
+  if (!target) return false;
+  const nextPlacement = normalizeDoorScenePlacement({
+    ...target,
+    ...(placement || {}),
+  }) || target;
+  const geometry = buildDoorAssetPlanGeometry(target.modelBoundsMm);
+  const worldLines = localDesignToWorld(geometry.lines, nextPlacement, "lines");
+  const worldOutline = localDesignToWorld(geometry.outline, nextPlacement, "points");
+  if (!editorRef.value?.setModel2dLines) return false;
+  editorRef.value.setModel2dLines(worldLines, {
+    outline: worldOutline,
+    outlineColor: target.outlineColor,
+    designId: target.id,
+    designCode: null,
+    designTitle: target.title,
+    instanceCode: null,
+    displayName: target.title,
+    offsetXmm: nextPlacement.x,
+    offsetYmm: nextPlacement.y,
+    rotationRad: nextPlacement.rotRad,
+    mirrorX: 1,
+  }, false);
+  editorRef.value?.selectModelOutline?.();
+  activeCabinetDesignId.value = null;
+  stageCabinetPlaceholderBoxes.value = [];
+  activeDoorAssetId.value = target.id;
+  activeStageOrderDesignSelected.value = false;
+  selectedStageOrderDesignIds.value = [];
+  selectedStageDoorAssetIds.value = [target.id];
+  upsertDoorScenePlacement(nextPlacement);
+  syncQuickStateFromEditor();
+  return true;
+}
+
+function restoreActiveDoorAssetToEditor(item, placement = null) {
+  const target = normalizeDoorScenePlacement(item);
+  if (!target) return false;
+  persistCurrentActiveOrderDesignPlacement();
+  persistCurrentActiveDoorAssetPlacement();
+  if (syncActiveDoorAssetToEditor(target, placement)) return true;
+  const nextPlacement = normalizeDoorScenePlacement({
+    ...target,
+    ...(placement || {}),
+  }) || target;
+  const geometry = buildDoorAssetPlanGeometry(target.modelBoundsMm);
+  const worldLines = localDesignToWorld(geometry.lines, nextPlacement, "lines");
+  const worldOutline = localDesignToWorld(geometry.outline, nextPlacement, "points");
+  const full = editorRef.value?.getState?.();
+  const nextSnapshot = {
+    ...full,
+    model2dSnap: {
+      ...(full?.model2dSnap || {}),
+      lines: worldLines,
+      outline: worldOutline,
+      outlineColor: target.outlineColor,
+      designId: target.id,
+      designCode: null,
+      designTitle: target.title,
+      instanceCode: null,
+      displayName: target.title,
+      offsetXmm: nextPlacement.x,
+      offsetYmm: nextPlacement.y,
+      rotationRad: nextPlacement.rotRad,
+      mirrorX: 1,
+    },
+  };
+  let restored = false;
+  if (editorRef.value?.restoreSnapshot) {
+    restored = !!editorRef.value.restoreSnapshot(nextSnapshot);
+  } else if (editorRef.value?.setModel2dLines) {
+    editorRef.value.setModel2dLines(worldLines, {
+      outline: worldOutline,
+      outlineColor: target.outlineColor,
+      designId: target.id,
+      designTitle: target.title,
+      displayName: target.title,
+      offsetXmm: nextPlacement.x,
+      offsetYmm: nextPlacement.y,
+      rotationRad: nextPlacement.rotRad,
+      mirrorX: 1,
+    }, false);
+    restored = true;
+  }
+  if (!restored) return false;
+  editorRef.value?.selectModelOutline?.();
+  activeCabinetDesignId.value = null;
+  stageCabinetPlaceholderBoxes.value = [];
+  activeDoorAssetId.value = target.id;
+  activeStageOrderDesignSelected.value = false;
+  selectedStageOrderDesignIds.value = [];
+  selectedStageDoorAssetIds.value = [target.id];
+  upsertDoorScenePlacement(nextPlacement);
+  syncQuickStateFromEditor();
+  return true;
+}
+
 function getOrderDesignPlacementForId(orderDesignId) {
   const key = String(orderDesignId || "").trim();
   if (!key) return null;
@@ -3573,7 +3757,18 @@ function activateOrderDesignFromStage(orderDesignId) {
   saveActiveOrderDrawing().catch(() => {});
 }
 
-passiveModelSelectionHandlerRef.value = activateOrderDesignFromStage;
+function activatePassiveStageModel(modelId) {
+  const key = String(modelId || "").trim();
+  if (!key) return;
+  const doorItem = doorScenePlacements.value.find((item) => String(item.id) === key) || null;
+  if (doorItem) {
+    restoreActiveDoorAssetToEditor(doorItem, getDoorScenePlacement(key));
+    return;
+  }
+  activateOrderDesignFromStage(key);
+}
+
+passiveModelSelectionHandlerRef.value = activatePassiveStageModel;
 activeModelDeleteHandlerRef.value = deleteActiveOrderDesignFromStage;
 orderDesignDeleteHandlerRef.value = handleStageOrderDesignDeleteRequest;
 orderDesignDuplicateHandlerRef.value = handleStageOrderDesignDuplicateRequest;
@@ -7305,6 +7500,7 @@ function getEditorSelectionSummary(full = null) {
   const beamSet = new Set(beamIds);
   const wallOnlyIds = wallIds.filter((id) => !beamSet.has(id));
   const hiddenIds = collectIds(selection.selectedHiddenId, selection.selectedHiddenIds);
+  const doorIds = collectIds(selection.selectedDoorId, selection.selectedDoorIds);
   const passiveModelIds = collectIds(selection.selectedPassiveModelId, selection.selectedPassiveModelIds);
   const designIds = normalizeSelectionIds(selectedOrderDesignIds.value);
   const hasActiveModel = !!selection.selectedModelOutline;
@@ -7313,6 +7509,7 @@ function getEditorSelectionSummary(full = null) {
     wallOnlyIds.length > 0,
     beamIds.length > 0,
     hiddenIds.length > 0,
+    doorIds.length > 0,
     designCount > 0,
   ].filter(Boolean).length;
   return {
@@ -7320,11 +7517,12 @@ function getEditorSelectionSummary(full = null) {
     wallOnlyIds,
     beamIds,
     hiddenIds,
+    doorIds,
     passiveModelIds,
     designIds,
     hasActiveModel,
     designCount,
-    totalCount: wallOnlyIds.length + beamIds.length + hiddenIds.length + designCount,
+    totalCount: wallOnlyIds.length + beamIds.length + hiddenIds.length + doorIds.length + designCount,
     categoryCount,
     isMixed: categoryCount > 1,
     isSingleDesign: designCount === 1 && categoryCount === 1,
@@ -7338,7 +7536,7 @@ function syncQuickStateFromEditor() {
   currentEditorDisplayUnitState.value = ["mm", "inch"].includes(String(s.unit || "cm").trim().toLowerCase())
     ? String(s.unit || "cm").trim().toLowerCase()
     : "cm";
-  activeStageOrderDesignSelected.value = !!full?.selection?.selectedModelOutline;
+  activeStageOrderDesignSelected.value = !!full?.selection?.selectedModelOutline && !!activeCabinetDesignId.value;
   {
     const nextSelectedIds = [];
     const pushSelectedId = (value) => {
@@ -7349,7 +7547,10 @@ function syncQuickStateFromEditor() {
     if (Array.isArray(full?.selection?.selectedPassiveModelIds)) {
       for (const id of full.selection.selectedPassiveModelIds) pushSelectedId(id);
     }
-    selectedStageOrderDesignIds.value = nextSelectedIds;
+    const orderIds = new Set(orderDesignCatalog.value.map((item) => String(item.id || "").trim()).filter(Boolean));
+    const doorIds = new Set(doorScenePlacements.value.map((item) => String(item.id || "").trim()).filter(Boolean));
+    selectedStageOrderDesignIds.value = nextSelectedIds.filter((id) => orderIds.has(id));
+    selectedStageDoorAssetIds.value = nextSelectedIds.filter((id) => doorIds.has(id));
   }
   editorViewportState.value = {
     zoom: Number.isFinite(Number(s.zoom)) ? Number(s.zoom) : 1,
@@ -7361,10 +7562,13 @@ function syncQuickStateFromEditor() {
   if (!model2dLines.length) {
     stageCabinetPlaceholderBoxes.value = [];
     activeCabinetDesignId.value = null;
+    activeDoorAssetId.value = null;
     activeStageOrderDesignSelected.value = false;
     selectedStageOrderDesignIds.value = [];
-  } else if (restoredModelDesignId) {
+    selectedStageDoorAssetIds.value = [];
+  } else if (restoredModelDesignId && orderDesignCatalog.value.some((item) => String(item.id) === restoredModelDesignId)) {
     activeCabinetDesignId.value = restoredModelDesignId;
+    activeDoorAssetId.value = null;
     const activeDesign = orderDesignCatalog.value.find((item) => String(item.id) === restoredModelDesignId) || null;
     if (activeDesign?.viewer_boxes?.length) {
       stageCabinetPlaceholderBoxes.value = activeDesign.viewer_boxes.map(normalizeCabinetBox);
@@ -7375,6 +7579,20 @@ function syncQuickStateFromEditor() {
       y: Number.isFinite(Number(full?.model2dSnap?.offsetYmm)) ? Number(full.model2dSnap.offsetYmm) : 0,
       rotRad: Number.isFinite(Number(full?.model2dSnap?.rotationRad)) ? Number(full.model2dSnap.rotationRad) : 0,
     });
+  } else if (restoredModelDesignId && doorScenePlacements.value.some((item) => String(item.id) === restoredModelDesignId)) {
+    activeCabinetDesignId.value = null;
+    activeDoorAssetId.value = restoredModelDesignId;
+    activeStageOrderDesignSelected.value = false;
+    stageCabinetPlaceholderBoxes.value = [];
+    const current = getDoorScenePlacement(restoredModelDesignId);
+    if (current) {
+      upsertDoorScenePlacement({
+        ...current,
+        x: Number.isFinite(Number(full?.model2dSnap?.offsetXmm)) ? Number(full.model2dSnap.offsetXmm) : 0,
+        y: Number.isFinite(Number(full?.model2dSnap?.offsetYmm)) ? Number(full.model2dSnap.offsetYmm) : 0,
+        rotRad: Number.isFinite(Number(full?.model2dSnap?.rotationRad)) ? Number(full.model2dSnap.rotationRad) : 0,
+      });
+    }
   } else if (activeCabinetDesignId.value) {
     upsertOrderDesignPlacement({
       orderDesignId: activeCabinetDesignId.value,
@@ -7382,6 +7600,16 @@ function syncQuickStateFromEditor() {
       y: Number.isFinite(Number(full?.model2dSnap?.offsetYmm)) ? Number(full.model2dSnap.offsetYmm) : 0,
       rotRad: Number.isFinite(Number(full?.model2dSnap?.rotationRad)) ? Number(full.model2dSnap.rotationRad) : 0,
     });
+  } else if (activeDoorAssetId.value) {
+    const current = getDoorScenePlacement(activeDoorAssetId.value);
+    if (current) {
+      upsertDoorScenePlacement({
+        ...current,
+        x: Number.isFinite(Number(full?.model2dSnap?.offsetXmm)) ? Number(full.model2dSnap.offsetXmm) : 0,
+        y: Number.isFinite(Number(full?.model2dSnap?.offsetYmm)) ? Number(full.model2dSnap.offsetYmm) : 0,
+        rotRad: Number.isFinite(Number(full?.model2dSnap?.rotationRad)) ? Number(full.model2dSnap.rotationRad) : 0,
+      });
+    }
   }
   showDimensions.value = s.showDimensions !== false;
   showOffsetWalls.value = !!s.offsetWallEnabled;
@@ -7390,11 +7618,14 @@ function syncQuickStateFromEditor() {
   const hiddenNodes = Array.isArray(full?.hiddenGraphSnap?.nodes) ? full.hiddenGraphSnap.nodes : [];
   const walls = Array.isArray(full?.graphSnap?.walls) ? full.graphSnap.walls : [];
   const hiddenWalls = Array.isArray(full?.hiddenGraphSnap?.walls) ? full.hiddenGraphSnap.walls : [];
+  const doors = Array.isArray(full?.doors) ? full.doors : [];
   const selectedWallIds = Array.isArray(full?.selection?.selectedWallIds) ? full.selection.selectedWallIds : [];
   const selectedHiddenIds = Array.isArray(full?.selection?.selectedHiddenIds) ? full.selection.selectedHiddenIds : [];
+  const selectedDoorIds = Array.isArray(full?.selection?.selectedDoorIds) ? full.selection.selectedDoorIds : [];
   const selectedPassiveModelIds = Array.isArray(full?.selection?.selectedPassiveModelIds) ? full.selection.selectedPassiveModelIds : [];
   const selectedWallId = full?.selection?.selectedWallId || selectedWallIds[0] || null;
   const selectedHiddenId = full?.selection?.selectedHiddenId || selectedHiddenIds[0] || null;
+  const selectedDoorId = full?.selection?.selectedDoorId || selectedDoorIds[0] || null;
   const selectedPassiveModelId = full?.selection?.selectedPassiveModelId || selectedPassiveModelIds[0] || null;
   const beamNodes = Array.isArray(full?.beamGraphSnap?.nodes) ? full.beamGraphSnap.nodes : [];
   const beams = Array.isArray(full?.beamGraphSnap?.walls) ? full.beamGraphSnap.walls : [];
@@ -7406,16 +7637,32 @@ function syncQuickStateFromEditor() {
   const selectedWallCount = selectedWallIds.length > 0 ? selectedWallIds.length : (selectedWallId ? 1 : 0);
   const selectedHiddenCount = selectedHiddenIds.length > 0 ? selectedHiddenIds.length : (selectedHiddenId ? 1 : 0);
   const selectedBeamCount = selectedBeamIds.length > 0 ? selectedBeamIds.length : (selectedBeamId ? 1 : 0);
+  const selectedDoor = selectedDoorId ? doors.find((door) => door.id === selectedDoorId) : null;
+  const selectedDoorCount = selectedDoorIds.length > 0 ? selectedDoorIds.length : (selectedDoorId ? 1 : 0);
+  const hasActiveDoorAssetSelection = !!full?.selection?.selectedModelOutline && !!activeDoorAssetId.value;
+  const selectedDoorAsset = hasActiveDoorAssetSelection
+    ? getDoorScenePlacement(activeDoorAssetId.value)
+    : (
+      selectedStageDoorAssetIds.value.length === 1
+        ? getDoorScenePlacement(selectedStageDoorAssetIds.value[0])
+        : null
+    );
+  const selectedDoorAssetCount = hasActiveDoorAssetSelection
+    ? 1
+    : selectedStageDoorAssetIds.value.length;
   const hasWallSelection = !!(selectedWall || selectedWallIds.length > 0);
   const hasHiddenSelection = !!(selectedHidden || selectedHiddenIds.length > 0);
   const hasBeamSelection = !!(selectedBeam || selectedBeamIds.length > 0);
-  const hasDesignSelection = !!(selectedOrderDesignIds.value.length > 0 || full?.selection?.selectedModelOutline);
+  const hasDoorSelection = !!(selectedDoor || selectedDoorIds.length > 0 || selectedDoorAsset || selectedStageDoorAssetIds.value.length > 0);
+  const hasDesignSelection = !!(selectedOrderDesignIds.value.length > 0 || (!!full?.selection?.selectedModelOutline && !!activeCabinetDesignId.value));
   const selectedSolidEntityType = selectedWall ? getSolidEntityType(selectedWall) : "wall";
   const metricsEntityType =
     getEditorSelectionSummary(full).categoryCount > 1
       ? "mixed"
       : hasBeamSelection
         ? "beam"
+        : hasDoorSelection
+          ? "door"
         : hasWallSelection
           ? selectedSolidEntityType
           : hasHiddenSelection
@@ -7426,17 +7673,21 @@ function syncQuickStateFromEditor() {
   const selectedCount =
     (metricsEntityType === "hidden") ? selectedHiddenCount
       : (metricsEntityType === "beam") ? selectedBeamCount
+        : (metricsEntityType === "door") ? Math.max(selectedDoorCount, selectedDoorAssetCount)
         : (metricsEntityType === "design") ? (selectedOrderDesignIds.value.length > 0 ? selectedOrderDesignIds.value.length : (full?.selection?.selectedModelOutline ? 1 : 0))
         : selectedWallCount;
 
   walls3dSnapshot.value = {
     nodes: wallNodes,
     walls,
+    doors,
     selection: {
       selectedWallId: full?.selection?.selectedWallId || null,
       selectedWallIds,
       selectedHiddenId: full?.selection?.selectedHiddenId || null,
       selectedHiddenIds,
+      selectedDoorId: full?.selection?.selectedDoorId || null,
+      selectedDoorIds,
       selectedBeamId: full?.selection?.selectedBeamId || null,
       selectedBeamIds,
       selectedPassiveModelId,
@@ -7446,9 +7697,12 @@ function syncQuickStateFromEditor() {
     metrics: {
       nodes: metricsEntityType === "hidden" ? hiddenNodes : metricsEntityType === "beam" ? beamNodes : wallNodes,
       walls: metricsEntityType === "hidden" ? hiddenWalls : metricsEntityType === "beam" ? beams : walls,
+      doors,
       selection: {
-        selectedWallId: metricsEntityType === "hidden" ? selectedHiddenId : metricsEntityType === "beam" ? selectedBeamId : selectedWallId,
-        selectedWallIds: metricsEntityType === "hidden" ? selectedHiddenIds : metricsEntityType === "beam" ? selectedBeamIds : selectedWallIds,
+        selectedWallId: metricsEntityType === "hidden" ? selectedHiddenId : metricsEntityType === "beam" ? selectedBeamId : metricsEntityType === "door" ? selectedDoorId : selectedWallId,
+        selectedWallIds: metricsEntityType === "hidden" ? selectedHiddenIds : metricsEntityType === "beam" ? selectedBeamIds : metricsEntityType === "door" ? selectedDoorIds : selectedWallIds,
+        selectedDoorId,
+        selectedDoorIds,
         selectedPassiveModelId,
         selectedPassiveModelIds,
         selectedModelOutline: !!full?.selection?.selectedModelOutline,
@@ -7490,11 +7744,23 @@ function syncQuickStateFromEditor() {
     const defaultColumnWidthCm = (Number.isFinite(Number(s?.columnWidthMm)) ? Number(s.columnWidthMm) : 500) / 10;
     const defaultColumnDepthCm = (Number.isFinite(Number(s?.columnDepthMm)) ? Number(s.columnDepthMm) : 400) / 10;
     const defaultColumnHeightCm = (Number.isFinite(Number(s?.columnHeightMm)) ? Number(s.columnHeightMm) : 2800) / 10;
+    const defaultDoorWidthCm = 90;
+    const defaultDoorHeightCm = 207;
+    const defaultDoorThicknessCm = 15;
+    const defaultDoorSillCm = 0;
 
     const selectedObj =
       (metricsEntityType === "hidden") ? selectedHidden
         : (metricsEntityType === "beam") ? selectedBeam
+          : (metricsEntityType === "door") ? (selectedDoor || selectedDoorAsset)
           : selectedWall;
+    const selectedDoorBoundsMm = metricsEntityType === "door"
+      ? sanitizeDoorBoundsMm(selectedObj?.modelBoundsMm || {
+          widthMm: selectedObj?.widthMm,
+          heightMm: selectedObj?.heightMm,
+          depthMm: selectedObj?.frameDepthMm,
+        })
+      : null;
     const selectedSolidType = getSolidEntityType(selectedObj);
     const fallbackThicknessCm =
       selectedSolidType === "beam" ? defaultBeamThicknessCm :
@@ -7512,33 +7778,50 @@ function syncQuickStateFromEditor() {
       defaultWallColor;
     wallStyleDraft.value = selectedObj
       ? {
-          thicknessCm: (Number(selectedObj.thickness) || (fallbackThicknessCm * 10)) / 10,
-          heightCm: (Number(selectedObj.heightMm) || (fallbackHeightCm * 10)) / 10,
-          lengthCm: fallbackLengthCm,
-          floorOffsetCm: (Number(selectedObj.floorOffsetMm) || (fallbackFloorOffsetCm * 10)) / 10,
+          thicknessCm: metricsEntityType === "door"
+            ? (Number(selectedDoorBoundsMm?.depthMm) || (defaultDoorThicknessCm * 10)) / 10
+            : (Number(selectedObj.thickness) || (fallbackThicknessCm * 10)) / 10,
+          heightCm: metricsEntityType === "door"
+            ? (Number(selectedDoorBoundsMm?.heightMm) || (fallbackHeightCm * 10)) / 10
+            : (Number(selectedObj.heightMm) || (fallbackHeightCm * 10)) / 10,
+          lengthCm: metricsEntityType === "door"
+            ? (Number(selectedDoorBoundsMm?.widthMm) || (defaultDoorWidthCm * 10)) / 10
+            : fallbackLengthCm,
+          floorOffsetCm: metricsEntityType === "door"
+            ? (Number(selectedObj.floorOffsetMm ?? selectedObj.sillHeightMm) || (defaultDoorSillCm * 10)) / 10
+            : (Number(selectedObj.floorOffsetMm) || (fallbackFloorOffsetCm * 10)) / 10,
           color: (typeof selectedObj.color3d === "string" && selectedObj.color3d) ? selectedObj.color3d : fallbackColor,
         }
       : {
           thicknessCm:
             designMenuTool.value === "column" ? defaultColumnDepthCm
+              : designMenuTool.value === "door" ? defaultDoorThicknessCm
               : designMenuTool.value === "beam" ? defaultBeamThicknessCm
                 : designMenuTool.value === "hidden" ? defaultHiddenThicknessCm
                   : defaultThicknessCm,
           heightCm:
             designMenuTool.value === "column" ? defaultColumnHeightCm
+              : designMenuTool.value === "door" ? defaultDoorHeightCm
               : designMenuTool.value === "beam" ? defaultBeamHeightCm
                 : defaultHeightCm,
-          lengthCm: designMenuTool.value === "column" ? defaultColumnWidthCm : null,
-          floorOffsetCm: designMenuTool.value === "beam" ? defaultBeamFloorOffsetCm : 0,
+          lengthCm: designMenuTool.value === "column" ? defaultColumnWidthCm : designMenuTool.value === "door" ? defaultDoorWidthCm : null,
+          floorOffsetCm: designMenuTool.value === "beam" ? defaultBeamFloorOffsetCm : designMenuTool.value === "door" ? defaultDoorSillCm : 0,
           color:
             designMenuTool.value === "column" ? defaultColumnColor
               : designMenuTool.value === "beam" ? defaultBeamColor
-                : defaultWallColor,
+                : designMenuTool.value === "door" ? "#8B6B4A" : defaultWallColor,
         };
   }
 
-  const selectedEntity = (metricsEntityType === "hidden") ? selectedHidden : (metricsEntityType === "beam") ? selectedBeam : selectedWall;
+  const selectedEntity = (metricsEntityType === "hidden") ? selectedHidden : (metricsEntityType === "beam") ? selectedBeam : (metricsEntityType === "door") ? (selectedDoor || selectedDoorAsset) : selectedWall;
   if (selectedEntity && metricsEntityType !== "mixed") {
+    const selectedDoorBoundsMm = metricsEntityType === "door"
+      ? sanitizeDoorBoundsMm(selectedEntity?.modelBoundsMm || {
+          widthMm: selectedEntity?.widthMm,
+          heightMm: selectedEntity?.heightMm,
+          depthMm: selectedEntity?.frameDepthMm,
+        })
+      : null;
     const srcNodes = (metricsEntityType === "hidden") ? hiddenNodes : (metricsEntityType === "beam") ? beamNodes : wallNodes;
     const byId = new Map(srcNodes.map((n) => [n.id, n]));
     const na = byId.get(selectedEntity.a);
@@ -7546,18 +7829,26 @@ function syncQuickStateFromEditor() {
     const lenMm = (na && nb) ? Math.hypot(nb.x - na.x, nb.y - na.y) : 0;
     selectedWallStyle.value = {
       id: selectedEntity.id,
-      name: selectedEntity.name || selectedEntity.id,
+      name: selectedEntity.title || selectedEntity.name || selectedEntity.id,
       entityType: metricsEntityType,
-      thicknessCm: (Number(selectedEntity.thickness) || 120) / 10,
-      heightCm: (Number(selectedEntity.heightMm)
+      thicknessCm: metricsEntityType === "door"
+        ? (Number(selectedDoorBoundsMm?.depthMm) || 150) / 10
+        : (Number(selectedEntity.thickness) || 120) / 10,
+      heightCm: metricsEntityType === "door"
+        ? (Number(selectedDoorBoundsMm?.heightMm) || 2070) / 10
+        : (Number(selectedEntity.heightMm)
         || (
           metricsEntityType === "beam" ? Number(s?.beamHeightMm)
             : metricsEntityType === "column" ? Number(s?.columnHeightMm)
               : Number(s?.wallHeightMm)
         )
         || 3000) / 10,
-      floorOffsetCm: (Number(selectedEntity.floorOffsetMm) || 0) / 10,
-      lengthCm: lenMm / 10,
+      floorOffsetCm: metricsEntityType === "door"
+        ? (Number(selectedEntity.floorOffsetMm ?? selectedEntity.sillHeightMm) || 0) / 10
+        : (Number(selectedEntity.floorOffsetMm) || 0) / 10,
+      lengthCm: metricsEntityType === "door"
+        ? (Number(selectedDoorBoundsMm?.widthMm) || 900) / 10
+        : lenMm / 10,
       color: (typeof selectedEntity.color3d === "string" && selectedEntity.color3d)
         ? selectedEntity.color3d
         : (
@@ -7569,6 +7860,11 @@ function syncQuickStateFromEditor() {
         ),
       a: selectedEntity.a,
       b: selectedEntity.b,
+      wallId: selectedEntity.wallId,
+      wallName: selectedEntity.wallName || null,
+      offsetCm: metricsEntityType === "door" ? (Number(selectedEntity.offsetMm) || 0) / 10 : null,
+      modelBoundsMm: selectedDoorBoundsMm || selectedEntity.modelBoundsMm || null,
+      floorOffsetMm: Number(selectedEntity.floorOffsetMm) || 0,
       selectedCount,
       isGroupEdit: selectedCount > 1,
     };
@@ -7591,8 +7887,8 @@ function syncQuickStateFromEditor() {
 
 function clampWallStyleDraft() {
   const entityType = selectedWallStyle.value?.entityType || designMenuTool.value || "wall";
-  const fallbackThickness = entityType === "column" ? 40 : 12;
-  const fallbackHeight = entityType === "column" ? 280 : 300;
+  const fallbackThickness = entityType === "column" ? 40 : entityType === "door" ? 12 : 12;
+  const fallbackHeight = entityType === "column" ? 280 : entityType === "door" ? 220 : 300;
   const t = Math.max(0.1, Number(wallStyleDraft.value.thicknessCm) || fallbackThickness);
   const h = Math.max(1, Number(wallStyleDraft.value.heightCm) || fallbackHeight);
   const f = Math.max(0, Number(wallStyleDraft.value.floorOffsetCm) || 0);
@@ -7604,7 +7900,7 @@ function clampWallStyleDraft() {
     floorOffsetCm: Math.round(f * 10) / 10,
     color: c,
   };
-  if (entityType === "column" || Number.isFinite(lengthRaw)) {
+  if (entityType === "column" || entityType === "door" || Number.isFinite(lengthRaw)) {
     next.lengthCm = Math.round((Math.max(0.1, lengthRaw || 50)) * 10) / 10;
   }
   wallStyleDraft.value = next;
@@ -7634,13 +7930,14 @@ function updateWallStyleDraft(next) {
     : null;
   const entityType =
     selectedWallStyle.value?.entityType
+    || (designMenuTool.value === "door" ? "door" : null)
     || (designMenuTool.value === "column" ? "column" : null)
     || (designMenuTool.value === "beam" ? "beam" : null)
     || "wall";
   const isBeamEntity = /^Beam\s+/i.test(String(selectedWallStyle.value?.name || "").trim());
 
   // Only update global wall defaults when no wall is selected.
-  if (entityType !== "hidden" && !selectedWallStyle.value?.id) {
+  if (entityType !== "hidden" && entityType !== "door" && !selectedWallStyle.value?.id) {
     if (designMenuTool.value === "column") {
       editorRef.value?.setState?.({
         columnWidthMm: Number.isFinite(lengthMm) ? lengthMm : Math.max(10, (Number(wallStyleDraft.value.lengthCm) || 50) * 10),
@@ -7668,6 +7965,31 @@ function updateWallStyleDraft(next) {
   if (selectedId) {
     if (entityType === "hidden") {
       if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedHiddenLength?.(lengthMm);
+    } else if (entityType === "door") {
+      const selectedDoorAsset = activeDoorAssetId.value ? getDoorScenePlacement(activeDoorAssetId.value) : null;
+      if (selectedDoorAsset) {
+        const nextWidthMm = Number.isFinite(lengthMm) ? lengthMm : (Number(selectedDoorAsset?.modelBoundsMm?.widthMm) || 900);
+        const nextDoor = {
+          ...selectedDoorAsset,
+          modelBoundsMm: {
+            ...(selectedDoorAsset.modelBoundsMm || getFallbackDoorModelBoundsMm()),
+            widthMm: nextWidthMm,
+            heightMm,
+            depthMm: thicknessMm,
+          },
+          floorOffsetMm,
+        };
+        upsertDoorScenePlacement(nextDoor);
+        if (String(activeDoorAssetId.value || "") === String(nextDoor.id || "")) {
+          syncActiveDoorAssetToEditor(nextDoor, nextDoor);
+        }
+      } else {
+        editorRef.value?.setSelectedDoorStyle?.({
+          widthMm: Number.isFinite(lengthMm) ? lengthMm : null,
+          heightMm,
+          sillHeightMm: floorOffsetMm,
+        });
+      }
     } else if (entityType === "beam") {
       editorRef.value?.setSelectedBeamStyle?.({ thicknessMm, heightMm, fillColor: color3d, floorOffsetMm });
       if (!isGroupEdit && Number.isFinite(lengthMm)) editorRef.value?.setSelectedBeamLength?.(lengthMm);
@@ -7691,7 +8013,25 @@ function updateSelectedWallCoords(patch) {
   const dxMm = Number.isFinite(Number(patch?.dxCm)) ? toMm(patch.dxCm) : null;
   const dyMm = Number.isFinite(Number(patch?.dyCm)) ? toMm(patch.dyCm) : null;
   if (dxMm !== null || dyMm !== null) {
-    if (editorRef.value?.moveSelectionBy) {
+    if (entityType === "door") {
+      if (activeDoorAssetId.value) {
+        const current = getDoorScenePlacement(activeDoorAssetId.value);
+        if (current) {
+        const nextDoor = {
+          ...current,
+          x: current.x + (dxMm ?? 0),
+          y: current.y + (dyMm ?? 0),
+        };
+        upsertDoorScenePlacement(nextDoor);
+        syncActiveDoorAssetToEditor(nextDoor, nextDoor);
+      }
+      } else {
+        editorRef.value?.moveSelectedDoorsBy?.({
+          dxMm: dxMm ?? 0,
+          dyMm: dyMm ?? 0,
+        });
+      }
+    } else if (editorRef.value?.moveSelectionBy) {
       editorRef.value.moveSelectionBy({
         dxMm: dxMm ?? 0,
         dyMm: dyMm ?? 0,
@@ -7712,6 +8052,24 @@ function updateSelectedWallCoords(patch) {
         dxMm: dxMm ?? 0,
         dyMm: dyMm ?? 0,
       });
+    }
+    return;
+  }
+
+  if (entityType === "door") {
+    const offsetCm = Number.isFinite(Number(patch?.offsetCm)) ? Number(patch.offsetCm) : null;
+    if (activeDoorAssetId.value && offsetCm !== null) {
+      const current = getDoorScenePlacement(activeDoorAssetId.value);
+      if (current) {
+        const nextDoor = {
+          ...current,
+          x: offsetCm * 10,
+        };
+        upsertDoorScenePlacement(nextDoor);
+        syncActiveDoorAssetToEditor(nextDoor, nextDoor);
+      }
+    } else if (offsetCm !== null) {
+      editorRef.value?.setSelectedDoorOffset?.(offsetCm * 10);
     }
     return;
   }
@@ -7979,6 +8337,26 @@ const selectedOrderDesignSource = computed(() => {
   return orderDesignCatalog.value.find((item) => String(item.id) === String(ids[0])) || activeStageOrderDesign.value;
 });
 const activeStageOrderPlacement = computed(() => getOrderDesignPlacement(activeCabinetDesignId.value));
+const draggedDoorAssetPreviewInstance = computed(() => {
+  const drag = presetDrag.value;
+  if (!drag?.active || drag.type !== "doorAsset" || !drag.preset?.modelUrl) return null;
+  if (drag.dragBootstrapping || drag.createdDoorAssetId || cabinetDesignDropLoading.value) return null;
+  const dx = drag.clientX - (drag.startX || drag.clientX);
+  const dy = drag.clientY - (drag.startY || drag.clientY);
+  if (Math.hypot(dx, dy) < PRESET_PREVIEW_MIN_DRAG_PX) return null;
+  const dropWorld = clientPointToStageWorld(drag.clientX, drag.clientY);
+  if (!dropWorld) return null;
+  return {
+    id: `door-drag-preview-${String(drag.preset.id || "door")}`,
+    modelUrl: drag.preset.modelUrl,
+    transform: {
+      x: Number(dropWorld.x) || 0,
+      y: Number(dropWorld.y) || 0,
+      rotRad: 0,
+    },
+    dragPreview: true,
+  };
+});
 const draggedCabinetPreviewInstance = computed(() => {
   const drag = presetDrag.value;
   if (!drag?.active || drag.type !== "cabinetDesign" || !drag.design?.preview?.viewer_boxes?.length) return null;
@@ -8037,6 +8415,40 @@ const stageOrderDesignInstances = computed(() =>
     ...(draggedCabinetPreviewInstance.value ? [draggedCabinetPreviewInstance.value] : []),
   ]
 );
+const stageDoorAssetInstances = computed(() => [
+  ...doorScenePlacements.value
+    .filter((placement) => String(placement.id) !== String(activeDoorAssetId.value || ""))
+    .map((placement) => ({
+      id: placement.id,
+      modelUrl: placement.modelUrl,
+      modelBoundsMm: placement.modelBoundsMm,
+      transform: {
+        x: placement.x,
+        y: placement.y,
+        rotRad: placement.rotRad,
+        floorOffsetMm: placement.floorOffsetMm || 0,
+      },
+    })),
+  ...(activeDoorAssetId.value
+    ? (() => {
+        const activePlacement = getDoorScenePlacement(activeDoorAssetId.value);
+        if (!activePlacement) return [];
+        const liveTransform = getCurrentModel2dTransform();
+        return [{
+          id: activePlacement.id,
+          modelUrl: activePlacement.modelUrl,
+          modelBoundsMm: activePlacement.modelBoundsMm,
+          transform: {
+            x: liveTransform.x,
+            y: liveTransform.y,
+            rotRad: liveTransform.rotRad,
+            floorOffsetMm: activePlacement.floorOffsetMm || 0,
+          },
+        }];
+      })()
+    : []),
+  ...(draggedDoorAssetPreviewInstance.value ? [draggedDoorAssetPreviewInstance.value] : []),
+]);
 const passiveStageOrderDesignModels = computed(() =>
   orderDesignPlacements.value
     .filter((placement) => String(placement.orderDesignId) !== String(activeCabinetDesignId.value || ""))
@@ -8068,6 +8480,49 @@ const passiveStageOrderDesignModels = computed(() =>
       };
     })
     .filter((item) => item && item.outline.length >= 3 && item.lines.length >= 1)
+);
+function buildDoorAssetPlanGeometry(boundsMm) {
+  const sanitized = sanitizeDoorBoundsMm(boundsMm);
+  const widthMm = sanitized.widthMm;
+  const depthMm = Math.max(40, sanitized.depthMm);
+  const halfD = depthMm * 0.5;
+  return {
+    outline: [
+      { x: 0, y: -halfD },
+      { x: widthMm, y: -halfD },
+      { x: widthMm, y: halfD },
+      { x: 0, y: halfD },
+    ],
+    lines: [
+      { ax: 0, ay: -halfD, bx: widthMm, by: -halfD },
+      { ax: widthMm, ay: -halfD, bx: widthMm, by: halfD },
+      { ax: widthMm, ay: halfD, bx: 0, by: halfD },
+      { ax: 0, ay: halfD, bx: 0, by: -halfD },
+      { ax: widthMm * 0.1, ay: 0, bx: widthMm * 0.9, by: 0 },
+    ],
+  };
+}
+const passiveDoorSceneModels = computed(() =>
+  doorScenePlacements.value
+    .filter((placement) => String(placement.id) !== String(activeDoorAssetId.value || ""))
+    .map((placement) => {
+      const geometry = buildDoorAssetPlanGeometry(placement.modelBoundsMm);
+      return {
+        id: placement.id,
+      geometrySpace: "local",
+      lines: geometry.lines,
+      outline: geometry.outline,
+      transform: {
+        x: placement.x,
+        y: placement.y,
+        rotRad: placement.rotRad,
+        mirrorX: 1,
+      },
+      designTitle: placement.title,
+      displayName: placement.title,
+      outlineColor: placement.outlineColor,
+    };
+  })
 );
 const isOrderDraftEditMode = computed(() => orderDraftMode.value === "edit");
 const orderEntryPreviewNumber = computed(() => {
@@ -8662,12 +9117,13 @@ function doSeeOrigin() {
 async function setTool(tool) {
   activeTool.value = tool;
 
-  const isDrawingTool = tool === "wall" || tool === "hidden" || tool === "dimension" || tool === "beam";
+  const isDrawingTool = tool === "wall" || tool === "hidden" || tool === "dimension" || tool === "beam" || tool === "door";
   if (route.path !== "/" && isDrawingTool) {
     await router.push("/");
   }
 
   if (tool === "wall") editorRef.value?.setActiveTool?.("wall");
+  else if (tool === "door") editorRef.value?.setActiveTool?.("door");
   else if (tool === "hidden") editorRef.value?.setActiveTool?.("hidden");
   else if (tool === "dimension") editorRef.value?.setActiveTool?.("dim");
   else if (tool === "beam") editorRef.value?.setActiveTool?.("beam");
@@ -8680,6 +9136,7 @@ async function setDesignMenuTool(id) {
 
   const mode =
     (id === "wall") ? "wall" :
+    (id === "door") ? "door" :
     (id === "hidden") ? "hidden" :
     (id === "dimension") ? "dim" :
     (id === "beam") ? "beam" :
@@ -8751,6 +9208,17 @@ watch(
   { immediate: true }
 );
 
+onMounted(() => {
+  getDoorModelBoundsMm(DEFAULT_DOOR_MODEL_URL)
+    .then((boundsMm) => {
+      doorAssetLibrary.value = doorAssetLibrary.value.map((item) => ({
+        ...item,
+        modelBoundsMm: boundsMm,
+      }));
+    })
+    .catch(() => {});
+});
+
 watch(
   () => ({
     x: Number.isFinite(Number(model2dTransformRef.value?.x)) ? Number(model2dTransformRef.value.x) : 0,
@@ -8760,11 +9228,21 @@ watch(
   }),
   (transform) => {
     if (_orderDesignPlacementSyncPaused) return;
-    if (!activeCabinetDesignId.value) return;
+    if (activeCabinetDesignId.value) {
       upsertOrderDesignPlacement({
         orderDesignId: activeCabinetDesignId.value,
         ...transform,
       });
+      return;
+    }
+    if (activeDoorAssetId.value) {
+      const current = getDoorScenePlacement(activeDoorAssetId.value);
+      if (!current) return;
+      upsertDoorScenePlacement({
+        ...current,
+        ...transform,
+      });
+    }
   },
   { deep: true }
 );
@@ -8772,7 +9250,7 @@ watch(
 watch(
   () => ({
     editorReady: !!editorRef.value,
-    models: passiveStageOrderDesignModels.value,
+    models: [...passiveStageOrderDesignModels.value, ...passiveDoorSceneModels.value],
   }),
   ({ models }) => {
     editorRef.value?.setPassiveModels?.(models);
@@ -8783,10 +9261,11 @@ watch(
 watch(
   passiveModelSelectionStateRef,
   (ids) => {
-    const validIds = new Set(orderDesignCatalog.value.map((item) => String(item.id || "").trim()).filter(Boolean));
-    selectedStageOrderDesignIds.value = Array.isArray(ids)
-      ? ids.map((id) => String(id || "").trim()).filter((id) => validIds.has(id))
-      : [];
+    const orderIds = new Set(orderDesignCatalog.value.map((item) => String(item.id || "").trim()).filter(Boolean));
+    const doorIds = new Set(doorScenePlacements.value.map((item) => String(item.id || "").trim()).filter(Boolean));
+    const nextIds = Array.isArray(ids) ? ids.map((id) => String(id || "").trim()).filter(Boolean) : [];
+    selectedStageOrderDesignIds.value = nextIds.filter((id) => orderIds.has(id));
+    selectedStageDoorAssetIds.value = nextIds.filter((id) => doorIds.has(id));
   },
   { immediate: true }
 );
@@ -8807,6 +9286,19 @@ watch(
         mirrorX: 1,
       });
     }
+    let changedDoorPlacements = false;
+    const nextDoorPlacements = doorScenePlacements.value.map((placement) => {
+      const match = models.find((model) => String(model?.id || "") === String(placement.id || ""));
+      if (!match) return placement;
+      changedDoorPlacements = true;
+      return {
+        ...placement,
+        x: Number.isFinite(Number(match?.x)) ? Number(match.x) : placement.x,
+        y: Number.isFinite(Number(match?.y)) ? Number(match.y) : placement.y,
+        rotRad: Number.isFinite(Number(match?.rotRad)) ? Number(match.rotRad) : placement.rotRad,
+      };
+    });
+    if (changedDoorPlacements) doorScenePlacements.value = nextDoorPlacements;
   },
   { immediate: true, deep: true }
 );
@@ -8936,6 +9428,15 @@ function setDraftFromDesignTool(id) {
       floorOffsetCm: 0,
       color: String(st?.wall3dColor || "#C7CCD1"),
     };
+    return;
+  }
+  if (id === "door") {
+    wallStyleDraft.value = {
+      lengthCm: 90,
+      heightCm: 220,
+      floorOffsetCm: 0,
+      color: "#8B6B4A",
+    };
   }
 }
 
@@ -8955,6 +9456,128 @@ function startWallPresetDrag(ev, preset) {
   disable2dInput();
   window.addEventListener("pointermove", onPresetPointerMove);
   window.addEventListener("pointerup", onPresetPointerUp, { once: true });
+}
+
+function startDoorPresetDrag(ev, preset) {
+  if (!preset || !ev?.isPrimary) return;
+  designMenuTool.value = "door";
+  const sessionId = ++presetDragSessionSeed;
+  presetDrag.value = {
+    ...createEmptyPresetDragState(),
+    active: true,
+    type: "doorPreset",
+    preset,
+    clientX: ev.clientX,
+    clientY: ev.clientY,
+    startX: ev.clientX,
+    startY: ev.clientY,
+    sessionId,
+  };
+  primeDoorPresetModel(preset).then((resolvedPreset) => {
+    if (!resolvedPreset) return;
+    if (!presetDrag.value?.active || presetDrag.value?.type !== "doorPreset") return;
+    if (presetDrag.value?.sessionId !== sessionId) return;
+    if (String(presetDrag.value?.preset?.id || "") !== String(preset.id || "")) return;
+    presetDrag.value = {
+      ...presetDrag.value,
+      preset: resolvedPreset,
+    };
+  }).catch(() => {});
+  disable2dInput();
+  window.addEventListener("pointermove", onPresetPointerMove);
+  window.addEventListener("pointerup", onPresetPointerUp, { once: true });
+}
+
+function startDoorAssetDrag(ev, item) {
+  if (!item || !ev?.isPrimary) return;
+  presetDrag.value = {
+    ...createEmptyPresetDragState(),
+    active: true,
+    type: "doorAsset",
+    preset: item,
+    clientX: ev.clientX,
+    clientY: ev.clientY,
+    startX: ev.clientX,
+    startY: ev.clientY,
+    enteredStage: false,
+    leftPanel: false,
+    sessionId: ++presetDragSessionSeed,
+  };
+  disable2dInput();
+  window.addEventListener("pointermove", onPresetPointerMove);
+  window.addEventListener("pointerup", onPresetPointerUp, { once: true });
+}
+
+async function ensureDoorAssetDragPlacement(clientX, clientY) {
+  const drag = { ...presetDrag.value };
+  if (!drag.active || drag.type !== "doorAsset" || !drag.preset?.modelUrl || drag.dragBootstrapping) return false;
+  const sessionId = drag.sessionId;
+  const previousActiveDoorAssetId = String(activeDoorAssetId.value || "").trim();
+  const previousActiveDoorPlacement = previousActiveDoorAssetId ? { ...(getDoorScenePlacement(previousActiveDoorAssetId) || getCurrentEditorModelPlacement()) } : null;
+  presetDrag.value = {
+    ...drag,
+    dragBootstrapping: true,
+    previousActiveDoorAssetId,
+    previousActiveDoorPlacement,
+  };
+  cabinetDesignDropLoadingMode.value = "door";
+  cabinetDesignDropLoading.value = true;
+  cabinetDesignDropLoadingTitle.value = String(drag.preset?.title || "درب").trim();
+  try {
+    const currentDrag = presetDrag.value;
+    if (!currentDrag.active || currentDrag.sessionId !== sessionId || currentDrag.type !== "doorAsset") return false;
+    const latestClientX = Number.isFinite(Number(presetDrag.value.clientX)) ? Number(presetDrag.value.clientX) : clientX;
+    const latestClientY = Number.isFinite(Number(presetDrag.value.clientY)) ? Number(presetDrag.value.clientY) : clientY;
+    const dropWorld = clientPointToStageWorld(latestClientX, latestClientY);
+    if (!dropWorld) return false;
+    const boundsMm = drag.preset.modelBoundsMm || await getDoorModelBoundsMm(drag.preset.modelUrl);
+    const nextId = `door-scene-${doorScenePlacementSeed++}`;
+    const nextPlacement = normalizeDoorScenePlacement({
+      id: nextId,
+      title: drag.preset.title || "Door",
+      modelUrl: drag.preset.modelUrl,
+      modelBoundsMm: boundsMm,
+      outlineColor: drag.preset.outlineColor || "#8B6B4A",
+      x: Number(dropWorld.x) || 0,
+      y: Number(dropWorld.y) || 0,
+      rotRad: 0,
+    });
+    if (!nextPlacement) return false;
+    upsertDoorScenePlacement(nextPlacement);
+    const restored = restoreActiveDoorAssetToEditor(nextPlacement, nextPlacement);
+    await nextTick();
+    presetDrag.value = {
+      ...presetDrag.value,
+      createdDoorAssetId: nextId,
+      dragBootstrapping: false,
+      dragStarted: restored,
+      previousActiveDoorAssetId,
+      previousActiveDoorPlacement,
+    };
+    syncQuickStateFromEditor();
+    if (presetDrag.value.releasePending) {
+      const releaseX = Number.isFinite(Number(presetDrag.value.releaseClientX)) ? Number(presetDrag.value.releaseClientX) : latestClientX;
+      const releaseY = Number.isFinite(Number(presetDrag.value.releaseClientY)) ? Number(presetDrag.value.releaseClientY) : latestClientY;
+      const stageRect = stageEl.value?.getBoundingClientRect();
+      const inStage = !!stageRect && releaseX >= stageRect.left && releaseX <= stageRect.right
+        && releaseY >= stageRect.top && releaseY <= stageRect.bottom;
+      const commit = inStage
+        && Math.hypot(releaseX - (presetDrag.value.startX || releaseX), releaseY - (presetDrag.value.startY || releaseY)) >= PRESET_PREVIEW_MIN_DRAG_PX
+        && presetDrag.value.enteredStage;
+      if (commit) {
+        enable2dInput();
+        const dragStarted = !!editorRef.value?.beginModelDragAtClient?.(releaseX, releaseY);
+        if (dragStarted) editorRef.value?.updateModelDragAtClient?.(releaseX, releaseY);
+        syncQuickStateFromEditor();
+      }
+      finishPresetDragSession();
+    }
+    return true;
+  } finally {
+    cabinetDesignDropLoading.value = false;
+    cabinetDesignDropLoadingTitle.value = "";
+    cabinetDesignDropLoadingMode.value = "add";
+  }
 }
 
 function startColumnDrag(ev) {
@@ -9034,6 +9657,20 @@ async function onPresetPointerUp(ev) {
   if (inStage && movedEnough && drag.enteredStage && canDropCabinet) {
     if (drag.type === "column") {
       editorRef.value?.placeColumnAtClient?.(ev.clientX, ev.clientY);
+    } else if (drag.type === "doorAsset" && drag.preset?.modelUrl) {
+      presetDrag.value = {
+        ...presetDrag.value,
+        releasePending: true,
+        releaseClientX: ev.clientX,
+        releaseClientY: ev.clientY,
+        clientX: ev.clientX,
+        clientY: ev.clientY,
+      };
+      await ensureDoorAssetDragPlacement(ev.clientX, ev.clientY);
+      return;
+    } else if (drag.type === "doorPreset" && drag.preset) {
+      const payload = await buildDoorPresetPayloadAsync(drag.preset);
+      editorRef.value?.beginDoorPlacementAtClient?.(payload, ev.clientX, ev.clientY);
     } else if (drag.type === "cabinetDesign" && drag.design?.preview?.viewer_boxes?.length) {
       presetDrag.value = {
         ...presetDrag.value,
@@ -9093,6 +9730,15 @@ const presetPreview = computed(() => {
           name: "Column",
         }];
       })()
+    : drag.type === "doorPreset"
+      ? buildDoorPresetPreviewLines(drag.preset)
+    : drag.type === "doorAsset"
+      ? buildDoorPresetPreviewLines({
+          id: drag.preset?.id,
+          title: drag.preset?.title,
+          frameThicknessMm: 50,
+          modelBoundsMm: drag.preset?.modelBoundsMm || getFallbackDoorModelBoundsMm(),
+        })
     : drag.type === "cabinetDesign"
       ? getCabinetDesignPreviewLines(drag.design)
     : buildPresetLines(drag.preset.kind);
@@ -9116,11 +9762,15 @@ const presetPreview = computed(() => {
   const cy = (minY + maxY) * 0.5;
   const previewFill = drag.type === "column"
     ? (walls3dSnapshot.value?.state?.columnFillColor || "#A6A6A6")
+    : drag.type === "doorPreset"
+      ? "#8B6B4A"
     : drag.type === "cabinetDesign"
       ? "#d3c7b7"
       : (walls3dSnapshot.value?.state?.wallFillColor || "#A6A6A6");
   const previewIdBase = drag.type === "column"
     ? "column-preview"
+    : drag.type === "doorPreset"
+      ? String(drag.preset?.id || "door-preview")
     : drag.type === "cabinetDesign"
       ? String(drag.design?.id || "cabinet-preview")
       : drag.preset.id;
@@ -9264,6 +9914,11 @@ function setSubRail(id) {
   openMode.value = "menu";
   if (id === "cabinet") {
     loadCabinetDesignCatalog();
+  }
+  if (id === "door") {
+    setDesignMenuTool("door");
+  } else if (id === "wall" && designMenuTool.value === "door") {
+    setDesignMenuTool("wall");
   }
   if (designBtnEl.value) scheduleMenuPanelPosition(designBtnEl.value);
   scheduleSubRailPosition();
@@ -9694,7 +10349,7 @@ onBeforeUnmount(() => {
               <template v-if="activeSubRail === 'wall'">
                 <div class="designMenu__grid" aria-label="Design Tools Grid">
                   <button
-                    v-for="it in designMenuTools"
+                    v-for="it in wallDesignMenuTools"
                     :key="it.id"
                     type="button"
                     class="designToolBtn"
@@ -9743,6 +10398,40 @@ onBeforeUnmount(() => {
                       </g>
                     </svg>
                   </button>
+                </div>
+              </template>
+              <template v-else-if="activeSubRail === 'door'">
+                <div class="designMenu__presetsHead">مدل های درب</div>
+                <div class="designMenu__cabinetHint">مدل سه بعدی درب را بگیرید و داخل فضای دوبعدی رها کنید تا موقعیتش را همان لحظه در سه بعدی ببینید.</div>
+                <div class="designMenu__cabinetList" aria-label="Door Designs">
+                  <div
+                    v-for="item in doorAssetLibrary"
+                    :key="item.id"
+                    class="cabinetDesignCard"
+                    :title="item.title"
+                    @pointerenter="hoveredCabinetDesignId = item.id"
+                    @pointerleave="hoveredCabinetDesignId = null"
+                    @pointerdown.prevent="startDoorAssetDrag($event, item)"
+                  >
+                    <div class="cabinetDesignCard__head">
+                      <span class="cabinetDesignCard__title">{{ item.title }}</span>
+                    </div>
+                    <div class="cabinetDesignCard__meta">
+                      <span>GLB Sample</span>
+                    </div>
+                    <div class="cabinetDesignCard__viewer" aria-hidden="true">
+                      <GlbViewerWidget
+                        src="/models/1_z1.glb"
+                        :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                        :asset-instances="[{ id: item.id, modelUrl: item.modelUrl, modelBoundsMm: item.modelBoundsMm, transform: { x: 0, y: 0, rotRad: 0 } }]"
+                        :display-unit="currentEditorDisplayUnit"
+                        :show-attrs-panel="false"
+                        :embedded="true"
+                        :preview-only="true"
+                        :preview-active="hoveredCabinetDesignId === item.id"
+                      />
+                    </div>
+                  </div>
                 </div>
               </template>
               <template v-else-if="activeSubRail === 'cabinet'">
@@ -9894,6 +10583,8 @@ onBeforeUnmount(() => {
                   ? "در حال ویرایش طرح..."
                   : cabinetDesignDropLoadingMode === "duplicate"
                     ? "در حال کپی طرح..."
+                    : cabinetDesignDropLoadingMode === "door"
+                      ? "در حال افزودن درب به صحنه..."
                     : "در حال افزودن طرح به صحنه..."
               }}
             </div>
@@ -10089,6 +10780,7 @@ onBeforeUnmount(() => {
             src="/models/1_z1.glb"
             :model2d-transform="model2dTransformRef"
             :walls2d="walls3dSnapshot"
+            :asset-instances="stageDoorAssetInstances"
             :display-unit="currentEditorDisplayUnit"
             :order-design="selectedOrderDesignSource"
             :selected-order-design-ids="selectedOrderDesignIds"
