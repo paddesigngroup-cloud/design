@@ -4,7 +4,7 @@ import { shallowRef } from "vue";
 export const editorRef = shallowRef(null);
 
 // Latest 2D transform of the projected 3D model (millimeters in 2D world).
-export const model2dTransformRef = shallowRef({ x: 0, y: 0, rotRad: 0 });
+export const model2dTransformRef = shallowRef({ x: 0, y: 0, rotRad: 0, mirrorX: 1 });
 
 // Latest 2D viewport state used by stage overlays that must track pan/zoom live.
 export const editorViewportRef = shallowRef({ zoom: 1, offsetX: 0, offsetY: 0 });
@@ -26,6 +26,9 @@ export const orderDesignDeleteHandlerRef = shallowRef(null);
 
 // Handler used by the 2D engine when one or more saved designs should be duplicated from canvas space and database.
 export const orderDesignDuplicateHandlerRef = shallowRef(null);
+
+// Handler used by the 2D engine when one or more saved designs should be mirrored from canvas space and database.
+export const orderDesignMirrorHandlerRef = shallowRef(null);
 
 // Snapshot provider used by editor undo/redo to persist order-design state alongside canvas history.
 export const externalHistoryCaptureHandlerRef = shallowRef(null);

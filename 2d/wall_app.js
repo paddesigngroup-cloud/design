@@ -79,6 +79,7 @@ export function createWallApp({
   onActiveModelDelete,
   onOrderDesignDeleteRequest,
   onOrderDesignDuplicateRequest,
+  onOrderDesignMirrorRequest,
   captureExternalHistoryState,
   restoreExternalHistoryState,
   onFitViewToAll,
@@ -977,6 +978,22 @@ const copyCommand = {
   startHiddenToolSnap: null,
   moved: false,
 };
+const mirrorCommand = {
+  mode: "idle", // idle | await_confirm_selection | await_axis_point_a | await_axis_point_b | await_result_mode | preview_mirror
+  selectionSnapshot: null,
+  startSelectionSnapshot: null,
+  axisStart: null,
+  axisEnd: null,
+  resultMode: null, // copy | in_place
+  startGraphSnap: null,
+  startHiddenGraphSnap: null,
+  startDimensionsSnap: null,
+  startModelSnap: null,
+  startPassiveModelsSnap: null,
+  startToolSnap: null,
+  startHiddenToolSnap: null,
+  moved: false,
+};
 const extendCommand = {
   mode: "idle", // idle | await_second_member_or_endpoint | preview_ready
   kind: null, // wall | beam | hidden
@@ -1852,6 +1869,7 @@ function beginExtendCommand() {
   hideOverlapPicker();
   hideContextMenu();
   if (copyCommand.mode !== "idle") cancelCopyCommand(true);
+  if (mirrorCommand.mode !== "idle") cancelMirrorCommand(true);
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);
   if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
   if (extendCommand.mode !== "idle") cancelExtendCommand(false);
@@ -1975,6 +1993,7 @@ function emitModel2dTransform() {
       x: model2d.offsetXmm || 0,
       y: model2d.offsetYmm || 0,
       rotRad: model2d.rotationRad || 0,
+      mirrorX: Number(model2d.mirrorX) === -1 ? -1 : 1,
     });
   } catch (_) {}
 }
@@ -2618,6 +2637,7 @@ function snapshotModel2d(model) {
     offsetXmm: (typeof model?.offsetXmm === "number" && isFinite(model.offsetXmm)) ? model.offsetXmm : 0,
     offsetYmm: (typeof model?.offsetYmm === "number" && isFinite(model.offsetYmm)) ? model.offsetYmm : 0,
     rotationRad: (typeof model?.rotationRad === "number" && isFinite(model.rotationRad)) ? model.rotationRad : 0,
+    mirrorX: Number(model?.mirrorX) === -1 ? -1 : 1,
   };
 }
 
@@ -2636,6 +2656,7 @@ function snapshotPassiveModels(models) {
       x: Number(model?.transform?.x) || 0,
       y: Number(model?.transform?.y) || 0,
       rotRad: Number(model?.transform?.rotRad) || 0,
+      mirrorX: Number(model?.transform?.mirrorX) === -1 ? -1 : 1,
     },
     color: model?.color ?? null,
     outlineColor: model?.outlineColor ?? null,
@@ -2664,6 +2685,7 @@ function restoreModel2d(model, snap) {
   model.offsetXmm = (typeof snap?.offsetXmm === "number" && isFinite(snap.offsetXmm)) ? snap.offsetXmm : 0;
   model.offsetYmm = (typeof snap?.offsetYmm === "number" && isFinite(snap.offsetYmm)) ? snap.offsetYmm : 0;
   model.rotationRad = (typeof snap?.rotationRad === "number" && isFinite(snap.rotationRad)) ? snap.rotationRad : 0;
+  model.mirrorX = Number(snap?.mirrorX) === -1 ? -1 : 1;
 }
 
 function restorePassiveModels(snap) {
@@ -2686,6 +2708,7 @@ function restorePassiveModels(snap) {
         x: Number(model?.transform?.x) || 0,
         y: Number(model?.transform?.y) || 0,
         rotRad: Number(model?.transform?.rotRad) || 0,
+        mirrorX: Number(model?.transform?.mirrorX) === -1 ? -1 : 1,
       },
       color: typeof model?.color === "string" ? model.color : model2d.color,
       outlineColor: typeof model?.outlineColor === "string" ? model.outlineColor : model2d.outlineColor,
@@ -2696,6 +2719,7 @@ function restorePassiveModels(snap) {
     }))
     .filter((model) => model.id && model.outline.length >= 3 && model.lines.length >= 1);
   copyPreviewPassiveModels = [];
+  mirrorPreviewPassiveModels = [];
   emitPassiveModelsTransformChange();
 }
 
@@ -2979,10 +3003,13 @@ const model2d = {
   offsetXmm: 0,
   offsetYmm: 0,
   rotationRad: 0,
+  mirrorX: 1,
 };
 let passiveModels = [];
 let copyPreviewPassiveModels = [];
+let mirrorPreviewPassiveModels = [];
 const COPY_PREVIEW_MODEL_PREFIX = "__copy_preview__";
+const MIRROR_PREVIEW_MODEL_PREFIX = "__mirror_preview__";
 let hoverPassiveModelId = null;
 let selectedPassiveModelId = null;
 let selectedPassiveModelIds = [];
@@ -3025,6 +3052,7 @@ function emitPassiveModelsTransformChange(modelIds = null) {
       x: Number(model.transform?.x) || 0,
       y: Number(model.transform?.y) || 0,
       rotRad: Number(model.transform?.rotRad) || 0,
+      mirrorX: Number(model.transform?.mirrorX) === -1 ? -1 : 1,
     }));
   onPassiveModelsTransformChange(payload);
 }
@@ -3034,7 +3062,25 @@ function getPassiveModelTransform(model) {
     x: Number(model?.transform?.x) || 0,
     y: Number(model?.transform?.y) || 0,
     rotRad: Number(model?.transform?.rotRad) || 0,
+    mirrorX: Number(model?.transform?.mirrorX) === -1 ? -1 : 1,
   };
+}
+
+function getPassiveModelLocalMirrorOriginX(model) {
+  let minX = Infinity;
+  for (const pt of Array.isArray(model?.outline) ? model.outline : []) {
+    const x = Number(pt?.x);
+    if (Number.isFinite(x)) minX = Math.min(minX, x);
+  }
+  if (!Number.isFinite(minX)) {
+    for (const line of Array.isArray(model?.lines) ? model.lines : []) {
+      const ax = Number(line?.ax);
+      const bx = Number(line?.bx);
+      if (Number.isFinite(ax)) minX = Math.min(minX, ax);
+      if (Number.isFinite(bx)) minX = Math.min(minX, bx);
+    }
+  }
+  return Number.isFinite(minX) ? minX : 0;
 }
 
 function transformPointByPassiveModel(point, model) {
@@ -3042,11 +3088,14 @@ function transformPointByPassiveModel(point, model) {
   const y = Number(point?.y) || 0;
   if (model?.geometrySpace !== "local") return { x, y };
   const transform = getPassiveModelTransform(model);
+  const mirrorX = transform.mirrorX === -1 ? -1 : 1;
+  const originX = getPassiveModelLocalMirrorOriginX(model);
+  const lx = mirrorX === -1 ? (2 * originX - x) : x;
   const c = Math.cos(transform.rotRad);
   const s = Math.sin(transform.rotRad);
   return {
-    x: x * c - y * s + transform.x,
-    y: x * s + y * c + transform.y,
+    x: lx * c - y * s + transform.x,
+    y: lx * s + y * c + transform.y,
   };
 }
 
@@ -3077,7 +3126,7 @@ function isCopyPreviewModelId(id) {
 }
 
 function getRenderablePassiveModels() {
-  return [...passiveModels, ...copyPreviewPassiveModels];
+  return [...passiveModels, ...copyPreviewPassiveModels, ...mirrorPreviewPassiveModels];
 }
 
 function _loadImgWithFallback(map, key, urls) {
@@ -3210,6 +3259,7 @@ function _applyModel2dLines(lines, opts = null) {
   model2d.offsetXmm = 0;
   model2d.offsetYmm = 0;
   model2d.rotationRad = 0;
+  model2d.mirrorX = 1;
   hoverModelOutline = false;
   selectedModelOutline = false;
   if (opts && typeof opts === "object") {
@@ -3228,6 +3278,7 @@ function _applyModel2dLines(lines, opts = null) {
     if (Array.isArray(opts.dash) && opts.dash.length >= 2) model2d.dash = opts.dash.slice(0, 2).map((n) => +n);
     if (typeof opts.alpha === "number" && isFinite(opts.alpha)) model2d.alpha = Math.max(0, Math.min(1, opts.alpha));
     if (typeof opts.outlineColor === "string") model2d.outlineColor = opts.outlineColor;
+    model2d.mirrorX = Number(opts.mirrorX) === -1 ? -1 : 1;
   }
   emitModel2dTransform();
 }
@@ -3255,6 +3306,7 @@ function _clearModel2dLines() {
   model2d.offsetXmm = 0;
   model2d.offsetYmm = 0;
   model2d.rotationRad = 0;
+  model2d.mirrorX = 1;
   hoverModelOutline = false;
   selectedModelOutline = false;
   emitModel2dTransform();
@@ -3295,6 +3347,7 @@ function setPassiveModels(models = []) {
           x: Number(model.transform?.x) || 0,
           y: Number(model.transform?.y) || 0,
           rotRad: Number(model.transform?.rotRad) || 0,
+          mirrorX: Number(model.transform?.mirrorX) === -1 ? -1 : 1,
         }];
       })
       .filter(Boolean)
@@ -3338,6 +3391,9 @@ function setPassiveModels(models = []) {
           rotRad: Number.isFinite(Number(model?.transform?.rotRad))
             ? Number(model.transform.rotRad)
             : (prevTransform?.rotRad || 0),
+          mirrorX: Number(model?.transform?.mirrorX) === -1
+            ? -1
+            : (prevTransform?.mirrorX === -1 ? -1 : 1),
         },
         color: typeof model.color === "string" ? model.color : model2d.color,
         outlineColor: typeof model.outlineColor === "string" ? model.outlineColor : model2d.outlineColor,
@@ -3349,6 +3405,7 @@ function setPassiveModels(models = []) {
     })
     .filter(Boolean);
   copyPreviewPassiveModels = [];
+  mirrorPreviewPassiveModels = [];
   if (!passiveModels.some((model) => String(model.id) === String(hoverPassiveModelId || ""))) {
     hoverPassiveModelId = null;
   }
@@ -3882,6 +3939,21 @@ function selectionSnapshotHasAny(snapshot) {
   );
 }
 
+function stripDesignSelectionFromSnapshot(snapshot) {
+  if (!snapshot) return snapshot;
+  return {
+    wallIds: Array.isArray(snapshot.wallIds) ? snapshot.wallIds.slice() : [],
+    hiddenIds: Array.isArray(snapshot.hiddenIds) ? snapshot.hiddenIds.slice() : [],
+    dimIds: Array.isArray(snapshot.dimIds) ? snapshot.dimIds.slice() : [],
+    passiveModelIds: [],
+    hasModel: false,
+  };
+}
+
+function hasAnyMirrorableSelection() {
+  return selectionSnapshotHasAny(stripDesignSelectionFromSnapshot(buildSelectionSnapshotFromCurrentSelection()));
+}
+
 function selectionSnapshotHasDesign(snapshot) {
   if (!snapshot) return false;
   return !!snapshot.hasModel || (Array.isArray(snapshot.passiveModelIds) && snapshot.passiveModelIds.length > 0);
@@ -3916,6 +3988,7 @@ function buildPassiveModelCopyPreview(source, previewId, dx, dy) {
       x: (Number(transform?.x) || 0) + dx,
       y: (Number(transform?.y) || 0) + dy,
       rotRad: Number(transform?.rotRad) || 0,
+      mirrorX: Number(transform?.mirrorX) === -1 ? -1 : 1,
     },
     color: source?.color ?? model2d.color ?? "#7a8792",
     outlineColor: source?.outlineColor ?? model2d.outlineColor ?? "#C96F2D",
@@ -4166,6 +4239,7 @@ function applySelectionRotation(snapshot, pivot, angleRad) {
         x: rotatedOrigin.x,
         y: rotatedOrigin.y,
         rotRad: wrapAnglePi((Number(model.transform?.rotRad) || 0) + angleRad),
+        mirrorX: Number(model.transform?.mirrorX) === -1 ? -1 : 1,
       };
     } else {
       model.lines = (model.lines || []).map((line) => {
@@ -4178,6 +4252,7 @@ function applySelectionRotation(snapshot, pivot, angleRad) {
         x: rotatedOrigin.x,
         y: rotatedOrigin.y,
         rotRad: wrapAnglePi((Number(model.transform?.rotRad) || 0) + angleRad),
+        mirrorX: Number(model.transform?.mirrorX) === -1 ? -1 : 1,
       };
     }
   }
@@ -4197,9 +4272,109 @@ function applySelectionRotation(snapshot, pivot, angleRad) {
     model2d.offsetXmm = rotatedOffset.x;
     model2d.offsetYmm = rotatedOffset.y;
     model2d.rotationRad = wrapAnglePi((model2d.rotationRad || 0) + angleRad);
+    model2d.mirrorX = Number(model2d.mirrorX) === -1 ? -1 : 1;
     emitModel2dTransform();
   }
   return true;
+}
+
+function reflectPointAcrossAxis(point, axisStart, axisEnd) {
+  const px = Number(point?.x) || 0;
+  const py = Number(point?.y) || 0;
+  const ax = Number(axisStart?.x) || 0;
+  const ay = Number(axisStart?.y) || 0;
+  const bx = Number(axisEnd?.x) || 0;
+  const by = Number(axisEnd?.y) || 0;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq <= 1e-9) return { x: px, y: py };
+  const t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+  const projX = ax + t * dx;
+  const projY = ay + t * dy;
+  return {
+    x: projX * 2 - px,
+    y: projY * 2 - py,
+  };
+}
+
+function reflectDirectionAcrossAxis(vx, vy, axisStart, axisEnd) {
+  const mirroredA = reflectPointAcrossAxis({ x: 0, y: 0 }, axisStart, axisEnd);
+  const mirroredB = reflectPointAcrossAxis({ x: vx, y: vy }, axisStart, axisEnd);
+  return {
+    x: mirroredB.x - mirroredA.x,
+    y: mirroredB.y - mirroredA.y,
+  };
+}
+
+function reflectTransformAcrossAxis(transform, axisStart, axisEnd) {
+  const origin = reflectPointAcrossAxis({
+    x: Number(transform?.x) || 0,
+    y: Number(transform?.y) || 0,
+  }, axisStart, axisEnd);
+  const baseMirrorX = Number(transform?.mirrorX) === -1 ? -1 : 1;
+  const theta = Number(transform?.rotRad) || 0;
+  const dir = {
+    x: Math.cos(theta) * baseMirrorX,
+    y: Math.sin(theta) * baseMirrorX,
+  };
+  const mirroredDir = reflectDirectionAcrossAxis(dir.x, dir.y, axisStart, axisEnd);
+  return {
+    x: origin.x,
+    y: origin.y,
+    rotRad: wrapAnglePi(Math.atan2(mirroredDir.y, mirroredDir.x)),
+    mirrorX: baseMirrorX * -1,
+  };
+}
+
+function buildMirroredPassiveModelPreview(source, previewId, axisStart, axisEnd) {
+  const geometrySpace = source?.geometrySpace === "local" ? "local" : "world";
+  const baseTransform = {
+    x: Number(source?.transform?.x) || 0,
+    y: Number(source?.transform?.y) || 0,
+    rotRad: Number(source?.transform?.rotRad) || 0,
+    mirrorX: Number(source?.transform?.mirrorX) === -1 ? -1 : 1,
+  };
+  const mirroredTransform = reflectTransformAcrossAxis(baseTransform, axisStart, axisEnd);
+  return {
+    id: previewId,
+    isCopyPreview: true,
+    geometrySpace,
+    designCode: String(source?.designCode || "").trim() || null,
+    designTitle: String(source?.designTitle || "").trim() || null,
+    instanceCode: String(source?.instanceCode || "").trim() || null,
+    displayName:
+      String(source?.displayName || "").trim() ||
+      String(source?.designTitle || "").trim() ||
+      String(source?.instanceCode || "").trim() ||
+      previewId,
+    lines: (source?.lines || []).map((line) => {
+      const raw = {
+        ax: Number(line?.ax) || 0,
+        ay: Number(line?.ay) || 0,
+        bx: Number(line?.bx) || 0,
+        by: Number(line?.by) || 0,
+      };
+      if (geometrySpace === "local") return raw;
+      const a = reflectPointAcrossAxis({ x: raw.ax, y: raw.ay }, axisStart, axisEnd);
+      const b = reflectPointAcrossAxis({ x: raw.bx, y: raw.by }, axisStart, axisEnd);
+      return { ax: a.x, ay: a.y, bx: b.x, by: b.y };
+    }),
+    outline: (source?.outline || []).map((pt) => {
+      const raw = {
+        x: Number(pt?.x) || 0,
+        y: Number(pt?.y) || 0,
+      };
+      return geometrySpace === "local" ? raw : reflectPointAcrossAxis(raw, axisStart, axisEnd);
+    }),
+    transform: mirroredTransform,
+    color: source?.color ?? model2d.color ?? "#7a8792",
+    outlineColor: source?.outlineColor ?? model2d.outlineColor ?? "#C96F2D",
+    outlineHoverColor: source?.outlineHoverColor ?? model2d.outlineSelectedColor ?? "#D97706",
+    lineWidthPx: Math.max(2, Number.isFinite(Number(source?.lineWidthPx)) ? Number(source.lineWidthPx) : (model2d.lineWidthPx || 1)),
+    dash: Array.isArray(source?.dash) ? source.dash.slice() : [],
+    alpha: 0.92,
+  };
 }
 
 function normalizeTypedNumberText(text) {
@@ -4428,6 +4603,206 @@ function duplicateSelectionByDelta(snapshot, delta, opts = null) {
   return result;
 }
 
+function applySelectionMirrorInPlace(snapshot, axisStart, axisEnd) {
+  if (!selectionSnapshotHasAny(snapshot) || !axisStart || !axisEnd) return false;
+  const normalizeIds = (ids) => Array.isArray(ids) ? ids : [];
+  const collectNodes = (wallIds, getWall, getNode) => {
+    const nodeIds = new Set();
+    for (const id of normalizeIds(wallIds)) {
+      const w = getWall(id);
+      if (!w) continue;
+      nodeIds.add(w.a);
+      nodeIds.add(w.b);
+    }
+    return [...nodeIds].map((nodeId) => getNode(nodeId)).filter(Boolean);
+  };
+  for (const node of collectNodes(snapshot.wallIds, (id) => graph.getWall(id), (id) => graph.getNode(id))) {
+    const mirrored = reflectPointAcrossAxis(node, axisStart, axisEnd);
+    node.x = mirrored.x;
+    node.y = mirrored.y;
+  }
+  for (const node of collectNodes(snapshot.hiddenIds, (id) => hiddenGraph.getWall(id), (id) => hiddenGraph.getNode(id))) {
+    const mirrored = reflectPointAcrossAxis(node, axisStart, axisEnd);
+    node.x = mirrored.x;
+    node.y = mirrored.y;
+  }
+  const dimIdSet = new Set(normalizeIds(snapshot.dimIds));
+  for (const dim of dimensions) {
+    if (!dim || !dimIdSet.has(dim.id)) continue;
+    if (dim.a) Object.assign(dim.a, reflectPointAcrossAxis(dim.a, axisStart, axisEnd));
+    if (dim.b) Object.assign(dim.b, reflectPointAcrossAxis(dim.b, axisStart, axisEnd));
+  }
+  const passiveModelIdSet = new Set(normalizeIds(snapshot.passiveModelIds));
+  for (const model of passiveModels) {
+    if (!model || !passiveModelIdSet.has(String(model.id || ""))) continue;
+    if (model.geometrySpace === "local") {
+      model.transform = reflectTransformAcrossAxis(model.transform, axisStart, axisEnd);
+    } else {
+      model.lines = (model.lines || []).map((line) => {
+        const a = reflectPointAcrossAxis({ x: line.ax, y: line.ay }, axisStart, axisEnd);
+        const b = reflectPointAcrossAxis({ x: line.bx, y: line.by }, axisStart, axisEnd);
+        return { ax: a.x, ay: a.y, bx: b.x, by: b.y };
+      });
+      model.outline = (model.outline || []).map((pt) => reflectPointAcrossAxis(pt, axisStart, axisEnd));
+      model.transform = reflectTransformAcrossAxis(model.transform, axisStart, axisEnd);
+    }
+  }
+  if (passiveModelIdSet.size > 0) emitPassiveModelsTransformChange([...passiveModelIdSet]);
+
+  if (snapshot.hasModel) {
+    model2d.lines = (model2d.lines || []).map((line) => {
+      const a = reflectPointAcrossAxis({ x: line.ax, y: line.ay }, axisStart, axisEnd);
+      const b = reflectPointAcrossAxis({ x: line.bx, y: line.by }, axisStart, axisEnd);
+      return { ax: a.x, ay: a.y, bx: b.x, by: b.y };
+    });
+    model2d.outline = (model2d.outline || []).map((pt) => reflectPointAcrossAxis(pt, axisStart, axisEnd));
+    const mirroredTransform = reflectTransformAcrossAxis({
+      x: model2d.offsetXmm || 0,
+      y: model2d.offsetYmm || 0,
+      rotRad: model2d.rotationRad || 0,
+      mirrorX: model2d.mirrorX || 1,
+    }, axisStart, axisEnd);
+    model2d.offsetXmm = mirroredTransform.x;
+    model2d.offsetYmm = mirroredTransform.y;
+    model2d.rotationRad = mirroredTransform.rotRad;
+    model2d.mirrorX = mirroredTransform.mirrorX;
+    emitModel2dTransform();
+  }
+  return true;
+}
+
+function duplicateSelectionByMirror(snapshot, axisStart, axisEnd, opts = null) {
+  if (!selectionSnapshotHasAny(snapshot) || !axisStart || !axisEnd) return null;
+  const fallbackPrefix = tool?.namePrefix || "Wall";
+  const shouldUpdateCreationCounters = opts?.updateCreationCounters !== false;
+  const includeDesignPreview = opts?.includeDesignPreview !== false;
+  const prefixToSeed = new Map();
+  let nextColumnSeed = null;
+  let nextDimId = Number.isFinite(Number(dimTool?._did)) ? Number(dimTool._did) : 1;
+  const ensurePrefixSeed = (prefix) => {
+    if (!prefixToSeed.has(prefix)) prefixToSeed.set(prefix, getNextNameSeedForPrefix(prefix));
+  };
+  const result = {
+    wallIds: [],
+    hiddenIds: [],
+    dimIds: [],
+    passiveModelIds: [],
+    sourceOrderDesignIds: [],
+  };
+
+  if (includeDesignPreview && selectionSnapshotHasDesign(snapshot)) {
+    const previews = [];
+    if (snapshot.hasModel && model2d.designId && Array.isArray(model2d.outline) && model2d.outline.length >= 3 && Array.isArray(model2d.lines) && model2d.lines.length >= 1) {
+      const sourceId = String(model2d.designId || "").trim();
+      const previewId = `${MIRROR_PREVIEW_MODEL_PREFIX}active-${sourceId}`;
+      previews.push(buildMirroredPassiveModelPreview({
+        id: sourceId,
+        geometrySpace: "world",
+        designCode: model2d.designCode,
+        designTitle: model2d.designTitle,
+        instanceCode: model2d.instanceCode,
+        displayName: model2d.displayName,
+        lines: model2d.lines,
+        outline: model2d.outline,
+        transform: {
+          x: Number(model2d.offsetXmm) || 0,
+          y: Number(model2d.offsetYmm) || 0,
+          rotRad: Number(model2d.rotationRad) || 0,
+          mirrorX: Number(model2d.mirrorX) === -1 ? -1 : 1,
+        },
+        color: model2d.color,
+        outlineColor: model2d.outlineColor,
+        outlineHoverColor: model2d.outlineSelectedColor,
+        lineWidthPx: model2d.lineWidthPx,
+        dash: model2d.dash,
+        alpha: model2d.alpha,
+      }, previewId, axisStart, axisEnd));
+      result.passiveModelIds.push(previewId);
+      result.sourceOrderDesignIds.push(sourceId);
+    }
+    for (const modelId of snapshot.passiveModelIds || []) {
+      const model = passiveModels.find((entry) => String(entry?.id || "") === String(modelId || ""));
+      if (!model) continue;
+      const previewId = `${MIRROR_PREVIEW_MODEL_PREFIX}passive-${String(model.id || "").trim()}`;
+      previews.push(buildMirroredPassiveModelPreview(model, previewId, axisStart, axisEnd));
+      result.passiveModelIds.push(previewId);
+      result.sourceOrderDesignIds.push(String(model.id || "").trim());
+    }
+    mirrorPreviewPassiveModels = previews;
+  }
+
+  for (const wallId of snapshot.wallIds || []) {
+    const wall = graph.getWall(wallId);
+    const a = wall ? graph.getNode(wall.a) : null;
+    const b = wall ? graph.getNode(wall.b) : null;
+    if (!wall || !a || !b) continue;
+    const ma = reflectPointAcrossAxis(a, axisStart, axisEnd);
+    const mb = reflectPointAcrossAxis(b, axisStart, axisEnd);
+    let nextName = "";
+    if (isColumnEdge(wall)) {
+      if (nextColumnSeed == null) nextColumnSeed = getNextColumnNameSeed();
+      nextName = `C${nextColumnSeed++}`;
+    } else {
+      const namePrefix = getEntityPrefixFromName(wall?.name, fallbackPrefix);
+      ensurePrefixSeed(namePrefix);
+      const nextNameIdx = prefixToSeed.get(namePrefix) || 0;
+      nextName = entityNameFromIndexLocal(nextNameIdx, namePrefix);
+      prefixToSeed.set(namePrefix, nextNameIdx + 1);
+    }
+    const copied = graph.addWallByPoints(ma.x, ma.y, mb.x, mb.y, wall.thickness, nextName, 1);
+    if (!copied) continue;
+    copied.heightMm = (typeof wall.heightMm === "number" && isFinite(wall.heightMm)) ? wall.heightMm : copied.heightMm;
+    copied.floorOffsetMm = (typeof wall.floorOffsetMm === "number" && isFinite(wall.floorOffsetMm)) ? wall.floorOffsetMm : (copied.floorOffsetMm ?? 0);
+    copied.fillColor = wall.fillColor ?? null;
+    copied.color3d = wall.color3d ?? null;
+    copied.elementType = wall.elementType ?? copied.elementType ?? null;
+    copied.dimSide = wall.dimSide ?? "auto";
+    copied.offsetSide = wall.offsetSide ?? "auto";
+    copied.offsetSideManual = !!wall.offsetSideManual;
+    copied.dimOffsetMm = (typeof wall.dimOffsetMm === "number" && isFinite(wall.dimOffsetMm)) ? wall.dimOffsetMm : null;
+    copied.dimAlwaysVisible = !!wall.dimAlwaysVisible;
+    copied.lockedInsideLenMm = (typeof wall.lockedInsideLenMm === "number") ? wall.lockedInsideLenMm : null;
+    result.wallIds.push(copied.id);
+  }
+
+  for (const wallId of snapshot.hiddenIds || []) {
+    const wall = hiddenGraph.getWall(wallId);
+    const a = wall ? hiddenGraph.getNode(wall.a) : null;
+    const b = wall ? hiddenGraph.getNode(wall.b) : null;
+    if (!wall || !a || !b) continue;
+    const ma = reflectPointAcrossAxis(a, axisStart, axisEnd);
+    const mb = reflectPointAcrossAxis(b, axisStart, axisEnd);
+    const copied = hiddenGraph.addWallByPoints(ma.x, ma.y, mb.x, mb.y, wall.thickness, "", 1);
+    if (!copied) continue;
+    copied.dimSide = wall.dimSide ?? "auto";
+    copied.offsetSide = wall.offsetSide ?? "auto";
+    copied.offsetSideManual = !!wall.offsetSideManual;
+    copied.dimOffsetMm = (typeof wall.dimOffsetMm === "number" && isFinite(wall.dimOffsetMm)) ? wall.dimOffsetMm : null;
+    copied.dimAlwaysVisible = !!wall.dimAlwaysVisible;
+    copied.lockedInsideLenMm = (typeof wall.lockedInsideLenMm === "number") ? wall.lockedInsideLenMm : null;
+    result.hiddenIds.push(copied.id);
+  }
+
+  for (const dimId of snapshot.dimIds || []) {
+    const dim = dimensions.find((d) => d && d.id === dimId);
+    if (!dim?.a || !dim?.b) continue;
+    const ma = reflectPointAcrossAxis(dim.a, axisStart, axisEnd);
+    const mb = reflectPointAcrossAxis(dim.b, axisStart, axisEnd);
+    const copied = {
+      id: `d${nextDimId++}`,
+      a: ma,
+      b: mb,
+      offsetMm: dim.offsetMm,
+      sideSign: dim.sideSign,
+    };
+    dimensions.push(copied);
+    result.dimIds.push(copied.id);
+  }
+  dimTool._did = nextDimId;
+  if (shouldUpdateCreationCounters) syncCreationCountersFromScene();
+  return result;
+}
+
 function beginAxisDrag(axis, offsetX, offsetY) {
   const target = getSelectedObjectTargetInfo();
   if (!target) return false;
@@ -4554,6 +4929,7 @@ function beginMoveDirectDrag(offsetX, offsetY) {
 function beginMoveSelectionFromClient(clientX, clientY) {
   if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
   if (copyCommand.mode !== "idle") cancelCopyCommand(true);
+  if (mirrorCommand.mode !== "idle") cancelMirrorCommand(true);
   if (extendCommand.mode !== "idle") cancelExtendCommand(true);
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);
   if (modelDrag.active) stopModelDrag(true);
@@ -5161,6 +5537,260 @@ function updateCopyCommandCursor(worldPoint, shiftKey = false) {
   emitPassiveModelSelectionChange();
   copyCommand.moved = !!result && Math.hypot(lock.target.x - copyCommand.basePoint.x, lock.target.y - copyCommand.basePoint.y) > 0.5;
   return true;
+}
+
+async function promptMirrorResultMode() {
+  const message = "نوع قرینه را انتخاب کنید:\n1) کپی قرینه\n2) فقط قرینه";
+  try {
+    const dialogs = (typeof window !== "undefined") ? window.__designkpDialogs : null;
+    if (dialogs && typeof dialogs.prompt === "function") {
+      const value = await dialogs.prompt(message, "1", {
+        title: "قرینه",
+        confirmText: "ادامه",
+        cancelText: "انصراف",
+      });
+      const normalized = normalizeTypedNumberText(String(value ?? ""));
+      if (normalized === "2") return "in_place";
+      if (normalized === "1") return "copy";
+      return null;
+    }
+  } catch (_) {}
+  const raw = (typeof window !== "undefined" && typeof window.prompt === "function")
+    ? window.prompt(message, "1")
+    : null;
+  const normalized = normalizeTypedNumberText(String(raw ?? ""));
+  if (normalized === "2") return "in_place";
+  if (normalized === "1") return "copy";
+  return null;
+}
+
+function stopMirrorCommandRuntime() {
+  mirrorCommand.selectionSnapshot = null;
+  mirrorCommand.startSelectionSnapshot = null;
+  mirrorCommand.axisStart = null;
+  mirrorCommand.axisEnd = null;
+  mirrorCommand.resultMode = null;
+  mirrorCommand.startGraphSnap = null;
+  mirrorCommand.startHiddenGraphSnap = null;
+  mirrorCommand.startDimensionsSnap = null;
+  mirrorCommand.startModelSnap = null;
+  mirrorCommand.startPassiveModelsSnap = null;
+  mirrorCommand.startToolSnap = null;
+  mirrorCommand.startHiddenToolSnap = null;
+  mirrorCommand.moved = false;
+  mirrorPreviewPassiveModels = [];
+}
+
+function beginMirrorCommand() {
+  if (mirrorCommand.mode !== "idle" || copyCommand.mode !== "idle" || moveCommand.mode !== "idle" || rotateCommand.mode !== "idle") return false;
+  if (dimEditor.active) closeDimEditor(true);
+  const selectionSnapshot = stripDesignSelectionFromSnapshot(buildSelectionSnapshotFromCurrentSelection());
+  if (!selectionSnapshotHasAny(selectionSnapshot)) return false;
+  mirrorCommand.mode = "await_confirm_selection";
+  mirrorCommand.selectionSnapshot = selectionSnapshot;
+  mirrorCommand.moved = false;
+  return true;
+}
+
+function _startMirrorPreview(resultMode) {
+  mirrorCommand.resultMode = resultMode === "in_place" ? "in_place" : "copy";
+  mirrorCommand.startSelectionSnapshot = buildSelectionSnapshotFromCurrentSelection();
+  mirrorCommand.startGraphSnap = snapshotGraph(graph);
+  mirrorCommand.startHiddenGraphSnap = snapshotGraph(hiddenGraph);
+  mirrorCommand.startDimensionsSnap = snapshotDimensions(dimensions);
+  mirrorCommand.startModelSnap = snapshotModel2d(model2d);
+  mirrorCommand.startPassiveModelsSnap = snapshotPassiveModels(passiveModels);
+  mirrorCommand.startToolSnap = snapshotTool(tool);
+  mirrorCommand.startHiddenToolSnap = snapshotHiddenTool(hiddenTool);
+  mirrorCommand.mode = "preview_mirror";
+  mirrorCommand.moved = false;
+  updateMirrorPreview();
+}
+
+function cancelMirrorCommand(restoreGeometry = true) {
+  const hasPreview =
+    mirrorCommand.startGraphSnap &&
+    mirrorCommand.startHiddenGraphSnap &&
+    mirrorCommand.startDimensionsSnap &&
+    mirrorCommand.startModelSnap &&
+    mirrorCommand.startPassiveModelsSnap;
+  if (restoreGeometry && hasPreview) {
+    restoreGraph(graph, mirrorCommand.startGraphSnap);
+    restoreGraph(hiddenGraph, mirrorCommand.startHiddenGraphSnap);
+    restoreDimensions(dimensions, mirrorCommand.startDimensionsSnap);
+    restoreModel2d(model2d, mirrorCommand.startModelSnap);
+    restorePassiveModels(mirrorCommand.startPassiveModelsSnap);
+    restoreTool(tool, graph, mirrorCommand.startToolSnap);
+    restoreHiddenTool(hiddenTool, hiddenGraph, mirrorCommand.startHiddenToolSnap);
+    emitModel2dTransform();
+  }
+  mirrorCommand.mode = "idle";
+  stopMirrorCommandRuntime();
+  syncCreationCountersFromScene();
+}
+
+function updateMirrorPreview() {
+  if (mirrorCommand.mode !== "preview_mirror" || !mirrorCommand.axisStart || !mirrorCommand.axisEnd) return false;
+  restoreGraph(graph, mirrorCommand.startGraphSnap);
+  restoreGraph(hiddenGraph, mirrorCommand.startHiddenGraphSnap);
+  restoreDimensions(dimensions, mirrorCommand.startDimensionsSnap);
+  restoreModel2d(model2d, mirrorCommand.startModelSnap);
+  restorePassiveModels(mirrorCommand.startPassiveModelsSnap);
+  restoreTool(tool, graph, mirrorCommand.startToolSnap);
+  restoreHiddenTool(hiddenTool, hiddenGraph, mirrorCommand.startHiddenToolSnap);
+  mirrorPreviewPassiveModels = [];
+  let result = null;
+  if (mirrorCommand.resultMode === "copy") {
+    result = duplicateSelectionByMirror(mirrorCommand.selectionSnapshot, mirrorCommand.axisStart, mirrorCommand.axisEnd, {
+      updateCreationCounters: false,
+      includeDesignPreview: true,
+    });
+    selectedWallId = (result?.wallIds?.length === 1) ? result.wallIds[0] : null;
+    selectedWallIds = result?.wallIds?.length > 1 ? result.wallIds.slice() : [];
+    selectedHiddenId = (result?.hiddenIds?.length === 1) ? result.hiddenIds[0] : null;
+    selectedHiddenIds = result?.hiddenIds?.length > 1 ? result.hiddenIds.slice() : [];
+    selectedDimId = (result?.dimIds?.length === 1) ? result.dimIds[0] : null;
+    selectedDimIds = result?.dimIds?.length > 1 ? result.dimIds.slice() : [];
+    selectedPassiveModelId = (result?.passiveModelIds?.length === 1) ? result.passiveModelIds[0] : null;
+    selectedPassiveModelIds = result?.passiveModelIds?.length > 1 ? result.passiveModelIds.slice() : [];
+    selectedModelOutline = false;
+    emitPassiveModelSelectionChange();
+  } else {
+    result = applySelectionMirrorInPlace(mirrorCommand.selectionSnapshot, mirrorCommand.axisStart, mirrorCommand.axisEnd);
+  }
+  mirrorCommand.moved = !!result;
+  return !!result;
+}
+
+function resolveMirrorAxisPoint(anchor, rawPoint) {
+  if (!anchor || !rawPoint) return rawPoint ? { x: rawPoint.x, y: rawPoint.y } : null;
+  let next = { x: Number(rawPoint.x) || 0, y: Number(rawPoint.y) || 0 };
+  if (state.orthoEnabled !== false) {
+    next = quantizeAngleFromAnchor(anchor, next, 45);
+  }
+  return next;
+}
+
+async function confirmMirrorStep() {
+  if (mirrorCommand.mode === "idle") return false;
+  if (mirrorCommand.mode === "await_confirm_selection") {
+    const snap = stripDesignSelectionFromSnapshot(buildSelectionSnapshotFromCurrentSelection());
+    if (!selectionSnapshotHasAny(snap)) return false;
+    mirrorCommand.selectionSnapshot = snap;
+    mirrorCommand.mode = "await_axis_point_a";
+    mirrorCommand.axisStart = null;
+    mirrorCommand.axisEnd = null;
+    return true;
+  }
+  if (mirrorCommand.mode === "await_axis_point_a") {
+    if (!mirrorCommand.axisStart) return false;
+    mirrorCommand.axisEnd = { x: mirrorCommand.axisStart.x, y: mirrorCommand.axisStart.y };
+    mirrorCommand.mode = "await_axis_point_b";
+    return true;
+  }
+  if (mirrorCommand.mode === "await_axis_point_b") {
+    if (!mirrorCommand.axisStart || !mirrorCommand.axisEnd) return false;
+    if (Math.hypot(mirrorCommand.axisEnd.x - mirrorCommand.axisStart.x, mirrorCommand.axisEnd.y - mirrorCommand.axisStart.y) <= 0.5) return false;
+    mirrorCommand.mode = "await_result_mode";
+    const resultMode = await promptMirrorResultMode();
+    if (!resultMode) {
+      cancelMirrorCommand(true);
+      return false;
+    }
+    _startMirrorPreview(resultMode);
+    return true;
+  }
+  if (mirrorCommand.mode === "preview_mirror") {
+    const moved = !!mirrorCommand.moved;
+    const resultMode = mirrorCommand.resultMode;
+    const axisStart = mirrorCommand.axisStart ? { ...mirrorCommand.axisStart } : null;
+    const axisEnd = mirrorCommand.axisEnd ? { ...mirrorCommand.axisEnd } : null;
+    const endGraphSnap = snapshotGraph(graph);
+    const endHiddenGraphSnap = snapshotGraph(hiddenGraph);
+    const endDimensionsSnap = snapshotDimensions(dimensions);
+    const endModelSnap = snapshotModel2d(model2d);
+    const endPassiveModelsSnap = snapshotPassiveModels(passiveModels);
+    const endToolSnap = snapshotTool(tool);
+    const endHiddenToolSnap = snapshotHiddenTool(hiddenTool);
+    const endSelection = {
+      selectedWallId,
+      selectedWallIds: selectedWallIds.slice(),
+      selectedHiddenId,
+      selectedHiddenIds: selectedHiddenIds.slice(),
+      selectedDimId,
+      selectedDimIds: selectedDimIds.slice(),
+      selectedPassiveModelId,
+      selectedPassiveModelIds: selectedPassiveModelIds.slice(),
+      selectedModelOutline,
+    };
+    const startGraphSnap = mirrorCommand.startGraphSnap;
+    const startHiddenGraphSnap = mirrorCommand.startHiddenGraphSnap;
+    const startDimensionsSnap = mirrorCommand.startDimensionsSnap;
+    const startModelSnap = mirrorCommand.startModelSnap;
+    const startPassiveModelsSnap = mirrorCommand.startPassiveModelsSnap;
+    const startToolSnap = mirrorCommand.startToolSnap;
+    const startHiddenToolSnap = mirrorCommand.startHiddenToolSnap;
+    const startSelectionSnapshot = mirrorCommand.startSelectionSnapshot;
+    const sourceSelectionSnapshot = mirrorCommand.selectionSnapshot;
+    cancelMirrorCommand(false);
+    if (!moved || !axisStart || !axisEnd) {
+      syncCreationCountersFromScene();
+      return true;
+    }
+    restoreGraph(graph, startGraphSnap);
+    restoreGraph(hiddenGraph, startHiddenGraphSnap);
+    restoreDimensions(dimensions, startDimensionsSnap);
+    restoreModel2d(model2d, startModelSnap);
+    restorePassiveModels(startPassiveModelsSnap);
+    restoreTool(tool, graph, startToolSnap);
+    restoreHiddenTool(hiddenTool, hiddenGraph, startHiddenToolSnap);
+    applySelectionSnapshot(startSelectionSnapshot);
+    emitModel2dTransform();
+    await undo.runAction(async () => {
+      const hasDesignSelection = selectionSnapshotHasDesign(sourceSelectionSnapshot);
+      if (hasDesignSelection && typeof onOrderDesignMirrorRequest === "function") {
+        const response = await onOrderDesignMirrorRequest({
+          activeDesignSelected: !!sourceSelectionSnapshot?.hasModel,
+          passiveDesignIds: Array.isArray(sourceSelectionSnapshot?.passiveModelIds) ? sourceSelectionSnapshot.passiveModelIds.slice() : [],
+          axisStart,
+          axisEnd,
+          resultMode,
+        });
+        const createdIds = normalizeSelectionIds(response?.createdIds);
+        if (resultMode === "copy") {
+          selectedModelOutline = false;
+          selectedPassiveModelId = createdIds.length === 1 ? createdIds[0] : null;
+          selectedPassiveModelIds = createdIds.length > 1 ? createdIds.slice() : [];
+          emitPassiveModelSelectionChange();
+        }
+      }
+      if (!selectionSnapshotHasDesign(sourceSelectionSnapshot) || resultMode === "in_place" || (endSelection.selectedWallIds.length || endSelection.selectedHiddenIds.length || endSelection.selectedDimIds.length)) {
+        restoreGraph(graph, endGraphSnap);
+        restoreGraph(hiddenGraph, endHiddenGraphSnap);
+        restoreDimensions(dimensions, endDimensionsSnap);
+        restoreModel2d(model2d, endModelSnap);
+        restorePassiveModels(endPassiveModelsSnap);
+        restoreTool(tool, graph, endToolSnap);
+        restoreHiddenTool(hiddenTool, hiddenGraph, endHiddenToolSnap);
+        selectedWallId = endSelection.selectedWallId;
+        selectedWallIds = endSelection.selectedWallIds.slice();
+        selectedHiddenId = endSelection.selectedHiddenId;
+        selectedHiddenIds = endSelection.selectedHiddenIds.slice();
+        selectedDimId = endSelection.selectedDimId;
+        selectedDimIds = endSelection.selectedDimIds.slice();
+        if (resultMode !== "copy") {
+          selectedPassiveModelId = endSelection.selectedPassiveModelId;
+          selectedPassiveModelIds = endSelection.selectedPassiveModelIds.slice();
+          selectedModelOutline = !!endSelection.selectedModelOutline;
+        }
+        emitPassiveModelSelectionChange();
+        emitModel2dTransform();
+      }
+    });
+    syncCreationCountersFromScene();
+    return true;
+  }
+  return false;
 }
 function drawSelectedObjectAxes() {
   if (!state.showObjectAxes) return;
@@ -6805,6 +7435,42 @@ function drawCopyOverlay() {
   ctx.restore();
 }
 
+function drawMirrorOverlay() {
+  if (mirrorCommand.mode === "idle") return;
+  const axisStart = mirrorCommand.axisStart;
+  const axisEnd = mirrorCommand.axisEnd;
+  ctx.save();
+  ctx.strokeStyle = "#dc2626";
+  ctx.fillStyle = "#111827";
+  ctx.lineWidth = 1.8;
+  ctx.setLineDash([9, 5]);
+  if (axisStart && axisEnd) {
+    const a = worldToScreen(axisStart.x, axisStart.y);
+    const b = worldToScreen(axisEnd.x, axisEnd.y);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  } else if (axisStart) {
+    const a = worldToScreen(axisStart.x, axisStart.y);
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, 6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.font = `12px ${state.fontFamily || "Tahoma"}`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "bottom";
+  const label =
+    mirrorCommand.mode === "await_axis_point_a" ? "MIR: نقطه اول محور" :
+    mirrorCommand.mode === "await_axis_point_b" ? "MIR: نقطه دوم محور" :
+    mirrorCommand.mode === "await_result_mode" ? "MIR: انتخاب نوع خروجی" :
+    `MIR ${mirrorCommand.resultMode === "copy" ? "COPY" : "INPLACE"}`;
+  ctx.fillText(label, 14, 22);
+  ctx.restore();
+}
+
 function updateCanvasCursor() {
   // We draw our own cursor inside the canvas. When input is disabled (menus),
   // let the browser show the native cursor.
@@ -7237,6 +7903,7 @@ function loop() {
     drawSnapOverlay();
     drawMoveOverlay();
     drawCopyOverlay();
+    drawMirrorOverlay();
     drawRotateOverlay();
     drawExtendOverlay();
     if (state.activeTool === "hidden") drawHiddenToolOverlay(hiddenTool);
@@ -7296,6 +7963,7 @@ function detach() {
   if (dimEditor.active) closeDimEditor(true);
   hideContextMenu();
   if (copyCommand.mode !== "idle") cancelCopyCommand(true);
+  if (mirrorCommand.mode !== "idle") cancelMirrorCommand(true);
   if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
   if (extendCommand.mode !== "idle") cancelExtendCommand(false);
   isPanning = false;
@@ -7564,6 +8232,7 @@ function renderContextMenuItems() {
     { id: "extend", label: "ادغام", disabled: !extendSelection },
     { id: "move", label: "انتقال", disabled: !hasAnySelection() },
     { id: "copy", label: "کپی", disabled: !hasAnySelection() },
+    { id: "mirror", label: "قرینه", disabled: !hasAnyMirrorableSelection() },
     { id: "rotate", label: "چرخش", disabled: !hasAnySelection() },
     { id: "delete", label: "حذف", disabled: true },
   ];
@@ -7599,6 +8268,10 @@ function renderContextMenuItems() {
           if (copyCommand.mode !== "idle") cancelCopyCommand(true);
           beginCopyCommand();
           confirmCopyStep();
+        } else if (item.id === "mirror") {
+          if (mirrorCommand.mode !== "idle") cancelMirrorCommand(true);
+          beginMirrorCommand();
+          confirmMirrorStep();
         } else if (item.id === "rotate") {
           if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
           beginRotateCommand();
@@ -7649,7 +8322,8 @@ function onContextMenu(e) {
     extendCommand.mode !== "idle" ||
     copyCommand.mode !== "idle" ||
     moveCommand.mode !== "idle" ||
-    rotateCommand.mode !== "idle"
+    rotateCommand.mode !== "idle" ||
+    mirrorCommand.mode !== "idle"
   ) {
     return;
   }
@@ -8261,6 +8935,7 @@ function onMouseDown(e) {
     const dimDrawing = effectiveMode === "dim" && !!dimTool.getStatus?.()?.isDrawing;
     const hasActiveTransformCommand =
       copyCommand.mode !== "idle" ||
+      mirrorCommand.mode !== "idle" ||
       moveCommand.mode !== "idle" ||
       rotateCommand.mode !== "idle" ||
       extendCommand.mode !== "idle";
@@ -8320,6 +8995,23 @@ function onMouseDown(e) {
     const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
     updateCopyCommandCursor(p, !!e.shiftKey);
     confirmCopyStep();
+    return;
+  }
+  if (mirrorCommand.mode === "await_axis_point_a") {
+    const raw = screenToWorld(e.offsetX, e.offsetY);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    mirrorCommand.axisStart = { x: p.x, y: p.y };
+    confirmMirrorStep();
+    return;
+  }
+  if (mirrorCommand.mode === "await_axis_point_b") {
+    const raw = screenToWorld(e.offsetX, e.offsetY);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    mirrorCommand.axisEnd = resolveMirrorAxisPoint(mirrorCommand.axisStart, p);
+    confirmMirrorStep();
+    return;
+  }
+  if (mirrorCommand.mode === "preview_mirror") {
     return;
   }
   if (moveCommand.mode === "await_base_point") {
@@ -9422,6 +10114,20 @@ function onWindowMouseMove(e) {
     hoverObjectAxis = null;
     return;
   }
+  if (mirrorCommand.mode === "await_axis_point_a") {
+    const raw = screenToWorld(ox, oy);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    mirrorCommand.axisStart = { x: p.x, y: p.y };
+    hoverObjectAxis = null;
+    return;
+  }
+  if (mirrorCommand.mode === "await_axis_point_b") {
+    const raw = screenToWorld(ox, oy);
+    const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
+    mirrorCommand.axisEnd = resolveMirrorAxisPoint(mirrorCommand.axisStart, p);
+    hoverObjectAxis = null;
+    return;
+  }
   if (moveCommand.mode === "await_base_point") {
     const raw = screenToWorld(ox, oy);
     const p = state.snapOn ? (resolveSnapPointWorld(raw.x, raw.y) || raw) : raw;
@@ -9753,6 +10459,10 @@ function cancelActiveHistoryPreview() {
     cancelCopyCommand(true);
     return true;
   }
+  if (mirrorCommand.mode !== "idle") {
+    cancelMirrorCommand(true);
+    return true;
+  }
   if (moveCommand.mode !== "idle") {
     cancelMoveCommand(true);
     return true;
@@ -9898,12 +10608,6 @@ async function onWindowKeyDown(e) {
   if (extendCommand.mode !== "idle") return;
 
   // MOVE command: M then Enter (AutoCAD-like flow)
-  if (!ctrl && (code === "KeyC" || key.toLowerCase() === "c")) {
-    if (isEditableTarget(e.target)) return;
-    e.preventDefault();
-    beginCopyCommand();
-    return;
-  }
   if (!ctrl && (code === "KeyR" || key.toLowerCase() === "r")) {
     if (isEditableTarget(e.target)) return;
     e.preventDefault();
@@ -9922,14 +10626,21 @@ async function onWindowKeyDown(e) {
     cancelCopyCommand(true);
     return;
   }
-  if (!ctrl && (code === "KeyM" || key.toLowerCase() === "m")) {
+  if ((key === "Enter" || key === " ") && mirrorCommand.mode !== "idle") {
     if (isEditableTarget(e.target)) return;
     e.preventDefault();
-    beginMoveCommand();
+    await confirmMirrorStep();
+    return;
+  }
+  if (key === "Escape" && mirrorCommand.mode !== "idle") {
+    if (isEditableTarget(e.target)) return;
+    e.preventDefault();
+    cancelMirrorCommand(true);
     return;
   }
   const commandTypingAllowed =
     copyCommand.mode === "idle" &&
+    mirrorCommand.mode === "idle" &&
     moveCommand.mode === "idle" &&
     rotateCommand.mode === "idle" &&
     extendCommand.mode === "idle";
@@ -9943,6 +10654,25 @@ async function onWindowKeyDown(e) {
     if (typedCommandBuffer === "ext") {
       e.preventDefault();
       beginExtendCommand();
+      resetTypedCommandBuffer();
+      return;
+    }
+    if (typedCommandBuffer === "m") {
+      e.preventDefault();
+      beginMoveCommand();
+      resetTypedCommandBuffer();
+      return;
+    }
+    if (typedCommandBuffer === "c") {
+      e.preventDefault();
+      beginCopyCommand();
+      resetTypedCommandBuffer();
+      return;
+    }
+    if (typedCommandBuffer === "mir") {
+      e.preventDefault();
+      beginMirrorCommand();
+      await confirmMirrorStep();
       resetTypedCommandBuffer();
       return;
     }
@@ -10070,6 +10800,7 @@ async function onWindowKeyDown(e) {
               model2d.offsetXmm = 0;
               model2d.offsetYmm = 0;
               model2d.rotationRad = 0;
+              model2d.mirrorX = 1;
               emitModel2dTransform();
               deletedModel = true;
               if (typeof onActiveModelDelete === "function") await onActiveModelDelete();
@@ -10083,6 +10814,7 @@ async function onWindowKeyDown(e) {
             model2d.offsetXmm = 0;
             model2d.offsetYmm = 0;
             model2d.rotationRad = 0;
+            model2d.mirrorX = 1;
             emitModel2dTransform();
           }
           if (deletedPassiveModels) {
@@ -10262,6 +10994,11 @@ function onWheel(e) {
 function onDblClick(e) {
   if (!inputEnabled) return;
   if (e.button !== 0) return;
+  if (mirrorCommand.mode === "preview_mirror") {
+    e.preventDefault();
+    confirmMirrorStep();
+    return;
+  }
   const isDrawing =
     (state.activeTool === "dim") ? !!dimTool.getStatus()?.isDrawing :
     (state.activeTool === "hidden") ? !!hiddenTool.getStatus()?.isDrawing :
@@ -10484,6 +11221,7 @@ function setActiveTool(name) {
   hideOverlapPicker();
   hideContextMenu();
   if (copyCommand.mode !== "idle") cancelCopyCommand(true);
+  if (mirrorCommand.mode !== "idle") cancelMirrorCommand(true);
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);
   if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
   if (extendCommand.mode !== "idle") cancelExtendCommand(false);
@@ -10515,6 +11253,7 @@ function clearAll() {
   hideOverlapPicker();
   hideContextMenu();
   if (copyCommand.mode !== "idle") cancelCopyCommand(true);
+  if (mirrorCommand.mode !== "idle") cancelMirrorCommand(true);
   if (moveCommand.mode !== "idle") cancelMoveCommand(true);
   if (rotateCommand.mode !== "idle") cancelRotateCommand(true);
   if (extendCommand.mode !== "idle") cancelExtendCommand(false);
@@ -10606,6 +11345,13 @@ function getState() {
     copy: {
       mode: copyCommand.mode,
       active: copyCommand.mode !== "idle",
+    },
+    mirror: {
+      mode: mirrorCommand.mode,
+      active: mirrorCommand.mode !== "idle",
+      axisStart: mirrorCommand.axisStart ? { x: mirrorCommand.axisStart.x, y: mirrorCommand.axisStart.y } : null,
+      axisEnd: mirrorCommand.axisEnd ? { x: mirrorCommand.axisEnd.x, y: mirrorCommand.axisEnd.y } : null,
+      resultMode: mirrorCommand.resultMode,
     },
     rotate: {
       mode: rotateCommand.mode,
@@ -10731,12 +11477,14 @@ function restoreSnapshot(snap) {
   hoverModelOutline = false;
   moveCommand.mode = "idle";
   copyCommand.mode = "idle";
+  mirrorCommand.mode = "idle";
   rotateCommand.mode = "idle";
   beamTool.stopChaining?.();
   onModel2dTransformChange?.({
     x: model2d.offsetXmm || 0,
     y: model2d.offsetYmm || 0,
     rotRad: model2d.rotationRad || 0,
+    mirrorX: Number(model2d.mirrorX) === -1 ? -1 : 1,
   });
   emitPassiveModelsTransformChange();
   emitViewportChange(true);

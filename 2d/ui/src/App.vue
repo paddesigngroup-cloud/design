@@ -11,6 +11,7 @@ import {
   activeModelDeleteHandlerRef,
   orderDesignDeleteHandlerRef,
   orderDesignDuplicateHandlerRef,
+  orderDesignMirrorHandlerRef,
   externalHistoryCaptureHandlerRef,
   externalHistoryRestoreHandlerRef,
   fitAllHandlerRef,
@@ -2373,6 +2374,7 @@ function normalizeOrderDesignPlacement(item) {
     x: Number.isFinite(Number(item?.x)) ? Number(item.x) : 0,
     y: Number.isFinite(Number(item?.y)) ? Number(item.y) : 0,
     rotRad: Number.isFinite(Number(item?.rotRad)) ? Number(item.rotRad) : 0,
+    mirrorX: 1,
   };
 }
 
@@ -2901,7 +2903,8 @@ function localDesignToWorld(linesOrPoints, placement = null, kind = "lines") {
   const cos = Math.cos(rotRad);
   const sin = Math.sin(rotRad);
   const mapPoint = (x, y) => {
-    const dx = Number(x);
+    const rawX = Number(x) || 0;
+    const dx = rawX;
     const dy = Number(y);
     return {
       x: (dx * cos - dy * sin) + tx,
@@ -2959,6 +2962,7 @@ function getCurrentModel2dTransform() {
     x: Number.isFinite(Number(model2dTransformRef.value?.x)) ? Number(model2dTransformRef.value.x) : 0,
     y: Number.isFinite(Number(model2dTransformRef.value?.y)) ? Number(model2dTransformRef.value.y) : 0,
     rotRad: Number.isFinite(Number(model2dTransformRef.value?.rotRad)) ? Number(model2dTransformRef.value.rotRad) : 0,
+    mirrorX: 1,
   };
 }
 
@@ -2966,11 +2970,12 @@ function getCurrentEditorModelPlacement() {
   const full = editorRef.value?.getState?.();
   const snap = full?.model2dSnap || null;
   if (snap) {
-    return {
-      x: Number.isFinite(Number(snap.offsetXmm)) ? Number(snap.offsetXmm) : 0,
-      y: Number.isFinite(Number(snap.offsetYmm)) ? Number(snap.offsetYmm) : 0,
-      rotRad: Number.isFinite(Number(snap.rotationRad)) ? Number(snap.rotationRad) : 0,
-    };
+      return {
+        x: Number.isFinite(Number(snap.offsetXmm)) ? Number(snap.offsetXmm) : 0,
+        y: Number.isFinite(Number(snap.offsetYmm)) ? Number(snap.offsetYmm) : 0,
+        rotRad: Number.isFinite(Number(snap.rotationRad)) ? Number(snap.rotationRad) : 0,
+        mirrorX: 1,
+      };
   }
   return getCurrentModel2dTransform();
 }
@@ -3043,7 +3048,7 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
   const nextPlacement = normalizeOrderDesignPlacement({
     orderDesignId: target.id,
     ...(placement || {}),
-  }) || { orderDesignId: target.id, x: 0, y: 0, rotRad: 0 };
+  }) || { orderDesignId: target.id, x: 0, y: 0, rotRad: 0, mirrorX: 1 };
   const geometry = getCachedOrderDesignGeometry(target);
   const worldLines = localDesignToWorld(geometry.lines, nextPlacement, "lines");
   const worldOutline = localDesignToWorld(geometry.outline, nextPlacement, "points");
@@ -3067,6 +3072,7 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
       offsetXmm: nextPlacement.x,
       offsetYmm: nextPlacement.y,
       rotationRad: nextPlacement.rotRad,
+      mirrorX: 1,
     },
   };
   let restored = false;
@@ -3093,6 +3099,7 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
         x: nextPlacement.x,
         y: nextPlacement.y,
         rotRad: nextPlacement.rotRad,
+        mirrorX: 1,
       };
       restored = true;
     }
@@ -3254,6 +3261,23 @@ function captureOrderDesignHistoryState() {
   };
 }
 
+function reflectPointAcrossAxis(point, axisStart, axisEnd) {
+  const px = Number(point?.x) || 0;
+  const py = Number(point?.y) || 0;
+  const ax = Number(axisStart?.x) || 0;
+  const ay = Number(axisStart?.y) || 0;
+  const bx = Number(axisEnd?.x) || 0;
+  const by = Number(axisEnd?.y) || 0;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq <= 1e-9) return { x: px, y: py };
+  const t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+  const projX = ax + t * dx;
+  const projY = ay + t * dy;
+  return { x: projX * 2 - px, y: projY * 2 - py };
+}
+
 function upsertOrderDesignCatalogItem(item) {
   const normalized = normalizeOrderDesignRecord(item);
   if (!normalized?.id) return null;
@@ -3330,6 +3354,7 @@ async function handleStageOrderDesignDuplicateRequest(payload = null) {
     x: Number.isFinite(Number(payload?.delta?.x)) ? Number(payload.delta.x) : 0,
     y: Number.isFinite(Number(payload?.delta?.y)) ? Number(payload.delta.y) : 0,
     rotRad: 0,
+    mirrorX: 1,
   };
   if (!sourceIds.length) return { createdIds: [] };
 
@@ -3352,12 +3377,13 @@ async function handleStageOrderDesignDuplicateRequest(payload = null) {
       const created = await duplicateOrderDesignById(sourceId);
       if (!created?.id) continue;
       createdItems.push(created);
-      const sourcePlacement = getOrderDesignPlacementForId(sourceId) || { x: 0, y: 0, rotRad: 0 };
+      const sourcePlacement = getOrderDesignPlacementForId(sourceId) || { x: 0, y: 0, rotRad: 0, mirrorX: 1 };
       upsertOrderDesignPlacement({
         orderDesignId: created.id,
         x: (Number(sourcePlacement.x) || 0) + delta.x,
         y: (Number(sourcePlacement.y) || 0) + delta.y,
         rotRad: Number(sourcePlacement.rotRad) || 0,
+        mirrorX: Number(sourcePlacement.mirrorX) === -1 ? -1 : 1,
       });
     }
     if (createdItems.length) {
@@ -3470,7 +3496,7 @@ async function ensureCabinetDesignDragPlacement(clientX, clientY) {
       x: Number(dropWorld?.x) || 0,
       y: Number(dropWorld?.y) || 0,
       rotRad: 0,
-    }) || { orderDesignId: createdOrderDesign?.id || "", x: 0, y: 0, rotRad: 0 };
+    }) || { orderDesignId: createdOrderDesign?.id || "", x: 0, y: 0, rotRad: 0, mirrorX: 1 };
     stageCabinetPlaceholderBoxes.value = localBoxes;
     if (createdOrderDesign?.id) {
       upsertOrderDesignPlacement(placement);
@@ -3551,6 +3577,7 @@ passiveModelSelectionHandlerRef.value = activateOrderDesignFromStage;
 activeModelDeleteHandlerRef.value = deleteActiveOrderDesignFromStage;
 orderDesignDeleteHandlerRef.value = handleStageOrderDesignDeleteRequest;
 orderDesignDuplicateHandlerRef.value = handleStageOrderDesignDuplicateRequest;
+orderDesignMirrorHandlerRef.value = null;
 externalHistoryCaptureHandlerRef.value = captureOrderDesignHistoryState;
 externalHistoryRestoreHandlerRef.value = restoreOrderDesignHistoryState;
 
@@ -7995,11 +8022,13 @@ const stageOrderDesignInstances = computed(() =>
                 x: liveTransform.x,
                 y: liveTransform.y,
                 rotRad: liveTransform.rotRad,
+                mirrorX: liveTransform.mirrorX,
               }
             : {
                 x: placement.x,
                 y: placement.y,
                 rotRad: placement.rotRad,
+                mirrorX: placement.mirrorX,
               },
           active: isActive,
         };
@@ -8025,6 +8054,7 @@ const passiveStageOrderDesignModels = computed(() =>
           x: placement.x,
           y: placement.y,
           rotRad: placement.rotRad,
+          mirrorX: placement.mirrorX,
         },
         designCode: String(item.design_code || "").trim() || null,
         designTitle: String(item.design_title || "").trim() || null,
@@ -8726,14 +8756,15 @@ watch(
     x: Number.isFinite(Number(model2dTransformRef.value?.x)) ? Number(model2dTransformRef.value.x) : 0,
     y: Number.isFinite(Number(model2dTransformRef.value?.y)) ? Number(model2dTransformRef.value.y) : 0,
     rotRad: Number.isFinite(Number(model2dTransformRef.value?.rotRad)) ? Number(model2dTransformRef.value.rotRad) : 0,
+    mirrorX: 1,
   }),
   (transform) => {
     if (_orderDesignPlacementSyncPaused) return;
     if (!activeCabinetDesignId.value) return;
-    upsertOrderDesignPlacement({
-      orderDesignId: activeCabinetDesignId.value,
-      ...transform,
-    });
+      upsertOrderDesignPlacement({
+        orderDesignId: activeCabinetDesignId.value,
+        ...transform,
+      });
   },
   { deep: true }
 );
@@ -8773,6 +8804,7 @@ watch(
         x: Number.isFinite(Number(model?.x)) ? Number(model.x) : 0,
         y: Number.isFinite(Number(model?.y)) ? Number(model.y) : 0,
         rotRad: Number.isFinite(Number(model?.rotRad)) ? Number(model.rotRad) : 0,
+        mirrorX: 1,
       });
     }
   },
@@ -9536,6 +9568,7 @@ onBeforeUnmount(() => {
   activeModelDeleteHandlerRef.value = null;
   orderDesignDeleteHandlerRef.value = null;
   orderDesignDuplicateHandlerRef.value = null;
+  orderDesignMirrorHandlerRef.value = null;
   externalHistoryCaptureHandlerRef.value = null;
   externalHistoryRestoreHandlerRef.value = null;
   editorRef.value?.setPassiveModels?.([]);

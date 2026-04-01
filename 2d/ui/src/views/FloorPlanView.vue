@@ -10,6 +10,7 @@ import {
   activeModelDeleteHandlerRef,
   orderDesignDeleteHandlerRef,
   orderDesignDuplicateHandlerRef,
+  orderDesignMirrorHandlerRef,
   externalHistoryCaptureHandlerRef,
   externalHistoryRestoreHandlerRef,
   fitAllHandlerRef,
@@ -67,7 +68,8 @@ onMounted(() => {
         const x = Number.isFinite(t?.x) ? t.x : 0;
         const y = Number.isFinite(t?.y) ? t.y : 0;
         const rotRad = Number.isFinite(t?.rotRad) ? t.rotRad : 0;
-        model2dTransformRef.value = { x, y, rotRad };
+        const mirrorX = Number(t?.mirrorX) === -1 ? -1 : 1;
+        model2dTransformRef.value = { x, y, rotRad, mirrorX };
       },
       onViewportChange: (viewport) => {
         editorViewportRef.value = {
@@ -97,6 +99,11 @@ onMounted(() => {
       },
       onOrderDesignDuplicateRequest: async (payload) => {
         const handler = orderDesignDuplicateHandlerRef.value;
+        if (typeof handler === "function") return await handler(payload);
+        return null;
+      },
+      onOrderDesignMirrorRequest: async (payload) => {
+        const handler = orderDesignMirrorHandlerRef.value;
         if (typeof handler === "function") return await handler(payload);
         return null;
       },
