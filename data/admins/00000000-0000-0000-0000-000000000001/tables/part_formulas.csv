@@ -1,12 +1,15 @@
 ﻿part_formula_id,part_kind_id,part_sub_kind_id,part_code,part_title,formula_l,formula_w,formula_width,formula_depth,formula_height,formula_cx,formula_cy,formula_cz,admin_mode
-1,1,1,floor,کف,w-f1,d-f2,w-f1,d-f2,u_th,((w-f1)/2)+f3,((d-f2)/2)+f4,f5+((u_th)/2),system
-2,1,2,roof,طاق,w-f6,d-f7,w-f6,d-f7,u_th,((w-f6)/2)+f8,((d-f7)/2)+f9,h-f10-((u_th)/2),system
-3,1,3,le_side,بدنه چپ,h-f11,d-f12,u_th,d-f12,h-f11,((u_th)/2)+f13,((d-f12)/2)+f14,f15+((h-f11)/2),system
-4,1,4,ri_side,بدنه راست,h-f16,d-f17,u_th,d-f17,h-f16,w-f18-((u_th)/2),((d-f17)/2)+f19,f20+((h-f16)/2),system
-5,1,5,back,پشت,h-f21,w-f22,w-f22,b_th,h-f21,((w-f22)/2)+f23,d-f24-((b_th)/2),((h-f21)/2)+f25,system
-6,2,1,top_fro_h_stre,تیرک افقی جلو بالا,w-f26,t_fr_h_st_w,w-f26,t_fr_h_st_w,u_th,((w-f26)/2)+f27,((t_fr_h_st_w)/2)+f28,h-f29-((u_th)/2),system
-7,2,2,top_bac_h_stre,تیرک افقی عقب بالا,w-f30,t_ba_h_st_w,w-f30,t_ba_h_st_w,u_th,((w-f30)/2)+f31,d-f32-((t_ba_h_st_w)/2),h-f33-((u_th)/2),system
-8,2,3,top_bac_v_stre,تیرک عمودی عقب بالا,w-f34,to_ba_v_st_w,w-f34,u_th,to_ba_v_st_w,((w-f34)/2)+f35,d-f36-((u_th)/2),h-f37-((to_ba_v_st_w)/2),system
-9,2,4,bot_bac_v_stre,تیرک عمودی عقب پایین,w-f38,bo_ba_v_st_w,w-f38,u_th,bo_ba_v_st_w,((w-f38)/2)+f39,d-f40-((u_th)/2),((bo_ba_v_st_w)/2)+f41,system
-10,3,1,fix_shelve,طبقه ثابت,w-f42,d-f43,w-f42,w-f43,u_th,((w-f42)/2)+f44,((d-f43)/2)+f45,f_s_cz,system
-11,3,2,moving_shelve,طبقه متحرک,u_i_w,(u_i_d)-f47,u_i_w,(u_i_d)-f47,u_th,((u_i_w)/2)+f46,((u_i_d)/2)+f48,m_s_cz,system
+1,1,1,floor,کف,w-f1,d-f2,w-f1,d-f2,u_th,((w-f1)/2)+f3,((d-f2)/2)+f4,f5+((u_th)/2)+u_f_h,system
+2,1,2,roof,طاق,w-f6,d-f7,w-f6,d-f7,u_th,((w-f6)/2)+f8,((d-f7)/2)+f9,h-f10-((u_th)/2)+u_f_h,system
+3,1,3,le_side,بدنه چپ,h-f11,d-f12,u_th,d-f12,h-f11,((u_th)/2)+f13,((d-f12)/2)+f14,f15+((h-f11)/2)+u_f_h,system
+4,1,4,ri_side,بدنه راست,h-f16,d-f17,u_th,d-f17,h-f16,w-f18-((u_th)/2),((d-f17)/2)+f19,f20+((h-f16)/2)+u_f_h,system
+5,1,5,back,پشت,h-f21,w-f22,w-f22,b_th,h-f21,((w-f22)/2)+f23,d-f24-((b_th)/2),((h-f21)/2)+f25+u_f_h,system
+6,2,1,top_fro_h_stre,تیرک افقی جلو بالا,w-f26,t_fr_h_st_w,w-f26,t_fr_h_st_w,u_th,((w-f26)/2)+f27,((t_fr_h_st_w)/2)+f28,h-f29-((u_th)/2)+u_f_h,system
+7,2,2,top_bac_h_stre,تیرک افقی عقب بالا,w-f30,t_ba_h_st_w,w-f30,t_ba_h_st_w,u_th,((w-f30)/2)+f31,d-f32-((t_ba_h_st_w)/2),h-f33-((u_th)/2)+u_f_h,system
+8,2,3,top_bac_v_stre,تیرک عمودی عقب بالا,w-f34,to_ba_v_st_w,w-f34,u_th,to_ba_v_st_w,((w-f34)/2)+f35,d-f36-((u_th)/2),h-f37-((to_ba_v_st_w)/2)+u_f_h,system
+9,2,4,bot_bac_v_stre,تیرک عمودی عقب پایین,w-f38,bo_ba_v_st_w,w-f38,u_th,bo_ba_v_st_w,((w-f38)/2)+f39,d-f40-((u_th)/2),((bo_ba_v_st_w)/2)+f41+u_f_h,system
+10,3,1,fix_shelve,طبقه ثابت,w-f42,d-f43,w-f42,d-f43,u_th,((w-f42)/2)+f44,((d-f43)/2)+f45,f_s_cz+f51,system
+11,3,2,moving_shelve,طبقه متحرک,w-(f46),d-(f47),w-(f46),d-(f47),u_th,((w-f46)/2)+f48,((d-f47)/2)+f49,m_s_cz+f51,system
+12,4,1,front side drawer,بدنه جلو کشو,w-f50,dr_b_h-f52,w-f50,fr_ba_s_dr_th,dr_b_h-f52,((w-f50)/2)+f53,(fr_ba_s_dr_th/2)+f54,((dr_b_h-f52)/2)+f55,system
+13,4,2,back side drawer,بدنه عقب کشو,w-f56,dr_b_h-f57,w-f56,fr_ba_s_dr_th,dr_b_h-f57,((w-f56)/2)+f58,f59-(fr_ba_s_dr_th/2),((dr_b_h-f57)/2)+f60,system
+14,4,3,left side drawer,بدنه کشو چپ,dr_g_d-f61,dr_b_h-f62,le_ri_s_dr_th,dr_g_d-f61,dr_b_h-f62,(le_ri_s_dr_th/2)+f63,((dr_g_d-f61)/2)+f64,((dr_b_h-f62)/2)+f65,system
