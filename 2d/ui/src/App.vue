@@ -927,7 +927,6 @@ function collectInternalGroupParamCodesLocal(group) {
 
 function buildInternalGroupDefaultsTree(group) {
   if (!group) return [];
-  ensureInternalPartGroupParamDefaults(group);
   const selectedParamGroupIds = new Set(
     (Array.isArray(group.param_groups) ? group.param_groups : [])
       .filter((row) => row?.enabled !== false && Number(row?.param_group_id) > 0)
@@ -938,10 +937,11 @@ function buildInternalGroupDefaultsTree(group) {
     .map((row) => ({
       ...row,
       items: row.items.map((column) => {
-        const override = group.param_overrides?.[column.key] || {};
+        const baseLabel = column.label || column.key;
+        const override = normalizeInternalPartGroupParamOverride(group.param_overrides?.[column.key], baseLabel);
         return {
           ...column,
-          displayTitle: String(override.display_title || column.label || column.key).trim() || column.key,
+          displayTitle: String(override.display_title || baseLabel).trim() || column.key,
           descriptionText: String(override.description_text || "").trim(),
           inputMode: override.input_mode === "binary" ? "binary" : "value",
           iconUrl: getSubCategoryDefaultIconUrl(override.icon_path),
@@ -958,11 +958,14 @@ function buildInternalGroupDefaultsTree(group) {
 
 function buildInteriorInstanceGroups(instance) {
   const groupsById = new Map();
+  const sourceInternalGroup = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
   for (const [key, meta] of Object.entries(instance?.param_meta || {})) {
     const code = String(key || "").trim();
     if (!code) continue;
     const groupId = String(meta?.group_id || "").trim() || "__ungrouped__";
     const sourceGroup = constructionSubCategoryParamTree.value.find((row) => String(row.id) === groupId);
+    const baseLabel = constructionSubCategoryParamMetaByCode.value[code]?.label || code;
+    const fallbackOverride = normalizeInternalPartGroupParamOverride(sourceInternalGroup?.param_overrides?.[code], baseLabel);
     const groupIconFileName = normalizeIconFileName(meta?.group_icon_path) || sourceGroup?.iconFileName || "";
     if (!groupsById.has(groupId)) {
       groupsById.set(groupId, {
@@ -979,14 +982,14 @@ function buildInteriorInstanceGroups(instance) {
     }
     groupEntry.items.push({
       key: code,
-      displayTitle: String(meta?.label || constructionSubCategoryParamMetaByCode.value[code]?.label || code).trim() || code,
-      descriptionText: String(meta?.description_text || "").trim(),
+      displayTitle: String(meta?.label || fallbackOverride.display_title || baseLabel).trim() || code,
+      descriptionText: String(meta?.description_text || fallbackOverride.description_text || "").trim(),
       inputMode: meta?.input_mode === "binary" ? "binary" : "value",
-      iconUrl: getSubCategoryDefaultIconUrl(meta?.icon_path),
-      binaryOffLabel: String(meta?.binary_off_label || "").trim() || "0",
-      binaryOnLabel: String(meta?.binary_on_label || "").trim() || "1",
-      binaryOffIconUrl: getSubCategoryDefaultIconUrl(meta?.binary_off_icon_path),
-      binaryOnIconUrl: getSubCategoryDefaultIconUrl(meta?.binary_on_icon_path),
+      iconUrl: getSubCategoryDefaultIconUrl(meta?.icon_path || fallbackOverride.icon_path),
+      binaryOffLabel: String(meta?.binary_off_label || fallbackOverride.binary_off_label || "").trim() || "0",
+      binaryOnLabel: String(meta?.binary_on_label || fallbackOverride.binary_on_label || "").trim() || "1",
+      binaryOffIconUrl: getSubCategoryDefaultIconUrl(meta?.binary_off_icon_path || fallbackOverride.binary_off_icon_path),
+      binaryOnIconUrl: getSubCategoryDefaultIconUrl(meta?.binary_on_icon_path || fallbackOverride.binary_on_icon_path),
       value: getInteriorInstanceEffectiveValue(instance, code),
       order: Number(meta?.param_ui_order) || 0,
     });
@@ -1066,13 +1069,13 @@ const activeSubCategoryUserPreviewRow = computed(() =>
 const activeSubCategoryUserPreviewGroups = computed(() => {
   const row = activeSubCategoryUserPreviewRow.value;
   if (!row) return [];
-  ensureSubCategoryParamDefaults(row);
   return constructionSubCategoryParamTree.value
     .map((group) => ({
       ...group,
       items: group.items.map((column) => {
-        const override = row.param_overrides?.[column.key] || {};
-        const displayTitle = String(override.display_title || column.label || column.key).trim() || column.key;
+        const baseLabel = column.label || column.key;
+        const override = normalizeInternalPartGroupParamOverride(row.param_overrides?.[column.key], baseLabel);
+        const displayTitle = String(override.display_title || baseLabel).trim() || column.key;
         const descriptionText = String(override.description_text || "").trim();
         const inputMode = override.input_mode === "binary" ? "binary" : "value";
         return {
@@ -4945,6 +4948,7 @@ function buildInternalPartGroupDefaultsGroups(row) {
     .filter((group) => selectedParamGroupIds.has(String(group.id)))
     .map((group) => ({
       ...group,
+      iconUrl: group.iconUrl || (group.iconFileName ? getSubCategoryDefaultIconUrl(group.iconFileName) : ""),
       items: group.items.map((column) => {
         const baseLabel = column.label || column.key;
         const override = normalizeInternalPartGroupParamOverride(row.param_overrides?.[column.key], baseLabel);
