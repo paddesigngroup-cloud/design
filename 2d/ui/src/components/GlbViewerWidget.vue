@@ -1565,6 +1565,35 @@ function syncPlaceholderOpacity() {
   syncSelectionHighlight();
 }
 
+function setPlaceholderOpacity(value) {
+  placeholderOpacity.value = Math.max(0, Math.min(100, Number(value) || 0));
+  syncPlaceholderOpacity();
+}
+
+function zoomCameraByFactor(factor) {
+  if (!camera || !controls) return;
+  const target = controls.target.clone();
+  const offset = camera.position.clone().sub(target);
+  const currentLength = Math.max(0.001, offset.length());
+  const nextLength = Math.max(0.001, currentLength / Math.max(0.001, Number(factor) || 1));
+  offset.setLength(nextLength);
+  camera.position.copy(target.clone().add(offset));
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
+function zoomIn() {
+  zoomCameraByFactor(1.18);
+}
+
+function zoomOut() {
+  zoomCameraByFactor(1 / 1.18);
+}
+
+function zoomByFactor(factor) {
+  zoomCameraByFactor(factor);
+}
+
 function syncSelectionHighlight() {
   if (!placeholderBoxesRoot) return;
   if (props.embedded) {
@@ -2153,11 +2182,16 @@ onMounted(async () => {
   controls.zoomSpeed = 0.9;
   controls.panSpeed = 0.7;
   controls.screenSpacePanning = true;
+  controls.mouseButtons = {
+    LEFT: THREE.MOUSE.ROTATE,
+    MIDDLE: THREE.MOUSE.PAN,
+    RIGHT: THREE.MOUSE.PAN,
+  };
   if (props.previewOnly) {
     controls.autoRotate = !!props.previewActive;
     controls.autoRotateSpeed = 2.2;
-    controls.enablePan = false;
-    controls.enableZoom = false;
+    controls.enablePan = true;
+    controls.enableZoom = true;
   }
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x334155, 1.0);
@@ -2281,6 +2315,10 @@ watch(
 defineExpose({
   fitCameraToAll,
   fitCameraToSelectionOrAll,
+  zoomIn,
+  zoomOut,
+  zoomByFactor,
+  setPlaceholderOpacity,
 });
 
 </script>

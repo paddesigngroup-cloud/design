@@ -3671,6 +3671,58 @@ textarea {
   color: #4b1e2f;
   margin-bottom: 12px;
 }
+.subCategoryDesignEditor__panelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.subCategoryDesignEditor__panelHead .subCategoryDesignEditor__panelTitle {
+  margin-bottom: 0;
+}
+.subCategoryDesignEditor__panelHead--interiorPreview {
+  align-items: flex-start;
+}
+.subCategoryDesignEditor__previewActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-inline-start: auto;
+  padding: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(11, 34, 48, 0.12);
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(10px);
+}
+.subCategoryDesignEditor__previewIconBtn {
+  flex: 0 0 auto;
+}
+.subCategoryDesignEditor__previewIconBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.subCategoryDesignEditor__previewIconBtn img {
+  object-fit: contain;
+}
+.subCategoryDesignEditor__previewOpacity {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-inline-start: 4px;
+}
+.subCategoryDesignEditor__previewOpacityValue {
+  color: #7a5d67;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+.subCategoryDesignEditor__previewOpacitySlider {
+  width: 112px;
+  accent-color: #7a4a2b;
+}
 .subCategoryDesignEditor__partList {
   display: flex;
   flex-direction: column;
@@ -3785,6 +3837,9 @@ textarea {
   background:
     linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,245,244,0.95)),
     radial-gradient(circle at top left, rgba(118, 45, 71, 0.05), transparent 42%);
+}
+.subCategoryDesignEditor__viewerWrap--interior.is-panning {
+  cursor: grabbing;
 }
 .subCategoryDesignEditor__frontSvg {
   width: 100%;
@@ -3913,6 +3968,10 @@ textarea {
   .subCategoryDesignEditor__viewerWrap--interior,
   .subCategoryDesignEditor__frontSvg {
     min-height: 420px;
+  }
+
+  .subCategoryDesignEditor__previewActions {
+    width: 100%;
   }
 }
 .subCategoryDefaults__panelTitle,

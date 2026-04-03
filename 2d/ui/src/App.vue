@@ -274,6 +274,13 @@ const interiorLibraryForcedOrderDesignId = ref("");
 const interiorInstanceEditorOpen = ref(false);
 const interiorInstanceEditorDraft = ref(null);
 const interiorInstanceEditorActiveGroupId = ref("");
+const interiorLibraryPreviewMode = ref("front2d");
+const interiorLibraryFrontZoom = ref(1);
+const interiorLibraryPreview3dRef = ref(null);
+const interiorLibraryPreviewOpacity = ref(100);
+const interiorLibraryFrontPan = ref({ x: 0, y: 0 });
+const interiorLibraryFrontPanning = ref(false);
+let interiorLibraryFrontPanSession = null;
 const orderDesignEditorOpen = ref(false);
 const orderDesignEditorDraft = ref(null);
 const orderDesignSavingIds = ref([]);
@@ -371,10 +378,133 @@ const constructionImportInputEl = ref(null);
 const constructionParamsTableWrapEl = ref(null);
 const interiorLibraryAddingGroupKey = ref("");
 const interiorInstanceEditorApplying = ref(false);
+const INTERIOR_LIBRARY_FRONT_ZOOM_MIN = 0.1;
+const INTERIOR_LIBRARY_FRONT_ZOOM_MAX = 20000;
+const INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR = 1.18;
+const INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR = 1.6;
 
 function isOrderDesignSaving(designId) {
   const key = String(designId || "").trim();
   return !!key && orderDesignSavingIds.value.includes(key);
+}
+function setInteriorLibraryPreviewMode(mode) {
+  interiorLibraryPreviewMode.value = mode === "model3d" ? "model3d" : "front2d";
+  if (interiorLibraryPreviewMode.value === "model3d") {
+    nextTick(() => {
+      resetInteriorLibraryPreviewView();
+      setInteriorLibraryPreviewOpacity(interiorLibraryPreviewOpacity.value);
+    });
+    return;
+  }
+  resetInteriorLibraryPreviewView();
+}
+function changeInteriorLibraryFrontZoom(nextZoom) {
+  const boundedZoom = Math.min(
+    INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
+    Math.max(
+      INTERIOR_LIBRARY_FRONT_ZOOM_MIN,
+      Number(nextZoom) || 1
+    )
+  );
+  interiorLibraryFrontZoom.value = boundedZoom;
+}
+function zoomInteriorLibraryFrontIn() {
+  if (interiorLibraryPreviewMode.value === "model3d") {
+    interiorLibraryPreview3dRef.value?.zoomIn?.();
+    return;
+  }
+  changeInteriorLibraryFrontZoom((Number(interiorLibraryFrontZoom.value) || 1) * INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR);
+}
+function zoomInteriorLibraryFrontOut() {
+  if (interiorLibraryPreviewMode.value === "model3d") {
+    interiorLibraryPreview3dRef.value?.zoomOut?.();
+    return;
+  }
+  changeInteriorLibraryFrontZoom((Number(interiorLibraryFrontZoom.value) || 1) / INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR);
+}
+function handleInteriorLibraryPreviewWheel(event) {
+  if (interiorLibraryPreviewMode.value !== "front2d") return;
+  const deltaY = Number(event?.deltaY) || 0;
+  if (!Number.isFinite(deltaY) || deltaY === 0) return;
+  if (deltaY < 0) {
+    zoomInteriorLibraryFrontIn();
+  } else {
+    zoomInteriorLibraryFrontOut();
+  }
+}
+function stopInteriorLibraryFrontPan() {
+  interiorLibraryFrontPanSession = null;
+  interiorLibraryFrontPanning.value = false;
+  window.removeEventListener("pointermove", onInteriorLibraryFrontPanMove);
+  window.removeEventListener("pointerup", onInteriorLibraryFrontPanUp);
+}
+function onInteriorLibraryFrontPanMove(event) {
+  const session = interiorLibraryFrontPanSession;
+  if (!session) return;
+  const rectWidth = Math.max(1, Number(session.rectWidth) || 1);
+  const rectHeight = Math.max(1, Number(session.rectHeight) || 1);
+  const zoom = Math.min(
+    INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
+    Math.max(INTERIOR_LIBRARY_FRONT_ZOOM_MIN, Number(interiorLibraryFrontZoom.value) || 1)
+  );
+  const viewWidth = FRONT_VIEW_WIDTH / zoom;
+  const viewHeight = FRONT_VIEW_HEIGHT / zoom;
+  const dx = Number(event?.clientX) - session.startClientX;
+  const dy = Number(event?.clientY) - session.startClientY;
+  interiorLibraryFrontPan.value = {
+    x: session.startPanX - (dx / rectWidth) * viewWidth,
+    y: session.startPanY - (dy / rectHeight) * viewHeight,
+  };
+}
+function onInteriorLibraryFrontPanUp() {
+  stopInteriorLibraryFrontPan();
+}
+function startInteriorLibraryFrontPan(event) {
+  if (interiorLibraryPreviewMode.value !== "front2d" || Number(event?.button) !== 1) return;
+  const currentTarget = event?.currentTarget;
+  const rect = currentTarget?.getBoundingClientRect?.();
+  interiorLibraryFrontPanSession = {
+    startClientX: Number(event.clientX) || 0,
+    startClientY: Number(event.clientY) || 0,
+    startPanX: Number(interiorLibraryFrontPan.value?.x) || 0,
+    startPanY: Number(interiorLibraryFrontPan.value?.y) || 0,
+    rectWidth: rect?.width || currentTarget?.clientWidth || 1,
+    rectHeight: rect?.height || currentTarget?.clientHeight || 1,
+  };
+  interiorLibraryFrontPanning.value = true;
+  event.preventDefault();
+  window.addEventListener("pointermove", onInteriorLibraryFrontPanMove);
+  window.addEventListener("pointerup", onInteriorLibraryFrontPanUp, { once: true });
+}
+function resetInteriorLibraryPreviewView() {
+  if (interiorLibraryPreviewMode.value === "model3d") {
+    interiorLibraryPreview3dRef.value?.fitCameraToAll?.();
+    return;
+  }
+  interiorLibraryFrontZoom.value = 1;
+  interiorLibraryFrontPan.value = { x: 0, y: 0 };
+  stopInteriorLibraryFrontPan();
+}
+function focusInteriorLibraryPreviewCloser() {
+  if (interiorLibraryPreviewMode.value === "model3d") {
+    interiorLibraryPreview3dRef.value?.fitCameraToAll?.();
+    interiorLibraryPreview3dRef.value?.zoomByFactor?.(INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR);
+    return;
+  }
+  interiorLibraryFrontZoom.value = INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR;
+  interiorLibraryFrontPan.value = { x: 0, y: 0 };
+  stopInteriorLibraryFrontPan();
+}
+function setInteriorLibraryPreviewOpacity(value) {
+  const nextValue = Math.max(0, Math.min(100, Number(value) || 0));
+  interiorLibraryPreviewOpacity.value = nextValue;
+  interiorLibraryPreview3dRef.value?.setPlaceholderOpacity?.(nextValue);
+}
+function toggleInteriorLibraryGuideTool() {
+  setDesignMenuTool(designMenuTool.value === "hidden" ? "wall" : "hidden");
+}
+function toggleInteriorLibraryDimensionTool() {
+  setDesignMenuTool(designMenuTool.value === "dimension" ? "wall" : "dimension");
 }
 function getInteriorLibraryAddingGroupKey(group) {
   const groupId = String(group?.id || "").trim();
@@ -877,6 +1007,17 @@ const interiorLibraryPreviewSvgLines = computed(() => {
     inner: (data.inner || []).map((line) => project(line, 1.15, true)),
   };
 });
+const interiorLibraryFrontSvgViewBox = computed(() => {
+  const zoom = Math.min(
+    INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
+    Math.max(INTERIOR_LIBRARY_FRONT_ZOOM_MIN, Number(interiorLibraryFrontZoom.value) || 1)
+  );
+  const width = FRONT_VIEW_WIDTH / zoom;
+  const height = FRONT_VIEW_HEIGHT / zoom;
+  const panX = Number(interiorLibraryFrontPan.value?.x) || 0;
+  const panY = Number(interiorLibraryFrontPan.value?.y) || 0;
+  return `${(FRONT_VIEW_WIDTH - width) * 0.5 + panX} ${(FRONT_VIEW_HEIGHT - height) * 0.5 + panY} ${width} ${height}`;
+});
 const interiorLibraryPreviewAxisLabels = computed(() => {
   if (!interiorLibraryFrontView.value?.bounds) return null;
   const width = 760;
@@ -1057,6 +1198,19 @@ const interiorLibraryInstanceCards = computed(() =>
       paramCount: groups.reduce((sum, row) => sum + row.items.length, 0),
     };
   })
+);
+const activeInteriorLibraryOutlineColor = computed(() => {
+  if (subCategoryDesignEditorOpen.value) {
+    return normalizeHexColor(subCategoryDesignEditorPreview.value?.design_outline_color);
+  }
+  return normalizeHexColor(
+    activeInteriorLibraryOrderDesign.value?.design_outline_color
+    || activeInteriorLibrarySourceDesign.value?.design_outline_color
+    || activeInteriorLibrarySourceDesign.value?.preview?.design_outline_color
+  );
+});
+const interiorLibraryPreviewPanelTitle = computed(() =>
+  interiorLibraryPreviewMode.value === "model3d" ? "نمای سه بعدی" : "نمای روبه‌رو طرح"
 );
 
 function getConstructionPartKindInternalLabel(partKindId) {
@@ -9351,6 +9505,11 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
     return;
   }
   interiorLibraryOpen.value = true;
+  interiorLibraryPreviewMode.value = "front2d";
+  interiorLibraryFrontZoom.value = 1;
+  interiorLibraryPreviewOpacity.value = 100;
+  interiorLibraryFrontPan.value = { x: 0, y: 0 };
+  stopInteriorLibraryFrontPan();
   activeMenu.value = null;
   openMenuPanel.value = null;
   activeSubRail.value = null;
@@ -9377,6 +9536,11 @@ function openInteriorLibraryForDesign(orderDesignId) {
 function closeInteriorLibrary() {
   interiorLibraryOpen.value = false;
   interiorLibraryForcedOrderDesignId.value = "";
+  interiorLibraryPreviewMode.value = "front2d";
+  interiorLibraryFrontZoom.value = 1;
+  interiorLibraryPreviewOpacity.value = 100;
+  interiorLibraryFrontPan.value = { x: 0, y: 0 };
+  stopInteriorLibraryFrontPan();
   closeInteriorInstanceEditor();
 }
 
@@ -10221,6 +10385,7 @@ onBeforeUnmount(() => {
     try { cancelAnimationFrame(window.__designkpDrawLockRaf); } catch (_) {}
     delete window.__designkpDrawLockRaf;
   }
+  stopInteriorLibraryFrontPan();
   fitAllHandlerRef.value = null;
   passiveModelSelectionHandlerRef.value = null;
   passiveModelSelectionStateRef.value = [];
@@ -12829,12 +12994,100 @@ onBeforeUnmount(() => {
       </div>
       <div class="subCategoryDesignEditor__layout subCategoryDesignEditor__layout--interiorLibrary">
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview subCategoryDesignEditor__panel--interiorPreview">
-          <div class="subCategoryDesignEditor__panelTitle">نمای روبه‌رو طرح</div>
+          <div class="subCategoryDesignEditor__panelHead subCategoryDesignEditor__panelHead--interiorPreview">
+            <div class="subCategoryDesignEditor__panelTitle">{{ interiorLibraryPreviewPanelTitle }}</div>
+            <div class="subCategoryDesignEditor__previewActions">
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': interiorLibraryPreviewMode === 'front2d' }"
+                title="نمای داخلی دوبعدی"
+                @click="setInteriorLibraryPreviewMode('front2d')"
+              >
+                <img src="/icons/enternal.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': interiorLibraryPreviewMode === 'model3d' }"
+                title="نمای سه بعدی طرح"
+                @click="setInteriorLibraryPreviewMode('model3d')"
+              >
+                <img src="/icons/3d_viewer.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': designMenuTool === 'dimension' }"
+                title="اندازه گذاری"
+                @click="toggleInteriorLibraryDimensionTool"
+              >
+                <img src="/icons/drawing_dimension.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': designMenuTool === 'hidden' }"
+                title="رسم خط راهنما"
+                @click="toggleInteriorLibraryGuideTool"
+              >
+                <img src="/icons/drawing_hidden_wall.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                title="بزرگنمایی نمای دوبعدی"
+                @click="zoomInteriorLibraryFrontIn"
+              >
+                <img src="/icons/zoom-in.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                title="کوچکنمایی نمای دوبعدی"
+                @click="zoomInteriorLibraryFrontOut"
+              >
+                <img src="/icons/zoom-out.png" alt="" />
+              </button>
+              <div v-if="interiorLibraryPreviewMode === 'model3d'" class="subCategoryDesignEditor__previewOpacity">
+                <span class="subCategoryDesignEditor__previewOpacityValue">0</span>
+                <input
+                  :value="interiorLibraryPreviewOpacity"
+                  class="subCategoryDesignEditor__previewOpacitySlider"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  @input="setInteriorLibraryPreviewOpacity($event.target.value)"
+                />
+                <span class="subCategoryDesignEditor__previewOpacityValue">100</span>
+              </div>
+            </div>
+          </div>
           <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
-            <div class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior">
+            <div
+              class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior"
+              :class="{ 'is-panning': interiorLibraryFrontPanning && interiorLibraryPreviewMode === 'front2d' }"
+              @wheel.prevent="handleInteriorLibraryPreviewWheel"
+              @pointerdown="startInteriorLibraryFrontPan"
+              @dblclick.prevent="focusInteriorLibraryPreviewCloser"
+            >
+              <GlbViewerWidget
+                v-if="interiorLibraryPreviewMode === 'model3d' && activeInteriorLibraryViewerBoxes.length"
+                ref="interiorLibraryPreview3dRef"
+                src="/models/1_z1.glb"
+                :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                :placeholder-outline-color="activeInteriorLibraryOutlineColor"
+                :placeholder-boxes="activeInteriorLibraryViewerBoxes"
+                :display-unit="currentEditorDisplayUnit"
+                :show-attrs-panel="false"
+                :embedded="true"
+                :preview-only="true"
+                :preview-active="interiorLibraryOpen"
+              />
               <svg
-                v-if="interiorLibraryPreviewSvgLines.outer.length"
-                :viewBox="`0 0 ${FRONT_VIEW_WIDTH} ${FRONT_VIEW_HEIGHT}`"
+                v-else-if="interiorLibraryPreviewSvgLines.outer.length"
+                :viewBox="interiorLibraryFrontSvgViewBox"
                 class="subCategoryDesignEditor__frontSvg"
               >
                 <defs>
@@ -12870,7 +13123,11 @@ onBeforeUnmount(() => {
                 <text v-if="interiorLibraryPreviewAxisLabels" :x="interiorLibraryPreviewAxisLabels.x.x" :y="interiorLibraryPreviewAxisLabels.x.y" fill="#79676d" font-size="14" font-weight="700">X</text>
                 <text v-if="interiorLibraryPreviewAxisLabels" :x="interiorLibraryPreviewAxisLabels.z.x" :y="interiorLibraryPreviewAxisLabels.z.y" fill="#79676d" font-size="14" font-weight="700">Z</text>
               </svg>
-              <div v-else class="designMenu__cabinetState">برای این طرح هنوز preview خطی قابل نمایش نیست.</div>
+              <div v-else class="designMenu__cabinetState">
+                {{ interiorLibraryPreviewMode === "model3d"
+                  ? "برای این طرح هنوز preview سه بعدی قابل نمایش نیست."
+                  : "برای این طرح هنوز preview خطی قابل نمایش نیست." }}
+              </div>
             </div>
           </div>
         </div>
