@@ -3696,16 +3696,28 @@ textarea {
   border: 1px solid rgba(11, 34, 48, 0.12);
   background: rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(10px);
+  user-select: none;
+  -webkit-user-select: none;
 }
 .subCategoryDesignEditor__previewIconBtn {
   flex: 0 0 auto;
+  -webkit-tap-highlight-color: transparent;
 }
 .subCategoryDesignEditor__previewIconBtn:disabled {
   opacity: 0.45;
   cursor: default;
 }
+.subCategoryDesignEditor__previewIconBtn:focus,
+.subCategoryDesignEditor__previewIconBtn:focus-visible,
+.subCategoryDesignEditor__previewIconBtn img:focus,
+.subCategoryDesignEditor__previewIconBtn img:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
 .subCategoryDesignEditor__previewIconBtn img {
   object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 .subCategoryDesignEditor__previewOpacity {
   display: inline-flex;
@@ -3837,6 +3849,8 @@ textarea {
   background:
     linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,245,244,0.95)),
     radial-gradient(circle at top left, rgba(118, 45, 71, 0.05), transparent 42%);
+  user-select: none;
+  -webkit-user-select: none;
 }
 .subCategoryDesignEditor__viewerWrap--interior.is-panning {
   cursor: grabbing;

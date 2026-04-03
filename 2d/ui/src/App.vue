@@ -281,6 +281,7 @@ const interiorLibraryPreviewOpacity = ref(100);
 const interiorLibraryFrontPan = ref({ x: 0, y: 0 });
 const interiorLibraryFrontPanning = ref(false);
 let interiorLibraryFrontPanSession = null;
+let interiorLibraryFrontLastMiddleClickMs = 0;
 const orderDesignEditorOpen = ref(false);
 const orderDesignEditorDraft = ref(null);
 const orderDesignSavingIds = ref([]);
@@ -461,6 +462,14 @@ function onInteriorLibraryFrontPanUp() {
 }
 function startInteriorLibraryFrontPan(event) {
   if (interiorLibraryPreviewMode.value !== "front2d" || Number(event?.button) !== 1) return;
+  const now = performance.now();
+  if (now - interiorLibraryFrontLastMiddleClickMs <= 300) {
+    interiorLibraryFrontLastMiddleClickMs = 0;
+    event.preventDefault();
+    focusInteriorLibraryPreviewCloser();
+    return;
+  }
+  interiorLibraryFrontLastMiddleClickMs = now;
   const currentTarget = event?.currentTarget;
   const rect = currentTarget?.getBoundingClientRect?.();
   interiorLibraryFrontPanSession = {

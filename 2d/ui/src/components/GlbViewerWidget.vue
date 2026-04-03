@@ -1970,11 +1970,21 @@ function setViewDir(dx, dy, dz) {
 }
 
 function onCanvasDoubleClick() {
+  focusPreviewCloser();
+}
+
+function focusPreviewCloser() {
+  if (props.previewOnly) {
+    fitCameraToAll(PREVIEW_VIEW_DIR);
+    zoomByFactor(1.6);
+    return;
+  }
   if (!has2dDrawingContent()) {
     centerCameraOnOrigin();
     return;
   }
   fitCameraToAll();
+  zoomByFactor(1.6);
 }
 
 function onCanvasMouseDown(event) {
@@ -1983,11 +1993,7 @@ function onCanvasMouseDown(event) {
   if (now - lastMiddleClickMs <= 300) {
     lastMiddleClickMs = 0;
     event.preventDefault();
-    if (!has2dDrawingContent()) {
-      centerCameraOnOrigin();
-      return;
-    }
-    fitCameraToAll();
+    focusPreviewCloser();
     return;
   }
   lastMiddleClickMs = now;
