@@ -56,6 +56,7 @@ class ResolvedInteriorInstanceSnapshot:
     internal_part_group_code: str
     internal_part_group_title: str
     instance_code: str
+    line_color: str | None
     ui_order: int
     placement_z: float
     interior_box_snapshot: dict[str, object]
@@ -1019,6 +1020,7 @@ async def resolve_internal_instance_preview(
     internal_group: InternalPartGroup,
     instance_id: uuid.UUID | None,
     instance_code: str,
+    line_color: str | None = None,
     ui_order: int,
     placement_z: float,
     interior_box_snapshot: dict[str, object],
@@ -1150,6 +1152,7 @@ async def resolve_internal_instance_preview(
         internal_part_group_code=str(internal_group.code or "").strip(),
         internal_part_group_title=str(internal_group.group_title or internal_group.title or "").strip(),
         instance_code=str(instance_code or "").strip(),
+        line_color=str(line_color or getattr(internal_group, "line_color", "") or "").strip() or None,
         ui_order=int(ui_order),
         placement_z=placement,
         interior_box_snapshot={str(key): value for key, value in dict(interior_box_snapshot or {}).items()},
@@ -1223,6 +1226,7 @@ async def compose_sub_category_design_preview(
                 internal_group=internal_group,
                 instance_id=instance.id,
                 instance_code=str(instance.instance_code or ""),
+                line_color=str(getattr(instance, "line_color", "") or "").strip() or None,
                 ui_order=int(instance.ui_order or 0),
                 placement_z=float(instance.placement_z or 0),
                 interior_box_snapshot=dict(instance.interior_box_snapshot or {}) or dict(interior_box_snapshot),

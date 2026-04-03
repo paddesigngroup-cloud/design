@@ -278,6 +278,7 @@ const interiorLibraryPreviewMode = ref("front2d");
 const interiorLibraryFrontZoom = ref(1);
 const interiorLibraryPreview3dRef = ref(null);
 const interiorLibraryPreviewOpacity = ref(100);
+const interiorLibraryShowInnerLines = ref(true);
 const interiorLibraryFrontPan = ref({ x: 0, y: 0 });
 const interiorLibraryFrontPanning = ref(false);
 let interiorLibraryFrontPanSession = null;
@@ -510,7 +511,7 @@ function setInteriorLibraryPreviewOpacity(value) {
   interiorLibraryPreview3dRef.value?.setPlaceholderOpacity?.(nextValue);
 }
 function toggleInteriorLibraryGuideTool() {
-  setDesignMenuTool(designMenuTool.value === "hidden" ? "wall" : "hidden");
+  interiorLibraryShowInnerLines.value = !interiorLibraryShowInnerLines.value;
 }
 function toggleInteriorLibraryDimensionTool() {
   setDesignMenuTool(designMenuTool.value === "dimension" ? "wall" : "dimension");
@@ -933,6 +934,7 @@ const activeInteriorLibraryBaseParamValues = computed(() => {
 const FRONT_VIEW_WIDTH = 760;
 const FRONT_VIEW_HEIGHT = 460;
 const FRONT_VIEW_PAD = 28;
+const DEFAULT_INTERIOR_LINE_COLOR = "#8A98A3";
 
 function getViewerBoxesFromPartSnapshots(partSnapshots) {
   return (Array.isArray(partSnapshots) ? partSnapshots : [])
@@ -991,10 +993,9 @@ const activeInteriorLibraryViewerBoxes = computed(() => {
 const interiorLibraryFrontView = computed(() =>
   buildFrontViewLinesFromBoxes(activeInteriorLibraryViewerBoxes.value || [])
 );
-const interiorLibraryPreviewSvgLines = computed(() => {
-  const data = interiorLibraryFrontView.value;
-  const bounds = data?.bounds;
-  if (!bounds) return { outer: [], inner: [] };
+const interiorLibraryPreviewProjection = computed(() => {
+  const bounds = interiorLibraryFrontView.value?.bounds;
+  if (!bounds) return null;
   const width = FRONT_VIEW_WIDTH;
   const height = FRONT_VIEW_HEIGHT;
   const pad = FRONT_VIEW_PAD;
@@ -1003,18 +1004,51 @@ const interiorLibraryPreviewSvgLines = computed(() => {
   const scale = Math.min((width - pad * 2) / spanX, (height - pad * 2) / spanZ);
   const cx = (bounds.minX + bounds.maxX) * 0.5;
   const cz = (bounds.minZ + bounds.maxZ) * 0.5;
-  const project = (line, sw, dashed = false) => ({
-    x1: width * 0.5 + (Number(line.ax) - cx) * scale,
-    y1: height * 0.5 - (Number(line.az) - cz) * scale,
-    x2: width * 0.5 + (Number(line.bx) - cx) * scale,
-    y2: height * 0.5 - (Number(line.bz) - cz) * scale,
-    sw,
-    dashed,
-  });
   return {
-    outer: (data.outer || []).map((line) => project(line, 2.2, false)),
-    inner: (data.inner || []).map((line) => project(line, 1.15, true)),
+    project(line, sw, dashed = false) {
+      return {
+        x1: width * 0.5 + (Number(line.ax) - cx) * scale,
+        y1: height * 0.5 - (Number(line.az) - cz) * scale,
+        x2: width * 0.5 + (Number(line.bx) - cx) * scale,
+        y2: height * 0.5 - (Number(line.bz) - cz) * scale,
+        sw,
+        dashed,
+      };
+    },
   };
+});
+const interiorLibraryPreviewSvgLines = computed(() => {
+  const data = interiorLibraryFrontView.value;
+  const projection = interiorLibraryPreviewProjection.value;
+  if (!data?.bounds || !projection) return { outer: [], inner: [] };
+  return {
+    outer: (data.outer || []).map((line) => projection.project(line, 2.2, false)),
+    inner: [],
+  };
+});
+function resolveInteriorInstanceLineColor(instance) {
+  const group = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
+  return normalizeHexColor(
+    instance?.line_color
+    || group?.line_color
+    || DEFAULT_INTERIOR_LINE_COLOR,
+    DEFAULT_INTERIOR_LINE_COLOR
+  );
+}
+const interiorLibraryPreviewInstanceSvgLines = computed(() => {
+  const projection = interiorLibraryPreviewProjection.value;
+  if (!projection) return [];
+  return activeInteriorLibraryInstances.value
+    .slice()
+    .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
+    .flatMap((instance) => {
+      const lineColor = resolveInteriorInstanceLineColor(instance);
+      return buildFrontViewLinesFromBoxes(instance?.viewer_boxes || []).inner.map((line, index) => ({
+        ...projection.project(line, 1.15, true),
+        color: lineColor,
+        key: `${String(instance?.id || instance?.instance_code || "instance")}-${index}`,
+      }));
+    });
 });
 const interiorLibraryFrontSvgViewBox = computed(() => {
   const zoom = Math.min(
@@ -1186,6 +1220,7 @@ const interiorLibraryGroupCards = computed(() => {
     const groupTree = buildInternalGroupDefaultsTree(group);
     return {
       ...group,
+      lineColor: normalizeHexColor(group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
       groupTree,
       relatedGroups: groupTree.map((row) => ({ id: String(row.id), title: row.title, count: row.items.length })),
       paramCount: groupTree.reduce((sum, row) => sum + row.items.length, 0),
@@ -1203,6 +1238,7 @@ const interiorLibraryInstanceCards = computed(() =>
       ...instance,
       groupTitle: String(group?.group_title || group?.title || instance.instance_code || "گروه داخلی").trim(),
       groupCode: String(group?.code || "").trim(),
+      lineColor: resolveInteriorInstanceLineColor(instance),
       groups,
       paramCount: groups.reduce((sum, row) => sum + row.items.length, 0),
     };
@@ -1517,6 +1553,7 @@ function normalizeInternalPartGroupPayload(item) {
     group_id: Number(item.group_id),
     group_title: String(item.group_title || "").trim(),
     code: String(item.code || "").trim(),
+    line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.group_id),
     is_system: !!item.is_system,
     parts: (Array.isArray(item.parts) ? item.parts : [])
@@ -1565,6 +1602,7 @@ function normalizeInteriorInstanceRecord(item) {
     id: String(item.id),
     internal_part_group_id: String(item.internal_part_group_id || ""),
     instance_code: String(item.instance_code || "").trim(),
+    line_color: item.line_color ? normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR) : "",
     ui_order: Number(item.ui_order) || 0,
     placement_z: Number(item.placement_z) || 0,
     interior_box_snapshot: { ...(item.interior_box_snapshot || {}) },
@@ -2420,6 +2458,7 @@ function buildNewInternalPartGroupDraft() {
     group_id: nextId,
     group_title: `گروه داخلی ${toPersianDigits(nextId)}`,
     code: `internal_part_group_${nextId}`,
+    line_color: DEFAULT_INTERIOR_LINE_COLOR,
     sort_order: nextId,
     is_system: true,
     parts: [],
@@ -2514,6 +2553,7 @@ async function refreshSubCategoryDesignPreview() {
           id: item.id || null,
           internal_part_group_id: item.internal_part_group_id,
           instance_code: String(item.instance_code || "").trim() || "interior",
+          line_color: item.line_color ? normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
           ui_order: Number(item.ui_order) || 0,
           placement_z: Number(item.placement_z) || 0,
           interior_box_snapshot: { ...(item.interior_box_snapshot || {}) },
@@ -2824,6 +2864,7 @@ async function loadConstructionInternalPartGroups() {
     editableInternalPartGroups.value = (await res.json()).map((item) =>
       ensureInternalPartGroupParamDefaults(withConstructionDraftState({
         ...item,
+        line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
         param_groups: Array.isArray(item.param_groups) ? item.param_groups.map((group) => ({
           ...group,
           param_group_id: Number(group.param_group_id),
@@ -3995,6 +4036,7 @@ function openInternalPartGroupEditor(item = null) {
         group_id: item.group_id,
         group_title: item.group_title,
         code: item.code,
+        line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
         sort_order: item.sort_order,
         is_system: item.is_system,
         parts: Array.isArray(item.parts) ? item.parts.map((part) => ({
@@ -4205,6 +4247,7 @@ async function addInteriorGroupToDesign(group) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           internal_part_group_id: group.id,
+          line_color: normalizeHexColor(group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
           placement_z: 0,
         }),
       });
@@ -4231,6 +4274,7 @@ async function addInteriorGroupToDesign(group) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         internal_part_group_id: group.id,
+        line_color: normalizeHexColor(group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
         placement_z: 0,
       }),
     });
@@ -4252,6 +4296,7 @@ function openInteriorInstanceEditor(instance) {
   );
   interiorInstanceEditorDraft.value = {
     ...normalized,
+    line_color: normalized.line_color || resolveInteriorInstanceLineColor(normalized),
     interior_box_snapshot: { ...(normalized.interior_box_snapshot || {}) },
     param_values: {
       ...effectiveParamValues,
@@ -4297,6 +4342,7 @@ async function applyInteriorInstanceEditor() {
             placement_z: Number(instance.placement_z) || 0,
             ui_order: Math.max(0, Number(instance.ui_order) || 0),
             instance_code: String(instance.instance_code || "").trim() || "interior",
+            line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
             param_values: Object.fromEntries(
               Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
             ),
@@ -4330,6 +4376,7 @@ async function applyInteriorInstanceEditor() {
           placement_z: Number(instance.placement_z) || 0,
           ui_order: Math.max(0, Number(instance.ui_order) || 0),
           instance_code: String(instance.instance_code || "").trim() || "interior",
+          line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
           param_values: Object.fromEntries(
             Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
           ),
@@ -4344,6 +4391,171 @@ async function applyInteriorInstanceEditor() {
     showAlert(error?.message || "ذخیره تنظیمات نمونه داخلی طرح ثبت‌شده انجام نشد.", { title: "خطا" });
   } finally {
     interiorInstanceEditorApplying.value = false;
+  }
+}
+
+async function applyInteriorInstanceLineColor(instance, lineColor) {
+  const normalized = normalizeInteriorInstanceRecord({
+    ...(instance || {}),
+    line_color: lineColor ? normalizeHexColor(lineColor, DEFAULT_INTERIOR_LINE_COLOR) : "",
+  });
+  if (!normalized?.id) return;
+  if (subCategoryDesignEditorOpen.value) {
+    const draft = subCategoryDesignEditorDraft.value;
+    if (!draft?.id) return;
+    try {
+      const res = await fetch(
+        `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances/${encodeURIComponent(String(normalized.id))}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            placement_z: Number(normalized.placement_z) || 0,
+            ui_order: Math.max(0, Number(normalized.ui_order) || 0),
+            instance_code: String(normalized.instance_code || "").trim() || "interior",
+            line_color: normalized.line_color ? normalizeHexColor(normalized.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+            param_values: Object.fromEntries(
+              Object.entries(normalized.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+            ),
+          }),
+        }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه داخلی انجام نشد."));
+      syncInteriorInstanceInDraft(await res.json());
+      syncOpenSubCategoryDesignDraftToCollection();
+      await refreshSubCategoryDesignPreview();
+    } catch (error) {
+      showAlert(error?.message || "ذخیره رنگ خطوط نمونه داخلی انجام نشد.", { title: "خطا" });
+    }
+    return;
+  }
+  const orderDesign = activeInteriorLibraryOrderDesign.value;
+  if (!orderDesign?.id) return;
+  try {
+    const res = await fetch(
+      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(normalized.id))}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          placement_z: Number(normalized.placement_z) || 0,
+          ui_order: Math.max(0, Number(normalized.ui_order) || 0),
+          instance_code: String(normalized.instance_code || "").trim() || "interior",
+          line_color: normalized.line_color ? normalizeHexColor(normalized.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+          param_values: Object.fromEntries(
+            Object.entries(normalized.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+          ),
+        }),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه داخلی انجام نشد."));
+    syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
+    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+  } catch (error) {
+    showAlert(error?.message || "ذخیره رنگ خطوط نمونه داخلی انجام نشد.", { title: "خطا" });
+  }
+}
+
+function previewInteriorInstanceLineColor(instance, lineColor) {
+  const normalizedColor = lineColor ? normalizeHexColor(lineColor, DEFAULT_INTERIOR_LINE_COLOR) : "";
+  const instanceId = String(instance?.id || "").trim();
+  if (!instanceId) return;
+  if (subCategoryDesignEditorOpen.value) {
+    const draft = subCategoryDesignEditorDraft.value;
+    if (!draft) return;
+    draft.interior_instances = (draft.interior_instances || []).map((row) =>
+      String(row?.id || "") === instanceId
+        ? {
+            ...row,
+            line_color: normalizedColor,
+          }
+        : row
+    );
+    syncOpenSubCategoryDesignDraftToCollection();
+    return;
+  }
+  const orderDesignId = String(activeInteriorLibraryOrderDesign.value?.id || "").trim();
+  if (!orderDesignId) return;
+  orderDesignCatalog.value = sortOrderDesignCatalogRecords(
+    orderDesignCatalog.value.map((design) =>
+      String(design?.id || "") === orderDesignId
+        ? {
+            ...design,
+            interior_instances: (design.interior_instances || []).map((row) =>
+              String(row?.id || "") === instanceId
+                ? {
+                    ...row,
+                    line_color: normalizedColor,
+                  }
+                : row
+            ),
+          }
+        : design
+    )
+  );
+}
+
+function previewConstructionInternalPartGroupLineColor(item, lineColor) {
+  if (!item) return;
+  const normalizedColor = normalizeHexColor(lineColor, DEFAULT_INTERIOR_LINE_COLOR);
+  item.line_color = normalizedColor;
+  if (internalPartGroupEditorDraft.value && String(internalPartGroupEditorDraft.value.id || "") === String(item.id || "")) {
+    internalPartGroupEditorDraft.value.line_color = normalizedColor;
+  }
+}
+
+async function saveConstructionInternalPartGroupLineColor(item) {
+  if (!item?.id) return;
+  const payload = normalizeInternalPartGroupPayload(item);
+  const saveKey = String(item.id);
+  constructionSavingIds.value = [...new Set([...constructionSavingIds.value, saveKey])];
+  try {
+    const res = await fetch(`/api/internal-part-groups/${encodeURIComponent(saveKey)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ پیش‌فرض گروه داخلی انجام نشد."));
+    const saved = await res.json();
+    editableInternalPartGroups.value = editableInternalPartGroups.value.map((row) =>
+      String(row.id) === saveKey
+        ? ensureInternalPartGroupParamDefaults(withConstructionDraftState({
+            ...saved,
+            line_color: normalizeHexColor(saved.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+            param_groups: Array.isArray(saved.param_groups) ? saved.param_groups.map((group) => ({
+              ...group,
+              param_group_id: Number(group.param_group_id),
+              param_group_code: String(group.param_group_code || "").trim(),
+              param_group_title: String(group.param_group_title || "").trim(),
+              param_group_icon_path: normalizeIconFileName(group.param_group_icon_path) || "",
+              enabled: group.enabled !== false,
+              ui_order: Number(group.ui_order) || 0,
+            })) : [],
+            param_defaults: Object.fromEntries(
+              Object.entries(saved.param_defaults || {}).map(([key, value]) => [String(key || "").trim(), value == null ? "" : String(value)])
+            ),
+            param_overrides: Object.fromEntries(
+              Object.entries(saved.param_overrides || {}).map(([key, override]) => [String(key || "").trim(), {
+                display_title: String(override?.display_title || "").trim(),
+                description_text: String(override?.description_text || "").trim(),
+                icon_path: normalizeIconFileName(override?.icon_path) || "",
+                input_mode: override?.input_mode === "binary" ? "binary" : "value",
+                binary_off_label: String(override?.binary_off_label || "").trim() || "0",
+                binary_on_label: String(override?.binary_on_label || "").trim() || "1",
+                binary_off_icon_path: normalizeIconFileName(override?.binary_off_icon_path) || "",
+                binary_on_icon_path: normalizeIconFileName(override?.binary_on_icon_path) || "",
+              }])
+            ),
+          }))
+        : row
+    );
+    if (internalPartGroupEditorDraft.value && String(internalPartGroupEditorDraft.value.id || "") === saveKey) {
+      internalPartGroupEditorDraft.value.line_color = normalizeHexColor(saved.line_color, DEFAULT_INTERIOR_LINE_COLOR);
+    }
+  } catch (error) {
+    showAlert(error?.message || "ذخیره رنگ پیش‌فرض گروه داخلی انجام نشد.", { title: "خطا" });
+  } finally {
+    constructionSavingIds.value = constructionSavingIds.value.filter((value) => value !== saveKey);
   }
 }
 
@@ -9517,6 +9729,7 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
   interiorLibraryPreviewMode.value = "front2d";
   interiorLibraryFrontZoom.value = 1;
   interiorLibraryPreviewOpacity.value = 100;
+  interiorLibraryShowInnerLines.value = true;
   interiorLibraryFrontPan.value = { x: 0, y: 0 };
   stopInteriorLibraryFrontPan();
   activeMenu.value = null;
@@ -9548,6 +9761,7 @@ function closeInteriorLibrary() {
   interiorLibraryPreviewMode.value = "front2d";
   interiorLibraryFrontZoom.value = 1;
   interiorLibraryPreviewOpacity.value = 100;
+  interiorLibraryShowInnerLines.value = true;
   interiorLibraryFrontPan.value = { x: 0, y: 0 };
   stopInteriorLibraryFrontPan();
   closeInteriorInstanceEditor();
@@ -12282,6 +12496,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--code">کد گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--outlineColor">رنگ خطوط</th>
                     <th class="constructionDialog__col constructionDialog__col--defaults">پیش‌فرض‌ها</th>
                     <th class="constructionDialog__col constructionDialog__col--id">تعداد قطعات</th>
                     <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
@@ -12300,6 +12515,27 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.group_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--code">{{ item.code }}</td>
                     <td class="constructionDialog__col constructionDialog__col--title">{{ item.group_title }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--outlineColor">
+                      <div class="constructionDialog__colorEditor">
+                        <input
+                          v-model="item.line_color"
+                          class="constructionDialog__colorInput"
+                          type="color"
+                          @input="previewConstructionInternalPartGroupLineColor(item, item.line_color)"
+                          @change="saveConstructionInternalPartGroupLineColor(item)"
+                        />
+                        <input
+                          v-model="item.line_color"
+                          class="constructionDialog__input constructionDialog__input--mono constructionDialog__colorHex"
+                          type="text"
+                          dir="ltr"
+                          maxlength="7"
+                          :placeholder="DEFAULT_INTERIOR_LINE_COLOR"
+                          @input="previewConstructionInternalPartGroupLineColor(item, item.line_color)"
+                          @change="saveConstructionInternalPartGroupLineColor(item)"
+                        />
+                      </div>
+                    </td>
                     <td class="constructionDialog__col constructionDialog__col--defaults">
                       <div class="constructionDialog__defaultsActions">
                         <button type="button" class="constructionDialog__defaultsBtn" :title="'پیش‌فرض پارامترهای گروه داخلی'" @click="openInternalPartGroupDefaultsEditor(item)">
@@ -12317,7 +12553,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionInternalPartGroups.length">
-                    <td class="constructionDialog__col constructionDialog__col--title" colspan="7">هنوز گروهی برای قطعات داخلی ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="8">هنوز گروهی برای قطعات داخلی ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -12776,6 +13012,26 @@ onBeforeUnmount(() => {
             <span>کد گروه</span>
             <input v-model="internalPartGroupEditorDraft.code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
           </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>رنگ پیش‌فرض خطوط</span>
+            <div class="constructionDialog__colorEditor">
+              <input
+                v-model="internalPartGroupEditorDraft.line_color"
+                class="constructionDialog__colorInput"
+                type="color"
+                @input="internalPartGroupEditorDraft.line_color = normalizeHexColor(internalPartGroupEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+              />
+              <input
+                v-model="internalPartGroupEditorDraft.line_color"
+                class="constructionDialog__input constructionDialog__input--mono constructionDialog__colorHex"
+                type="text"
+                dir="ltr"
+                maxlength="7"
+                :placeholder="DEFAULT_INTERIOR_LINE_COLOR"
+                @change="internalPartGroupEditorDraft.line_color = normalizeHexColor(internalPartGroupEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+              />
+            </div>
+          </label>
           <div class="subCategoryDesignEditor__metaActions">
             <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': internalPartGroupParamGroupsOpen }" title="گروه پارامترها" @click="toggleInternalPartGroupParamGroupsPanel">
               <svg viewBox="0 0 24 24" class="subCategoryDesignEditor__metaIcon subCategoryDesignEditor__metaIcon--glyph" aria-hidden="true">
@@ -13036,8 +13292,8 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
-                :class="{ 'is-active': designMenuTool === 'hidden' }"
-                title="رسم خط راهنما"
+                :class="{ 'is-active': interiorLibraryShowInnerLines }"
+                :title="interiorLibraryShowInnerLines ? 'مخفی کردن خطوط داخلی' : 'نمایش خطوط داخلی'"
                 @click="toggleInteriorLibraryGuideTool"
               >
                 <img src="/icons/drawing_hidden_wall.png" alt="" />
@@ -13105,19 +13361,21 @@ onBeforeUnmount(() => {
                   </pattern>
                 </defs>
                 <rect x="0" y="0" :width="FRONT_VIEW_WIDTH" :height="FRONT_VIEW_HEIGHT" fill="url(#interior-front-grid)" />
-                <line
-                  v-for="(line, index) in interiorLibraryPreviewSvgLines.inner"
-                  :key="`interior-inner-${index}`"
-                  :x1="line.x1"
-                  :y1="line.y1"
-                  :x2="line.x2"
-                  :y2="line.y2"
-                  :stroke-width="line.sw"
-                  stroke="#8a98a3"
-                  stroke-linecap="round"
-                  stroke-dasharray="6 8"
-                  opacity="0.88"
-                />
+                <template v-if="interiorLibraryShowInnerLines">
+                  <line
+                    v-for="line in interiorLibraryPreviewInstanceSvgLines"
+                    :key="line.key"
+                    :x1="line.x1"
+                    :y1="line.y1"
+                    :x2="line.x2"
+                    :y2="line.y2"
+                    :stroke-width="line.sw"
+                    :stroke="line.color"
+                    stroke-linecap="round"
+                    stroke-dasharray="6 8"
+                    opacity="0.88"
+                  />
+                </template>
                 <line
                   v-for="(line, index) in interiorLibraryPreviewSvgLines.outer"
                   :key="`interior-outer-${index}`"
@@ -13153,6 +13411,15 @@ onBeforeUnmount(() => {
                   <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
                 </span>
                 <div class="subCategoryDesignEditor__interiorGroupActions">
+                  <label class="subCategoryDesignEditor__miniColorBtn" :style="{ '--line-color': item.lineColor }" :title="`رنگ خطوط ${item.instance_code}`">
+                    <input
+                      :value="item.lineColor"
+                      class="subCategoryDesignEditor__miniColorInput"
+                      type="color"
+                      @input="previewInteriorInstanceLineColor(item, $event.target.value)"
+                      @change="applyInteriorInstanceLineColor(item, $event.target.value)"
+                    />
+                  </label>
                   <button
                     type="button"
                     class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
@@ -13174,6 +13441,7 @@ onBeforeUnmount(() => {
               <div class="subCategoryDesignEditor__chipRow">
                 <span class="constructionDialog__pill">ترتیب {{ toPersianDigits(item.ui_order + 1) }}</span>
                 <span class="constructionDialog__pill">{{ toPersianDigits(item.paramCount) }} پارامتر</span>
+                <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.lineColor }}</span>
               </div>
             </div>
           </div>
@@ -13191,6 +13459,7 @@ onBeforeUnmount(() => {
                   <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
                 </span>
                 <div class="subCategoryDesignEditor__interiorGroupActions">
+                  <span class="constructionDialog__colorSwatch subCategoryDesignEditor__groupLineSwatch" :style="{ backgroundColor: item.lineColor }" :title="`رنگ پیش‌فرض خطوط ${item.group_title}`"></span>
                   <span class="constructionDialog__pill">{{ toPersianDigits(item.parts?.length || 0) }} قطعه</span>
                   <button
                     type="button"
@@ -13249,6 +13518,26 @@ onBeforeUnmount(() => {
         <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
           <span>ترتیب</span>
           <input v-model.number="interiorInstanceEditorDraft.ui_order" class="constructionDialog__input" type="number" min="0" step="1" />
+        </label>
+        <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+          <span>رنگ خطوط این نمونه</span>
+          <div class="constructionDialog__colorEditor">
+            <input
+              v-model="interiorInstanceEditorDraft.line_color"
+              class="constructionDialog__colorInput"
+              type="color"
+              @input="interiorInstanceEditorDraft.line_color = normalizeHexColor(interiorInstanceEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+            />
+            <input
+              v-model="interiorInstanceEditorDraft.line_color"
+              class="constructionDialog__input constructionDialog__input--mono constructionDialog__colorHex"
+              type="text"
+              dir="ltr"
+              maxlength="7"
+              :placeholder="resolveInteriorInstanceLineColor(interiorInstanceEditorDraft)"
+              @change="interiorInstanceEditorDraft.line_color = normalizeHexColor(interiorInstanceEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+            />
+          </div>
         </label>
       </div>
       <div class="constructionDialog__sectionHint">

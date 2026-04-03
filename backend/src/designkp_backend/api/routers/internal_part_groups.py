@@ -26,6 +26,25 @@ from designkp_backend.services.admin_storage import normalize_icon_file_name
 from designkp_backend.services.sub_category_defaults import normalize_default_value
 
 router = APIRouter(prefix="/internal-part-groups", tags=["internal_part_groups"])
+DEFAULT_INTERNAL_LINE_COLOR = "#8A98A3"
+
+
+def _normalize_hex_color(value: str | None, fallback: str = DEFAULT_INTERNAL_LINE_COLOR) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return fallback
+    normalized = raw if raw.startswith("#") else f"#{raw}"
+    if not normalized or len(normalized) != 7:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Internal part group line color must be a HEX value like #8A98A3.",
+        )
+    if not all(ch in "0123456789ABCDEFabcdef#" for ch in normalized):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Internal part group line color must be a HEX value like #8A98A3.",
+        )
+    return normalized.upper()
 
 
 class InternalPartGroupPartSelectionPayload(BaseModel):
@@ -71,6 +90,7 @@ class InternalPartGroupItemResponse(BaseModel):
     group_title: str
     code: str
     title: str
+    line_color: str
     sort_order: int
     is_system: bool
     parts: list[InternalPartGroupPartItem]
@@ -97,6 +117,7 @@ class InternalPartGroupCreate(BaseModel):
     group_id: int | None = Field(default=None, ge=1)
     group_title: str = Field(min_length=1, max_length=255)
     code: str = Field(min_length=1, max_length=64)
+    line_color: str = Field(default=DEFAULT_INTERNAL_LINE_COLOR, min_length=7, max_length=7)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
     parts: list[InternalPartGroupPartSelectionPayload] = Field(default_factory=list)
@@ -110,6 +131,7 @@ class InternalPartGroupUpdate(BaseModel):
     group_id: int = Field(ge=1)
     group_title: str = Field(min_length=1, max_length=255)
     code: str = Field(min_length=1, max_length=64)
+    line_color: str = Field(default=DEFAULT_INTERNAL_LINE_COLOR, min_length=7, max_length=7)
     sort_order: int = Field(ge=0)
     is_system: bool
     parts: list[InternalPartGroupPartSelectionPayload] = Field(default_factory=list)
@@ -200,6 +222,7 @@ def _serialize_group(
         group_title=item.group_title,
         code=item.code,
         title=item.title,
+        line_color=_normalize_hex_color(getattr(item, "line_color", DEFAULT_INTERNAL_LINE_COLOR), DEFAULT_INTERNAL_LINE_COLOR),
         sort_order=item.sort_order,
         is_system=item.is_system,
         parts=[
@@ -554,6 +577,7 @@ async def create_internal_part_group(payload: InternalPartGroupCreate, session: 
         group_title=title,
         code=code,
         title=title,
+        line_color=_normalize_hex_color(payload.line_color, DEFAULT_INTERNAL_LINE_COLOR),
         sort_order=payload.sort_order if payload.sort_order is not None else next_group_id,
         is_system=payload.is_system,
     )
@@ -603,6 +627,7 @@ async def update_internal_part_group(
     item.group_title = title
     item.code = code
     item.title = title
+    item.line_color = _normalize_hex_color(payload.line_color, DEFAULT_INTERNAL_LINE_COLOR)
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     await _replace_group_parts(session, group=item, parts=payload.parts)

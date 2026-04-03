@@ -26,6 +26,17 @@ from designkp_backend.services.sub_category_designs import (
 )
 
 router = APIRouter(prefix="/sub-category-designs", tags=["sub_category_designs"])
+DEFAULT_INTERIOR_LINE_COLOR = "#8A98A3"
+
+
+def _normalize_hex_color(value: str | None, fallback: str = DEFAULT_INTERIOR_LINE_COLOR) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return fallback
+    normalized = raw if raw.startswith("#") else f"#{raw}"
+    if not normalized or len(normalized) != 7 or not all(ch in "0123456789ABCDEFabcdef#" for ch in normalized):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Interior line color must be a HEX value like #8A98A3.")
+    return normalized.upper()
 
 
 class SubCategoryDesignPartSelectionPayload(BaseModel):
@@ -62,6 +73,7 @@ class SubCategoryDesignInteriorInstanceItem(BaseModel):
     id: uuid.UUID
     internal_part_group_id: uuid.UUID
     instance_code: str
+    line_color: str | None = None
     ui_order: int
     placement_z: float
     interior_box_snapshot: dict[str, object]
@@ -80,6 +92,7 @@ class SubCategoryDesignInteriorInstancePreviewItem(BaseModel):
     internal_part_group_code: str
     internal_part_group_title: str
     instance_code: str
+    line_color: str | None = None
     ui_order: int
     placement_z: float
     interior_box_snapshot: dict[str, object]
@@ -154,6 +167,7 @@ class SubCategoryDesignInteriorInstanceDraftPayload(BaseModel):
     id: uuid.UUID | None = None
     internal_part_group_id: uuid.UUID
     instance_code: str = Field(min_length=1, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
     ui_order: int = Field(ge=0)
     placement_z: float = 0
     interior_box_snapshot: dict[str, object] = Field(default_factory=dict)
@@ -169,6 +183,7 @@ class SubCategoryDesignInteriorInstanceCreate(BaseModel):
     placement_z: float = 0
     ui_order: int | None = Field(default=None, ge=0)
     instance_code: str | None = Field(default=None, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
     param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
@@ -176,6 +191,7 @@ class SubCategoryDesignInteriorInstanceUpdate(BaseModel):
     placement_z: float
     ui_order: int = Field(ge=0)
     instance_code: str = Field(min_length=1, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
     param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
@@ -236,7 +252,20 @@ def _serialize_design(item: SubCategoryDesign, *, include_interior: bool = True,
         ],
         interior_instances=(
             [
-                SubCategoryDesignInteriorInstanceItem.model_validate(instance)
+                SubCategoryDesignInteriorInstanceItem(
+                    id=instance.id,
+                    internal_part_group_id=instance.internal_part_group_id,
+                    instance_code=str(instance.instance_code or "").strip(),
+                    line_color=str(getattr(instance, "line_color", "") or "").strip() or None,
+                    ui_order=int(instance.ui_order or 0),
+                    placement_z=float(instance.placement_z or 0),
+                    interior_box_snapshot=dict(instance.interior_box_snapshot or {}),
+                    param_values={str(key): (None if value is None else str(value)) for key, value in dict(instance.param_values or {}).items()},
+                    param_meta={str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()},
+                    part_snapshots=[dict(row or {}) for row in list(instance.part_snapshots or [])],
+                    viewer_boxes=[dict(row or {}) for row in list(instance.viewer_boxes or [])],
+                    status=str(instance.status or "draft").strip() or "draft",
+                )
                 for instance in sorted(item.interior_instances, key=lambda row: (int(row.ui_order), str(row.instance_code or "")))
             ]
             if include_interior else []
@@ -274,6 +303,7 @@ def _serialize_preview(
             internal_part_group_code=item.internal_part_group_code,
             internal_part_group_title=item.internal_part_group_title,
             instance_code=item.instance_code,
+            line_color=str(getattr(item, "line_color", "") or "").strip() or None,
             ui_order=item.ui_order,
             placement_z=item.placement_z,
             interior_box_snapshot=item.interior_box_snapshot,
@@ -738,6 +768,11 @@ async def create_sub_category_design_interior_instance(
     if not await interior_instance_tables_ready(session):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interior-instance tables are not available yet. Run database migrations first.")
     design = await _load_design(session, design_uuid)
+    group = await require_accessible_internal_part_group(
+        session,
+        admin_id=design.admin_id,
+        group_id=payload.internal_part_group_id,
+    )
     next_code, next_order, interior_box_snapshot, param_values, param_meta = await _next_interior_instance_state(
         session,
         design=design,
@@ -751,6 +786,7 @@ async def create_sub_category_design_interior_instance(
         design=design,
         internal_part_group_id=payload.internal_part_group_id,
         instance_code=next_code,
+        line_color=_normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else _normalize_hex_color(getattr(group, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR),
         ui_order=next_order,
         placement_z=float(payload.placement_z or 0),
         interior_box_snapshot=interior_box_snapshot,
@@ -783,6 +819,7 @@ async def update_sub_category_design_interior_instance(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design interior instance not found.")
     item.instance_code = str(payload.instance_code or "").strip()
+    item.line_color = _normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else None
     item.ui_order = int(payload.ui_order)
     item.placement_z = float(payload.placement_z or 0)
     item.param_values = _normalize_interior_param_values(payload.param_values)

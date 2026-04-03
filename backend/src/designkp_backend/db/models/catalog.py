@@ -354,6 +354,7 @@ class InternalPartGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
     group_title: Mapped[str] = mapped_column(String(255), nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    line_color: Mapped[str] = mapped_column(String(7), nullable=False, default="#8A98A3", server_default="#8A98A3")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
@@ -468,6 +469,7 @@ class SubCategoryDesignInteriorInstance(UUIDPrimaryKeyMixin, TimestampMixin, Sof
         index=True,
     )
     instance_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    line_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
     ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     placement_z: Mapped[float] = mapped_column(nullable=False, default=0)
     interior_box_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)

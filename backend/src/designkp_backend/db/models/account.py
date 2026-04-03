@@ -309,6 +309,7 @@ class OrderDesignInteriorInstance(UUIDPrimaryKeyMixin, TimestampMixin, SoftDelet
         index=True,
     )
     instance_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    line_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
     ui_order: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
     placement_z: Mapped[float] = mapped_column(nullable=False, default=0)
     interior_box_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)

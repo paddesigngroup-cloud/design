@@ -70,6 +70,7 @@ def build_order_design_snapshot_checksum(
                 "id": str(getattr(instance, "id", "") or ""),
                 "internal_part_group_id": str(getattr(instance, "internal_part_group_id", "") or ""),
                 "instance_code": str(getattr(instance, "instance_code", "") or ""),
+                "line_color": str(getattr(instance, "line_color", "") or ""),
                 "ui_order": int(getattr(instance, "ui_order", 0) or 0),
                 "placement_z": float(getattr(instance, "placement_z", 0) or 0),
                 "param_values": {
@@ -416,6 +417,7 @@ def _build_order_source_state(
                 "updated_at": str(getattr(instance, "updated_at", "") or ""),
                 "internal_part_group_id": str(getattr(instance, "internal_part_group_id", "") or ""),
                 "instance_code": str(getattr(instance, "instance_code", "") or ""),
+                "line_color": str(getattr(instance, "line_color", "") or ""),
                 "ui_order": int(getattr(instance, "ui_order", 0) or 0),
                 "placement_z": float(getattr(instance, "placement_z", 0) or 0),
                 "param_values": {
@@ -569,6 +571,7 @@ async def build_order_design_snapshot(
             internal_group=internal_group,
             instance_id=getattr(instance, "id", None),
             instance_code=str(instance.instance_code or ""),
+            line_color=str(getattr(instance, "line_color", "") or "").strip() or None,
             ui_order=int(instance.ui_order or 0),
             placement_z=float(instance.placement_z or 0),
             interior_box_snapshot=dict(instance.interior_box_snapshot or {}),
@@ -586,6 +589,7 @@ async def build_order_design_snapshot(
                 "internal_part_group_code": resolved.internal_part_group_code,
                 "internal_part_group_title": resolved.internal_part_group_title,
                 "instance_code": resolved.instance_code,
+                "line_color": resolved.line_color,
                 "ui_order": resolved.ui_order,
                 "placement_z": resolved.placement_z,
                 "interior_box_snapshot": resolved.interior_box_snapshot,

@@ -35,6 +35,17 @@ from designkp_backend.services.order_designs import (
 from designkp_backend.services.sub_category_designs import require_accessible_internal_part_group
 
 router = APIRouter(prefix="/order-designs", tags=["order_designs"])
+DEFAULT_INTERIOR_LINE_COLOR = "#8A98A3"
+
+
+def _normalize_hex_color(value: str | None, fallback: str = DEFAULT_INTERIOR_LINE_COLOR) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return fallback
+    normalized = raw if raw.startswith("#") else f"#{raw}"
+    if not normalized or len(normalized) != 7 or not all(ch in "0123456789ABCDEFabcdef#" for ch in normalized):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Interior line color must be a HEX value like #8A98A3.")
+    return normalized.upper()
 
 DELETED_RESTORE_INSTANCE_CODE_KEY = "restore_instance_code"
 
@@ -82,6 +93,7 @@ class OrderDesignInteriorInstanceUpdate(BaseModel):
     placement_z: float
     ui_order: int = Field(ge=0)
     instance_code: str = Field(min_length=1, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
     param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
@@ -90,6 +102,7 @@ class OrderDesignInteriorInstanceCreate(BaseModel):
     placement_z: float = 0
     ui_order: int | None = Field(default=None, ge=0)
     instance_code: str | None = Field(default=None, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
     param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
@@ -97,6 +110,7 @@ class OrderDesignInteriorInstanceItem(BaseModel):
     id: uuid.UUID
     internal_part_group_id: uuid.UUID
     instance_code: str
+    line_color: str | None = None
     ui_order: int
     placement_z: float
     interior_box_snapshot: dict[str, object]
@@ -113,6 +127,7 @@ class OrderDesignHistoryRestoreInteriorInstance(BaseModel):
     id: uuid.UUID
     internal_part_group_id: uuid.UUID
     instance_code: str = Field(min_length=1, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
     ui_order: int = Field(ge=0)
     placement_z: float = 0
     param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
@@ -169,6 +184,7 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
                 "id": instance.id,
                 "internal_part_group_id": instance.internal_part_group_id,
                 "instance_code": str(instance.instance_code or "").strip(),
+                "line_color": str(getattr(instance, "line_color", "") or "").strip() or None,
                 "ui_order": int(instance.ui_order or 0),
                 "placement_z": float(instance.placement_z or 0),
                 "interior_box_snapshot": dict(instance.interior_box_snapshot or {}),
@@ -359,6 +375,7 @@ def _serialize_interior_instance_item(instance: OrderDesignInteriorInstance) -> 
         id=instance.id,
         internal_part_group_id=instance.internal_part_group_id,
         instance_code=str(instance.instance_code or "").strip(),
+        line_color=str(getattr(instance, "line_color", "") or "").strip() or None,
         ui_order=int(instance.ui_order or 0),
         placement_z=float(instance.placement_z or 0),
         interior_box_snapshot=dict(instance.interior_box_snapshot or {}),
@@ -475,6 +492,7 @@ async def _duplicate_order_design_record(
                     source_instance_id=interior.source_instance_id,
                     internal_part_group_id=interior.internal_part_group_id,
                     instance_code=str(interior.instance_code or "").strip(),
+                    line_color=_normalize_hex_color(getattr(interior, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR) if getattr(interior, "line_color", None) else None,
                     ui_order=int(interior.ui_order or 0),
                     placement_z=float(interior.placement_z or 0),
                     interior_box_snapshot=_clone_order_design_json(dict(interior.interior_box_snapshot or {})),
@@ -606,6 +624,12 @@ async def create_order_design(payload: OrderDesignCreate, session: AsyncSession 
                     source_instance_id=getattr(source_interior, "id", None),
                     internal_part_group_id=uuid.UUID(str(interior.get("internal_part_group_id"))),
                     instance_code=str(interior.get("instance_code") or "").strip(),
+                    line_color=(
+                        str(interior.get("line_color") or "").strip()
+                        or
+                        str(getattr(source_interior, "line_color", "") or "").strip()
+                        or None
+                    ),
                     ui_order=int(interior.get("ui_order") or 0),
                     placement_z=float(interior.get("placement_z") or 0),
                     interior_box_snapshot=dict(interior.get("interior_box_snapshot") or {}),
@@ -760,6 +784,7 @@ async def restore_order_design_history_state(
                     source_instance_id=None,
                     internal_part_group_id=snapshot.internal_part_group_id,
                     instance_code=str(snapshot.instance_code or "").strip(),
+                    line_color=_normalize_hex_color(snapshot.line_color, DEFAULT_INTERIOR_LINE_COLOR) if snapshot.line_color else None,
                     ui_order=int(snapshot.ui_order),
                     placement_z=float(snapshot.placement_z or 0),
                     interior_box_snapshot={},
@@ -773,6 +798,7 @@ async def restore_order_design_history_state(
             else:
                 instance.internal_part_group_id = snapshot.internal_part_group_id
                 instance.instance_code = str(snapshot.instance_code or "").strip()
+                instance.line_color = _normalize_hex_color(snapshot.line_color, DEFAULT_INTERIOR_LINE_COLOR) if snapshot.line_color else None
                 instance.ui_order = int(snapshot.ui_order)
                 instance.placement_z = float(snapshot.placement_z or 0)
                 instance.param_values = _normalize_interior_param_values(snapshot.param_values)
@@ -812,6 +838,7 @@ async def update_order_design_interior_instance(
     if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design interior instance not found.")
     target.instance_code = str(payload.instance_code or "").strip()
+    target.line_color = _normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else None
     target.ui_order = int(payload.ui_order)
     target.placement_z = float(payload.placement_z or 0)
     target.param_values = _normalize_interior_param_values(payload.param_values)
@@ -863,6 +890,7 @@ async def create_order_design_interior_instance(
         source_instance_id=None,
         internal_part_group_id=group.id,
         instance_code=next_code,
+        line_color=_normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else _normalize_hex_color(getattr(group, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR),
         ui_order=int(next_order),
         placement_z=float(payload.placement_z or 0),
         interior_box_snapshot={},
