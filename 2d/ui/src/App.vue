@@ -17,6 +17,7 @@ import {
   fitAllHandlerRef,
 } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
+import InteriorControllerTestModal from "./components/InteriorControllerTestModal.vue";
 import { useDialogService } from "./dialog_service.js";
 import { WALL_READY_PRESETS, buildPresetLines, getPresetIconWalls } from "./features/wall_preset_drag.js";
 import { DOOR_READY_PRESETS, buildDoorPresetPayloadAsync, buildDoorPresetPreviewLines, getDoorPresetIconLines, primeDoorPresetModel } from "./features/door_preset_drag.js";
@@ -284,6 +285,7 @@ const orderDesignCatalogLoadedForOrderId = ref("");
 let orderDesignCatalogLoadRequestSeq = 0;
 let orderDesignCatalogReloadQueued = false;
 const interiorLibraryOpen = ref(false);
+const interiorControllerTestOpen = ref(false);
 const interiorLibraryForcedOrderDesignId = ref("");
 const interiorInstanceEditorOpen = ref(false);
 const interiorInstanceEditorDraft = ref(null);
@@ -10566,6 +10568,7 @@ function openInteriorLibraryForDesign(orderDesignId) {
 
 function closeInteriorLibrary() {
   interiorLibraryOpen.value = false;
+  interiorControllerTestOpen.value = false;
   interiorLibraryForcedOrderDesignId.value = "";
   interiorLibraryPreviewMode.value = "front2d";
   interiorLibraryFrontZoom.value = 1;
@@ -10575,6 +10578,14 @@ function closeInteriorLibrary() {
   interiorLibraryFrontPan.value = { x: 0, y: 0 };
   stopInteriorLibraryFrontPan();
   closeInteriorInstanceEditor();
+}
+
+function openInteriorControllerTest() {
+  interiorControllerTestOpen.value = true;
+}
+
+function closeInteriorControllerTest() {
+  interiorControllerTestOpen.value = false;
 }
 
 function disable2dInput() {
@@ -14130,6 +14141,15 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                title="تست کنترلر قطعات داخلی"
+                aria-label="تست کنترلر قطعات داخلی"
+                @click="openInteriorControllerTest"
+              >
+                <img src="/icons/double-arrow.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
                 :class="{ 'is-active': interiorLibraryShowDimensions }"
                 title="نمایش اندازه گذاری"
                 aria-label="نمایش اندازه گذاری"
@@ -15609,5 +15629,11 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+
+  <InteriorControllerTestModal
+    v-if="interiorControllerTestOpen"
+    :display-unit="currentEditorDisplayUnit"
+    @close="closeInteriorControllerTest"
+  />
 
 </template>
