@@ -301,8 +301,14 @@ const interiorLibraryCurrentSnapPoint = ref(null);
 const interiorLibraryCursorPoint = ref(null);
 const interiorLibrarySelectedInstanceId = ref("");
 const interiorLibraryHoveredInstanceId = ref("");
+const interiorLibraryPickerPreviewInstanceId = ref("");
 const interiorLibraryHoverMode = ref(null);
-const interiorLibraryOverlapPickState = ref({ signature: "", index: -1 });
+const interiorLibraryOverlapPickerState = ref({
+  visible: false,
+  items: [],
+  clientX: 0,
+  clientY: 0,
+});
 const interiorLibraryFrontPan = ref({ x: 0, y: 0 });
 const interiorLibraryFrontPanning = ref(false);
 let interiorLibraryFrontPanSession = null;
@@ -563,8 +569,9 @@ function resetInteriorLibraryAnnotations() {
   interiorLibraryCurrentSnapPoint.value = null;
   interiorLibrarySelectedInstanceId.value = "";
   interiorLibraryHoveredInstanceId.value = "";
+  interiorLibraryPickerPreviewInstanceId.value = "";
   interiorLibraryHoverMode.value = null;
-  interiorLibraryOverlapPickState.value = { signature: "", index: -1 };
+  hideInteriorLibraryOverlapPicker();
 }
 function cancelInteriorLibraryAnnotationDrawing() {
   interiorLibraryAnnotationDraft.value = null;
@@ -694,12 +701,57 @@ function removeSelectedInteriorLibraryAnnotation() {
   );
   interiorLibrarySelectedAnnotation.value = null;
 }
-function resetInteriorLibraryOverlapPickState() {
-  interiorLibraryOverlapPickState.value = { signature: "", index: -1 };
+function hideInteriorLibraryOverlapPicker() {
+  interiorLibraryOverlapPickerState.value = {
+    visible: false,
+    items: [],
+    clientX: 0,
+    clientY: 0,
+  };
+  interiorLibraryPickerPreviewInstanceId.value = "";
+}
+function showInteriorLibraryOverlapPicker(clientX, clientY, items) {
+  interiorLibraryOverlapPickerState.value = {
+    visible: true,
+    items: Array.isArray(items) ? items.slice() : [],
+    clientX: Number(clientX) || 0,
+    clientY: Number(clientY) || 0,
+  };
+  interiorLibraryPickerPreviewInstanceId.value = "";
+}
+function setInteriorLibraryOverlapPreview(instanceId) {
+  interiorLibraryPickerPreviewInstanceId.value = String(instanceId || "").trim();
+}
+function clearInteriorLibraryOverlapPreview() {
+  interiorLibraryPickerPreviewInstanceId.value = "";
+}
+function selectInteriorLibraryOverlapItem(hit) {
+  const instanceId = String(hit?.id || "").trim();
+  if (!instanceId) return;
+  selectInteriorLibraryInstance(instanceId);
+  hideInteriorLibraryOverlapPicker();
+}
+function getInteriorLibraryOverlapPickerStyle() {
+  const state = interiorLibraryOverlapPickerState.value || {};
+  const menuWidth = 320;
+  const gutter = 8;
+  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
+  const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
+  const estimatedHeight = Math.min(
+    360,
+    52 + ((Array.isArray(state.items) ? state.items.length : 0) * 88)
+  );
+  const left = Math.max(gutter, Math.min((Number(state.clientX) || 0) + 10, viewportWidth - menuWidth - gutter));
+  const top = Math.max(gutter, Math.min((Number(state.clientY) || 0) + 10, viewportHeight - estimatedHeight - gutter));
+  return {
+    left: `${Math.round(left)}px`,
+    top: `${Math.round(top)}px`,
+  };
 }
 function selectInteriorLibraryInstance(instanceId) {
   interiorLibrarySelectedInstanceId.value = String(instanceId || "").trim();
   interiorLibrarySelectedAnnotation.value = null;
+  clearInteriorLibraryOverlapPreview();
 }
 function distancePointToSegmentLocal(point, start, end) {
   const px = Number(point?.x) || 0;
@@ -758,6 +810,9 @@ function collectInteriorInstanceHits(point) {
     if (!inside && minDistance > 10) continue;
     hits.push({
       id: String(instance.id || "").trim(),
+      instanceCode: String(instance.instanceCode || "").trim(),
+      title: String(instance.groupTitle || instance.instanceCode || instance.id || "قطعه داخلی").trim(),
+      lineColor: String(instance.lineColor || "").trim(),
       distance: inside ? Math.min(minDistance, 0) : minDistance,
       visualOrder: Number(instance.visualOrder) || 0,
     });
@@ -767,23 +822,11 @@ function collectInteriorInstanceHits(point) {
     return b.visualOrder - a.visualOrder;
   });
 }
-function pickInteriorOverlapHit(hits, point) {
-  if (!Array.isArray(hits) || !hits.length) {
-    resetInteriorLibraryOverlapPickState();
-    return null;
-  }
-  const signature = `${hits.map((item) => item.id).join("|")}@${Math.round((Number(point?.x) || 0) / 12)}:${Math.round((Number(point?.y) || 0) / 12)}`;
-  let nextIndex = 0;
-  if (interiorLibraryOverlapPickState.value.signature === signature) {
-    nextIndex = (Number(interiorLibraryOverlapPickState.value.index) + 1) % hits.length;
-  }
-  interiorLibraryOverlapPickState.value = { signature, index: nextIndex };
-  return hits[nextIndex] || hits[0] || null;
-}
 function updateInteriorLibraryHoverState(point) {
   if (!point || interiorLibraryAnnotationTool.value) {
     interiorLibraryHoverMode.value = null;
     interiorLibraryHoveredInstanceId.value = "";
+    clearInteriorLibraryOverlapPreview();
     return;
   }
   const rendered = interiorLibraryRenderedAnnotations.value;
@@ -794,7 +837,8 @@ function updateInteriorLibraryHoverState(point) {
     ? hitTestInteriorAnnotationList(rendered.guides, point, 10)
     : null;
   const instanceHits = !hitDimension && !hitGuide ? collectInteriorInstanceHits(point) : [];
-  interiorLibraryHoveredInstanceId.value = instanceHits[0]?.id || "";
+  const previewId = String(interiorLibraryPickerPreviewInstanceId.value || "").trim();
+  interiorLibraryHoveredInstanceId.value = previewId || instanceHits[0]?.id || "";
   interiorLibraryHoverMode.value = (hitDimension || hitGuide || instanceHits.length) ? "clicker" : null;
 }
 function onInteriorLibraryFrontSvgPointerDown(event) {
@@ -817,7 +861,7 @@ function onInteriorLibraryFrontSvgPointerDown(event) {
     clearInteriorLibraryInstanceSelection();
     interiorLibraryAnnotationDraft.value = null;
     interiorLibraryCurrentSnapPoint.value = null;
-    resetInteriorLibraryOverlapPickState();
+    hideInteriorLibraryOverlapPicker();
     event.preventDefault();
     event.stopPropagation();
     return;
@@ -825,21 +869,27 @@ function onInteriorLibraryFrontSvgPointerDown(event) {
   if (!interiorLibraryAnnotationTool.value) {
     const instanceHits = collectInteriorInstanceHits(rawPoint);
     if (instanceHits.length) {
-      const picked = pickInteriorOverlapHit(instanceHits, rawPoint);
-      if (picked?.id) {
-        selectInteriorLibraryInstance(picked.id);
+      if (instanceHits.length === 1) {
+        selectInteriorLibraryInstance(instanceHits[0].id);
+        hideInteriorLibraryOverlapPicker();
         interiorLibraryCurrentSnapPoint.value = null;
         event.preventDefault();
         event.stopPropagation();
         return;
       }
+      showInteriorLibraryOverlapPicker(event.clientX, event.clientY, instanceHits);
+      interiorLibraryCurrentSnapPoint.value = null;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
     }
+    hideInteriorLibraryOverlapPicker();
     clearInteriorLibraryAnnotationSelection();
     clearInteriorLibraryInstanceSelection();
     interiorLibraryCurrentSnapPoint.value = null;
-    resetInteriorLibraryOverlapPickState();
     return;
   }
+  hideInteriorLibraryOverlapPicker();
   const point = getInteriorLibrarySnappedFrontPoint(rawPoint);
   if (!point) return;
   if (!interiorLibraryAnnotationDraft.value) {
@@ -851,6 +901,12 @@ function onInteriorLibraryFrontSvgPointerDown(event) {
   event.preventDefault();
   event.stopPropagation();
 }
+function onInteriorLibraryOverlapPickerPointerDown(event) {
+  event.stopPropagation();
+}
+function onInteriorLibraryOverlapPickerLeave() {
+  clearInteriorLibraryOverlapPreview();
+}
 function onInteriorLibraryFrontSvgPointerMove(event) {
   const rawPoint = getInteriorLibraryFrontSvgPoint(event);
   if (!rawPoint) return;
@@ -860,6 +916,7 @@ function onInteriorLibraryFrontSvgPointerMove(event) {
     updateInteriorLibraryHoverState(rawPoint);
     return;
   }
+  hideInteriorLibraryOverlapPicker();
   const point = getInteriorLibrarySnappedFrontPoint(rawPoint);
   syncInteriorLibraryCursorPoint(rawPoint, point);
   interiorLibraryHoverMode.value = null;
@@ -873,6 +930,7 @@ function onInteriorLibraryFrontSvgPointerLeave() {
   clearInteriorLibraryCursorPoint();
   interiorLibraryHoverMode.value = null;
   interiorLibraryHoveredInstanceId.value = "";
+  clearInteriorLibraryOverlapPreview();
 }
 function getInteriorLibraryAddingGroupKey(group) {
   const groupId = String(group?.id || "").trim();
@@ -1469,6 +1527,7 @@ const interiorLibraryPreviewInstances2d = computed(() => {
     .map((instance, index) => {
       const data = buildFrontViewLinesFromBoxes(getViewerBoxesFromInteriorInstance(instance));
       if (!data?.bounds) return null;
+      const group = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || ""));
       const lineColor = resolveInteriorInstanceLineColor(instance);
       const outerLines = (data.outer || []).map((line) => projection.project(line, 1.8, false));
       const innerLines = (data.inner || []).map((line) => projection.project(line, 1.15, true));
@@ -1479,6 +1538,7 @@ const interiorLibraryPreviewInstances2d = computed(() => {
       return {
         id: String(instance?.id || "").trim(),
         instanceCode: String(instance?.instance_code || "").trim(),
+        groupTitle: String(group?.group_title || group?.title || instance?.instance_code || "قطعه داخلی").trim(),
         lineColor,
         visualOrder: index,
         outerLines,
@@ -1645,9 +1705,15 @@ const interiorLibraryShouldShowSnapMarkers = computed(() =>
   (interiorLibraryAnnotationTool.value === "dimension" || interiorLibraryAnnotationTool.value === "guide")
 );
 watch(interiorLibraryAnnotationTool, (tool) => {
-  if (tool === "dimension" || tool === "guide") return;
+  if (tool === "dimension" || tool === "guide") {
+    hideInteriorLibraryOverlapPicker();
+    return;
+  }
   interiorLibraryAnnotationDraft.value = null;
   interiorLibraryCurrentSnapPoint.value = null;
+});
+watch(interiorLibraryPreviewMode, () => {
+  hideInteriorLibraryOverlapPicker();
 });
 watch(activeInteriorLibraryInstances, (items) => {
   const ids = new Set((Array.isArray(items) ? items : []).map((item) => String(item?.id || "").trim()).filter(Boolean));
@@ -1656,6 +1722,15 @@ watch(activeInteriorLibraryInstances, (items) => {
   }
   if (interiorLibraryHoveredInstanceId.value && !ids.has(String(interiorLibraryHoveredInstanceId.value))) {
     interiorLibraryHoveredInstanceId.value = "";
+  }
+  if (interiorLibraryPickerPreviewInstanceId.value && !ids.has(String(interiorLibraryPickerPreviewInstanceId.value))) {
+    interiorLibraryPickerPreviewInstanceId.value = "";
+  }
+  const pickerItems = Array.isArray(interiorLibraryOverlapPickerState.value?.items)
+    ? interiorLibraryOverlapPickerState.value.items
+    : [];
+  if (pickerItems.length && pickerItems.some((item) => !ids.has(String(item?.id || "").trim()))) {
+    hideInteriorLibraryOverlapPicker();
   }
 }, { immediate: true });
 
@@ -10998,6 +11073,9 @@ onMounted(() => {
     const el = e.target;
     if (!(el instanceof Element)) return;
     if (el.closest(".stageQuickBar")) return;
+    if (interiorLibraryOverlapPickerState.value.visible && !el.closest(".subCategoryDesignEditor__overlapPicker")) {
+      hideInteriorLibraryOverlapPicker();
+    }
     closeQuickMenus();
   };
   window.addEventListener("pointerdown", _quickOutsidePointerDown, true);
@@ -11038,6 +11116,12 @@ onMounted(() => {
     const t = e.target;
     const tag = (t?.tagName || "").toUpperCase();
     if (t?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (interiorLibraryOpen.value && interiorLibraryOverlapPickerState.value.visible) {
+      hideInteriorLibraryOverlapPicker();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (interiorLibraryOpen.value && (interiorLibraryAnnotationDraft.value || interiorLibraryAnnotationTool.value)) {
       cancelInteriorLibraryAnnotationDrawing();
       e.preventDefault();
@@ -14152,7 +14236,7 @@ onBeforeUnmount(() => {
                   :key="`interior-instance-${instance.id}`"
                   class="subCategoryDesignEditor__instanceLayer"
                   :class="{
-                    'is-hovered': String(interiorLibraryHoveredInstanceId || '') === String(instance.id || ''),
+                    'is-hovered': String(interiorLibraryHoveredInstanceId || '') === String(instance.id || '') || String(interiorLibraryPickerPreviewInstanceId || '') === String(instance.id || ''),
                     'is-selected': String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '')
                   }"
                 >
@@ -14170,11 +14254,11 @@ onBeforeUnmount(() => {
                     :y1="line.y1"
                     :x2="line.x2"
                     :y2="line.y2"
-                    :stroke-width="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 1.8 : Math.max(1.25, Number(line.sw) || 1.25)"
+                    :stroke-width="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 1.8 : (String(interiorLibraryPickerPreviewInstanceId || '') === String(instance.id || '') ? Math.max(1.45, Number(line.sw) || 1.25) : Math.max(1.25, Number(line.sw) || 1.25))"
                     :stroke="instance.lineColor"
                     stroke-linecap="round"
                     stroke-dasharray="6 8"
-                    :opacity="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 0.98 : 0.94"
+                    :opacity="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 0.98 : (String(interiorLibraryPickerPreviewInstanceId || '') === String(instance.id || '') ? 0.98 : 0.94)"
                   />
                   <line
                     v-for="(line, index) in instance.outerLines"
@@ -14184,9 +14268,9 @@ onBeforeUnmount(() => {
                     :x2="line.x2"
                     :y2="line.y2"
                     :stroke="instance.lineColor"
-                    :stroke-width="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 2.2 : (String(interiorLibraryHoveredInstanceId || '') === String(instance.id || '') ? 1.4 : 0)"
+                    :stroke-width="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 2.2 : ((String(interiorLibraryHoveredInstanceId || '') === String(instance.id || '') || String(interiorLibraryPickerPreviewInstanceId || '') === String(instance.id || '')) ? 1.4 : 0)"
                     stroke-linecap="round"
-                    :opacity="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 0.92 : 0.78"
+                    :opacity="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 0.92 : ((String(interiorLibraryHoveredInstanceId || '') === String(instance.id || '') || String(interiorLibraryPickerPreviewInstanceId || '') === String(instance.id || '')) ? 0.88 : 0.78)"
                   />
                 </g>
                 <template v-if="interiorLibraryShowDimensions">
@@ -14315,7 +14399,32 @@ onBeforeUnmount(() => {
                 <text v-if="interiorLibraryPreviewAxisLabels" :x="interiorLibraryPreviewAxisLabels.x.x" :y="interiorLibraryPreviewAxisLabels.x.y" fill="#79676d" font-size="14" font-weight="700">X</text>
                 <text v-if="interiorLibraryPreviewAxisLabels" :x="interiorLibraryPreviewAxisLabels.z.x" :y="interiorLibraryPreviewAxisLabels.z.y" fill="#79676d" font-size="14" font-weight="700">Z</text>
               </svg>
-              <div v-else class="designMenu__cabinetState">
+              <div
+                v-if="interiorLibraryOverlapPickerState.visible && interiorLibraryOverlapPickerState.items.length"
+                class="subCategoryDesignEditor__overlapPicker"
+                :style="getInteriorLibraryOverlapPickerStyle()"
+                @pointerdown="onInteriorLibraryOverlapPickerPointerDown"
+                @mouseleave="onInteriorLibraryOverlapPickerLeave"
+              >
+                <div class="subCategoryDesignEditor__overlapPickerTitle">آبجکت‌های روی‌هم</div>
+                <button
+                  v-for="item in interiorLibraryOverlapPickerState.items"
+                  :key="`interior-overlap-${item.id}`"
+                  type="button"
+                  class="subCategoryDesignEditor__overlapPickerItem"
+                  :class="{ 'is-active': String(interiorLibrarySelectedInstanceId || '') === String(item.id || '') }"
+                  @mouseenter="setInteriorLibraryOverlapPreview(item.id)"
+                  @focus="setInteriorLibraryOverlapPreview(item.id)"
+                  @click="selectInteriorLibraryOverlapItem(item)"
+                >
+                  <span class="subCategoryDesignEditor__overlapPickerSwatch" :style="{ '--line-color': item.lineColor || '#7c3f57' }"></span>
+                  <span class="subCategoryDesignEditor__overlapPickerText">
+                    <span class="subCategoryDesignEditor__overlapPickerPrimary">{{ item.title }}</span>
+                    <span v-if="item.instanceCode" class="subCategoryDesignEditor__overlapPickerSecondary">{{ item.instanceCode }}</span>
+                  </span>
+                </button>
+              </div>
+              <div v-if="!interiorLibraryPreviewSvgLines.outer.length" class="designMenu__cabinetState">
                 {{ interiorLibraryPreviewMode === "model3d"
                   ? "برای این طرح هنوز preview سه بعدی قابل نمایش نیست."
                   : "برای این طرح هنوز preview خطی قابل نمایش نیست." }}
