@@ -1903,7 +1903,6 @@ const interiorLibraryInstanceCards = computed(() =>
       groupCode: String(group?.code || "").trim(),
       lineColor: resolveInteriorInstanceLineColor(instance),
       groups,
-      paramCount: groups.reduce((sum, row) => sum + row.items.length, 0),
     };
   })
 );
@@ -14026,7 +14025,7 @@ onBeforeUnmount(() => {
                 aria-label="نمایش خطوط داخلی"
                 @click="toggleInteriorLibraryGuideTool"
               >
-                <img src="/icons/drawing_hidden_wall.png" alt="" />
+                <img src="/icons/drawing_wall.png" alt="" />
               </button>
               <button
                 type="button"
@@ -14451,6 +14450,22 @@ onBeforeUnmount(() => {
                   <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
                 </span>
                 <div class="subCategoryDesignEditor__interiorGroupActions">
+                  <button
+                    type="button"
+                    class="constructionDialog__iconBtn"
+                    title="حذف نمونه"
+                    @click="deleteInteriorInstanceFromDesign(item)"
+                  >
+                    ×
+                  </button>
+                  <button
+                    type="button"
+                    class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
+                    title="تنظیمات این نمونه"
+                    @click="openInteriorInstanceEditor(item)"
+                  >
+                    <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                  </button>
                   <label class="subCategoryDesignEditor__miniColorBtn" :style="{ '--line-color': item.lineColor }" :title="`رنگ خطوط ${item.instance_code}`">
                     <input
                       :value="item.lineColor"
@@ -14460,28 +14475,8 @@ onBeforeUnmount(() => {
                       @change="applyInteriorInstanceLineColor(item, $event.target.value)"
                     />
                   </label>
-                  <button
-                    type="button"
-                    class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
-                    title="تنظیمات این نمونه"
-                    @click="openInteriorInstanceEditor(item)"
-                  >
-                    <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-                  </button>
-                  <button
-                    type="button"
-                    class="constructionDialog__iconBtn"
-                    title="حذف نمونه"
-                    @click="deleteInteriorInstanceFromDesign(item)"
-                  >
-                    ×
-                  </button>
+                  <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits((Number(item.ui_order) || 0) + 1) }}</span>
                 </div>
-              </div>
-              <div class="subCategoryDesignEditor__chipRow">
-                <span class="constructionDialog__pill">ترتیب {{ toPersianDigits(item.ui_order + 1) }}</span>
-                <span class="constructionDialog__pill">{{ toPersianDigits(item.paramCount) }} پارامتر</span>
-                <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.lineColor }}</span>
               </div>
             </div>
           </div>
@@ -14499,8 +14494,6 @@ onBeforeUnmount(() => {
                   <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
                 </span>
                 <div class="subCategoryDesignEditor__interiorGroupActions">
-                  <span class="constructionDialog__colorSwatch subCategoryDesignEditor__groupLineSwatch" :style="{ backgroundColor: item.lineColor }" :title="`رنگ پیش‌فرض خطوط ${item.group_title}`"></span>
-                  <span class="constructionDialog__pill">{{ toPersianDigits(item.parts?.length || 0) }} قطعه</span>
                   <button
                     type="button"
                     class="constructionDialog__textBtn constructionDialog__textBtn--compact"
@@ -14511,21 +14504,11 @@ onBeforeUnmount(() => {
                     <span v-if="isAddingInteriorGroup(item)" class="constructionDialog__spinner"></span>
                     <span>{{ isAddingInteriorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
                   </button>
+                  <span class="constructionDialog__pill">{{ toPersianDigits(item.parts?.length || 0) }} قطعه</span>
+                  <label class="subCategoryDesignEditor__miniColorBtn subCategoryDesignEditor__miniColorBtn--static" :style="{ '--line-color': item.lineColor }" :title="`رنگ پیش‌فرض خطوط ${item.group_title}`">
+                    <span class="subCategoryDesignEditor__miniColorPreview" aria-hidden="true"></span>
+                  </label>
                 </div>
-              </div>
-              <div v-if="item.relatedGroups.length" class="subCategoryDesignEditor__chipRow">
-                <span
-                  v-for="group in item.relatedGroups"
-                  :key="`${item.id}-${group.id}`"
-                  class="subCategoryDesignEditor__groupChip"
-                >
-                  <span>{{ group.title }}</span>
-                  <span>{{ toPersianDigits(group.count) }}</span>
-                </span>
-              </div>
-              <div class="subCategoryDesignEditor__interiorParamsHead">
-                <span>گروه‌های پارامتری این مجموعه</span>
-                <span>{{ toPersianDigits(item.paramCount) }} پارامتر</span>
               </div>
             </div>
           </div>

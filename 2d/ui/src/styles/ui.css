@@ -4074,10 +4074,22 @@ textarea {
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
+  direction: ltr;
   gap: 8px;
   flex-shrink: 0;
   margin-inline-start: auto;
   max-width: 100%;
+}
+.subCategoryDesignEditor__panel--interiorInstances .subCategoryDesignEditor__interiorGroupActions {
+  width: 100%;
+  justify-content: flex-start;
+  margin-inline-start: 0;
+}
+.subCategoryDesignEditor__panel--interiorSidebar .subCategoryDesignEditor__interiorGroupActions {
+  width: 100%;
+}
+.subCategoryDesignEditor__panel--interiorSidebar .subCategoryDesignEditor__interiorGroupActions > .constructionDialog__textBtn {
+  margin-right: auto;
 }
 .subCategoryDesignEditor__partItem--interiorCard .subCategoryDesignEditor__partMeta {
   flex: 1 1 220px;
@@ -4103,11 +4115,8 @@ textarea {
   min-height: 42px;
   padding: 0;
 }
-.subCategoryDesignEditor__chipRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
+.subCategoryDesignEditor__panel--interiorInstances .subCategoryDesignEditor__partList {
+  padding-top: 18px;
 }
 .subCategoryDesignEditor__groupChip {
   display: inline-flex;
@@ -4148,6 +4157,20 @@ textarea {
   background: var(--line-color, #8A98A3);
   pointer-events: none;
 }
+.subCategoryDesignEditor__miniColorBtn--static {
+  cursor: default;
+}
+.subCategoryDesignEditor__miniColorBtn--static::before {
+  content: none;
+}
+.subCategoryDesignEditor__miniColorPreview {
+  position: absolute;
+  inset: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(79, 65, 68, 0.14);
+  background: var(--line-color, #8A98A3);
+  pointer-events: none;
+}
 .subCategoryDesignEditor__miniColorInput {
   position: absolute;
   inset: 0;
@@ -4155,6 +4178,21 @@ textarea {
   height: 100%;
   opacity: 0;
   cursor: pointer;
+}
+.subCategoryDesignEditor__orderPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  border-radius: 14px;
+  font-size: 24px;
+  line-height: 1;
+  text-align: center;
+  margin-left: auto;
 }
 .subCategoryDesignEditor__groupLineSwatch {
   width: 24px;
