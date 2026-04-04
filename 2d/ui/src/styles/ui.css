@@ -4054,9 +4054,9 @@ textarea {
   box-shadow: 0 12px 26px rgba(86, 58, 33, 0.08);
 }
 .subCategoryDesignEditor__partItem--interiorCard.is-active {
-  border-color: rgba(166, 114, 42, 0.36);
-  background: linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(248, 239, 228, 0.96));
-  box-shadow: 0 14px 28px rgba(166, 114, 42, 0.16);
+  border-color: rgba(118, 45, 71, 0.24);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--iconBgActive) 88%, #fff 12%), color-mix(in srgb, var(--iconBgActive) 94%, #f8eef2 6%));
+  box-shadow: 0 14px 28px rgba(118, 45, 71, 0.12);
   transform: translateY(-1px);
 }
 .subCategoryDesignEditor__meta--interiorInstance {
