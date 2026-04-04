@@ -3809,18 +3809,19 @@ textarea {
   direction: ltr;
   grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.62fr) minmax(340px, 0.8fr);
   gap: 16px;
+  height: 100%;
 }
 .subCategoryDesignEditor__layout--interiorLibrary > * {
   direction: rtl;
 }
 .subCategoryDesignEditor__panel--interiorPreview {
-  min-height: 660px;
+  height: 100%;
 }
 .subCategoryDesignEditor__panel--interiorSidebar {
-  min-height: 660px;
+  height: 100%;
 }
 .subCategoryDesignEditor__panel--interiorInstances {
-  min-height: 660px;
+  height: 100%;
 }
 .subCategoryDesignEditor__previewBody {
   display: flex;
@@ -3842,8 +3843,8 @@ textarea {
 }
 .subCategoryDesignEditor__viewerWrap--interior {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
+  justify-content: stretch;
   min-height: 580px;
   padding: 20px;
   background:
@@ -3851,7 +3852,30 @@ textarea {
     radial-gradient(circle at top left, rgba(118, 45, 71, 0.05), transparent 42%);
   user-select: none;
   -webkit-user-select: none;
-  cursor: default;
+  cursor: none;
+}
+.subCategoryDesignEditor__viewerWrap--interior.is-front2d-mode {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,245,244,0.95)),
+    radial-gradient(circle at top left, rgba(118, 45, 71, 0.05), transparent 42%),
+    linear-gradient(rgba(90,60,66,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(90,60,66,0.05) 1px, transparent 1px),
+    linear-gradient(rgba(90,60,66,0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(90,60,66,0.08) 1px, transparent 1px);
+  background-size:
+    auto,
+    auto,
+    20px 20px,
+    20px 20px,
+    80px 80px,
+    80px 80px;
+  background-position:
+    0 0,
+    0 0,
+    0 0,
+    0 0,
+    0 0,
+    0 0;
 }
 .subCategoryDesignEditor__viewerWrap--interior.is-panning {
   cursor: grabbing;
@@ -3874,15 +3898,21 @@ textarea {
   margin: 0;
 }
 .subCategoryDesignEditor__frontSvg {
+  display: block;
+  flex: 1 1 auto;
   width: 100%;
   height: 100%;
   min-height: 560px;
   touch-action: none;
-  cursor: default;
+  cursor: none;
 }
 .subCategoryDesignEditor__viewerWrap--interior.is-idle,
 .subCategoryDesignEditor__frontSvg.is-idle {
-  cursor: default;
+  cursor: none;
+}
+.subCategoryDesignEditor__viewerWrap--interior.is-clickable,
+.subCategoryDesignEditor__frontSvg.is-clickable {
+  cursor: none;
 }
 .subCategoryDesignEditor__viewerWrap--interior.is-drawing-dimension,
 .subCategoryDesignEditor__frontSvg.is-drawing-dimension,
@@ -3890,10 +3920,20 @@ textarea {
 .subCategoryDesignEditor__frontSvg.is-drawing-guide {
   cursor: none;
 }
+.subCategoryDesignEditor__instanceLayer {
+  pointer-events: none;
+}
+.subCategoryDesignEditor__instanceHitBox {
+  fill: rgba(255, 255, 255, 0.001);
+  stroke: none;
+}
 .subCategoryDesignEditor__frontSvg text {
   user-select: none;
 }
 .subCategoryDesignEditor__drawCursor {
+  pointer-events: none;
+}
+.subCategoryDesignEditor__overlayCursorImage {
   pointer-events: none;
 }
 .subCategoryDesignEditor__drawCursorRing {
@@ -3929,9 +3969,22 @@ textarea {
 }
 .subCategoryDesignEditor__partItem--interiorCard {
   display: block;
+  flex: 0 0 auto;
   padding: 14px;
   border-radius: 18px;
   overflow: hidden;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease, transform 160ms ease;
+}
+.subCategoryDesignEditor__partItem--interiorCard:hover {
+  border-color: rgba(138, 113, 74, 0.28);
+  box-shadow: 0 12px 26px rgba(86, 58, 33, 0.08);
+}
+.subCategoryDesignEditor__partItem--interiorCard.is-active {
+  border-color: rgba(166, 114, 42, 0.36);
+  background: linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(248, 239, 228, 0.96));
+  box-shadow: 0 14px 28px rgba(166, 114, 42, 0.16);
+  transform: translateY(-1px);
 }
 .subCategoryDesignEditor__meta--interiorInstance {
   margin-top: 14px;
@@ -4038,6 +4091,15 @@ textarea {
 }
 .subCategoryDesignEditor__interiorParams {
   margin-top: 12px;
+}
+.subCategoryDesignEditor__panel--interiorInstances .subCategoryDesignEditor__partList,
+.subCategoryDesignEditor__panel--interiorSidebar .subCategoryDesignEditor__partList {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding-right: 4px;
 }
 .subCategoryDesignEditor__interiorParamsHead {
   display: flex;

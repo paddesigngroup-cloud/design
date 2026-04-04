@@ -299,6 +299,10 @@ const interiorLibraryAnnotationDraft = ref(null);
 const interiorLibrarySelectedAnnotation = ref(null);
 const interiorLibraryCurrentSnapPoint = ref(null);
 const interiorLibraryCursorPoint = ref(null);
+const interiorLibrarySelectedInstanceId = ref("");
+const interiorLibraryHoveredInstanceId = ref("");
+const interiorLibraryHoverMode = ref(null);
+const interiorLibraryOverlapPickState = ref({ signature: "", index: -1 });
 const interiorLibraryFrontPan = ref({ x: 0, y: 0 });
 const interiorLibraryFrontPanning = ref(false);
 let interiorLibraryFrontPanSession = null;
@@ -557,6 +561,10 @@ function resetInteriorLibraryAnnotations() {
   interiorLibraryShowDimensions.value = true;
   interiorLibraryShowGuideAnnotations.value = true;
   interiorLibraryCurrentSnapPoint.value = null;
+  interiorLibrarySelectedInstanceId.value = "";
+  interiorLibraryHoveredInstanceId.value = "";
+  interiorLibraryHoverMode.value = null;
+  interiorLibraryOverlapPickState.value = { signature: "", index: -1 };
 }
 function cancelInteriorLibraryAnnotationDrawing() {
   interiorLibraryAnnotationDraft.value = null;
@@ -564,6 +572,7 @@ function cancelInteriorLibraryAnnotationDrawing() {
   interiorLibrarySelectedAnnotation.value = null;
   interiorLibraryCurrentSnapPoint.value = null;
   interiorLibraryCursorPoint.value = null;
+  interiorLibraryHoverMode.value = null;
 }
 function getInteriorLibraryFrontSvgPoint(event) {
   const svgEl = interiorLibraryFrontSvgEl.value;
@@ -674,6 +683,9 @@ function commitInteriorLibraryAnnotationDraft() {
 function clearInteriorLibraryAnnotationSelection() {
   interiorLibrarySelectedAnnotation.value = null;
 }
+function clearInteriorLibraryInstanceSelection() {
+  interiorLibrarySelectedInstanceId.value = "";
+}
 function removeSelectedInteriorLibraryAnnotation() {
   if (!interiorLibrarySelectedAnnotation.value) return;
   interiorLibraryAnnotations.value = removeSelectedInteriorAnnotation(
@@ -681,6 +693,109 @@ function removeSelectedInteriorLibraryAnnotation() {
     interiorLibrarySelectedAnnotation.value
   );
   interiorLibrarySelectedAnnotation.value = null;
+}
+function resetInteriorLibraryOverlapPickState() {
+  interiorLibraryOverlapPickState.value = { signature: "", index: -1 };
+}
+function selectInteriorLibraryInstance(instanceId) {
+  interiorLibrarySelectedInstanceId.value = String(instanceId || "").trim();
+  interiorLibrarySelectedAnnotation.value = null;
+}
+function distancePointToSegmentLocal(point, start, end) {
+  const px = Number(point?.x) || 0;
+  const py = Number(point?.y) || 0;
+  const ax = Number(start?.x) || 0;
+  const ay = Number(start?.y) || 0;
+  const bx = Number(end?.x) || 0;
+  const by = Number(end?.y) || 0;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq <= 0.0001) return Math.hypot(px - ax, py - ay);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  const cx = ax + dx * t;
+  const cy = ay + dy * t;
+  return Math.hypot(px - cx, py - cy);
+}
+function pointInInteriorRect(point, rect, padding = 0) {
+  if (!rect) return false;
+  const px = Number(point?.x) || 0;
+  const py = Number(point?.y) || 0;
+  return (
+    px >= Number(rect.x) - padding &&
+    px <= Number(rect.x) + Number(rect.w) + padding &&
+    py >= Number(rect.y) - padding &&
+    py <= Number(rect.y) + Number(rect.h) + padding
+  );
+}
+function collectInteriorInstanceHits(point) {
+  const target = { x: Number(point?.x) || 0, y: Number(point?.y) || 0 };
+  const hits = [];
+  for (const instance of interiorLibraryPreviewInstances2d.value) {
+    if (!instance?.boundsRect) continue;
+    const inside = pointInInteriorRect(target, instance.boundsRect, 0);
+    let minDistance = Infinity;
+    for (const line of instance.outerLines || []) {
+      minDistance = Math.min(
+        minDistance,
+        distancePointToSegmentLocal(
+          target,
+          { x: line.x1, y: line.y1 },
+          { x: line.x2, y: line.y2 }
+        )
+      );
+    }
+    for (const line of instance.innerLines || []) {
+      minDistance = Math.min(
+        minDistance,
+        distancePointToSegmentLocal(
+          target,
+          { x: line.x1, y: line.y1 },
+          { x: line.x2, y: line.y2 }
+        )
+      );
+    }
+    if (!inside && minDistance > 10) continue;
+    hits.push({
+      id: String(instance.id || "").trim(),
+      distance: inside ? Math.min(minDistance, 0) : minDistance,
+      visualOrder: Number(instance.visualOrder) || 0,
+    });
+  }
+  return hits.sort((a, b) => {
+    if (Math.abs(a.distance - b.distance) > 0.01) return a.distance - b.distance;
+    return b.visualOrder - a.visualOrder;
+  });
+}
+function pickInteriorOverlapHit(hits, point) {
+  if (!Array.isArray(hits) || !hits.length) {
+    resetInteriorLibraryOverlapPickState();
+    return null;
+  }
+  const signature = `${hits.map((item) => item.id).join("|")}@${Math.round((Number(point?.x) || 0) / 12)}:${Math.round((Number(point?.y) || 0) / 12)}`;
+  let nextIndex = 0;
+  if (interiorLibraryOverlapPickState.value.signature === signature) {
+    nextIndex = (Number(interiorLibraryOverlapPickState.value.index) + 1) % hits.length;
+  }
+  interiorLibraryOverlapPickState.value = { signature, index: nextIndex };
+  return hits[nextIndex] || hits[0] || null;
+}
+function updateInteriorLibraryHoverState(point) {
+  if (!point || interiorLibraryAnnotationTool.value) {
+    interiorLibraryHoverMode.value = null;
+    interiorLibraryHoveredInstanceId.value = "";
+    return;
+  }
+  const rendered = interiorLibraryRenderedAnnotations.value;
+  const hitDimension = interiorLibraryShowDimensions.value
+    ? hitTestInteriorAnnotationList(rendered.dimensions, point, 12)
+    : null;
+  const hitGuide = !hitDimension && interiorLibraryShowGuideAnnotations.value
+    ? hitTestInteriorAnnotationList(rendered.guides, point, 10)
+    : null;
+  const instanceHits = !hitDimension && !hitGuide ? collectInteriorInstanceHits(point) : [];
+  interiorLibraryHoveredInstanceId.value = instanceHits[0]?.id || "";
+  interiorLibraryHoverMode.value = (hitDimension || hitGuide || instanceHits.length) ? "clicker" : null;
 }
 function onInteriorLibraryFrontSvgPointerDown(event) {
   if (interiorLibraryPreviewMode.value !== "front2d" || Number(event?.button) !== 0) return;
@@ -699,15 +814,30 @@ function onInteriorLibraryFrontSvgPointerDown(event) {
       type: hitDimension ? "dimension" : "guide",
       id: String((hitDimension || hitGuide)?.id || ""),
     };
+    clearInteriorLibraryInstanceSelection();
     interiorLibraryAnnotationDraft.value = null;
     interiorLibraryCurrentSnapPoint.value = null;
+    resetInteriorLibraryOverlapPickState();
     event.preventDefault();
     event.stopPropagation();
     return;
   }
   if (!interiorLibraryAnnotationTool.value) {
+    const instanceHits = collectInteriorInstanceHits(rawPoint);
+    if (instanceHits.length) {
+      const picked = pickInteriorOverlapHit(instanceHits, rawPoint);
+      if (picked?.id) {
+        selectInteriorLibraryInstance(picked.id);
+        interiorLibraryCurrentSnapPoint.value = null;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+    }
     clearInteriorLibraryAnnotationSelection();
+    clearInteriorLibraryInstanceSelection();
     interiorLibraryCurrentSnapPoint.value = null;
+    resetInteriorLibraryOverlapPickState();
     return;
   }
   const point = getInteriorLibrarySnappedFrontPoint(rawPoint);
@@ -727,10 +857,13 @@ function onInteriorLibraryFrontSvgPointerMove(event) {
   if (!interiorLibraryAnnotationTool.value) {
     interiorLibraryCurrentSnapPoint.value = null;
     syncInteriorLibraryCursorPoint(rawPoint, null);
+    updateInteriorLibraryHoverState(rawPoint);
     return;
   }
   const point = getInteriorLibrarySnappedFrontPoint(rawPoint);
   syncInteriorLibraryCursorPoint(rawPoint, point);
+  interiorLibraryHoverMode.value = null;
+  interiorLibraryHoveredInstanceId.value = "";
   if (!point) return;
   if (!interiorLibraryAnnotationDraft.value) return;
   updateInteriorLibraryAnnotationDraft(point);
@@ -738,6 +871,8 @@ function onInteriorLibraryFrontSvgPointerMove(event) {
 function onInteriorLibraryFrontSvgPointerLeave() {
   interiorLibraryCurrentSnapPoint.value = null;
   clearInteriorLibraryCursorPoint();
+  interiorLibraryHoverMode.value = null;
+  interiorLibraryHoveredInstanceId.value = "";
 }
 function getInteriorLibraryAddingGroupKey(group) {
   const groupId = String(group?.id || "").trim();
@@ -1113,13 +1248,13 @@ const activeInteriorLibraryOrderDesignId = computed(() => {
   if (subCategoryDesignEditorOpen.value) return "";
   const forcedId = String(interiorLibraryForcedOrderDesignId.value || "").trim();
   if (forcedId) return forcedId;
-  return String(selectedOrderDesignSource.value?.id || activeCabinetDesignId.value || "").trim();
+  return String(activeCabinetDesignId.value || "").trim();
 });
 const activeInteriorLibraryOrderDesign = computed(() => {
   if (subCategoryDesignEditorOpen.value) return null;
   const targetId = activeInteriorLibraryOrderDesignId.value;
   if (!targetId) return null;
-  return orderDesignCatalog.value.find((item) => String(item.id) === targetId) || selectedOrderDesignSource.value || null;
+  return orderDesignCatalog.value.find((item) => String(item.id) === targetId) || null;
 });
 const activeInteriorLibrarySourceDesign = computed(() => {
   if (subCategoryDesignEditorOpen.value) return null;
@@ -1166,6 +1301,30 @@ function getViewerBoxesFromPartSnapshots(partSnapshots) {
     .map((box) => ({ ...(box || {}) }));
 }
 
+function getViewerBoxesFromPreviewParts(parts) {
+  return (Array.isArray(parts) ? parts : [])
+    .map((row) => row?.viewer_payload?.box)
+    .filter((box) => box && typeof box === "object")
+    .map((box) => ({ ...(box || {}) }));
+}
+
+function getViewerBoxesFromInteriorInstance(instance) {
+  const directBoxes = (Array.isArray(instance?.viewer_boxes) ? instance.viewer_boxes : [])
+    .filter((box) => box && typeof box === "object")
+    .map((box) => ({ ...(box || {}) }));
+  if (directBoxes.length) return directBoxes;
+
+  const snapshotBoxes = getViewerBoxesFromPartSnapshots(instance?.part_snapshots || []);
+  if (snapshotBoxes.length) return snapshotBoxes;
+
+  const fallbackBox = instance?.interior_box_snapshot;
+  if (fallbackBox && typeof fallbackBox === "object" && Object.keys(fallbackBox).length) {
+    return [{ ...(fallbackBox || {}) }];
+  }
+
+  return [];
+}
+
 function buildFrontViewLinesFromBoxes(boxes) {
   const normalized = Array.isArray(boxes) ? boxes.map(normalizeCabinetBox) : [];
   if (!normalized.length) {
@@ -1208,13 +1367,29 @@ const activeInteriorLibraryViewerBoxes = computed(() => {
   if (subCategoryDesignEditorOpen.value) {
     return subCategoryDesignEditorPreview.value?.viewer_boxes || [];
   }
-  return activeInteriorLibraryOrderDesign.value?.viewer_boxes
-    || getViewerBoxesFromPartSnapshots(activeInteriorLibraryOrderDesign.value?.part_snapshots || [])
-    || activeInteriorLibrarySourceDesign.value?.preview?.viewer_boxes
-    || [];
+  const mergedBoxes = Array.isArray(activeInteriorLibraryOrderDesign.value?.viewer_boxes)
+    ? activeInteriorLibraryOrderDesign.value.viewer_boxes
+    : [];
+  if (mergedBoxes.length) return mergedBoxes;
+  const rootBoxes = getViewerBoxesFromPartSnapshots(activeInteriorLibraryOrderDesign.value?.part_snapshots || []);
+  if (rootBoxes.length) return rootBoxes;
+  const sourceBoxes = Array.isArray(activeInteriorLibrarySourceDesign.value?.preview?.viewer_boxes)
+    ? activeInteriorLibrarySourceDesign.value.preview.viewer_boxes
+    : [];
+  return sourceBoxes;
+});
+const activeInteriorLibraryStructureViewerBoxes = computed(() => {
+  if (subCategoryDesignEditorOpen.value) {
+    return getViewerBoxesFromPreviewParts(subCategoryDesignEditorPreview.value?.parts || []);
+  }
+  const rootBoxes = getViewerBoxesFromPartSnapshots(activeInteriorLibraryOrderDesign.value?.part_snapshots || []);
+  if (rootBoxes.length) return rootBoxes;
+  const sourceBoxes = getViewerBoxesFromPreviewParts(activeInteriorLibrarySourceDesign.value?.preview?.parts || []);
+  if (sourceBoxes.length) return sourceBoxes;
+  return [];
 });
 const interiorLibraryFrontView = computed(() =>
-  buildFrontViewLinesFromBoxes(activeInteriorLibraryViewerBoxes.value || [])
+  buildFrontViewLinesFromBoxes(activeInteriorLibraryStructureViewerBoxes.value || [])
 );
 const interiorLibraryPreviewProjection = computed(() => {
   const bounds = interiorLibraryFrontView.value?.bounds;
@@ -1258,7 +1433,7 @@ const interiorLibraryPreviewSvgLines = computed(() => {
   if (!data?.bounds || !projection) return { outer: [], inner: [] };
   return {
     outer: (data.outer || []).map((line) => projection.project(line, 2.2, false)),
-    inner: [],
+    inner: (data.inner || []).map((line) => projection.project(line, 1.2, true)),
   };
 });
 function resolveInteriorInstanceLineColor(instance) {
@@ -1278,12 +1453,45 @@ const interiorLibraryPreviewInstanceSvgLines = computed(() => {
     .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
     .flatMap((instance) => {
       const lineColor = resolveInteriorInstanceLineColor(instance);
-      return buildFrontViewLinesFromBoxes(instance?.viewer_boxes || []).inner.map((line, index) => ({
+      return buildFrontViewLinesFromBoxes(getViewerBoxesFromInteriorInstance(instance)).inner.map((line, index) => ({
         ...projection.project(line, 1.15, true),
         color: lineColor,
         key: `${String(instance?.id || instance?.instance_code || "instance")}-${index}`,
       }));
     });
+});
+const interiorLibraryPreviewInstances2d = computed(() => {
+  const projection = interiorLibraryPreviewProjection.value;
+  if (!projection) return [];
+  return activeInteriorLibraryInstances.value
+    .slice()
+    .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
+    .map((instance, index) => {
+      const data = buildFrontViewLinesFromBoxes(getViewerBoxesFromInteriorInstance(instance));
+      if (!data?.bounds) return null;
+      const lineColor = resolveInteriorInstanceLineColor(instance);
+      const outerLines = (data.outer || []).map((line) => projection.project(line, 1.8, false));
+      const innerLines = (data.inner || []).map((line) => projection.project(line, 1.15, true));
+      const x1 = projection.project({ ax: data.bounds.minX, az: data.bounds.minZ, bx: data.bounds.minX, bz: data.bounds.minZ }, 1, false).x1;
+      const y1 = projection.project({ ax: data.bounds.minX, az: data.bounds.maxZ, bx: data.bounds.minX, bz: data.bounds.maxZ }, 1, false).y1;
+      const x2 = projection.project({ ax: data.bounds.maxX, az: data.bounds.minZ, bx: data.bounds.maxX, bz: data.bounds.minZ }, 1, false).x1;
+      const y2 = projection.project({ ax: data.bounds.minX, az: data.bounds.minZ, bx: data.bounds.minX, bz: data.bounds.minZ }, 1, false).y1;
+      return {
+        id: String(instance?.id || "").trim(),
+        instanceCode: String(instance?.instance_code || "").trim(),
+        lineColor,
+        visualOrder: index,
+        outerLines,
+        innerLines,
+        boundsRect: {
+          x: Math.min(x1, x2),
+          y: Math.min(y1, y2),
+          w: Math.abs(x2 - x1),
+          h: Math.abs(y2 - y1),
+        },
+      };
+    })
+    .filter(Boolean);
 });
 const interiorLibraryFrontSnapLines = computed(() => {
   const outer = (interiorLibraryPreviewSvgLines.value?.outer || []).map((line) => ({
@@ -1292,13 +1500,13 @@ const interiorLibraryFrontSnapLines = computed(() => {
     x2: Number(line?.x2) || 0,
     y2: Number(line?.y2) || 0,
   }));
-  const inner = (interiorLibraryShowInnerLines.value ? interiorLibraryPreviewInstanceSvgLines.value : []).map((line) => ({
+  const designInner = (interiorLibraryShowInnerLines.value ? (interiorLibraryPreviewSvgLines.value?.inner || []) : []).map((line) => ({
     x1: Number(line?.x1) || 0,
     y1: Number(line?.y1) || 0,
     x2: Number(line?.x2) || 0,
     y2: Number(line?.y2) || 0,
   }));
-  return [...outer, ...inner];
+  return [...outer, ...designInner];
 });
 const interiorLibraryFrontSnapPoints = computed(() =>
   collectInteriorSnapPoints(interiorLibraryFrontSnapLines.value)
@@ -1318,6 +1526,15 @@ const interiorLibraryFrontSvgViewBox = computed(() => {
   const panX = Number(interiorLibraryFrontPan.value?.x) || 0;
   const panY = Number(interiorLibraryFrontPan.value?.y) || 0;
   return `${(FRONT_VIEW_WIDTH - width) * 0.5 + panX} ${(FRONT_VIEW_HEIGHT - height) * 0.5 + panY} ${width} ${height}`;
+});
+const interiorLibraryFrontSvgViewBoxRect = computed(() => {
+  const parts = String(interiorLibraryFrontSvgViewBox.value || "").split(/\s+/).map(Number);
+  return {
+    x: Number.isFinite(parts[0]) ? parts[0] : 0,
+    y: Number.isFinite(parts[1]) ? parts[1] : 0,
+    width: Number.isFinite(parts[2]) ? parts[2] : FRONT_VIEW_WIDTH,
+    height: Number.isFinite(parts[3]) ? parts[3] : FRONT_VIEW_HEIGHT,
+  };
 });
 const interiorLibraryPreviewAxisLabels = computed(() => {
   if (!interiorLibraryFrontView.value?.bounds) return null;
@@ -1401,8 +1618,32 @@ const interiorLibraryFrontCursorClass = computed(() => {
   if (interiorLibraryFrontPanning.value && interiorLibraryPreviewMode.value === "front2d") return "is-panning";
   if (interiorLibraryAnnotationTool.value === "dimension") return "is-drawing-dimension";
   if (interiorLibraryAnnotationTool.value === "guide") return "is-drawing-guide";
+  if (interiorLibraryHoverMode.value === "clicker") return "is-clickable";
   return "is-idle";
 });
+const interiorLibraryOverlayCursorIcon = computed(() => {
+  if (interiorLibraryFrontPanning.value || !interiorLibraryCursorPoint.value) return "";
+  if (interiorLibraryAnnotationTool.value === "dimension" || interiorLibraryAnnotationTool.value === "guide") return "";
+  if (interiorLibraryHoverMode.value === "clicker") return "/icons/clicker_32.png";
+  return "/icons/cursor_32.png";
+});
+const interiorLibraryShouldShowSnapMarkers = computed(() =>
+  (interiorLibraryAnnotationTool.value === "dimension" || interiorLibraryAnnotationTool.value === "guide")
+);
+watch(interiorLibraryAnnotationTool, (tool) => {
+  if (tool === "dimension" || tool === "guide") return;
+  interiorLibraryAnnotationDraft.value = null;
+  interiorLibraryCurrentSnapPoint.value = null;
+});
+watch(activeInteriorLibraryInstances, (items) => {
+  const ids = new Set((Array.isArray(items) ? items : []).map((item) => String(item?.id || "").trim()).filter(Boolean));
+  if (interiorLibrarySelectedInstanceId.value && !ids.has(String(interiorLibrarySelectedInstanceId.value))) {
+    interiorLibrarySelectedInstanceId.value = "";
+  }
+  if (interiorLibraryHoveredInstanceId.value && !ids.has(String(interiorLibraryHoveredInstanceId.value))) {
+    interiorLibraryHoveredInstanceId.value = "";
+  }
+}, { immediate: true });
 
 function extractFormulaNamesLocal(expression) {
   return Array.from(new Set(String(expression || "").match(/[A-Za-z_][A-Za-z0-9_]*/g) || []));
@@ -1590,6 +1831,19 @@ const activeInteriorLibraryOutlineColor = computed(() => {
 const interiorLibraryPreviewPanelTitle = computed(() =>
   interiorLibraryPreviewMode.value === "model3d" ? "نمای سه بعدی" : "نمای روبه‌رو طرح"
 );
+function getSelectedOrderDesignSourceLocal() {
+  const ids = [];
+  const push = (value) => {
+    const key = String(value || "").trim();
+    if (key && !ids.includes(key)) ids.push(key);
+  };
+  if (activeStageOrderDesignSelected.value && activeCabinetDesignId.value) push(activeCabinetDesignId.value);
+  for (const id of selectedStageOrderDesignIds.value) push(id);
+  if (!ids.length) {
+    return orderDesignCatalog.value.find((item) => String(item.id) === String(activeCabinetDesignId.value || "")) || null;
+  }
+  return orderDesignCatalog.value.find((item) => String(item.id) === String(ids[0])) || null;
+}
 
 function getConstructionPartKindInternalLabel(partKindId) {
   const partKind = constructionPartKindsById.value.get(Number(partKindId) || 0);
@@ -3747,7 +4001,7 @@ function getSingleSelectedOrderDesignContext() {
   if (!summary.isSingleDesign || summary.isMixed || summary.totalCount !== 1) return null;
   const designId = String(summary.designIds[0] || activeCabinetDesignId.value || "").trim();
   if (!designId) return null;
-  const design = orderDesignCatalog.value.find((item) => String(item.id) === designId) || selectedOrderDesignSource.value || null;
+  const design = orderDesignCatalog.value.find((item) => String(item.id) === designId) || getSelectedOrderDesignSourceLocal() || null;
   if (!design?.viewer_boxes?.length) return null;
   const placement = getOrderDesignPlacementForId(designId);
   if (!placement) return null;
@@ -4624,6 +4878,7 @@ async function addInteriorGroupToDesign(group) {
 function openInteriorInstanceEditor(instance) {
   const normalized = normalizeInteriorInstanceRecord(instance);
   if (!normalized) return;
+  selectInteriorLibraryInstance(normalized.id);
   const effectiveParamValues = Object.fromEntries(
     Object.keys(normalized.param_meta || {}).map((key) => [key, getInteriorInstanceEffectiveValue(normalized, key)])
   );
@@ -4910,6 +5165,9 @@ async function deleteInteriorInstanceFromDesign(instance) {
       );
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه داخلی انجام نشد."));
       draft.interior_instances = (draft.interior_instances || []).filter((row) => String(row.id) !== String(instance.id));
+      if (String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || "")) {
+        interiorLibrarySelectedInstanceId.value = "";
+      }
       syncOpenSubCategoryDesignDraftToCollection();
       if (String(interiorInstanceEditorDraft.value?.id || "") === String(instance.id)) {
         closeInteriorInstanceEditor();
@@ -4929,6 +5187,9 @@ async function deleteInteriorInstanceFromDesign(instance) {
     );
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه داخلی طرح ثبت‌شده انجام نشد."));
     removeInteriorInstanceFromOrderDesignCollection(orderDesign.id, instance.id);
+    if (String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || "")) {
+      interiorLibrarySelectedInstanceId.value = "";
+    }
     await refreshOrderDesignGeometryFromServer(orderDesign.id);
     if (String(interiorInstanceEditorDraft.value?.id || "") === String(instance.id)) {
       closeInteriorInstanceEditor();
@@ -10044,7 +10305,7 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
     return;
   }
   if (!subCategoryDesignEditorOpen.value) {
-    const fallbackTargetId = String(selectedOrderDesignSource.value?.id || "").trim();
+    const fallbackTargetId = String(getSelectedOrderDesignSourceLocal()?.id || "").trim();
     const resolvedTargetId = nextTargetOrderDesignId || fallbackTargetId;
     if (!resolvedTargetId) {
       showAlert("ابتدا یک طرح ثبت‌شده را انتخاب کنید.", { title: "قطعات داخلی" });
@@ -13643,7 +13904,8 @@ onBeforeUnmount(() => {
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
                 :class="{ 'is-active': interiorLibraryShowDimensions }"
-                :title="interiorLibraryShowDimensions ? 'مخفی کردن اندازه گذاری ها' : 'نمایش اندازه گذاری ها'"
+                title="نمایش اندازه گذاری"
+                aria-label="نمایش اندازه گذاری"
                 @click="toggleInteriorLibraryDimensionsVisibility"
               >
                 <img src="/icons/turn_dim.png" alt="" />
@@ -13652,7 +13914,8 @@ onBeforeUnmount(() => {
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
                 :class="{ 'is-active': interiorLibraryShowGuideAnnotations }"
-                :title="interiorLibraryShowGuideAnnotations ? 'مخفی کردن خطوط راهنمای رسم شده' : 'نمایش خطوط راهنمای رسم شده'"
+                title="نمایش خطوط راهنما"
+                aria-label="نمایش خطوط راهنما"
                 @click="toggleInteriorLibraryGuideAnnotationsVisibility"
               >
                 <img src="/icons/turn_offset.png" alt="" />
@@ -13661,7 +13924,8 @@ onBeforeUnmount(() => {
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
                 :class="{ 'is-active': interiorLibraryShowInnerLines }"
-                :title="interiorLibraryShowInnerLines ? 'مخفی کردن خطوط داخلی' : 'نمایش خطوط داخلی'"
+                title="نمایش خطوط داخلی"
+                aria-label="نمایش خطوط داخلی"
                 @click="toggleInteriorLibraryGuideTool"
               >
                 <img src="/icons/drawing_hidden_wall.png" alt="" />
@@ -13700,7 +13964,13 @@ onBeforeUnmount(() => {
           <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
             <div
               class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior"
-              :class="[interiorLibraryFrontCursorClass, { 'is-panning': interiorLibraryFrontPanning && interiorLibraryPreviewMode === 'front2d' }]"
+              :class="[
+                interiorLibraryFrontCursorClass,
+                {
+                  'is-panning': interiorLibraryFrontPanning && interiorLibraryPreviewMode === 'front2d',
+                  'is-front2d-mode': interiorLibraryPreviewMode === 'front2d',
+                }
+              ]"
               @wheel.prevent="handleInteriorLibraryPreviewWheel"
               @pointerdown="startInteriorLibraryFrontPan"
               @dblclick.prevent="focusInteriorLibraryPreviewCloser"
@@ -13753,8 +14023,15 @@ onBeforeUnmount(() => {
                     <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(90,60,66,0.08)" stroke-width="1" />
                   </pattern>
                 </defs>
-                <rect x="0" y="0" :width="FRONT_VIEW_WIDTH" :height="FRONT_VIEW_HEIGHT" fill="url(#interior-front-grid)" />
+                <rect
+                  :x="interiorLibraryFrontSvgViewBoxRect.x"
+                  :y="interiorLibraryFrontSvgViewBoxRect.y"
+                  :width="interiorLibraryFrontSvgViewBoxRect.width"
+                  :height="interiorLibraryFrontSvgViewBoxRect.height"
+                  fill="url(#interior-front-grid)"
+                />
                 <circle
+                  v-if="interiorLibraryShouldShowSnapMarkers"
                   v-for="(point, index) in interiorLibraryFrontSnapPoints"
                   :key="`interior-snap-${index}`"
                   :cx="point.x"
@@ -13763,7 +14040,7 @@ onBeforeUnmount(() => {
                   r="3.6"
                 />
                 <circle
-                  v-if="interiorLibraryCurrentSnapPoint"
+                  v-if="interiorLibraryShouldShowSnapMarkers && interiorLibraryCurrentSnapPoint"
                   :cx="interiorLibraryCurrentSnapPoint.x"
                   :cy="interiorLibraryCurrentSnapPoint.y"
                   class="subCategoryDesignEditor__snapPoint subCategoryDesignEditor__snapPoint--active"
@@ -13794,6 +14071,16 @@ onBeforeUnmount(() => {
                     class="subCategoryDesignEditor__drawCursorLine"
                   />
                 </g>
+                <image
+                  v-else-if="interiorLibraryCursorPoint && interiorLibraryOverlayCursorIcon"
+                  :href="interiorLibraryOverlayCursorIcon"
+                  :x="interiorLibraryCursorPoint.x - 16"
+                  :y="interiorLibraryCursorPoint.y - 16"
+                  width="32"
+                  height="32"
+                  class="subCategoryDesignEditor__overlayCursorImage"
+                  preserveAspectRatio="xMidYMid meet"
+                />
                 <template v-if="interiorLibraryShowGuideAnnotations">
                   <line
                     v-for="guide in interiorLibraryRenderedAnnotations.guides"
@@ -13820,21 +14107,6 @@ onBeforeUnmount(() => {
                     opacity="0.75"
                   />
                 </template>
-                <template v-if="interiorLibraryShowInnerLines">
-                  <line
-                    v-for="line in interiorLibraryPreviewInstanceSvgLines"
-                    :key="line.key"
-                    :x1="line.x1"
-                    :y1="line.y1"
-                    :x2="line.x2"
-                    :y2="line.y2"
-                    :stroke-width="line.sw"
-                    :stroke="line.color"
-                    stroke-linecap="round"
-                    stroke-dasharray="6 8"
-                    opacity="0.88"
-                  />
-                </template>
                 <line
                   v-for="(line, index) in interiorLibraryPreviewSvgLines.outer"
                   :key="`interior-outer-${index}`"
@@ -13846,6 +14118,63 @@ onBeforeUnmount(() => {
                   stroke="#4f4144"
                   stroke-linecap="round"
                 />
+                <template v-if="interiorLibraryShowInnerLines">
+                  <line
+                    v-for="(line, index) in interiorLibraryPreviewSvgLines.inner"
+                    :key="`interior-design-inner-${index}`"
+                    :x1="line.x1"
+                    :y1="line.y1"
+                    :x2="line.x2"
+                    :y2="line.y2"
+                    :stroke-width="line.sw"
+                    stroke="#b9c3cd"
+                    stroke-linecap="round"
+                    stroke-dasharray="6 8"
+                    opacity="0.82"
+                  />
+                </template>
+                <g
+                  v-for="instance in interiorLibraryPreviewInstances2d"
+                  :key="`interior-instance-${instance.id}`"
+                  class="subCategoryDesignEditor__instanceLayer"
+                  :class="{
+                    'is-hovered': String(interiorLibraryHoveredInstanceId || '') === String(instance.id || ''),
+                    'is-selected': String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '')
+                  }"
+                >
+                  <rect
+                    :x="instance.boundsRect.x"
+                    :y="instance.boundsRect.y"
+                    :width="instance.boundsRect.w"
+                    :height="instance.boundsRect.h"
+                    class="subCategoryDesignEditor__instanceHitBox"
+                  />
+                  <line
+                    v-for="(line, index) in instance.innerLines"
+                    :key="`${instance.id}-inner-${index}`"
+                    :x1="line.x1"
+                    :y1="line.y1"
+                    :x2="line.x2"
+                    :y2="line.y2"
+                    :stroke-width="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 1.8 : Math.max(1.25, Number(line.sw) || 1.25)"
+                    :stroke="instance.lineColor"
+                    stroke-linecap="round"
+                    stroke-dasharray="6 8"
+                    :opacity="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 0.98 : 0.94"
+                  />
+                  <line
+                    v-for="(line, index) in instance.outerLines"
+                    :key="`${instance.id}-outer-${index}`"
+                    :x1="line.x1"
+                    :y1="line.y1"
+                    :x2="line.x2"
+                    :y2="line.y2"
+                    :stroke="instance.lineColor"
+                    :stroke-width="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 2.2 : (String(interiorLibraryHoveredInstanceId || '') === String(instance.id || '') ? 1.4 : 0)"
+                    stroke-linecap="round"
+                    :opacity="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 0.92 : 0.78"
+                  />
+                </g>
                 <template v-if="interiorLibraryShowDimensions">
                   <g
                     v-for="dimension in interiorLibraryRenderedAnnotations.dimensions"
@@ -13986,7 +14315,13 @@ onBeforeUnmount(() => {
           <div v-if="!activeInteriorLibraryTargetId" class="designMenu__cabinetState">برای افزودن نمونه داخلی، ابتدا یک طرح معتبر را باز یا انتخاب کنید.</div>
           <div v-else-if="!interiorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز هیچ گروه داخلی به این طرح اضافه نشده است.</div>
           <div v-else class="subCategoryDesignEditor__partList">
-            <div v-for="item in interiorLibraryInstanceCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+            <div
+              v-for="item in interiorLibraryInstanceCards"
+              :key="item.id"
+              class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard"
+              :class="{ 'is-active': String(interiorLibrarySelectedInstanceId || '') === String(item.id || '') }"
+              @click="selectInteriorLibraryInstance(item.id)"
+            >
               <div class="subCategoryDesignEditor__interiorGroupHead">
                 <span class="subCategoryDesignEditor__partMeta" dir="rtl">
                   <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
