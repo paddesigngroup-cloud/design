@@ -78,6 +78,8 @@ const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallSty
 const widgetEl = ref(null);
 const hostEl = ref(null);
 const canvasEl = ref(null);
+const widgetCursorPoint = ref(null);
+const widgetCursorPanning = ref(false);
 
 let renderer = null;
 let scene = null;
@@ -96,6 +98,7 @@ let assetInstancesRoot = null;
 let axesHelper = null;
 let lastMiddleClickMs = 0;
 const PREVIEW_VIEW_DIR = new THREE.Vector3(1, 0.78, 1.18);
+const GLB_WIDGET_CURSOR_UI_SELECTOR = ".glbWidget__view, .glbWidget__edgeToggle, .glbWidget__opacity, .glbWidget__head, .glbWallAttrs";
 
 const DEFAULT_WALL_HEIGHT_M = 2.8;
 const DEFAULT_MITER_LIMIT = 10;
@@ -1999,6 +2002,66 @@ function onCanvasMouseDown(event) {
   lastMiddleClickMs = now;
 }
 
+function shouldShowCustomWidgetCursor() {
+  return !props.embedded && !props.previewOnly;
+}
+
+function isWidgetUiEventTarget(target) {
+  return !!target?.closest?.(GLB_WIDGET_CURSOR_UI_SELECTOR);
+}
+
+function syncWidgetCursorPoint(event) {
+  if (!shouldShowCustomWidgetCursor() || isWidgetUiEventTarget(event?.target)) {
+    widgetCursorPoint.value = null;
+    return;
+  }
+  const host = hostEl.value;
+  if (!host || !event) {
+    widgetCursorPoint.value = null;
+    return;
+  }
+  const rect = host.getBoundingClientRect();
+  const clientX = Number(event.clientX);
+  const clientY = Number(event.clientY);
+  if (!rect.width || !rect.height || !Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+    widgetCursorPoint.value = null;
+    return;
+  }
+  widgetCursorPoint.value = {
+    x: Math.max(0, Math.min(rect.width, clientX - rect.left)),
+    y: Math.max(0, Math.min(rect.height, clientY - rect.top)),
+  };
+}
+
+function clearWidgetCursorPoint() {
+  widgetCursorPoint.value = null;
+}
+
+function stopWidgetPanCursor() {
+  widgetCursorPanning.value = false;
+  window.removeEventListener("pointerup", stopWidgetPanCursor);
+  window.removeEventListener("pointercancel", stopWidgetPanCursor);
+}
+
+function onHostPointerMove(event) {
+  syncWidgetCursorPoint(event);
+}
+
+function onHostPointerLeave() {
+  clearWidgetCursorPoint();
+  stopWidgetPanCursor();
+}
+
+function onHostPointerDown(event) {
+  syncWidgetCursorPoint(event);
+  if (!shouldShowCustomWidgetCursor()) return;
+  if (isWidgetUiEventTarget(event?.target)) return;
+  if (Number(event?.button) !== 1 && Number(event?.button) !== 2) return;
+  widgetCursorPanning.value = true;
+  window.addEventListener("pointerup", stopWidgetPanCursor, { once: true });
+  window.addEventListener("pointercancel", stopWidgetPanCursor, { once: true });
+}
+
 function toggleViewMenu() {
   viewOpen.value = !viewOpen.value;
 }
@@ -2265,6 +2328,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stop();
+  stopWidgetPanCursor();
+  clearWidgetCursorPoint();
   canvasEl.value?.removeEventListener?.("mousedown", onCanvasMouseDown);
   canvasEl.value?.removeEventListener?.("dblclick", onCanvasDoubleClick);
   if (ro) ro.disconnect();
@@ -2337,8 +2402,34 @@ defineExpose({
         <button type="button" class="glbWidget__btn" title="بزرگ" @click="goMax">□</button>
       </div>
     </div>
-    <div ref="hostEl" class="glbWidget__host">
+    <div
+      ref="hostEl"
+      class="glbWidget__host"
+      :class="{ 'has-custom-cursor': !embedded && !previewOnly }"
+      @pointermove="onHostPointerMove"
+      @pointerleave="onHostPointerLeave"
+      @pointerdown="onHostPointerDown"
+    >
       <canvas ref="canvasEl" class="glbWidget__canvas"></canvas>
+      <div
+        v-if="!embedded && !previewOnly && widgetCursorPoint"
+        class="glbWidget__floatingCursor"
+        :class="{ 'is-panning': widgetCursorPanning }"
+        :style="{ left: `${Math.round(widgetCursorPoint.x)}px`, top: `${Math.round(widgetCursorPoint.y)}px` }"
+        aria-hidden="true"
+      >
+        <svg viewBox="0 0 48 48" class="glbWidget__floatingCursorSvg">
+          <circle cx="24" cy="24" r="6" class="glbWidget__floatingCursorCenter" />
+          <line x1="24" y1="4" x2="24" y2="18" class="glbWidget__floatingCursorLine" />
+          <line x1="24" y1="30" x2="24" y2="44" class="glbWidget__floatingCursorLine" />
+          <line x1="4" y1="24" x2="18" y2="24" class="glbWidget__floatingCursorLine" />
+          <line x1="30" y1="24" x2="44" y2="24" class="glbWidget__floatingCursorLine" />
+          <path d="M24 2 L20 9 H28 Z" class="glbWidget__floatingCursorArrow" />
+          <path d="M24 46 L20 39 H28 Z" class="glbWidget__floatingCursorArrow" />
+          <path d="M2 24 L9 20 V28 Z" class="glbWidget__floatingCursorArrow" />
+          <path d="M46 24 L39 20 V28 Z" class="glbWidget__floatingCursorArrow" />
+        </svg>
+      </div>
       <template v-if="!previewOnly">
         <div class="glbWidget__view" @mouseenter.stop @mouseleave.stop>
           <button type="button" class="glbWidget__viewBtn" title="نما" @click="toggleViewMenu">
