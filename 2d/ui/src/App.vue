@@ -313,6 +313,8 @@ const interiorLibraryOverlapPickerState = ref({
 });
 const interiorLibraryFrontPan = ref({ x: 0, y: 0 });
 const interiorLibraryFrontPanning = ref(false);
+const interiorLibraryViewerCursorPoint = ref(null);
+const interiorLibraryModelPanning = ref(false);
 let interiorLibraryFrontPanSession = null;
 let interiorLibraryFrontLastMiddleClickMs = 0;
 const orderDesignEditorOpen = ref(false);
@@ -416,7 +418,6 @@ const INTERIOR_LIBRARY_FRONT_ZOOM_MIN = 0.1;
 const INTERIOR_LIBRARY_FRONT_ZOOM_MAX = 20000;
 const INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR = 1.18;
 const INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR = 1.6;
-
 function isOrderDesignSaving(designId) {
   const key = String(designId || "").trim();
   return !!key && orderDesignSavingIds.value.includes(key);
@@ -457,9 +458,10 @@ function zoomInteriorLibraryFrontOut() {
   changeInteriorLibraryFrontZoom((Number(interiorLibraryFrontZoom.value) || 1) / INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR);
 }
 function handleInteriorLibraryPreviewWheel(event) {
-  if (interiorLibraryPreviewMode.value !== "front2d") return;
   const deltaY = Number(event?.deltaY) || 0;
   if (!Number.isFinite(deltaY) || deltaY === 0) return;
+  if (interiorLibraryPreviewMode.value === "model3d") return;
+  if (interiorLibraryPreviewMode.value !== "front2d") return;
   if (deltaY < 0) {
     zoomInteriorLibraryFrontIn();
   } else {
@@ -520,6 +522,7 @@ function startInteriorLibraryFrontPan(event) {
 }
 function resetInteriorLibraryPreviewView() {
   if (interiorLibraryPreviewMode.value === "model3d") {
+    interiorLibraryModelPanning.value = false;
     interiorLibraryPreview3dRef.value?.fitCameraToAll?.();
     return;
   }
@@ -636,6 +639,31 @@ function syncInteriorLibraryCursorPoint(rawPoint, snappedPoint = null) {
 }
 function clearInteriorLibraryCursorPoint() {
   interiorLibraryCursorPoint.value = null;
+}
+function syncInteriorLibraryViewerCursorPoint(event) {
+  const wrapEl = interiorLibraryViewerWrapEl.value;
+  if (!wrapEl || !event) {
+    interiorLibraryViewerCursorPoint.value = null;
+    return;
+  }
+  const rect = wrapEl.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    interiorLibraryViewerCursorPoint.value = null;
+    return;
+  }
+  const clientX = Number(event.clientX);
+  const clientY = Number(event.clientY);
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+    interiorLibraryViewerCursorPoint.value = null;
+    return;
+  }
+  interiorLibraryViewerCursorPoint.value = {
+    x: Math.max(0, Math.min(rect.width, clientX - rect.left)),
+    y: Math.max(0, Math.min(rect.height, clientY - rect.top)),
+  };
+}
+function clearInteriorLibraryViewerCursorPoint() {
+  interiorLibraryViewerCursorPoint.value = null;
 }
 function createInteriorLibraryAnnotationDraft(type, point) {
   return {
@@ -933,6 +961,39 @@ function onInteriorLibraryFrontSvgPointerLeave() {
   interiorLibraryHoverMode.value = null;
   interiorLibraryHoveredInstanceId.value = "";
   clearInteriorLibraryOverlapPreview();
+}
+function stopInteriorLibraryModelPanCursor() {
+  interiorLibraryModelPanning.value = false;
+  window.removeEventListener("pointerup", stopInteriorLibraryModelPanCursor);
+  window.removeEventListener("pointercancel", stopInteriorLibraryModelPanCursor);
+}
+function onInteriorLibraryViewerPointerMove(event) {
+  if (interiorLibraryPreviewMode.value === "model3d") {
+    syncInteriorLibraryViewerCursorPoint(event);
+    return;
+  }
+  if (interiorLibraryPreviewMode.value === "front2d" && interiorLibraryFrontPanning.value) {
+    const rawPoint = getInteriorLibraryFrontSvgPoint(event);
+    if (rawPoint) syncInteriorLibraryCursorPoint(rawPoint, null);
+  }
+}
+function onInteriorLibraryViewerPointerLeave() {
+  clearInteriorLibraryViewerCursorPoint();
+  if (interiorLibraryPreviewMode.value === "model3d") {
+    stopInteriorLibraryModelPanCursor();
+  }
+}
+function onInteriorLibraryViewerPointerDown(event) {
+  if (interiorLibraryPreviewMode.value === "model3d") {
+    syncInteriorLibraryViewerCursorPoint(event);
+    if (Number(event?.button) === 1 || Number(event?.button) === 2) {
+      interiorLibraryModelPanning.value = true;
+      window.addEventListener("pointerup", stopInteriorLibraryModelPanCursor, { once: true });
+      window.addEventListener("pointercancel", stopInteriorLibraryModelPanCursor, { once: true });
+    }
+    return;
+  }
+  startInteriorLibraryFrontPan(event);
 }
 function getInteriorLibraryAddingGroupKey(group) {
   const groupId = String(group?.id || "").trim();
@@ -1710,16 +1771,38 @@ const interiorLibraryRenderedAnnotations = computed(() => {
 });
 const interiorLibraryFrontCursorClass = computed(() => {
   if (interiorLibraryFrontPanning.value && interiorLibraryPreviewMode.value === "front2d") return "is-panning";
+  if (interiorLibraryPreviewMode.value === "model3d" && interiorLibraryModelPanning.value) return "is-panning";
   if (interiorLibraryAnnotationTool.value === "dimension") return "is-drawing-dimension";
   if (interiorLibraryAnnotationTool.value === "guide") return "is-drawing-guide";
   if (interiorLibraryHoverMode.value === "clicker") return "is-clickable";
   return "is-idle";
+});
+const interiorLibraryFrontShowPanCursor = computed(() =>
+  interiorLibraryPreviewMode.value === "front2d"
+  && interiorLibraryFrontPanning.value
+  && !!interiorLibraryCursorPoint.value
+);
+const interiorLibraryCursorVisualScale = computed(() => {
+  const zoom = Math.min(
+    INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
+    Math.max(INTERIOR_LIBRARY_FRONT_ZOOM_MIN, Number(interiorLibraryFrontZoom.value) || 1)
+  );
+  return 1 / zoom;
 });
 const interiorLibraryOverlayCursorIcon = computed(() => {
   if (interiorLibraryFrontPanning.value || !interiorLibraryCursorPoint.value) return "";
   if (interiorLibraryAnnotationTool.value === "dimension" || interiorLibraryAnnotationTool.value === "guide") return "";
   if (interiorLibraryHoverMode.value === "clicker") return "/icons/clicker_32.png";
   return "/icons/cursor_32.png";
+});
+const interiorLibraryModelCursorStyle = computed(() => {
+  const point = interiorLibraryViewerCursorPoint.value;
+  if (!point) return null;
+  return {
+    left: `${Math.round(Number(point.x) || 0)}px`,
+    top: `${Math.round(Number(point.y) || 0)}px`,
+    transform: "translate(-50%, -50%)",
+  };
 });
 const interiorLibraryShouldShowSnapMarkers = computed(() =>
   (interiorLibraryAnnotationTool.value === "dimension" || interiorLibraryAnnotationTool.value === "guide")
@@ -1734,6 +1817,8 @@ watch(interiorLibraryAnnotationTool, (tool) => {
 });
 watch(interiorLibraryPreviewMode, () => {
   hideInteriorLibraryOverlapPicker();
+  stopInteriorLibraryModelPanCursor();
+  clearInteriorLibraryViewerCursorPoint();
   nextTick(() => {
     syncInteriorLibraryFrontViewport();
   });
@@ -14115,7 +14200,9 @@ onBeforeUnmount(() => {
                 }
               ]"
               @wheel.prevent="handleInteriorLibraryPreviewWheel"
-              @pointerdown="startInteriorLibraryFrontPan"
+              @pointermove="onInteriorLibraryViewerPointerMove"
+              @pointerleave="onInteriorLibraryViewerPointerLeave"
+              @pointerdown="onInteriorLibraryViewerPointerDown"
               @dblclick.prevent="focusInteriorLibraryPreviewCloser"
             >
               <div v-if="interiorLibraryPreviewMode === 'front2d'" class="subCategoryDesignEditor__annotationTools">
@@ -14196,31 +14283,86 @@ onBeforeUnmount(() => {
                   <circle
                     :cx="interiorLibraryCursorPoint.x"
                     :cy="interiorLibraryCursorPoint.y"
-                    r="6.5"
+                    :r="6.5 * interiorLibraryCursorVisualScale"
                     class="subCategoryDesignEditor__drawCursorRing"
                   />
                   <line
-                    :x1="interiorLibraryCursorPoint.x - 7"
+                    :x1="interiorLibraryCursorPoint.x - (7 * interiorLibraryCursorVisualScale)"
                     :y1="interiorLibraryCursorPoint.y"
-                    :x2="interiorLibraryCursorPoint.x + 7"
+                    :x2="interiorLibraryCursorPoint.x + (7 * interiorLibraryCursorVisualScale)"
                     :y2="interiorLibraryCursorPoint.y"
                     class="subCategoryDesignEditor__drawCursorLine"
                   />
                   <line
                     :x1="interiorLibraryCursorPoint.x"
-                    :y1="interiorLibraryCursorPoint.y - 7"
+                    :y1="interiorLibraryCursorPoint.y - (7 * interiorLibraryCursorVisualScale)"
                     :x2="interiorLibraryCursorPoint.x"
-                    :y2="interiorLibraryCursorPoint.y + 7"
+                    :y2="interiorLibraryCursorPoint.y + (7 * interiorLibraryCursorVisualScale)"
                     class="subCategoryDesignEditor__drawCursorLine"
+                  />
+                </g>
+                <g
+                  v-else-if="interiorLibraryFrontShowPanCursor"
+                  class="subCategoryDesignEditor__drawCursor"
+                >
+                  <circle
+                    :cx="interiorLibraryCursorPoint.x"
+                    :cy="interiorLibraryCursorPoint.y"
+                    :r="6 * interiorLibraryCursorVisualScale"
+                    class="subCategoryDesignEditor__floatingCursorCenter"
+                  />
+                  <line
+                    :x1="interiorLibraryCursorPoint.x"
+                    :y1="interiorLibraryCursorPoint.y - (20 * interiorLibraryCursorVisualScale)"
+                    :x2="interiorLibraryCursorPoint.x"
+                    :y2="interiorLibraryCursorPoint.y - (7 * interiorLibraryCursorVisualScale)"
+                    class="subCategoryDesignEditor__floatingCursorLine"
+                  />
+                  <line
+                    :x1="interiorLibraryCursorPoint.x"
+                    :y1="interiorLibraryCursorPoint.y + (7 * interiorLibraryCursorVisualScale)"
+                    :x2="interiorLibraryCursorPoint.x"
+                    :y2="interiorLibraryCursorPoint.y + (20 * interiorLibraryCursorVisualScale)"
+                    class="subCategoryDesignEditor__floatingCursorLine"
+                  />
+                  <line
+                    :x1="interiorLibraryCursorPoint.x - (20 * interiorLibraryCursorVisualScale)"
+                    :y1="interiorLibraryCursorPoint.y"
+                    :x2="interiorLibraryCursorPoint.x - (7 * interiorLibraryCursorVisualScale)"
+                    :y2="interiorLibraryCursorPoint.y"
+                    class="subCategoryDesignEditor__floatingCursorLine"
+                  />
+                  <line
+                    :x1="interiorLibraryCursorPoint.x + (7 * interiorLibraryCursorVisualScale)"
+                    :y1="interiorLibraryCursorPoint.y"
+                    :x2="interiorLibraryCursorPoint.x + (20 * interiorLibraryCursorVisualScale)"
+                    :y2="interiorLibraryCursorPoint.y"
+                    class="subCategoryDesignEditor__floatingCursorLine"
+                  />
+                  <path
+                    :d="`M ${interiorLibraryCursorPoint.x} ${interiorLibraryCursorPoint.y - (22 * interiorLibraryCursorVisualScale)} L ${interiorLibraryCursorPoint.x - (4 * interiorLibraryCursorVisualScale)} ${interiorLibraryCursorPoint.y - (15 * interiorLibraryCursorVisualScale)} L ${interiorLibraryCursorPoint.x + (4 * interiorLibraryCursorVisualScale)} ${interiorLibraryCursorPoint.y - (15 * interiorLibraryCursorVisualScale)} Z`"
+                    class="subCategoryDesignEditor__floatingCursorArrow"
+                  />
+                  <path
+                    :d="`M ${interiorLibraryCursorPoint.x} ${interiorLibraryCursorPoint.y + (22 * interiorLibraryCursorVisualScale)} L ${interiorLibraryCursorPoint.x - (4 * interiorLibraryCursorVisualScale)} ${interiorLibraryCursorPoint.y + (15 * interiorLibraryCursorVisualScale)} L ${interiorLibraryCursorPoint.x + (4 * interiorLibraryCursorVisualScale)} ${interiorLibraryCursorPoint.y + (15 * interiorLibraryCursorVisualScale)} Z`"
+                    class="subCategoryDesignEditor__floatingCursorArrow"
+                  />
+                  <path
+                    :d="`M ${interiorLibraryCursorPoint.x - (22 * interiorLibraryCursorVisualScale)} ${interiorLibraryCursorPoint.y} L ${interiorLibraryCursorPoint.x - (15 * interiorLibraryCursorVisualScale)} ${interiorLibraryCursorPoint.y - (4 * interiorLibraryCursorVisualScale)} L ${interiorLibraryCursorPoint.x - (15 * interiorLibraryCursorVisualScale)} ${interiorLibraryCursorPoint.y + (4 * interiorLibraryCursorVisualScale)} Z`"
+                    class="subCategoryDesignEditor__floatingCursorArrow"
+                  />
+                  <path
+                    :d="`M ${interiorLibraryCursorPoint.x + (22 * interiorLibraryCursorVisualScale)} ${interiorLibraryCursorPoint.y} L ${interiorLibraryCursorPoint.x + (15 * interiorLibraryCursorVisualScale)} ${interiorLibraryCursorPoint.y - (4 * interiorLibraryCursorVisualScale)} L ${interiorLibraryCursorPoint.x + (15 * interiorLibraryCursorVisualScale)} ${interiorLibraryCursorPoint.y + (4 * interiorLibraryCursorVisualScale)} Z`"
+                    class="subCategoryDesignEditor__floatingCursorArrow"
                   />
                 </g>
                 <image
                   v-else-if="interiorLibraryCursorPoint && interiorLibraryOverlayCursorIcon"
                   :href="interiorLibraryOverlayCursorIcon"
-                  :x="interiorLibraryCursorPoint.x - 16"
-                  :y="interiorLibraryCursorPoint.y - 16"
-                  width="32"
-                  height="32"
+                  :x="interiorLibraryCursorPoint.x - (16 * interiorLibraryCursorVisualScale)"
+                  :y="interiorLibraryCursorPoint.y - (16 * interiorLibraryCursorVisualScale)"
+                  :width="32 * interiorLibraryCursorVisualScale"
+                  :height="32 * interiorLibraryCursorVisualScale"
                   class="subCategoryDesignEditor__overlayCursorImage"
                   preserveAspectRatio="xMidYMid meet"
                 />
@@ -14442,6 +14584,25 @@ onBeforeUnmount(() => {
                   </g>
                 </template>
               </svg>
+              <div
+                v-if="interiorLibraryPreviewMode === 'model3d' && interiorLibraryModelCursorStyle"
+                class="subCategoryDesignEditor__floatingCursor"
+                :class="{ 'is-panning': interiorLibraryModelPanning }"
+                :style="interiorLibraryModelCursorStyle"
+                aria-hidden="true"
+              >
+                <svg viewBox="0 0 48 48" class="subCategoryDesignEditor__floatingCursorSvg">
+                  <circle cx="24" cy="24" r="6" class="subCategoryDesignEditor__floatingCursorCenter" />
+                  <line x1="24" y1="4" x2="24" y2="18" class="subCategoryDesignEditor__floatingCursorLine" />
+                  <line x1="24" y1="30" x2="24" y2="44" class="subCategoryDesignEditor__floatingCursorLine" />
+                  <line x1="4" y1="24" x2="18" y2="24" class="subCategoryDesignEditor__floatingCursorLine" />
+                  <line x1="30" y1="24" x2="44" y2="24" class="subCategoryDesignEditor__floatingCursorLine" />
+                  <path d="M24 2 L20 9 H28 Z" class="subCategoryDesignEditor__floatingCursorArrow" />
+                  <path d="M24 46 L20 39 H28 Z" class="subCategoryDesignEditor__floatingCursorArrow" />
+                  <path d="M2 24 L9 20 V28 Z" class="subCategoryDesignEditor__floatingCursorArrow" />
+                  <path d="M46 24 L39 20 V28 Z" class="subCategoryDesignEditor__floatingCursorArrow" />
+                </svg>
+              </div>
               <div
                 v-if="interiorLibraryOverlapPickerState.visible && interiorLibraryOverlapPickerState.items.length"
                 class="subCategoryDesignEditor__overlapPicker"

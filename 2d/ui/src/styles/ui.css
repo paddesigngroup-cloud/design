@@ -3878,7 +3878,7 @@ textarea {
     0 0;
 }
 .subCategoryDesignEditor__viewerWrap--interior.is-panning {
-  cursor: grabbing;
+  cursor: none;
 }
 .subCategoryDesignEditor__annotationTools {
   position: absolute;
@@ -4006,8 +4006,35 @@ textarea {
 .subCategoryDesignEditor__drawCursor {
   pointer-events: none;
 }
+.subCategoryDesignEditor__floatingCursor {
+  position: absolute;
+  z-index: 4;
+  width: 48px;
+  height: 48px;
+  pointer-events: none;
+  transform-origin: center;
+}
+.subCategoryDesignEditor__floatingCursorSvg {
+  display: block;
+  width: 48px;
+  height: 48px;
+  overflow: visible;
+}
 .subCategoryDesignEditor__overlayCursorImage {
   pointer-events: none;
+}
+.subCategoryDesignEditor__floatingCursorCenter {
+  fill: rgba(255, 255, 255, 0.92);
+  stroke: rgba(58, 52, 52, 0.9);
+  stroke-width: 2px;
+}
+.subCategoryDesignEditor__floatingCursorLine {
+  stroke: rgba(58, 52, 52, 0.9);
+  stroke-width: 2.4px;
+  stroke-linecap: round;
+}
+.subCategoryDesignEditor__floatingCursorArrow {
+  fill: rgba(58, 52, 52, 0.9);
 }
 .subCategoryDesignEditor__drawCursorRing {
   fill: rgba(255, 255, 255, 0.88);
