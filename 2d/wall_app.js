@@ -7937,9 +7937,9 @@ function drawToolCursor() {
   ctx.setLineDash([]);
   const img = cursorImgs.get(key);
   const size = (key === "cursor") ? 22 : 24;
-  // Cursor hotspot is center-top of PNG to match selection point expectations.
+  // Align the interactive point with the visual center of the custom cursor.
   const hotspotX = size / 2;
-  const hotspotY = 0;
+  const hotspotY = size / 2;
   if (img && img.complete && img.naturalWidth > 0) {
     ctx.globalAlpha = 1;
     ctx.drawImage(img, x - hotspotX, y - hotspotY, size, size);
