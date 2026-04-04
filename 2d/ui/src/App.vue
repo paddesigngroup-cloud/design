@@ -1506,7 +1506,21 @@ const interiorLibraryFrontSnapLines = computed(() => {
     x2: Number(line?.x2) || 0,
     y2: Number(line?.y2) || 0,
   }));
-  return [...outer, ...designInner];
+  const interiorInstanceLines = interiorLibraryPreviewInstances2d.value.flatMap((instance) => ([
+    ...((instance?.outerLines || []).map((line) => ({
+      x1: Number(line?.x1) || 0,
+      y1: Number(line?.y1) || 0,
+      x2: Number(line?.x2) || 0,
+      y2: Number(line?.y2) || 0,
+    }))),
+    ...((instance?.innerLines || []).map((line) => ({
+      x1: Number(line?.x1) || 0,
+      y1: Number(line?.y1) || 0,
+      x2: Number(line?.x2) || 0,
+      y2: Number(line?.y2) || 0,
+    }))),
+  ]));
+  return [...outer, ...designInner, ...interiorInstanceLines];
 });
 const interiorLibraryFrontSnapPoints = computed(() =>
   collectInteriorSnapPoints(interiorLibraryFrontSnapLines.value)
