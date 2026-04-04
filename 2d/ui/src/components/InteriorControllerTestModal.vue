@@ -117,6 +117,42 @@ const controllerValues = computed(() => {
   };
 });
 
+const sampleStructureLines = computed(() => {
+  const frame = frameRect.value;
+  const midX = frame.x + (frame.w * 0.5);
+  const shelfY = frame.y + (frame.h * 0.34);
+  const leftDividerX = frame.x + (frame.w * 0.24);
+  const rightDividerX = frame.x + (frame.w * 0.76);
+  const bottomGuideY = frame.y + (frame.h * 0.82);
+  return [
+    { x1: frame.x, y1: shelfY, x2: frame.x + frame.w, y2: shelfY },
+    { x1: leftDividerX, y1: shelfY, x2: leftDividerX, y2: frame.y + frame.h },
+    { x1: rightDividerX, y1: shelfY, x2: rightDividerX, y2: frame.y + frame.h },
+    { x1: frame.x + (frame.w * 0.18), y1: bottomGuideY, x2: frame.x + (frame.w * 0.82), y2: bottomGuideY },
+    { x1: midX, y1: frame.y, x2: midX, y2: shelfY },
+  ];
+});
+
+const hiddenSnapLines = computed(() => {
+  const frame = frameRect.value;
+  const outerLines = [
+    { x1: frame.x, y1: frame.y, x2: frame.x + frame.w, y2: frame.y },
+    { x1: frame.x + frame.w, y1: frame.y, x2: frame.x + frame.w, y2: frame.y + frame.h },
+    { x1: frame.x + frame.w, y1: frame.y + frame.h, x2: frame.x, y2: frame.y + frame.h },
+    { x1: frame.x, y1: frame.y + frame.h, x2: frame.x, y2: frame.y },
+  ];
+  const inner = innerRect.value;
+  const innerLines = [
+    { x1: inner.x, y1: inner.y, x2: inner.x + inner.w, y2: inner.y },
+    { x1: inner.x + inner.w, y1: inner.y, x2: inner.x + inner.w, y2: inner.y + inner.h },
+    { x1: inner.x + inner.w, y1: inner.y + inner.h, x2: inner.x, y2: inner.y + inner.h },
+    { x1: inner.x, y1: inner.y + inner.h, x2: inner.x, y2: inner.y },
+  ];
+  return [...outerLines, ...sampleStructureLines.value, ...innerLines];
+});
+
+const hiddenSnapTolerance = computed(() => Math.max(14, 22 * visualScale.value));
+
 function toPersianDigits(value) {
   return String(value ?? "").replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
 }
@@ -278,6 +314,50 @@ function pointInRect(point, rect, pad = 0) {
   );
 }
 
+function collectHiddenSnapAxisValues(axis = "x") {
+  const values = [];
+  const seen = new Set();
+  for (const line of hiddenSnapLines.value) {
+    const x1 = Number(line.x1) || 0;
+    const y1 = Number(line.y1) || 0;
+    const x2 = Number(line.x2) || 0;
+    const y2 = Number(line.y2) || 0;
+    const isVertical = Math.abs(x1 - x2) <= 0.0001;
+    const isHorizontal = Math.abs(y1 - y2) <= 0.0001;
+
+    const pushValue = (raw) => {
+      const rounded = Number(raw.toFixed(3));
+      const key = `${axis}:${rounded}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      values.push(rounded);
+    };
+
+    if (axis === "x") {
+      if (isVertical) pushValue(x1);
+      pushValue(x1);
+      pushValue(x2);
+    } else {
+      if (isHorizontal) pushValue(y1);
+      pushValue(y1);
+      pushValue(y2);
+    }
+  }
+  return values;
+}
+
+function snapAxisToHiddenGeometry(rawValue, axis = "x") {
+  const target = Number(rawValue) || 0;
+  const tolerance = Number(hiddenSnapTolerance.value) || 0;
+  let best = null;
+  for (const candidate of collectHiddenSnapAxisValues(axis)) {
+    const distance = Math.abs(candidate - target);
+    if (distance > tolerance) continue;
+    if (best == null || distance < Math.abs(best - target)) best = candidate;
+  }
+  return best == null ? target : best;
+}
+
 function hitTestInnerRect(point) {
   return pointInRect(point, innerRect.value, 0);
 }
@@ -352,20 +432,24 @@ function applyControllerDrag(controllerId, currentPoint) {
   const pointerToAnchor = pointerState.value.pointerToAnchor || { x: 0, y: 0 };
   if (controllerId === "left") {
     const right = getRight(startRect);
-    const anchorX = (Number(currentPoint.x) || frame.x) - (Number(pointerToAnchor.x) || 0);
+    const rawAnchorX = (Number(currentPoint.x) || frame.x) - (Number(pointerToAnchor.x) || 0);
+    const anchorX = snapAxisToHiddenGeometry(rawAnchorX, "x");
     nextRect.x = Math.max(frame.x, Math.min(anchorX, right - CONTROLLER_MIN_WIDTH_MM));
     nextRect.w = right - nextRect.x;
   } else if (controllerId === "right") {
-    const anchorX = (Number(currentPoint.x) || getRight(startRect)) - (Number(pointerToAnchor.x) || 0);
+    const rawAnchorX = (Number(currentPoint.x) || getRight(startRect)) - (Number(pointerToAnchor.x) || 0);
+    const anchorX = snapAxisToHiddenGeometry(rawAnchorX, "x");
     const nextRight = Math.min(frame.x + frame.w, Math.max(anchorX, startRect.x + CONTROLLER_MIN_WIDTH_MM));
     nextRect.w = nextRight - startRect.x;
   } else if (controllerId === "top") {
     const bottom = getBottom(startRect);
-    const anchorY = (Number(currentPoint.y) || frame.y) - (Number(pointerToAnchor.y) || 0);
+    const rawAnchorY = (Number(currentPoint.y) || frame.y) - (Number(pointerToAnchor.y) || 0);
+    const anchorY = snapAxisToHiddenGeometry(rawAnchorY, "y");
     nextRect.y = Math.max(frame.y, Math.min(anchorY, bottom - CONTROLLER_MIN_HEIGHT_MM));
     nextRect.h = bottom - nextRect.y;
   } else if (controllerId === "bottomOffset") {
-    const anchorY = (Number(currentPoint.y) || frame.y) - (Number(pointerToAnchor.y) || 0);
+    const rawAnchorY = (Number(currentPoint.y) || frame.y) - (Number(pointerToAnchor.y) || 0);
+    const anchorY = snapAxisToHiddenGeometry(rawAnchorY, "y");
     const startAnchorY = (Number(pointerState.value.startPoint?.y) || frame.y) - (Number(pointerToAnchor.y) || 0);
     const rawY = (Number(startRect.y) || frame.y) + (anchorY - startAnchorY);
     nextRect.y = Math.max(frame.y, Math.min(rawY, (frame.y + frame.h) - startRect.h));
@@ -671,6 +755,17 @@ watch(() => props.displayUnit, () => {
           </defs>
           <rect :x="baseBounds.x" :y="baseBounds.y" :width="baseBounds.w" :height="baseBounds.h" fill="url(#controller-test-grid)" />
           <rect :x="frameRect.x" :y="frameRect.y" :width="frameRect.w" :height="frameRect.h" class="controllerTestModal__frame" />
+          <g class="controllerTestModal__sampleStructure">
+            <line
+              v-for="(line, index) in sampleStructureLines"
+              :key="`sample-structure-${index}`"
+              :x1="line.x1"
+              :y1="line.y1"
+              :x2="line.x2"
+              :y2="line.y2"
+              class="controllerTestModal__sampleLine"
+            />
+          </g>
           <rect
             :x="innerRect.x"
             :y="innerRect.y"
@@ -827,6 +922,17 @@ watch(() => props.displayUnit, () => {
   fill: rgba(255, 255, 255, 0.82);
   stroke: #8b0d23;
   stroke-width: 12;
+}
+
+.controllerTestModal__sampleStructure {
+  pointer-events: none;
+}
+
+.controllerTestModal__sampleLine {
+  stroke: rgba(120, 136, 150, 0.68);
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-dasharray: 18 14;
 }
 
 .controllerTestModal__innerRect {
