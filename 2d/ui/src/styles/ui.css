@@ -4183,15 +4183,16 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  min-width: 42px;
-  height: 42px;
-  min-height: 42px;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
   padding: 0;
-  border-radius: 14px;
-  font-size: 24px;
+  border-radius: 11px;
+  font-size: 19px;
   line-height: 1;
   text-align: center;
+  color: #7f858d;
   margin-left: auto;
 }
 .subCategoryDesignEditor__groupLineSwatch {
