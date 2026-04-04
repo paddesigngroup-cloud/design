@@ -251,6 +251,8 @@ function createEmptyPresetDragState() {
 }
 const presetDrag = ref(createEmptyPresetDragState());
 const PRESET_PREVIEW_MIN_DRAG_PX = 12;
+const DEFAULT_FRONT_VIEW_WIDTH = 760;
+const DEFAULT_FRONT_VIEW_HEIGHT = 460;
 const snapMenuItems = [
   { id: "corner", title: "گوشه", icon: "/icons/corner_point.png" },
   { id: "mid", title: "وسط ضلع", icon: "/icons/midpoint.png" },
@@ -1347,10 +1349,34 @@ const activeInteriorLibraryBaseParamValues = computed(() => {
     Object.entries(activeInteriorLibraryOrderDesign.value?.order_attr_values || {}).map(([key, value]) => [String(key), value == null ? "" : String(value)])
   );
 });
-const FRONT_VIEW_WIDTH = 760;
-const FRONT_VIEW_HEIGHT = 460;
+const FRONT_VIEW_WIDTH = DEFAULT_FRONT_VIEW_WIDTH;
+const FRONT_VIEW_HEIGHT = DEFAULT_FRONT_VIEW_HEIGHT;
 const FRONT_VIEW_PAD = 28;
 const DEFAULT_INTERIOR_LINE_COLOR = "#8A98A3";
+const interiorLibraryViewerWrapEl = ref(null);
+const interiorLibraryFrontViewport = ref({
+  width: DEFAULT_FRONT_VIEW_WIDTH,
+  height: DEFAULT_FRONT_VIEW_HEIGHT,
+});
+let interiorLibraryFrontViewportObserver = null;
+
+function syncInteriorLibraryFrontViewport() {
+  const el = interiorLibraryViewerWrapEl.value;
+  if (!el) {
+    interiorLibraryFrontViewport.value = {
+      width: DEFAULT_FRONT_VIEW_WIDTH,
+      height: DEFAULT_FRONT_VIEW_HEIGHT,
+    };
+    return;
+  }
+  const styles = window.getComputedStyle(el);
+  const padX = (parseFloat(styles.paddingLeft) || 0) + (parseFloat(styles.paddingRight) || 0);
+  const padY = (parseFloat(styles.paddingTop) || 0) + (parseFloat(styles.paddingBottom) || 0);
+  interiorLibraryFrontViewport.value = {
+    width: Math.max(320, Math.round(el.clientWidth - padX)),
+    height: Math.max(320, Math.round(el.clientHeight - padY)),
+  };
+}
 
 function getViewerBoxesFromPartSnapshots(partSnapshots) {
   return (Array.isArray(partSnapshots) ? partSnapshots : [])
@@ -1452,8 +1478,8 @@ const interiorLibraryFrontView = computed(() =>
 const interiorLibraryPreviewProjection = computed(() => {
   const bounds = interiorLibraryFrontView.value?.bounds;
   if (!bounds) return null;
-  const width = FRONT_VIEW_WIDTH;
-  const height = FRONT_VIEW_HEIGHT;
+  const width = Math.max(320, Number(interiorLibraryFrontViewport.value?.width) || FRONT_VIEW_WIDTH);
+  const height = Math.max(320, Number(interiorLibraryFrontViewport.value?.height) || FRONT_VIEW_HEIGHT);
   const pad = FRONT_VIEW_PAD;
   const spanX = Math.max(1, bounds.maxX - bounds.minX);
   const spanZ = Math.max(1, bounds.maxZ - bounds.minZ);
@@ -1587,7 +1613,8 @@ const interiorLibraryFrontSnapPoints = computed(() =>
 );
 const interiorLibraryFrontSnapTolerance = computed(() => {
   const viewBox = String(interiorLibraryFrontSvgViewBox.value || "").split(/\s+/).map(Number);
-  const width = Number.isFinite(viewBox[2]) ? viewBox[2] : FRONT_VIEW_WIDTH;
+  const viewportWidth = Math.max(320, Number(interiorLibraryFrontViewport.value?.width) || FRONT_VIEW_WIDTH);
+  const width = Number.isFinite(viewBox[2]) ? viewBox[2] : viewportWidth;
   return Math.max(6, (width / FRONT_VIEW_WIDTH) * 12);
 });
 const interiorLibraryFrontSvgViewBox = computed(() => {
@@ -1595,11 +1622,13 @@ const interiorLibraryFrontSvgViewBox = computed(() => {
     INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
     Math.max(INTERIOR_LIBRARY_FRONT_ZOOM_MIN, Number(interiorLibraryFrontZoom.value) || 1)
   );
-  const width = FRONT_VIEW_WIDTH / zoom;
-  const height = FRONT_VIEW_HEIGHT / zoom;
+  const viewportWidth = Math.max(320, Number(interiorLibraryFrontViewport.value?.width) || FRONT_VIEW_WIDTH);
+  const viewportHeight = Math.max(320, Number(interiorLibraryFrontViewport.value?.height) || FRONT_VIEW_HEIGHT);
+  const width = viewportWidth / zoom;
+  const height = viewportHeight / zoom;
   const panX = Number(interiorLibraryFrontPan.value?.x) || 0;
   const panY = Number(interiorLibraryFrontPan.value?.y) || 0;
-  return `${(FRONT_VIEW_WIDTH - width) * 0.5 + panX} ${(FRONT_VIEW_HEIGHT - height) * 0.5 + panY} ${width} ${height}`;
+  return `${(viewportWidth - width) * 0.5 + panX} ${(viewportHeight - height) * 0.5 + panY} ${width} ${height}`;
 });
 const interiorLibraryFrontSvgViewBoxRect = computed(() => {
   const parts = String(interiorLibraryFrontSvgViewBox.value || "").split(/\s+/).map(Number);
@@ -1608,15 +1637,6 @@ const interiorLibraryFrontSvgViewBoxRect = computed(() => {
     y: Number.isFinite(parts[1]) ? parts[1] : 0,
     width: Number.isFinite(parts[2]) ? parts[2] : FRONT_VIEW_WIDTH,
     height: Number.isFinite(parts[3]) ? parts[3] : FRONT_VIEW_HEIGHT,
-  };
-});
-const interiorLibraryPreviewAxisLabels = computed(() => {
-  if (!interiorLibraryFrontView.value?.bounds) return null;
-  const width = 760;
-  const height = 460;
-  return {
-    x: { x: width - 20, y: height - 14, text: "X" },
-    z: { x: 16, y: 20, text: "Z" },
   };
 });
 const interiorLibraryAnnotationColors = computed(() => ({
@@ -1714,7 +1734,25 @@ watch(interiorLibraryAnnotationTool, (tool) => {
 });
 watch(interiorLibraryPreviewMode, () => {
   hideInteriorLibraryOverlapPicker();
+  nextTick(() => {
+    syncInteriorLibraryFrontViewport();
+  });
 });
+watch(interiorLibraryViewerWrapEl, (el) => {
+  if (interiorLibraryFrontViewportObserver) {
+    interiorLibraryFrontViewportObserver.disconnect();
+    interiorLibraryFrontViewportObserver = null;
+  }
+  if (typeof ResizeObserver !== "undefined" && el) {
+    interiorLibraryFrontViewportObserver = new ResizeObserver(() => {
+      syncInteriorLibraryFrontViewport();
+    });
+    interiorLibraryFrontViewportObserver.observe(el);
+  }
+  nextTick(() => {
+    syncInteriorLibraryFrontViewport();
+  });
+}, { flush: "post" });
 watch(activeInteriorLibraryInstances, (items) => {
   const ids = new Set((Array.isArray(items) ? items : []).map((item) => String(item?.id || "").trim()).filter(Boolean));
   if (interiorLibrarySelectedInstanceId.value && !ids.has(String(interiorLibrarySelectedInstanceId.value))) {
@@ -10278,6 +10316,9 @@ onMounted(() => {
       }));
     })
     .catch(() => {});
+  nextTick(() => {
+    syncInteriorLibraryFrontViewport();
+  });
 });
 
 watch(
@@ -11265,6 +11306,10 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (interiorLibraryFrontViewportObserver) {
+    interiorLibraryFrontViewportObserver.disconnect();
+    interiorLibraryFrontViewportObserver = null;
+  }
   window.removeEventListener("pointermove", onPresetPointerMove);
   if (window.__designkpDialogs) delete window.__designkpDialogs;
   window.removeEventListener("resize", scheduleShift);
@@ -14060,6 +14105,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
             <div
+              ref="interiorLibraryViewerWrapEl"
               class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior"
               :class="[
                 interiorLibraryFrontCursorClass,
@@ -14395,8 +14441,6 @@ onBeforeUnmount(() => {
                     </text>
                   </g>
                 </template>
-                <text v-if="interiorLibraryPreviewAxisLabels" :x="interiorLibraryPreviewAxisLabels.x.x" :y="interiorLibraryPreviewAxisLabels.x.y" fill="#79676d" font-size="14" font-weight="700">X</text>
-                <text v-if="interiorLibraryPreviewAxisLabels" :x="interiorLibraryPreviewAxisLabels.z.x" :y="interiorLibraryPreviewAxisLabels.z.y" fill="#79676d" font-size="14" font-weight="700">Z</text>
               </svg>
               <div
                 v-if="interiorLibraryOverlapPickerState.visible && interiorLibraryOverlapPickerState.items.length"
