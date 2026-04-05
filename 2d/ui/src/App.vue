@@ -288,7 +288,6 @@ const interiorLibraryForcedOrderDesignId = ref("");
 const interiorInstanceEditorOpen = ref(false);
 const interiorInstanceEditorDraft = ref(null);
 const interiorInstanceEditorActiveGroupId = ref("");
-const interiorLibraryControllerTestMode = ref(false);
 const interiorLibraryControllerEditingId = ref("");
 const interiorLibraryControllerInputDraft = ref("");
 const interiorLibraryHoveredControllerId = ref("");
@@ -375,9 +374,11 @@ const PART_FORMULA_FIELDS = [
 ];
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH = "width_controler_internal_group_parts";
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP = "width_controller_internal_group_part";
+const INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT = "height_controller_internal_group_part";
 const INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS = [
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH, label: "کنترلر قطعات عرضی" },
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP, label: "قطعه عرضی" },
+  { value: INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT, label: "قطعه ارتفاعی" },
 ];
 const INTERNAL_GROUP_CONTROLLER_DEFINITIONS = {
   [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH]: [
@@ -389,6 +390,12 @@ const INTERNAL_GROUP_CONTROLLER_DEFINITIONS = {
   [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP]: [
     { key: "left", label: "کنترلر ضلع چپ" },
     { key: "top", label: "کنترلر ضلع بالا", hidden: true },
+    { key: "right", label: "کنترلر ضلع راست" },
+    { key: "bottom_offset", label: "کنترلر ارتفاع کل" },
+  ],
+  [INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT]: [
+    { key: "left", label: "کنترلر ضلع چپ", hidden: true },
+    { key: "top", label: "کنترلر ضلع بالا" },
     { key: "right", label: "کنترلر ضلع راست" },
     { key: "bottom_offset", label: "کنترلر ارتفاع کل" },
   ],
@@ -1875,7 +1882,9 @@ const constructionInternalPartGroupsById = computed(() =>
   )
 );
 const activeInteriorLibrarySubCategory = computed(() => {
-  const subCategoryId = String(subCategoryDesignEditorDraft.value?.sub_category_id || "").trim();
+  const subCategoryId = subCategoryDesignEditorOpen.value
+    ? String(subCategoryDesignEditorDraft.value?.sub_category_id || "").trim()
+    : String(activeInteriorLibrarySourceDesign.value?.sub_category_id || "").trim();
   if (!subCategoryId) return null;
   return constructionSubCategories.value.find((item) => String(item.id) === subCategoryId) || null;
 });
@@ -2225,12 +2234,10 @@ const interiorLibraryControllerState = computed(() => {
   const hasAllBindings = interiorLibraryControllerDefinitions.value.length > 0
     && interiorLibraryControllerDefinitions.value.every((definition) => String(interiorLibraryControllerBindingMap.value?.[definition.key]?.param_code || "").trim());
   let message = "";
-  if (interiorLibraryControllerTestMode.value && interiorLibraryPreviewMode.value === "front2d") {
-    if (!instance) message = "برای نمایش کنترلرها، ابتدا یک نمونه داخلی را انتخاب کنید.";
-    else if (!group || !normalizeInternalPartGroupControllerType(group?.controller_type)) message = "برای این نمونه، کنترلر قطعه عرضی روی گروه داخلی تنظیم نشده است.";
-    else if (!hasAllBindings) message = `اتصال هر ${toPersianDigits(interiorLibraryControllerDefinitions.value.length)} پارامتر کنترلر برای این گروه کامل نیست.`;
-    else if (!interiorLibrarySelectedControllerOverlay.value?.rect) message = "مقادیر کنترلرهای این نمونه قابل محاسبه نیست.";
-  }
+  if (!instance) message = "برای نمایش کنترلرها، ابتدا یک نمونه داخلی را انتخاب کنید.";
+  else if (!group || !normalizeInternalPartGroupControllerType(group?.controller_type)) message = "برای این نمونه، کنترلر روی گروه داخلی تنظیم نشده است.";
+  else if (!hasAllBindings) message = `اتصال هر ${toPersianDigits(interiorLibraryControllerDefinitions.value.length)} پارامتر کنترلر برای این گروه کامل نیست.`;
+  else if (!interiorLibrarySelectedControllerOverlay.value?.rect) message = "مقادیر کنترلرهای این نمونه قابل محاسبه نیست.";
   return { enabled, message };
 });
 const interiorLibraryControllerVisuals = computed(() => {
@@ -2505,7 +2512,10 @@ watch(interiorLibraryPreviewMode, () => {
 watch(interiorLibraryOpen, (open) => {
   if (!open) {
     stopInteriorLibraryPointerProcessing();
+    enable2dInput();
+    return;
   }
+  disable2dInput();
 });
 watch(interiorLibraryViewerWrapEl, (el) => {
   if (interiorLibraryFrontViewportObserver) {
@@ -2589,6 +2599,7 @@ function collectInternalGroupParamCodesLocal(group) {
 
 function buildInternalGroupDefaultsTree(group) {
   if (!group) return [];
+  const subCategoryOverrides = activeInteriorLibrarySubCategory.value?.param_overrides || {};
   const selectedParamGroupIds = new Set(
     (Array.isArray(group.param_groups) ? group.param_groups : [])
       .filter((row) => row?.enabled !== false && Number(row?.param_group_id) > 0)
@@ -2601,16 +2612,29 @@ function buildInternalGroupDefaultsTree(group) {
       items: row.items.map((column) => {
         const baseLabel = column.label || column.key;
         const override = normalizeInternalPartGroupParamOverride(group.param_overrides?.[column.key], baseLabel);
+        const fallback = normalizeInternalPartGroupParamOverride(subCategoryOverrides?.[column.key], baseLabel);
+        const resolved = {
+          ...fallback,
+          ...override,
+          display_title: override.display_title || fallback.display_title || baseLabel,
+          description_text: override.description_text || fallback.description_text || "",
+          icon_path: override.icon_path || fallback.icon_path || "",
+          binary_off_label: override.binary_off_label || fallback.binary_off_label || "0",
+          binary_on_label: override.binary_on_label || fallback.binary_on_label || "1",
+          binary_off_icon_path: override.binary_off_icon_path || fallback.binary_off_icon_path || "",
+          binary_on_icon_path: override.binary_on_icon_path || fallback.binary_on_icon_path || "",
+          input_mode: override.input_mode || fallback.input_mode || "value",
+        };
         return {
           ...column,
-          displayTitle: String(override.display_title || baseLabel).trim() || column.key,
-          descriptionText: String(override.description_text || "").trim(),
-          inputMode: override.input_mode === "binary" ? "binary" : "value",
-          iconUrl: getSubCategoryDefaultIconUrl(override.icon_path),
-          binaryOffLabel: String(override.binary_off_label || "").trim() || "0",
-          binaryOnLabel: String(override.binary_on_label || "").trim() || "1",
-          binaryOffIconUrl: getSubCategoryDefaultIconUrl(override.binary_off_icon_path),
-          binaryOnIconUrl: getSubCategoryDefaultIconUrl(override.binary_on_icon_path),
+          displayTitle: String(resolved.display_title || baseLabel).trim() || column.key,
+          descriptionText: String(resolved.description_text || "").trim(),
+          inputMode: resolved.input_mode === "binary" ? "binary" : "value",
+          iconUrl: getSubCategoryDefaultIconUrl(resolved.icon_path),
+          binaryOffLabel: String(resolved.binary_off_label || "").trim() || "0",
+          binaryOnLabel: String(resolved.binary_on_label || "").trim() || "1",
+          binaryOffIconUrl: getSubCategoryDefaultIconUrl(resolved.binary_off_icon_path),
+          binaryOnIconUrl: getSubCategoryDefaultIconUrl(resolved.binary_on_icon_path),
           value: String(group.param_defaults?.[column.key] ?? "").trim(),
         };
       }),
@@ -2621,7 +2645,17 @@ function buildInternalGroupDefaultsTree(group) {
 function buildInteriorInstanceGroups(instance) {
   const groupsById = new Map();
   const sourceInternalGroup = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
-  for (const [key, meta] of Object.entries(instance?.param_meta || {})) {
+  const metaEntries = Object.entries(instance?.param_meta || {}).filter(([key]) => String(key || "").trim());
+  if (!metaEntries.length && sourceInternalGroup) {
+    return buildInternalGroupDefaultsTree(sourceInternalGroup).map((group) => ({
+      ...group,
+      items: group.items.map((column) => ({
+        ...column,
+        value: getInteriorInstanceEffectiveValue(instance, column.key),
+      })),
+    }));
+  }
+  for (const [key, meta] of metaEntries) {
     const code = String(key || "").trim();
     if (!code) continue;
     const groupId = String(meta?.group_id || "").trim() || "__ungrouped__";
@@ -6052,6 +6086,25 @@ async function refreshOrderDesignGeometryFromServer(orderDesignId, { updateStage
   return fresh;
 }
 
+async function ensureOrderDesignInteriorParamMetaLoaded(orderDesignId) {
+  const key = String(orderDesignId || "").trim();
+  if (!key) return;
+  const item = orderDesignCatalog.value.find((row) => String(row.id) === key);
+  const interiors = Array.isArray(item?.interior_instances) ? item.interior_instances : [];
+  if (!interiors.length) return;
+  const needsRefresh = interiors.some((instance) => {
+    const hasValues = Object.keys(instance?.param_values || {}).length > 0;
+    const metaCount = Object.keys(instance?.param_meta || {}).length;
+    return hasValues && metaCount === 0;
+  });
+  if (!needsRefresh) return;
+  try {
+    await refreshOrderDesignGeometryFromServer(key, { updateStage: false });
+  } catch (_) {
+    // Silent: failing to refresh should not block opening the library.
+  }
+}
+
 function syncInteriorInstanceInOrderDesignCollection(orderDesignId, instance) {
   const targetId = String(orderDesignId || "").trim();
   const normalized = normalizeInteriorInstanceRecord(instance);
@@ -6168,10 +6221,20 @@ async function addInteriorGroupToDesign(group) {
   }
 }
 
-function openInteriorInstanceEditor(instance) {
+async function openInteriorInstanceEditor(instance) {
   const normalized = normalizeInteriorInstanceRecord(instance);
   if (!normalized) return;
   selectInteriorLibraryInstance(normalized.id);
+  if (!subCategoryDesignEditorOpen.value && Object.keys(normalized.param_meta || {}).length === 0) {
+    await ensureOrderDesignInteriorParamMetaLoaded(activeInteriorLibraryOrderDesign.value?.id);
+    const refreshed = activeInteriorLibraryInstances.value.find(
+      (row) => String(row?.id || "").trim() === String(normalized.id || "").trim()
+    );
+    if (refreshed) {
+      const updated = normalizeInteriorInstanceRecord(refreshed);
+      if (updated) Object.assign(normalized, updated);
+    }
+  }
   const effectiveParamValues = Object.fromEntries(
     Object.keys(normalized.param_meta || {}).map((key) => [key, getInteriorInstanceEffectiveValue(normalized, key)])
   );
@@ -11699,6 +11762,9 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
   activeSubRail.value = null;
   openMode.value = "menu";
   await Promise.allSettled([
+    loadConstructionParamGroups(),
+    loadConstructionParams(),
+    loadConstructionSubCategories(),
     loadConstructionInternalPartGroups(),
     loadConstructionSubCategoryDesigns(),
     loadConstructionPartKinds(),
@@ -11706,6 +11772,10 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
   ]);
   if (!subCategoryDesignEditorOpen.value && activeOrder.value?.id) {
     await loadOrderDesignCatalog(true);
+    const currentOrderDesignId = String(activeInteriorLibraryOrderDesign.value?.id || "").trim();
+    if (currentOrderDesignId) {
+      await ensureOrderDesignInteriorParamMetaLoaded(currentOrderDesignId);
+    }
   }
   if (subCategoryDesignEditorOpen.value && !subCategoryDesignPreviewLoading.value) {
     await refreshSubCategoryDesignPreview();
@@ -11719,7 +11789,6 @@ function openInteriorLibraryForDesign(orderDesignId) {
 
 function closeInteriorLibrary() {
   interiorLibraryOpen.value = false;
-  interiorLibraryControllerTestMode.value = false;
   interiorLibraryControllerEditingId.value = "";
   interiorLibraryControllerInputDraft.value = "";
   interiorLibraryControllerDraftValues.value = null;
@@ -11745,16 +11814,6 @@ function closeInteriorLibrary() {
   closeInteriorInstanceEditor();
 }
 
-function openInteriorControllerTest() {
-  if (!interiorLibraryControllerTestMode.value) {
-    interiorLibraryPreviewMode.value = "front2d";
-  }
-  interiorLibraryControllerTestMode.value = !interiorLibraryControllerTestMode.value;
-  interiorLibraryControllerEditingId.value = "";
-  interiorLibraryControllerInputDraft.value = "";
-  interiorLibraryControllerDraftValues.value = null;
-  interiorLibraryHoveredControllerId.value = "";
-}
 
 function disable2dInput() {
   editorRef.value?.setInputEnabled?.(false);
@@ -12479,8 +12538,19 @@ onMounted(() => {
     const t = e.target;
     const tag = (t?.tagName || "").toUpperCase();
     if (t?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    if (!interiorLibrarySelectedAnnotation.value) return;
-    removeSelectedInteriorLibraryAnnotation();
+    if (interiorLibrarySelectedAnnotation.value) {
+      removeSelectedInteriorLibraryAnnotation();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    const selectedId = String(interiorLibrarySelectedInstanceId.value || "").trim();
+    if (!selectedId) return;
+    const targetInstance = activeInteriorLibraryInstances.value.find(
+      (item) => String(item?.id || "").trim() === selectedId
+    );
+    if (!targetInstance) return;
+    deleteInteriorInstanceFromDesign(targetInstance);
     e.preventDefault();
     e.stopPropagation();
   };
@@ -15410,16 +15480,6 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
-                :class="{ 'is-active': interiorLibraryControllerTestMode }"
-                title="تست کنترلر قطعات داخلی"
-                aria-label="تست کنترلر قطعات داخلی"
-                @click="openInteriorControllerTest"
-              >
-                <img src="/icons/double-arrow.png" alt="" />
-              </button>
-              <button
-                type="button"
-                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
                 :class="{ 'is-active': interiorLibraryShowDimensions }"
                 title="نمایش اندازه گذاری"
                 aria-label="نمایش اندازه گذاری"
@@ -16014,7 +16074,7 @@ onBeforeUnmount(() => {
                   : "برای این طرح هنوز preview خطی قابل نمایش نیست." }}
               </div>
               <div
-                v-if="interiorLibraryPreviewMode === 'front2d' && interiorLibraryControllerTestMode && interiorLibraryControllerState.message"
+                v-if="interiorLibraryPreviewMode === 'front2d' && interiorLibraryControllerState.message"
                 class="subCategoryDesignEditor__controllerHint"
               >
                 {{ interiorLibraryControllerState.message }}
