@@ -914,6 +914,9 @@ function updateInteriorLibraryHoverState(point) {
 function hitTestInteriorLibraryController(point) {
   for (let index = interiorLibraryControllerVisuals.value.length - 1; index >= 0; index -= 1) {
     const item = interiorLibraryControllerVisuals.value[index];
+    if (pointInInteriorControllerBody(point, item)) {
+      return { ...item, activeHotspot: null };
+    }
     const hotspot = getInteriorControllerMatchingHotspot(point, item);
     if (hotspot) {
       return { ...item, activeHotspot: hotspot };
@@ -1126,11 +1129,15 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
   const frame = interiorLibraryControllerFrameRect.value;
   const startValues = state.startValues;
   if (!frame || !startValues || !currentPoint) return;
+  const startRect = buildInteriorLibraryControllerRectFromFrameValues(frame, startValues);
   const pointerToAnchor = state.pointerToAnchor || { x: 0, y: 0 };
   const anchorX = (Number(currentPoint.x) || 0) - (Number(pointerToAnchor.x) || 0);
   const anchorY = (Number(currentPoint.y) || 0) - (Number(pointerToAnchor.y) || 0);
-  const snappedX = snapInteriorControllerAxis(controllerId, anchorX);
-  const snappedY = snapInteriorControllerAxis(controllerId, anchorY);
+  const ignoreAxisValues = controllerId === "left" || controllerId === "right"
+    ? [Number(startRect?.x), Number(startRect?.x) + Number(startRect?.w || 0)]
+    : [Number(startRect?.y), Number(startRect?.y) + Number(startRect?.h || 0)];
+  const snappedX = snapInteriorControllerAxis(controllerId, anchorX, ignoreAxisValues);
+  const snappedY = snapInteriorControllerAxis(controllerId, anchorY, ignoreAxisValues);
   const frameWidth = Math.max(0, frame.maxX - frame.minX);
   const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
   const minWidth = 240;
@@ -1148,11 +1155,15 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
     const rightMm = ((frame.x + frame.w) - snappedX) / frame.scale;
     nextValues.right = Math.min(Math.max(0, rightMm), Math.max(0, frameWidth - nextValues.left - minWidth));
   } else if (controllerId === "top") {
-    const topMm = ((frame.y + frame.h) - (Number(startValues.bottom_offset) || 0) * frame.scale - snappedY) / frame.scale;
+    const bottomY = (Number(startRect?.y) || frame.y) + (Number(startRect?.h) || 0);
+    const topMm = (bottomY - snappedY) / frame.scale;
     nextValues.top = Math.min(Math.max(minHeight, topMm), Math.max(minHeight, frameHeight - nextValues.bottom_offset));
   } else if (controllerId === "bottom_offset") {
-    const bottomMm = ((frame.y + frame.h) - snappedY) / frame.scale - (Number(startValues.top) || 0);
-    nextValues.bottom_offset = Math.min(Math.max(0, bottomMm), Math.max(0, frameHeight - nextValues.top));
+    const startAnchorY = (Number(state.startPoint?.y) || frame.y) - (Number(pointerToAnchor.y) || 0);
+    const rawRectY = (Number(startRect?.y) || frame.y) + (snappedY - startAnchorY);
+    const clampedRectY = Math.max(frame.y, Math.min(rawRectY, (frame.y + frame.h) - (Number(startRect?.h) || 0)));
+    const bottomOffsetMm = ((frame.y + frame.h) - (clampedRectY + (Number(startRect?.h) || 0))) / frame.scale;
+    nextValues.bottom_offset = Math.min(Math.max(0, bottomOffsetMm), Math.max(0, frameHeight - nextValues.top));
   }
   interiorLibraryControllerDraftValues.value = nextValues;
   interiorLibraryControllerPointerState.value = {
@@ -2042,16 +2053,20 @@ const interiorLibraryControllerVisuals = computed(() => {
   if (!interiorLibraryControllerState.value.enabled || !interiorLibraryControllerRect.value) return [];
   const rect = interiorLibraryControllerRect.value;
   const scale = interiorLibraryControllerVisualScale.value;
-  const horizontal = { w: 92 * scale, h: 32 * scale, inputW: 62.5 * scale, inputH: 22.5 * scale };
-  const vertical = { w: 28 * scale, h: 76 * scale, inputW: 62.5 * scale, inputH: 22.5 * scale };
+  const gap = 4 * scale;
+  const handleSize = 31.92 * scale;
+  const horizontal = { w: handleSize, h: handleSize, inputW: 62.5 * scale, inputH: 22.5 * scale };
+  const vertical = { w: handleSize, h: handleSize, inputW: 62.5 * scale, inputH: 22.5 * scale };
   return [
     {
       id: "left",
       kind: "horizontal",
       direction: "left",
       anchor: { x: rect.x, y: rect.y + (rect.h * 0.5) },
-      x: rect.x - (horizontal.w * 0.5),
+      x: rect.x - horizontal.w,
       y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
+      fieldX: rect.x - horizontal.w - gap - horizontal.inputW,
+      fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
       ...horizontal,
     },
     {
@@ -2060,7 +2075,9 @@ const interiorLibraryControllerVisuals = computed(() => {
       direction: "up",
       anchor: { x: rect.x + (rect.w * 0.5), y: rect.y },
       x: rect.x + (rect.w * 0.5) - (vertical.w * 0.5),
-      y: rect.y - (vertical.h * 0.5),
+      y: rect.y,
+      fieldX: rect.x + (rect.w * 0.5) - (vertical.inputW * 0.5),
+      fieldY: rect.y - gap - vertical.inputH,
       ...vertical,
     },
     {
@@ -2068,8 +2085,10 @@ const interiorLibraryControllerVisuals = computed(() => {
       kind: "horizontal",
       direction: "right",
       anchor: { x: rect.x + rect.w, y: rect.y + (rect.h * 0.5) },
-      x: rect.x + rect.w - (horizontal.w * 0.5),
+      x: rect.x + rect.w,
       y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
+      fieldX: rect.x + rect.w + horizontal.w + gap,
+      fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
       ...horizontal,
     },
     {
@@ -2078,7 +2097,9 @@ const interiorLibraryControllerVisuals = computed(() => {
       direction: "up",
       anchor: { x: rect.x + (rect.w * 0.5), y: rect.y + rect.h },
       x: rect.x + (rect.w * 0.5) - (vertical.w * 0.5),
-      y: rect.y + rect.h - (vertical.h * 0.5),
+      y: rect.y + rect.h,
+      fieldX: rect.x + (rect.w * 0.5) - (vertical.inputW * 0.5),
+      fieldY: rect.y + rect.h + vertical.h + gap,
       ...vertical,
     },
   ];
@@ -2116,60 +2137,6 @@ const interiorLibraryFrontSnapPoints = computed(() =>
   collectInteriorSnapPoints(interiorLibraryFrontSnapLines.value)
 );
 
-function buildInteriorControllerSnapLineKey(line) {
-  const values = [
-    Number(line?.x1) || 0,
-    Number(line?.y1) || 0,
-    Number(line?.x2) || 0,
-    Number(line?.y2) || 0,
-  ];
-  const forward = values.map((value) => value.toFixed(3)).join("|");
-  const reversed = [values[2], values[3], values[0], values[1]].map((value) => value.toFixed(3)).join("|");
-  return forward < reversed ? forward : reversed;
-}
-
-const interiorLibraryControllerSnapLines = computed(() => {
-  const selectedId = String(interiorLibrarySelectedInstanceId.value || "").trim();
-  const selectedInstance = interiorLibraryPreviewInstances2d.value.find((instance) => String(instance?.id || "").trim() === selectedId);
-  const selectedLineKeys = new Set([
-    ...((selectedInstance?.outerLines || []).map((line) => buildInteriorControllerSnapLineKey(line))),
-    ...((selectedInstance?.innerLines || []).map((line) => buildInteriorControllerSnapLineKey(line))),
-  ]);
-  const outer = (interiorLibraryPreviewSvgLines.value?.outer || []).map((line) => ({
-    x1: Number(line?.x1) || 0,
-    y1: Number(line?.y1) || 0,
-    x2: Number(line?.x2) || 0,
-    y2: Number(line?.y2) || 0,
-  }));
-  const designInner = (interiorLibraryShowInnerLines.value ? (interiorLibraryPreviewSvgLines.value?.inner || []) : [])
-    .map((line) => ({
-      x1: Number(line?.x1) || 0,
-      y1: Number(line?.y1) || 0,
-      x2: Number(line?.x2) || 0,
-      y2: Number(line?.y2) || 0,
-    }))
-    .filter((line) => !selectedLineKeys.has(buildInteriorControllerSnapLineKey(line)));
-  const interiorInstanceLines = interiorLibraryPreviewInstances2d.value
-    .filter((instance) => String(instance?.id || "").trim() !== selectedId)
-    .flatMap((instance) => ([
-      ...((instance?.outerLines || []).map((line) => ({
-        x1: Number(line?.x1) || 0,
-        y1: Number(line?.y1) || 0,
-        x2: Number(line?.x2) || 0,
-        y2: Number(line?.y2) || 0,
-      }))),
-      ...((instance?.innerLines || []).map((line) => ({
-        x1: Number(line?.x1) || 0,
-        y1: Number(line?.y1) || 0,
-        x2: Number(line?.x2) || 0,
-        y2: Number(line?.y2) || 0,
-      }))),
-    ]));
-  return [...outer, ...designInner, ...interiorInstanceLines];
-});
-const interiorLibraryControllerSnapPoints = computed(() =>
-  collectInteriorSnapPoints(interiorLibraryControllerSnapLines.value)
-);
 const interiorLibraryFrontSnapTolerance = computed(() => {
   const viewBox = String(interiorLibraryFrontSvgViewBox.value || "").split(/\s+/).map(Number);
   const viewportWidth = Math.max(320, Number(interiorLibraryFrontViewport.value?.width) || FRONT_VIEW_WIDTH);
@@ -2629,6 +2596,29 @@ function pointInInteriorControllerHotspot(point, controller) {
   return !!getInteriorControllerMatchingHotspot(point, controller);
 }
 
+function pointInInteriorControllerBody(point, controller) {
+  const x = Number(point?.x) || 0;
+  const y = Number(point?.y) || 0;
+  const bounds = getInteriorControllerBodyBounds(controller);
+  if (!bounds) return false;
+  return x >= bounds.x1 && x <= bounds.x2 && y >= bounds.y1 && y <= bounds.y2;
+}
+
+function getInteriorControllerBodyBounds(controller) {
+  if (!controller) return null;
+  const x = Number(controller?.x) || 0;
+  const y = Number(controller?.y) || 0;
+  const w = Math.max(0, Number(controller?.w) || 0);
+  const h = Math.max(0, Number(controller?.h) || 0);
+  const padding = 4 * (Number(interiorLibraryControllerVisualScale.value) || 1);
+  return {
+    x1: x - padding,
+    y1: y - padding,
+    x2: x + w + padding,
+    y2: y + h + padding,
+  };
+}
+
 function getInteriorControllerMatchingHotspot(point, controller) {
   const x = Number(point?.x) || 0;
   const y = Number(point?.y) || 0;
@@ -2658,10 +2648,10 @@ function getInteriorControllerHotspots(controller) {
   ];
 }
 
-function snapInteriorControllerAxis(controllerId, axisValue) {
+function snapInteriorControllerAxis(controllerId, axisValue, ignoreValues = []) {
   const tolerance = Number(interiorLibraryFrontSnapTolerance.value) || 0;
   const isHorizontalAxis = controllerId === "left" || controllerId === "right";
-  const lineCandidates = interiorLibraryControllerSnapLines.value
+  const lineCandidates = interiorLibraryFrontSnapLines.value
     .map((line) => {
       const x1 = Number(line?.x1) || 0;
       const y1 = Number(line?.y1) || 0;
@@ -2675,12 +2665,16 @@ function snapInteriorControllerAxis(controllerId, axisValue) {
       return null;
     })
     .filter((value) => Number.isFinite(value));
-  const pointCandidates = interiorLibraryControllerSnapPoints.value
+  const pointCandidates = interiorLibraryFrontSnapPoints.value
     .map((point) => isHorizontalAxis ? Number(point?.x) : Number(point?.y))
+    .filter((value) => Number.isFinite(value));
+  const ignored = (Array.isArray(ignoreValues) ? ignoreValues : [])
+    .map((value) => Number(value))
     .filter((value) => Number.isFinite(value));
   let bestValue = Number(axisValue) || 0;
   let bestDistance = tolerance + 0.0001;
   for (const candidate of [...lineCandidates, ...pointCandidates]) {
+    if (ignored.some((value) => Math.abs(candidate - value) <= 0.75)) continue;
     const distance = Math.abs(candidate - axisValue);
     if (distance <= tolerance && distance < bestDistance) {
       bestDistance = distance;
@@ -2691,35 +2685,45 @@ function snapInteriorControllerAxis(controllerId, axisValue) {
 }
 
 function buildInteriorControllerHorizontalArrowPath(direction, x, y, width, height) {
-  const head = Math.min(width * 0.28, height * 0.92);
-  const shaftInset = Math.max(head, height * 0.42);
+  const head = Math.min(width * 0.34, height * 0.98);
+  const shaftInset = Math.max(head, height * 0.28);
   const centerY = y + height * 0.5;
-  const shaftHalf = height * 0.22;
+  const shaftHalf = height * 0.24;
   const topY = centerY - shaftHalf;
   const bottomY = centerY + shaftHalf;
   const headTop = centerY - height * 0.5;
   const headBottom = centerY + height * 0.5;
-  const leftTip = x;
-  const rightTip = x + width;
-  const leftJoin = x + shaftInset;
-  const rightJoin = x + width - shaftInset;
-  return `M ${leftJoin} ${headTop} L ${leftTip} ${centerY} L ${leftJoin} ${headBottom} L ${leftJoin} ${bottomY} L ${rightJoin} ${bottomY} L ${rightJoin} ${headBottom} L ${rightTip} ${centerY} L ${rightJoin} ${headTop} L ${rightJoin} ${topY} L ${leftJoin} ${topY} Z`;
+  if (direction === "left") {
+    const tipX = x;
+    const joinX = x + shaftInset;
+    const flatX = x + width;
+    return `M ${flatX} ${topY} L ${joinX} ${topY} L ${joinX} ${headTop} L ${tipX} ${centerY} L ${joinX} ${headBottom} L ${joinX} ${bottomY} L ${flatX} ${bottomY} Z`;
+  }
+  const flatX = x;
+  const joinX = x + width - shaftInset;
+  const tipX = x + width;
+  return `M ${flatX} ${topY} L ${joinX} ${topY} L ${joinX} ${headTop} L ${tipX} ${centerY} L ${joinX} ${headBottom} L ${joinX} ${bottomY} L ${flatX} ${bottomY} Z`;
 }
 
 function buildInteriorControllerVerticalArrowPath(direction, x, y, width, height) {
-  const head = Math.min(height * 0.28, width * 0.92);
-  const shaftInset = Math.max(head, width * 0.42);
+  const head = Math.min(height * 0.34, width * 0.98);
+  const shaftInset = Math.max(head, width * 0.28);
   const centerX = x + width * 0.5;
-  const shaftHalf = width * 0.22;
+  const shaftHalf = width * 0.24;
   const leftX = centerX - shaftHalf;
   const rightX = centerX + shaftHalf;
   const headLeft = centerX - width * 0.5;
   const headRight = centerX + width * 0.5;
-  const topTip = y;
-  const bottomTip = y + height;
-  const topJoin = y + shaftInset;
-  const bottomJoin = y + height - shaftInset;
-  return `M ${headLeft} ${topJoin} L ${centerX} ${topTip} L ${headRight} ${topJoin} L ${rightX} ${topJoin} L ${rightX} ${bottomJoin} L ${headRight} ${bottomJoin} L ${centerX} ${bottomTip} L ${headLeft} ${bottomJoin} L ${leftX} ${bottomJoin} L ${leftX} ${topJoin} Z`;
+  if (direction === "up") {
+    const tipY = y;
+    const joinY = y + shaftInset;
+    const flatY = y + height;
+    return `M ${leftX} ${flatY} L ${leftX} ${joinY} L ${headLeft} ${joinY} L ${centerX} ${tipY} L ${headRight} ${joinY} L ${rightX} ${joinY} L ${rightX} ${flatY} Z`;
+  }
+  const flatY = y;
+  const joinY = y + height - shaftInset;
+  const tipY = y + height;
+  return `M ${leftX} ${flatY} L ${leftX} ${joinY} L ${headLeft} ${joinY} L ${centerX} ${tipY} L ${headRight} ${joinY} L ${rightX} ${joinY} L ${rightX} ${flatY} Z`;
 }
 
 const interiorLibraryGroupCards = computed(() => {
@@ -15548,8 +15552,8 @@ onBeforeUnmount(() => {
                       @pointerdown="handleInteriorLibraryControllerPointerDown(controller.id, $event)"
                     />
                     <foreignObject
-                      :x="controller.x + ((controller.w - controller.inputW) * 0.5)"
-                      :y="controller.y + ((controller.h - controller.inputH) * 0.5)"
+                      :x="controller.fieldX"
+                      :y="controller.fieldY"
                       :width="controller.inputW"
                       :height="controller.inputH"
                     >
