@@ -330,8 +330,18 @@ const interiorLibraryFrontPan = ref({ x: 0, y: 0 });
 const interiorLibraryFrontPanning = ref(false);
 const interiorLibraryViewerCursorPoint = ref(null);
 const interiorLibraryModelPanning = ref(false);
+const interiorLibraryPendingPointerPoint = ref(null);
+const interiorLibraryLastProcessedPointerPoint = ref(null);
+const interiorLibraryInstanceHitCache = ref([]);
+const interiorLibraryControllerVisualsToken = ref(0);
+const interiorLibraryControllerHitCache = ref({
+  token: 0,
+  point: null,
+  result: null,
+});
 let interiorLibraryFrontPanSession = null;
 let interiorLibraryFrontLastMiddleClickMs = 0;
+let interiorLibraryHoverRafId = 0;
 const orderDesignEditorOpen = ref(false);
 const orderDesignEditorDraft = ref(null);
 const orderDesignSavingIds = ref([]);
@@ -450,6 +460,9 @@ const INTERIOR_LIBRARY_FRONT_ZOOM_MIN = 0.1;
 const INTERIOR_LIBRARY_FRONT_ZOOM_MAX = 20000;
 const INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR = 1.18;
 const INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR = 1.6;
+const INTERIOR_LIBRARY_POINTER_EPS = 0.4;
+const INTERIOR_LIBRARY_INSTANCE_HIT_PADDING = 6;
+const INTERIOR_LIBRARY_INSTANCE_HIT_DISTANCE = 10;
 function isOrderDesignSaving(designId) {
   const key = String(designId || "").trim();
   return !!key && orderDesignSavingIds.value.includes(key);
@@ -793,7 +806,7 @@ function selectInteriorLibraryOverlapItem(hit) {
   selectInteriorLibraryInstance(instanceId);
   hideInteriorLibraryOverlapPicker();
 }
-function getInteriorLibraryOverlapPickerStyle() {
+const interiorLibraryOverlapPickerStyle = computed(() => {
   const state = interiorLibraryOverlapPickerState.value || {};
   const menuWidth = 320;
   const gutter = 8;
@@ -809,7 +822,7 @@ function getInteriorLibraryOverlapPickerStyle() {
     left: `${Math.round(left)}px`,
     top: `${Math.round(top)}px`,
   };
-}
+});
 function selectInteriorLibraryInstance(instanceId) {
   interiorLibrarySelectedInstanceId.value = String(instanceId || "").trim();
   interiorLibrarySelectedAnnotation.value = null;
@@ -842,10 +855,71 @@ function pointInInteriorRect(point, rect, padding = 0) {
     py <= Number(rect.y) + Number(rect.h) + padding
   );
 }
-function collectInteriorInstanceHits(point) {
+function isInteriorPointerDeltaSignificant(nextPoint, prevPoint) {
+  if (!nextPoint || !prevPoint) return true;
+  const dx = (Number(nextPoint.x) || 0) - (Number(prevPoint.x) || 0);
+  const dy = (Number(nextPoint.y) || 0) - (Number(prevPoint.y) || 0);
+  return (dx * dx + dy * dy) >= (INTERIOR_LIBRARY_POINTER_EPS * INTERIOR_LIBRARY_POINTER_EPS);
+}
+function normalizeInteriorRect(rect) {
+  if (!rect) return null;
+  return {
+    x: Number(rect.x) || 0,
+    y: Number(rect.y) || 0,
+    w: Number(rect.w) || 0,
+    h: Number(rect.h) || 0,
+  };
+}
+function buildInteriorLibraryInstanceHitCache(instances) {
+  const pad = INTERIOR_LIBRARY_INSTANCE_HIT_PADDING;
+  return (instances || []).map((instance) => {
+    const boundsRect = normalizeInteriorRect(instance?.boundsRect);
+    const expandedHitRect = boundsRect
+      ? {
+          x: boundsRect.x - pad,
+          y: boundsRect.y - pad,
+          w: boundsRect.w + (pad * 2),
+          h: boundsRect.h + (pad * 2),
+        }
+      : null;
+    return {
+      id: String(instance?.id || "").trim(),
+      instanceCode: String(instance?.instanceCode || "").trim(),
+      title: String(instance?.groupTitle || instance?.instanceCode || instance?.id || "قطعه داخلی").trim(),
+      lineColor: String(instance?.lineColor || "").trim(),
+      visualOrder: Number(instance?.visualOrder) || 0,
+      boundsRect,
+      expandedHitRect,
+      outerLines: (instance?.outerLines || []).map((line) => ({
+        x1: Number(line?.x1) || 0,
+        y1: Number(line?.y1) || 0,
+        x2: Number(line?.x2) || 0,
+        y2: Number(line?.y2) || 0,
+      })),
+      innerLines: (instance?.innerLines || []).map((line) => ({
+        x1: Number(line?.x1) || 0,
+        y1: Number(line?.y1) || 0,
+        x2: Number(line?.x2) || 0,
+        y2: Number(line?.y2) || 0,
+      })),
+    };
+  });
+}
+function collectInteriorInstanceHitCandidates(point) {
+  const target = { x: Number(point?.x) || 0, y: Number(point?.y) || 0 };
+  const candidates = [];
+  for (const instance of interiorLibraryInstanceHitCache.value) {
+    const hitRect = instance?.expandedHitRect || instance?.boundsRect;
+    if (!hitRect) continue;
+    if (!pointInInteriorRect(target, hitRect, 0)) continue;
+    candidates.push(instance);
+  }
+  return candidates;
+}
+function scoreInteriorInstanceCandidates(point, candidates) {
   const target = { x: Number(point?.x) || 0, y: Number(point?.y) || 0 };
   const hits = [];
-  for (const instance of interiorLibraryPreviewInstances2d.value) {
+  for (const instance of candidates || []) {
     if (!instance?.boundsRect) continue;
     const inside = pointInInteriorRect(target, instance.boundsRect, 0);
     let minDistance = Infinity;
@@ -869,14 +943,14 @@ function collectInteriorInstanceHits(point) {
         )
       );
     }
-    if (!inside && minDistance > 10) continue;
+    if (!inside && minDistance > INTERIOR_LIBRARY_INSTANCE_HIT_DISTANCE) continue;
     hits.push({
-      id: String(instance.id || "").trim(),
-      instanceCode: String(instance.instanceCode || "").trim(),
-      title: String(instance.groupTitle || instance.instanceCode || instance.id || "قطعه داخلی").trim(),
-      lineColor: String(instance.lineColor || "").trim(),
+      id: instance.id,
+      instanceCode: instance.instanceCode,
+      title: instance.title,
+      lineColor: instance.lineColor,
       distance: inside ? Math.min(minDistance, 0) : minDistance,
-      visualOrder: Number(instance.visualOrder) || 0,
+      visualOrder: instance.visualOrder,
     });
   }
   return hits.sort((a, b) => {
@@ -884,20 +958,12 @@ function collectInteriorInstanceHits(point) {
     return b.visualOrder - a.visualOrder;
   });
 }
+function collectInteriorInstanceHits(point) {
+  const candidates = collectInteriorInstanceHitCandidates(point);
+  return scoreInteriorInstanceCandidates(point, candidates);
+}
 function updateInteriorLibraryHoverState(point) {
-  if (interiorLibraryControllerPointerState.value.mode === "controller") return;
-  if (hitTestInteriorLibraryController(point)) {
-    interiorLibraryHoverMode.value = "clicker";
-    interiorLibraryHoveredInstanceId.value = "";
-    clearInteriorLibraryOverlapPreview();
-    return;
-  }
-  if (!point || interiorLibraryAnnotationTool.value) {
-    interiorLibraryHoverMode.value = null;
-    interiorLibraryHoveredInstanceId.value = "";
-    clearInteriorLibraryOverlapPreview();
-    return;
-  }
+  if (!point) return;
   const rendered = interiorLibraryRenderedAnnotations.value;
   const hitDimension = interiorLibraryShowDimensions.value
     ? hitTestInteriorAnnotationList(rendered.dimensions, point, 12)
@@ -907,22 +973,44 @@ function updateInteriorLibraryHoverState(point) {
     : null;
   const instanceHits = !hitDimension && !hitGuide ? collectInteriorInstanceHits(point) : [];
   const previewId = String(interiorLibraryPickerPreviewInstanceId.value || "").trim();
-  interiorLibraryHoveredInstanceId.value = previewId || instanceHits[0]?.id || "";
-  interiorLibraryHoverMode.value = (hitDimension || hitGuide || instanceHits.length) ? "clicker" : null;
+  const nextHoveredInstanceId = previewId || instanceHits[0]?.id || "";
+  const nextHoverMode = (hitDimension || hitGuide || instanceHits.length) ? "clicker" : null;
+  if (interiorLibraryHoveredInstanceId.value !== nextHoveredInstanceId) {
+    interiorLibraryHoveredInstanceId.value = nextHoveredInstanceId;
+  }
+  if (interiorLibraryHoverMode.value !== nextHoverMode) {
+    interiorLibraryHoverMode.value = nextHoverMode;
+  }
 }
 
 function hitTestInteriorLibraryController(point) {
+  if (!point) return null;
+  const target = { x: Number(point.x) || 0, y: Number(point.y) || 0 };
+  const cache = interiorLibraryControllerHitCache.value;
+  if (cache?.token === interiorLibraryControllerVisualsToken.value
+    && cache.point
+    && !isInteriorPointerDeltaSignificant(target, cache.point)) {
+    return cache.result;
+  }
+  let result = null;
   for (let index = interiorLibraryControllerVisuals.value.length - 1; index >= 0; index -= 1) {
     const item = interiorLibraryControllerVisuals.value[index];
-    if (pointInInteriorControllerBody(point, item)) {
-      return { ...item, activeHotspot: null };
+    if (pointInInteriorControllerBody(target, item)) {
+      result = { ...item, activeHotspot: null };
+      break;
     }
-    const hotspot = getInteriorControllerMatchingHotspot(point, item);
+    const hotspot = getInteriorControllerMatchingHotspot(target, item);
     if (hotspot) {
-      return { ...item, activeHotspot: hotspot };
+      result = { ...item, activeHotspot: hotspot };
+      break;
     }
   }
-  return null;
+  interiorLibraryControllerHitCache.value = {
+    token: interiorLibraryControllerVisualsToken.value,
+    point: target,
+    result,
+  };
+  return result;
 }
 
 function clearInteriorLibraryControllerEditing() {
@@ -1190,6 +1278,84 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
     dirty: true,
   };
 }
+function stopInteriorLibraryPointerProcessing() {
+  if (interiorLibraryHoverRafId) {
+    cancelAnimationFrame(interiorLibraryHoverRafId);
+    interiorLibraryHoverRafId = 0;
+  }
+  interiorLibraryPendingPointerPoint.value = null;
+  interiorLibraryLastProcessedPointerPoint.value = null;
+}
+function scheduleInteriorLibraryPointerProcessing() {
+  if (interiorLibraryHoverRafId) return;
+  interiorLibraryHoverRafId = requestAnimationFrame(processInteriorLibraryPointerFrame);
+}
+function processInteriorLibraryPointerFrame() {
+  interiorLibraryHoverRafId = 0;
+  const rawPoint = interiorLibraryPendingPointerPoint.value;
+  if (!rawPoint) return;
+  if (interiorLibraryPreviewMode.value !== "front2d") return;
+  if (interiorLibraryControllerPointerState.value.mode === "controller") {
+    interiorLibraryPendingPointerPoint.value = null;
+    return;
+  }
+  interiorLibraryPendingPointerPoint.value = null;
+  if (!isInteriorPointerDeltaSignificant(rawPoint, interiorLibraryLastProcessedPointerPoint.value)) {
+    if (interiorLibraryPendingPointerPoint.value) {
+      scheduleInteriorLibraryPointerProcessing();
+    }
+    return;
+  }
+  interiorLibraryLastProcessedPointerPoint.value = rawPoint;
+  const controllerHit = hitTestInteriorLibraryController(rawPoint);
+  if (controllerHit) {
+    if (interiorLibraryHoveredControllerId.value !== controllerHit.id) {
+      interiorLibraryHoveredControllerId.value = controllerHit.id;
+    }
+    if (interiorLibraryHoverMode.value !== "clicker") {
+      interiorLibraryHoverMode.value = "clicker";
+    }
+    if (interiorLibraryHoveredInstanceId.value !== "") {
+      interiorLibraryHoveredInstanceId.value = "";
+    }
+    if (interiorLibraryPickerPreviewInstanceId.value) {
+      clearInteriorLibraryOverlapPreview();
+    }
+    if (interiorLibraryPendingPointerPoint.value) {
+      scheduleInteriorLibraryPointerProcessing();
+    }
+    return;
+  }
+  if (interiorLibraryHoveredControllerId.value !== "") {
+    interiorLibraryHoveredControllerId.value = "";
+  }
+  if (interiorLibraryAnnotationTool.value) {
+    hideInteriorLibraryOverlapPicker();
+    const snappedPoint = getInteriorLibrarySnappedFrontPoint(rawPoint);
+    syncInteriorLibraryCursorPoint(rawPoint, snappedPoint);
+    if (interiorLibraryHoverMode.value !== null) {
+      interiorLibraryHoverMode.value = null;
+    }
+    if (interiorLibraryHoveredInstanceId.value !== "") {
+      interiorLibraryHoveredInstanceId.value = "";
+    }
+    if (snappedPoint && interiorLibraryAnnotationDraft.value) {
+      updateInteriorLibraryAnnotationDraft(snappedPoint);
+    }
+    if (interiorLibraryPendingPointerPoint.value) {
+      scheduleInteriorLibraryPointerProcessing();
+    }
+    return;
+  }
+  if (interiorLibraryCurrentSnapPoint.value) {
+    interiorLibraryCurrentSnapPoint.value = null;
+  }
+  syncInteriorLibraryCursorPoint(rawPoint, null);
+  updateInteriorLibraryHoverState(rawPoint);
+  if (interiorLibraryPendingPointerPoint.value) {
+    scheduleInteriorLibraryPointerProcessing();
+  }
+}
 function onInteriorLibraryFrontSvgPointerDown(event) {
   if (interiorLibraryPreviewMode.value !== "front2d" || Number(event?.button) !== 0) return;
   if (interiorLibraryControllerState.value.enabled) {
@@ -1273,22 +1439,9 @@ function onInteriorLibraryFrontSvgPointerMove(event) {
     applyInteriorLibraryControllerDrag(interiorLibraryControllerPointerState.value.controllerId, rawPoint);
     return;
   }
-  const controllerHit = hitTestInteriorLibraryController(rawPoint);
-  interiorLibraryHoveredControllerId.value = controllerHit?.id || "";
-  if (!interiorLibraryAnnotationTool.value) {
-    interiorLibraryCurrentSnapPoint.value = null;
-    syncInteriorLibraryCursorPoint(rawPoint, null);
-    updateInteriorLibraryHoverState(rawPoint);
-    return;
-  }
-  hideInteriorLibraryOverlapPicker();
-  const point = getInteriorLibrarySnappedFrontPoint(rawPoint);
-  syncInteriorLibraryCursorPoint(rawPoint, point);
-  interiorLibraryHoverMode.value = null;
-  interiorLibraryHoveredInstanceId.value = "";
-  if (!point) return;
-  if (!interiorLibraryAnnotationDraft.value) return;
-  updateInteriorLibraryAnnotationDraft(point);
+  syncInteriorLibraryCursorPoint(rawPoint, interiorLibraryCurrentSnapPoint.value);
+  interiorLibraryPendingPointerPoint.value = rawPoint;
+  scheduleInteriorLibraryPointerProcessing();
 }
 function onInteriorLibraryFrontSvgPointerLeave() {
   if (interiorLibraryControllerPointerState.value.mode === "controller") return;
@@ -1298,6 +1451,7 @@ function onInteriorLibraryFrontSvgPointerLeave() {
   interiorLibraryHoveredInstanceId.value = "";
   interiorLibraryHoveredControllerId.value = "";
   clearInteriorLibraryOverlapPreview();
+  stopInteriorLibraryPointerProcessing();
 }
 
 function onInteriorLibraryFrontSvgPointerUp() {
@@ -1992,6 +2146,9 @@ const interiorLibraryPreviewInstances2d = computed(() => {
     })
     .filter(Boolean);
 });
+watch(interiorLibraryPreviewInstances2d, (next) => {
+  interiorLibraryInstanceHitCache.value = buildInteriorLibraryInstanceHitCache(next || []);
+}, { immediate: true });
 const interiorLibraryControllerVisualScale = computed(() => {
   const zoom = Math.min(
     INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
@@ -2124,6 +2281,9 @@ const interiorLibraryControllerVisuals = computed(() => {
       ...vertical,
     },
   ];
+});
+watch(interiorLibraryControllerVisuals, () => {
+  interiorLibraryControllerVisualsToken.value += 1;
 });
 const interiorLibraryFrontSnapLines = computed(() => {
   const outer = (interiorLibraryPreviewSvgLines.value?.outer || []).map((line) => ({
@@ -2320,9 +2480,17 @@ watch(interiorLibraryPreviewMode, () => {
   hideInteriorLibraryOverlapPicker();
   stopInteriorLibraryModelPanCursor();
   clearInteriorLibraryViewerCursorPoint();
+  if (interiorLibraryPreviewMode.value !== "front2d") {
+    stopInteriorLibraryPointerProcessing();
+  }
   nextTick(() => {
     syncInteriorLibraryFrontViewport();
   });
+});
+watch(interiorLibraryOpen, (open) => {
+  if (!open) {
+    stopInteriorLibraryPointerProcessing();
+  }
 });
 watch(interiorLibraryViewerWrapEl, (el) => {
   if (interiorLibraryFrontViewportObserver) {
@@ -15800,7 +15968,7 @@ onBeforeUnmount(() => {
               <div
                 v-if="interiorLibraryOverlapPickerState.visible && interiorLibraryOverlapPickerState.items.length"
                 class="subCategoryDesignEditor__overlapPicker"
-                :style="getInteriorLibraryOverlapPickerStyle()"
+                :style="interiorLibraryOverlapPickerStyle"
                 @pointerdown="onInteriorLibraryOverlapPickerPointerDown"
                 @mouseleave="onInteriorLibraryOverlapPickerLeave"
               >
