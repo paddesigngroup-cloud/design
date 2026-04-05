@@ -17,7 +17,6 @@ import {
   fitAllHandlerRef,
 } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
-import InteriorControllerTestModal from "./components/InteriorControllerTestModal.vue";
 import { useDialogService } from "./dialog_service.js";
 import { WALL_READY_PRESETS, buildPresetLines, getPresetIconWalls } from "./features/wall_preset_drag.js";
 import { DOOR_READY_PRESETS, buildDoorPresetPayloadAsync, buildDoorPresetPreviewLines, getDoorPresetIconLines, primeDoorPresetModel } from "./features/door_preset_drag.js";
@@ -285,11 +284,25 @@ const orderDesignCatalogLoadedForOrderId = ref("");
 let orderDesignCatalogLoadRequestSeq = 0;
 let orderDesignCatalogReloadQueued = false;
 const interiorLibraryOpen = ref(false);
-const interiorControllerTestOpen = ref(false);
 const interiorLibraryForcedOrderDesignId = ref("");
 const interiorInstanceEditorOpen = ref(false);
 const interiorInstanceEditorDraft = ref(null);
 const interiorInstanceEditorActiveGroupId = ref("");
+const interiorLibraryControllerTestMode = ref(false);
+const interiorLibraryControllerEditingId = ref("");
+const interiorLibraryControllerInputDraft = ref("");
+const interiorLibraryHoveredControllerId = ref("");
+const interiorLibraryControllerDraftValues = ref(null);
+const interiorLibraryControllerPointerState = ref({
+  mode: "idle",
+  pointerId: null,
+  controllerId: "",
+  startPoint: null,
+  startPan: null,
+  startValues: null,
+  pointerToAnchor: null,
+  dirty: false,
+});
 const interiorLibraryPreviewMode = ref("front2d");
 const interiorLibraryFrontZoom = ref(1);
 const interiorLibraryPreview3dRef = ref(null);
@@ -872,6 +885,13 @@ function collectInteriorInstanceHits(point) {
   });
 }
 function updateInteriorLibraryHoverState(point) {
+  if (interiorLibraryControllerPointerState.value.mode === "controller") return;
+  if (hitTestInteriorLibraryController(point)) {
+    interiorLibraryHoverMode.value = "clicker";
+    interiorLibraryHoveredInstanceId.value = "";
+    clearInteriorLibraryOverlapPreview();
+    return;
+  }
   if (!point || interiorLibraryAnnotationTool.value) {
     interiorLibraryHoverMode.value = null;
     interiorLibraryHoveredInstanceId.value = "";
@@ -890,8 +910,264 @@ function updateInteriorLibraryHoverState(point) {
   interiorLibraryHoveredInstanceId.value = previewId || instanceHits[0]?.id || "";
   interiorLibraryHoverMode.value = (hitDimension || hitGuide || instanceHits.length) ? "clicker" : null;
 }
+
+function hitTestInteriorLibraryController(point) {
+  for (let index = interiorLibraryControllerVisuals.value.length - 1; index >= 0; index -= 1) {
+    const item = interiorLibraryControllerVisuals.value[index];
+    if (pointInInteriorControllerHotspot(point, item)) return item;
+  }
+  return null;
+}
+
+function clearInteriorLibraryControllerEditing() {
+  interiorLibraryControllerEditingId.value = "";
+  interiorLibraryControllerInputDraft.value = "";
+}
+
+function clearInteriorLibraryControllerDraftValues() {
+  interiorLibraryControllerDraftValues.value = null;
+}
+
+function beginInteriorLibraryControllerEditing(controllerId) {
+  if (!controllerId || !interiorLibraryControllerState.value.enabled) return;
+  interiorLibraryControllerEditingId.value = String(controllerId || "").trim();
+  interiorLibraryControllerInputDraft.value = formatInteriorControllerRawValue(interiorLibraryControllerParamValues.value?.[controllerId]);
+  nextTick(() => {
+    const inputEl = interiorLibraryViewerWrapEl.value?.querySelector?.(`[data-interior-controller-input="${controllerId}"]`);
+    inputEl?.focus?.();
+    inputEl?.select?.();
+  });
+}
+
+function updateInteriorInstanceFromControllerValues(nextValues) {
+  const instance = activeInteriorLibrarySelectedInstance.value;
+  if (!instance?.id) return null;
+  const bindings = interiorLibraryControllerBindingMap.value;
+  const nextParamValues = { ...(instance.param_values || {}) };
+  for (const [controllerId, valueMm] of Object.entries(nextValues || {})) {
+    const paramCode = String(bindings?.[controllerId]?.param_code || "").trim();
+    if (!paramCode) continue;
+    nextParamValues[paramCode] = String(Math.max(0, Number(valueMm) || 0));
+  }
+  const nextInstance = normalizeInteriorInstanceRecord({
+    ...instance,
+    param_values: nextParamValues,
+  });
+  if (!nextInstance) return null;
+  if (subCategoryDesignEditorOpen.value) {
+    syncInteriorInstanceInDraft(nextInstance);
+    syncOpenSubCategoryDesignDraftToCollection();
+  } else {
+    syncInteriorInstanceInOrderDesignCollection(activeInteriorLibraryOrderDesign.value?.id, nextInstance);
+  }
+  return nextInstance;
+}
+
+function applyInteriorLibraryControllerInput(controllerId, nextValueMm) {
+  const frame = interiorLibraryControllerFrameRect.value;
+  const values = interiorLibraryControllerParamValues.value;
+  if (!frame || !Number.isFinite(nextValueMm)) return false;
+  const safeValue = Math.max(0, Number(nextValueMm) || 0);
+  const nextValues = {
+    left: Number(values.left) || 0,
+    top: Number(values.top) || 0,
+    right: Number(values.right) || 0,
+    bottom_offset: Number(values.bottom_offset) || 0,
+  };
+  const frameWidth = Math.max(0, frame.maxX - frame.minX);
+  const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
+  const minWidth = 240;
+  const minHeight = 1;
+  if (controllerId === "left") {
+    nextValues.left = Math.min(Math.max(0, safeValue), Math.max(0, frameWidth - nextValues.right - minWidth));
+  } else if (controllerId === "right") {
+    nextValues.right = Math.min(Math.max(0, safeValue), Math.max(0, frameWidth - nextValues.left - minWidth));
+  } else if (controllerId === "top") {
+    nextValues.top = Math.min(Math.max(minHeight, safeValue), Math.max(minHeight, frameHeight - nextValues.bottom_offset));
+  } else if (controllerId === "bottom_offset") {
+    nextValues.bottom_offset = Math.min(Math.max(0, safeValue), Math.max(0, frameHeight - nextValues.top));
+  } else {
+    return false;
+  }
+  return !!updateInteriorInstanceFromControllerValues(nextValues);
+}
+
+async function persistActiveInteriorLibraryControllerInstance() {
+  const instance = activeInteriorLibrarySelectedInstance.value;
+  if (!instance?.id) return;
+  if (subCategoryDesignEditorOpen.value) {
+    const draft = subCategoryDesignEditorDraft.value;
+    if (!draft?.id) return;
+    const res = await fetch(
+      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          placement_z: Number(instance.placement_z) || 0,
+          ui_order: Math.max(0, Number(instance.ui_order) || 0),
+          instance_code: String(instance.instance_code || "").trim() || "interior",
+          line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+          param_values: Object.fromEntries(
+            Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+          ),
+        }),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره کنترلر نمونه داخلی انجام نشد."));
+    syncInteriorInstanceInDraft(await res.json());
+    syncOpenSubCategoryDesignDraftToCollection();
+    await refreshSubCategoryDesignPreview();
+    return;
+  }
+  const orderDesign = activeInteriorLibraryOrderDesign.value;
+  if (!orderDesign?.id) return;
+  const res = await fetch(
+    `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        placement_z: Number(instance.placement_z) || 0,
+        ui_order: Math.max(0, Number(instance.ui_order) || 0),
+        instance_code: String(instance.instance_code || "").trim() || "interior",
+        line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+        param_values: Object.fromEntries(
+          Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+        ),
+      }),
+    }
+  );
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره کنترلر نمونه داخلی طرح ثبت‌شده انجام نشد."));
+  syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
+  await refreshOrderDesignGeometryFromServer(orderDesign.id);
+}
+
+function commitInteriorLibraryControllerEditing() {
+  const controllerId = String(interiorLibraryControllerEditingId.value || "").trim();
+  if (!controllerId) return;
+  const nextValueMm = parseInteriorControllerInputToMm(interiorLibraryControllerInputDraft.value);
+  if (nextValueMm == null) {
+    clearInteriorLibraryControllerEditing();
+    return;
+  }
+  const applied = applyInteriorLibraryControllerInput(controllerId, nextValueMm);
+  clearInteriorLibraryControllerEditing();
+  if (!applied) return;
+  persistActiveInteriorLibraryControllerInstance().catch((error) => {
+    showAlert(error?.message || "ذخیره کنترلر نمونه داخلی انجام نشد.", { title: "خطا" });
+  });
+}
+
+function beginInteriorLibraryControllerDrag(controllerId, event) {
+  const point = getInteriorLibraryFrontSvgPoint(event);
+  const controller = interiorLibraryControllerVisuals.value.find((item) => item.id === controllerId);
+  if (!point || !controller?.anchor) return;
+  interiorLibraryHoveredControllerId.value = String(controllerId || "").trim();
+  interiorLibraryControllerDraftValues.value = { ...interiorLibraryControllerParamValues.value };
+  interiorLibraryControllerPointerState.value = {
+    mode: "controller",
+    pointerId: event.pointerId,
+    controllerId: String(controllerId || "").trim(),
+    startPoint: point,
+    startPan: null,
+    startValues: { ...interiorLibraryControllerParamValues.value },
+    pointerToAnchor: {
+      x: (Number(point.x) || 0) - (Number(controller.anchor.x) || 0),
+      y: (Number(point.y) || 0) - (Number(controller.anchor.y) || 0),
+    },
+    dirty: false,
+  };
+  interiorLibraryFrontSvgEl.value?.setPointerCapture?.(event.pointerId);
+}
+
+function handleInteriorLibraryControllerPointerDown(controllerId, event) {
+  if (Number(event?.button) === 1) return;
+  if (Number(event?.button) !== 0) return;
+  beginInteriorLibraryControllerDrag(controllerId, event);
+}
+
+function handleInteriorLibraryControllerValuePointerDown(event) {
+  if (Number(event?.button) === 1) return;
+  event?.stopPropagation?.();
+}
+
+function stopInteriorLibraryControllerDrag() {
+  if (interiorLibraryControllerPointerState.value.pointerId != null) {
+    interiorLibraryFrontSvgEl.value?.releasePointerCapture?.(interiorLibraryControllerPointerState.value.pointerId);
+  }
+  const dirty = !!interiorLibraryControllerPointerState.value.dirty;
+  const activeControllerId = String(interiorLibraryControllerPointerState.value.controllerId || "").trim();
+  const draftValues = interiorLibraryControllerDraftValues.value ? { ...interiorLibraryControllerDraftValues.value } : null;
+  interiorLibraryControllerPointerState.value = {
+    mode: "idle",
+    pointerId: null,
+    controllerId: "",
+    startPoint: null,
+    startPan: null,
+    startValues: null,
+    pointerToAnchor: null,
+    dirty: false,
+  };
+  interiorLibraryHoveredControllerId.value = activeControllerId;
+  clearInteriorLibraryControllerDraftValues();
+  if (!dirty) return;
+  if (!draftValues || !updateInteriorInstanceFromControllerValues(draftValues)) return;
+  persistActiveInteriorLibraryControllerInstance().catch((error) => {
+    showAlert(error?.message || "ذخیره کنترلر نمونه داخلی انجام نشد.", { title: "خطا" });
+  });
+}
+
+function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
+  const state = interiorLibraryControllerPointerState.value;
+  const frame = interiorLibraryControllerFrameRect.value;
+  const startValues = state.startValues;
+  if (!frame || !startValues || !currentPoint) return;
+  const pointerToAnchor = state.pointerToAnchor || { x: 0, y: 0 };
+  const anchorX = (Number(currentPoint.x) || 0) - (Number(pointerToAnchor.x) || 0);
+  const anchorY = (Number(currentPoint.y) || 0) - (Number(pointerToAnchor.y) || 0);
+  const snappedX = snapInteriorControllerAxis(controllerId, anchorX);
+  const snappedY = snapInteriorControllerAxis(controllerId, anchorY);
+  const frameWidth = Math.max(0, frame.maxX - frame.minX);
+  const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
+  const minWidth = 240;
+  const minHeight = 1;
+  const nextValues = {
+    left: Number(startValues.left) || 0,
+    top: Number(startValues.top) || 0,
+    right: Number(startValues.right) || 0,
+    bottom_offset: Number(startValues.bottom_offset) || 0,
+  };
+  if (controllerId === "left") {
+    const leftMm = (snappedX - frame.x) / frame.scale;
+    nextValues.left = Math.min(Math.max(0, leftMm), Math.max(0, frameWidth - nextValues.right - minWidth));
+  } else if (controllerId === "right") {
+    const rightMm = ((frame.x + frame.w) - snappedX) / frame.scale;
+    nextValues.right = Math.min(Math.max(0, rightMm), Math.max(0, frameWidth - nextValues.left - minWidth));
+  } else if (controllerId === "top") {
+    const topMm = ((frame.y + frame.h) - (Number(startValues.bottom_offset) || 0) * frame.scale - snappedY) / frame.scale;
+    nextValues.top = Math.min(Math.max(minHeight, topMm), Math.max(minHeight, frameHeight - nextValues.bottom_offset));
+  } else if (controllerId === "bottom_offset") {
+    const bottomMm = ((frame.y + frame.h) - snappedY) / frame.scale - (Number(startValues.top) || 0);
+    nextValues.bottom_offset = Math.min(Math.max(0, bottomMm), Math.max(0, frameHeight - nextValues.top));
+  }
+  interiorLibraryControllerDraftValues.value = nextValues;
+  interiorLibraryControllerPointerState.value = {
+    ...state,
+    dirty: true,
+  };
+}
 function onInteriorLibraryFrontSvgPointerDown(event) {
   if (interiorLibraryPreviewMode.value !== "front2d" || Number(event?.button) !== 0) return;
+  if (interiorLibraryControllerState.value.enabled) {
+    const controllerHit = hitTestInteriorLibraryController(getInteriorLibraryFrontSvgPoint(event));
+    if (controllerHit) {
+      beginInteriorLibraryControllerDrag(controllerHit.id, event);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+  }
   const rawPoint = getInteriorLibraryFrontSvgPoint(event);
   if (!rawPoint) return;
   syncInteriorLibraryCursorPoint(rawPoint, interiorLibraryCurrentSnapPoint.value);
@@ -959,6 +1235,13 @@ function onInteriorLibraryOverlapPickerLeave() {
 function onInteriorLibraryFrontSvgPointerMove(event) {
   const rawPoint = getInteriorLibraryFrontSvgPoint(event);
   if (!rawPoint) return;
+  if (interiorLibraryControllerPointerState.value.mode === "controller") {
+    syncInteriorLibraryCursorPoint(rawPoint, null);
+    applyInteriorLibraryControllerDrag(interiorLibraryControllerPointerState.value.controllerId, rawPoint);
+    return;
+  }
+  const controllerHit = hitTestInteriorLibraryController(rawPoint);
+  interiorLibraryHoveredControllerId.value = controllerHit?.id || "";
   if (!interiorLibraryAnnotationTool.value) {
     interiorLibraryCurrentSnapPoint.value = null;
     syncInteriorLibraryCursorPoint(rawPoint, null);
@@ -975,11 +1258,25 @@ function onInteriorLibraryFrontSvgPointerMove(event) {
   updateInteriorLibraryAnnotationDraft(point);
 }
 function onInteriorLibraryFrontSvgPointerLeave() {
+  if (interiorLibraryControllerPointerState.value.mode === "controller") return;
   interiorLibraryCurrentSnapPoint.value = null;
   clearInteriorLibraryCursorPoint();
   interiorLibraryHoverMode.value = null;
   interiorLibraryHoveredInstanceId.value = "";
+  interiorLibraryHoveredControllerId.value = "";
   clearInteriorLibraryOverlapPreview();
+}
+
+function onInteriorLibraryFrontSvgPointerUp() {
+  if (interiorLibraryControllerPointerState.value.mode === "controller") {
+    stopInteriorLibraryControllerDrag();
+  }
+}
+
+function onInteriorLibraryFrontSvgPointerCancel() {
+  if (interiorLibraryControllerPointerState.value.mode === "controller") {
+    stopInteriorLibraryControllerDrag();
+  }
 }
 function stopInteriorLibraryModelPanCursor() {
   interiorLibraryModelPanning.value = false;
@@ -1662,6 +1959,127 @@ const interiorLibraryPreviewInstances2d = computed(() => {
     })
     .filter(Boolean);
 });
+const interiorLibraryControllerVisualScale = computed(() => {
+  const zoom = Math.min(
+    INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
+    Math.max(INTERIOR_LIBRARY_FRONT_ZOOM_MIN, Number(interiorLibraryFrontZoom.value) || 1)
+  );
+  return 1 / zoom;
+});
+const activeInteriorLibrarySelectedInstance = computed(() =>
+  activeInteriorLibraryInstances.value.find((item) => String(item?.id || "").trim() === String(interiorLibrarySelectedInstanceId.value || "").trim()) || null
+);
+const activeInteriorLibrarySelectedGroup = computed(() =>
+  constructionInternalPartGroupsById.value.get(String(activeInteriorLibrarySelectedInstance.value?.internal_part_group_id || "").trim()) || null
+);
+const interiorLibraryControllerDefinitions = computed(() =>
+  getInternalPartGroupControllerDefinitions(activeInteriorLibrarySelectedGroup.value?.controller_type)
+);
+const interiorLibraryControllerBindingMap = computed(() => {
+  const group = activeInteriorLibrarySelectedGroup.value;
+  if (!group) return {};
+  const allowedCodes = new Set(getInternalPartGroupSelectedParamColumns(group).map((column) => column.key));
+  return normalizeInternalPartGroupControllerBindings(group.controller_type, group.controller_bindings, allowedCodes);
+});
+const interiorLibraryControllerFrameRect = computed(() => {
+  const projection = interiorLibraryPreviewProjection.value;
+  const bounds = interiorLibraryFrontView.value?.bounds;
+  if (!projection || !bounds) return null;
+  const left = projection.project({ ax: bounds.minX, az: bounds.minZ, bx: bounds.minX, bz: bounds.minZ }, 1, false).x1;
+  const right = projection.project({ ax: bounds.maxX, az: bounds.minZ, bx: bounds.maxX, bz: bounds.minZ }, 1, false).x1;
+  const top = projection.project({ ax: bounds.minX, az: bounds.maxZ, bx: bounds.minX, bz: bounds.maxZ }, 1, false).y1;
+  const bottom = projection.project({ ax: bounds.minX, az: bounds.minZ, bx: bounds.minX, bz: bounds.minZ }, 1, false).y1;
+  return {
+    x: Math.min(left, right),
+    y: Math.min(top, bottom),
+    w: Math.abs(right - left),
+    h: Math.abs(bottom - top),
+    minX: Number(bounds.minX) || 0,
+    maxX: Number(bounds.maxX) || 0,
+    minZ: Number(bounds.minZ) || 0,
+    maxZ: Number(bounds.maxZ) || 0,
+    scale: Number(projection.scale) || 1,
+  };
+});
+const interiorLibraryControllerOverlays = computed(() => {
+  const frame = interiorLibraryControllerFrameRect.value;
+  if (!frame || interiorLibraryPreviewMode.value !== "front2d") return [];
+  return activeInteriorLibraryInstances.value
+    .map((instance) => buildInteriorLibraryControllerOverlayForInstance(instance, frame))
+    .filter(Boolean);
+});
+const interiorLibrarySelectedControllerOverlay = computed(() =>
+  interiorLibraryControllerOverlays.value.find(
+    (item) => String(item?.instanceId || "") === String(activeInteriorLibrarySelectedInstance.value?.id || "")
+  ) || null
+);
+const interiorLibraryControllerParamValues = computed(() => interiorLibraryControllerDraftValues.value || interiorLibrarySelectedControllerOverlay.value?.values || {});
+const interiorLibraryControllerRect = computed(() =>
+  buildInteriorLibraryControllerRectFromFrameValues(
+    interiorLibraryControllerFrameRect.value,
+    interiorLibraryControllerParamValues.value,
+  ) || interiorLibrarySelectedControllerOverlay.value?.rect || null
+);
+const interiorLibraryControllerState = computed(() => {
+  const group = activeInteriorLibrarySelectedGroup.value;
+  const instance = activeInteriorLibrarySelectedInstance.value;
+  const enabled = interiorLibraryPreviewMode.value === "front2d" && !!interiorLibrarySelectedControllerOverlay.value;
+  const hasAllBindings = interiorLibraryControllerDefinitions.value.length > 0
+    && interiorLibraryControllerDefinitions.value.every((definition) => String(interiorLibraryControllerBindingMap.value?.[definition.key]?.param_code || "").trim());
+  let message = "";
+  if (interiorLibraryControllerTestMode.value && interiorLibraryPreviewMode.value === "front2d") {
+    if (!instance) message = "برای نمایش کنترلرها، ابتدا یک نمونه داخلی را انتخاب کنید.";
+    else if (!group || normalizeInternalPartGroupControllerType(group?.controller_type) !== INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH) message = "برای این نمونه، کنترلر قطعات عرضی روی گروه داخلی تنظیم نشده است.";
+    else if (!hasAllBindings) message = "اتصال هر ۴ پارامتر کنترلر برای این گروه کامل نیست.";
+    else if (!interiorLibrarySelectedControllerOverlay.value?.rect) message = "مقادیر کنترلرهای این نمونه قابل محاسبه نیست.";
+  }
+  return { enabled, message };
+});
+const interiorLibraryControllerVisuals = computed(() => {
+  if (!interiorLibraryControllerState.value.enabled || !interiorLibraryControllerRect.value) return [];
+  const rect = interiorLibraryControllerRect.value;
+  const scale = interiorLibraryControllerVisualScale.value;
+  const horizontal = { w: 92 * scale, h: 32 * scale, inputW: 62.5 * scale, inputH: 22.5 * scale };
+  const vertical = { w: 28 * scale, h: 76 * scale, inputW: 62.5 * scale, inputH: 22.5 * scale };
+  return [
+    {
+      id: "left",
+      kind: "horizontal",
+      direction: "left",
+      anchor: { x: rect.x, y: rect.y + (rect.h * 0.5) },
+      x: rect.x - (horizontal.w * 0.5),
+      y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
+      ...horizontal,
+    },
+    {
+      id: "top",
+      kind: "vertical",
+      direction: "up",
+      anchor: { x: rect.x + (rect.w * 0.5), y: rect.y },
+      x: rect.x + (rect.w * 0.5) - (vertical.w * 0.5),
+      y: rect.y - (vertical.h * 0.5),
+      ...vertical,
+    },
+    {
+      id: "right",
+      kind: "horizontal",
+      direction: "right",
+      anchor: { x: rect.x + rect.w, y: rect.y + (rect.h * 0.5) },
+      x: rect.x + rect.w - (horizontal.w * 0.5),
+      y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
+      ...horizontal,
+    },
+    {
+      id: "bottom_offset",
+      kind: "vertical",
+      direction: "up",
+      anchor: { x: rect.x + (rect.w * 0.5), y: rect.y + rect.h },
+      x: rect.x + (rect.w * 0.5) - (vertical.w * 0.5),
+      y: rect.y + rect.h - (vertical.h * 0.5),
+      ...vertical,
+    },
+  ];
+});
 const interiorLibraryFrontSnapLines = computed(() => {
   const outer = (interiorLibraryPreviewSvgLines.value?.outer || []).map((line) => ({
     x1: Number(line?.x1) || 0,
@@ -1792,8 +2210,15 @@ const interiorLibraryRenderedAnnotations = computed(() => {
   return { dimensions, guides, draftDimension, draftGuide };
 });
 const interiorLibraryFrontCursorClass = computed(() => {
+  if (interiorLibraryControllerPointerState.value.mode === "controller") {
+    return interiorLibraryControllerPointerState.value.controllerId === "left" || interiorLibraryControllerPointerState.value.controllerId === "right"
+      ? "is-drag-horizontal"
+      : "is-drag-vertical";
+  }
   if (interiorLibraryFrontPanning.value && interiorLibraryPreviewMode.value === "front2d") return "is-panning";
   if (interiorLibraryPreviewMode.value === "model3d" && interiorLibraryModelPanning.value) return "is-panning";
+  if (interiorLibraryHoveredControllerId.value === "left" || interiorLibraryHoveredControllerId.value === "right") return "is-resize-horizontal";
+  if (interiorLibraryHoveredControllerId.value === "top" || interiorLibraryHoveredControllerId.value === "bottom_offset") return "is-resize-vertical";
   if (interiorLibraryAnnotationTool.value === "dimension") return "is-drawing-dimension";
   if (interiorLibraryAnnotationTool.value === "guide") return "is-drawing-guide";
   if (interiorLibraryHoverMode.value === "clicker") return "is-clickable";
@@ -1816,6 +2241,14 @@ const interiorLibraryOverlayCursorIcon = computed(() => {
   if (interiorLibraryAnnotationTool.value === "dimension" || interiorLibraryAnnotationTool.value === "guide") return "";
   if (interiorLibraryHoverMode.value === "clicker") return "/icons/clicker_32.png";
   return "/icons/cursor_32.png";
+});
+const interiorLibraryOverlayCursorOffset = computed(() => {
+  const scale = Number(interiorLibraryCursorVisualScale.value) || 1;
+  const icon = String(interiorLibraryOverlayCursorIcon.value || "");
+  if (icon.includes("clicker_32")) {
+    return { x: 9 * scale, y: 6 * scale, size: 32 * scale };
+  }
+  return { x: 6 * scale, y: 4 * scale, size: 32 * scale };
 });
 const interiorLibraryModelCursorStyle = computed(() => {
   const point = interiorLibraryViewerCursorPoint.value;
@@ -1878,6 +2311,14 @@ watch(activeInteriorLibraryInstances, (items) => {
     hideInteriorLibraryOverlapPicker();
   }
 }, { immediate: true });
+watch(activeInteriorLibrarySelectedInstance, () => {
+  clearInteriorLibraryControllerEditing();
+  clearInteriorLibraryControllerDraftValues();
+  interiorLibraryHoveredControllerId.value = "";
+  if (interiorLibraryControllerPointerState.value.mode === "controller") {
+    stopInteriorLibraryControllerDrag();
+  }
+});
 
 function extractFormulaNamesLocal(expression) {
   return Array.from(new Set(String(expression || "").match(/[A-Za-z_][A-Za-z0-9_]*/g) || []));
@@ -2020,6 +2461,203 @@ function getInteriorInstanceEffectiveValue(instance, code) {
   }
   if (String(baseValue) === "0") return "0";
   return "";
+}
+
+function normalizeInteriorControllerNumericText(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
+    .replace(/[٫،]/g, ".");
+}
+
+function parseInteriorControllerMm(value) {
+  const numeric = Number.parseFloat(normalizeInteriorControllerNumericText(value));
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatInteriorControllerRawValue(valueMm, unit = currentEditorDisplayUnit.value) {
+  const numeric = Math.max(0, Number(valueMm) || 0);
+  const normalizedUnit = String(unit || "cm").trim().toLowerCase();
+  if (normalizedUnit === "mm") return String(Math.round(numeric));
+  if (normalizedUnit === "inch") return (numeric / 25.4).toFixed(2);
+  return (numeric / 10).toFixed(1);
+}
+
+function formatInteriorControllerDisplayValue(valueMm) {
+  return `${formatInteriorControllerRawValue(valueMm)} ${String(currentEditorDisplayUnit.value || "cm").trim().toLowerCase()}`;
+}
+
+function parseInteriorControllerInputToMm(value) {
+  const numeric = Number.parseFloat(normalizeInteriorControllerNumericText(value));
+  if (!Number.isFinite(numeric)) return null;
+  const unit = String(currentEditorDisplayUnit.value || "cm").trim().toLowerCase();
+  if (unit === "mm") return numeric;
+  if (unit === "inch") return numeric * 25.4;
+  return numeric * 10;
+}
+
+function buildInteriorLibraryControllerRectFromFrameValues(frame, values) {
+  if (!frame) return null;
+  const left = Number(values?.left);
+  const right = Number(values?.right);
+  const top = Number(values?.top);
+  const bottomOffset = Number(values?.bottom_offset);
+  if (![left, right, top, bottomOffset].every(Number.isFinite)) return null;
+  const widthMm = Math.max(0, (frame.maxX - frame.minX) - left - right);
+  const heightMm = Math.max(0, top);
+  const x = frame.x + (left * frame.scale);
+  const w = widthMm * frame.scale;
+  const h = heightMm * frame.scale;
+  const bottomMm = frame.minZ + bottomOffset;
+  const y = frame.y + ((frame.maxZ - (bottomMm + heightMm)) * frame.scale);
+  return { x, y, w, h, left, right, top, bottom_offset: bottomOffset };
+}
+
+function deriveInteriorLibraryControllerValuesFromGeometry(instance, frame) {
+  if (!instance || !frame) return null;
+  const data = buildFrontViewLinesFromBoxes(getViewerBoxesFromInteriorInstance(instance));
+  const bounds = data?.bounds;
+  if (!bounds) return null;
+  return {
+    left: Math.max(0, (Number(bounds.minX) || 0) - frame.minX),
+    right: Math.max(0, frame.maxX - (Number(bounds.maxX) || 0)),
+    top: Math.max(0, (Number(bounds.maxZ) || 0) - (Number(bounds.minZ) || 0)),
+    bottom_offset: Math.max(0, (Number(bounds.minZ) || 0) - frame.minZ),
+  };
+}
+
+function buildInteriorLibraryControllerOverlayForInstance(instance, frame) {
+  const group = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
+  if (!group || normalizeInternalPartGroupControllerType(group.controller_type) !== INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH) return null;
+  const definitions = getInternalPartGroupControllerDefinitions(group.controller_type);
+  if (!definitions.length) return null;
+  const allowedCodes = new Set(getInternalPartGroupSelectedParamColumns(group).map((column) => column.key));
+  const bindings = normalizeInternalPartGroupControllerBindings(group.controller_type, group.controller_bindings, allowedCodes);
+  if (!definitions.every((definition) => String(bindings?.[definition.key]?.param_code || "").trim())) return null;
+  const geometryValues = deriveInteriorLibraryControllerValuesFromGeometry(instance, frame) || {};
+  const values = Object.fromEntries(
+    definitions.map((definition) => {
+      const paramCode = String(bindings?.[definition.key]?.param_code || "").trim();
+      const rawValue = paramCode ? getInteriorInstanceEffectiveValue(instance, paramCode) : "";
+      const parsedValue = parseInteriorControllerMm(rawValue);
+      return [definition.key, Number.isFinite(parsedValue) ? parsedValue : geometryValues[definition.key]];
+    })
+  );
+  const rect = buildInteriorLibraryControllerRectFromFrameValues(frame, values);
+  if (!rect) return null;
+  return {
+    instanceId: String(instance?.id || "").trim(),
+    groupId: String(group?.id || "").trim(),
+    groupCode: String(group?.code || "").trim(),
+    groupTitle: String(group?.group_title || group?.title || "").trim(),
+    bindings,
+    values,
+    rect,
+  };
+}
+
+function pointInInteriorControllerRect(point, rect, pad = 0) {
+  const x = Number(point?.x) || 0;
+  const y = Number(point?.y) || 0;
+  return (
+    x >= (Number(rect?.x) || 0) - pad &&
+    x <= (Number(rect?.x) || 0) + (Number(rect?.w) || 0) + pad &&
+    y >= (Number(rect?.y) || 0) - pad &&
+    y <= (Number(rect?.y) || 0) + (Number(rect?.h) || 0) + pad
+  );
+}
+
+function pointInInteriorControllerHotspot(point, controller) {
+  const x = Number(point?.x) || 0;
+  const y = Number(point?.y) || 0;
+  return getInteriorControllerHotspots(controller).some((hotspot) => {
+    const hx = Number(hotspot?.x);
+    const hy = Number(hotspot?.y);
+    const radius = Number(hotspot?.radius);
+    if (!Number.isFinite(hx) || !Number.isFinite(hy) || !Number.isFinite(radius)) return false;
+    return Math.hypot(x - hx, y - hy) <= radius;
+  });
+}
+
+function getInteriorControllerHotspots(controller) {
+  const scale = Number(interiorLibraryControllerVisualScale.value) || 1;
+  const radius = 12 * scale;
+  if (controller?.kind === "horizontal") {
+    const centerY = (Number(controller?.y) || 0) + ((Number(controller?.h) || 0) * 0.5);
+    return [
+      { x: Number(controller?.x) || 0, y: centerY, radius },
+      { x: (Number(controller?.x) || 0) + (Number(controller?.w) || 0), y: centerY, radius },
+    ];
+  }
+  const centerX = (Number(controller?.x) || 0) + ((Number(controller?.w) || 0) * 0.5);
+  return [
+    { x: centerX, y: Number(controller?.y) || 0, radius },
+    { x: centerX, y: (Number(controller?.y) || 0) + (Number(controller?.h) || 0), radius },
+  ];
+}
+
+function snapInteriorControllerAxis(controllerId, axisValue) {
+  const tolerance = Number(interiorLibraryFrontSnapTolerance.value) || 0;
+  const isHorizontalAxis = controllerId === "left" || controllerId === "right";
+  const lineCandidates = interiorLibraryFrontSnapLines.value
+    .map((line) => {
+      const x1 = Number(line?.x1) || 0;
+      const y1 = Number(line?.y1) || 0;
+      const x2 = Number(line?.x2) || 0;
+      const y2 = Number(line?.y2) || 0;
+      if (isHorizontalAxis) {
+        if (Math.abs(x1 - x2) <= tolerance) return (x1 + x2) * 0.5;
+        return null;
+      }
+      if (Math.abs(y1 - y2) <= tolerance) return (y1 + y2) * 0.5;
+      return null;
+    })
+    .filter((value) => Number.isFinite(value));
+  const pointCandidates = interiorLibraryFrontSnapPoints.value
+    .map((point) => isHorizontalAxis ? Number(point?.x) : Number(point?.y))
+    .filter((value) => Number.isFinite(value));
+  let bestValue = Number(axisValue) || 0;
+  let bestDistance = tolerance + 0.0001;
+  for (const candidate of [...lineCandidates, ...pointCandidates]) {
+    const distance = Math.abs(candidate - axisValue);
+    if (distance <= tolerance && distance < bestDistance) {
+      bestDistance = distance;
+      bestValue = candidate;
+    }
+  }
+  return bestValue;
+}
+
+function buildInteriorControllerHorizontalArrowPath(direction, x, y, width, height) {
+  const head = Math.min(width * 0.28, height * 0.92);
+  const shaftInset = Math.max(head, height * 0.42);
+  const centerY = y + height * 0.5;
+  const shaftHalf = height * 0.22;
+  const topY = centerY - shaftHalf;
+  const bottomY = centerY + shaftHalf;
+  const headTop = centerY - height * 0.5;
+  const headBottom = centerY + height * 0.5;
+  const leftTip = x;
+  const rightTip = x + width;
+  const leftJoin = x + shaftInset;
+  const rightJoin = x + width - shaftInset;
+  return `M ${leftJoin} ${headTop} L ${leftTip} ${centerY} L ${leftJoin} ${headBottom} L ${leftJoin} ${bottomY} L ${rightJoin} ${bottomY} L ${rightJoin} ${headBottom} L ${rightTip} ${centerY} L ${rightJoin} ${headTop} L ${rightJoin} ${topY} L ${leftJoin} ${topY} Z`;
+}
+
+function buildInteriorControllerVerticalArrowPath(direction, x, y, width, height) {
+  const head = Math.min(height * 0.28, width * 0.92);
+  const shaftInset = Math.max(head, width * 0.42);
+  const centerX = x + width * 0.5;
+  const shaftHalf = width * 0.22;
+  const leftX = centerX - shaftHalf;
+  const rightX = centerX + shaftHalf;
+  const headLeft = centerX - width * 0.5;
+  const headRight = centerX + width * 0.5;
+  const topTip = y;
+  const bottomTip = y + height;
+  const topJoin = y + shaftInset;
+  const bottomJoin = y + height - shaftInset;
+  return `M ${headLeft} ${topJoin} L ${centerX} ${topTip} L ${headRight} ${topJoin} L ${rightX} ${topJoin} L ${rightX} ${bottomJoin} L ${headRight} ${bottomJoin} L ${centerX} ${bottomTip} L ${headLeft} ${bottomJoin} L ${leftX} ${bottomJoin} L ${leftX} ${topJoin} Z`;
 }
 
 const interiorLibraryGroupCards = computed(() => {
@@ -10768,7 +11406,21 @@ function openInteriorLibraryForDesign(orderDesignId) {
 
 function closeInteriorLibrary() {
   interiorLibraryOpen.value = false;
-  interiorControllerTestOpen.value = false;
+  interiorLibraryControllerTestMode.value = false;
+  interiorLibraryControllerEditingId.value = "";
+  interiorLibraryControllerInputDraft.value = "";
+  interiorLibraryControllerDraftValues.value = null;
+  interiorLibraryHoveredControllerId.value = "";
+  interiorLibraryControllerPointerState.value = {
+    mode: "idle",
+    pointerId: null,
+    controllerId: "",
+    startPoint: null,
+    startPan: null,
+    startValues: null,
+    pointerToAnchor: null,
+    dirty: false,
+  };
   interiorLibraryForcedOrderDesignId.value = "";
   interiorLibraryPreviewMode.value = "front2d";
   interiorLibraryFrontZoom.value = 1;
@@ -10781,11 +11433,14 @@ function closeInteriorLibrary() {
 }
 
 function openInteriorControllerTest() {
-  interiorControllerTestOpen.value = true;
-}
-
-function closeInteriorControllerTest() {
-  interiorControllerTestOpen.value = false;
+  if (!interiorLibraryControllerTestMode.value) {
+    interiorLibraryPreviewMode.value = "front2d";
+  }
+  interiorLibraryControllerTestMode.value = !interiorLibraryControllerTestMode.value;
+  interiorLibraryControllerEditingId.value = "";
+  interiorLibraryControllerInputDraft.value = "";
+  interiorLibraryControllerDraftValues.value = null;
+  interiorLibraryHoveredControllerId.value = "";
 }
 
 function disable2dInput() {
@@ -14435,6 +15090,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': interiorLibraryControllerTestMode }"
                 title="تست کنترلر قطعات داخلی"
                 aria-label="تست کنترلر قطعات داخلی"
                 @click="openInteriorControllerTest"
@@ -14560,6 +15216,8 @@ onBeforeUnmount(() => {
                 :class="interiorLibraryFrontCursorClass"
                 @pointerdown="onInteriorLibraryFrontSvgPointerDown"
                 @pointermove="onInteriorLibraryFrontSvgPointerMove"
+                @pointerup="onInteriorLibraryFrontSvgPointerUp"
+                @pointercancel="onInteriorLibraryFrontSvgPointerCancel"
                 @pointerleave="onInteriorLibraryFrontSvgPointerLeave"
               >
                 <defs>
@@ -14673,10 +15331,10 @@ onBeforeUnmount(() => {
                 <image
                   v-else-if="interiorLibraryCursorPoint && interiorLibraryOverlayCursorIcon"
                   :href="interiorLibraryOverlayCursorIcon"
-                  :x="interiorLibraryCursorPoint.x - (16 * interiorLibraryCursorVisualScale)"
-                  :y="interiorLibraryCursorPoint.y - (16 * interiorLibraryCursorVisualScale)"
-                  :width="32 * interiorLibraryCursorVisualScale"
-                  :height="32 * interiorLibraryCursorVisualScale"
+                  :x="interiorLibraryCursorPoint.x - interiorLibraryOverlayCursorOffset.x"
+                  :y="interiorLibraryCursorPoint.y - interiorLibraryOverlayCursorOffset.y"
+                  :width="interiorLibraryOverlayCursorOffset.size"
+                  :height="interiorLibraryOverlayCursorOffset.size"
                   class="subCategoryDesignEditor__overlayCursorImage"
                   preserveAspectRatio="xMidYMid meet"
                 />
@@ -14773,6 +15431,92 @@ onBeforeUnmount(() => {
                     stroke-linecap="round"
                     :opacity="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 0.92 : ((String(interiorLibraryHoveredInstanceId || '') === String(instance.id || '') || String(interiorLibraryPickerPreviewInstanceId || '') === String(instance.id || '')) ? 0.88 : 0.78)"
                   />
+                </g>
+                <template
+                  v-for="overlay in interiorLibraryControllerOverlays"
+                  :key="`interior-controller-rect-${overlay.instanceId}`"
+                >
+                  <g
+                    v-if="String(interiorLibrarySelectedInstanceId || '') !== String(overlay.instanceId || '')"
+                    class="subCategoryDesignEditor__controllerOverlay"
+                  >
+                    <rect
+                      :x="overlay.rect.x"
+                      :y="overlay.rect.y"
+                      :width="overlay.rect.w"
+                      :height="overlay.rect.h"
+                      class="subCategoryDesignEditor__controllerRect"
+                    />
+                  </g>
+                </template>
+                <g
+                  v-if="interiorLibraryControllerState.enabled && interiorLibraryControllerRect"
+                  class="subCategoryDesignEditor__controllerOverlay is-selected"
+                >
+                  <rect
+                    :x="interiorLibraryControllerRect.x"
+                    :y="interiorLibraryControllerRect.y"
+                    :width="interiorLibraryControllerRect.w"
+                    :height="interiorLibraryControllerRect.h"
+                    class="subCategoryDesignEditor__controllerRect"
+                  />
+                  <g
+                    v-for="controller in interiorLibraryControllerVisuals"
+                    :key="`interior-controller-${controller.id}`"
+                    class="subCategoryDesignEditor__controllerHandle"
+                    :class="{
+                      'is-hovered': interiorLibraryHoveredControllerId === controller.id,
+                      'is-editing': interiorLibraryControllerEditingId === controller.id,
+                      'is-dragging': interiorLibraryControllerPointerState.mode === 'controller' && interiorLibraryControllerPointerState.controllerId === controller.id,
+                    }"
+                  >
+                    <path
+                      :d="controller.kind === 'horizontal'
+                        ? buildInteriorControllerHorizontalArrowPath(controller.direction, controller.x, controller.y, controller.w, controller.h)
+                        : buildInteriorControllerVerticalArrowPath(controller.direction, controller.x, controller.y, controller.w, controller.h)"
+                      class="subCategoryDesignEditor__controllerBody"
+                    />
+                    <circle
+                      v-for="(hotspot, hotspotIndex) in getInteriorControllerHotspots(controller)"
+                      :key="`${controller.id}-hotspot-${hotspotIndex}`"
+                      :cx="hotspot.x"
+                      :cy="hotspot.y"
+                      :r="hotspot.radius"
+                      class="subCategoryDesignEditor__controllerHotspot"
+                      @pointerdown="handleInteriorLibraryControllerPointerDown(controller.id, $event)"
+                    />
+                    <foreignObject
+                      :x="controller.x + ((controller.w - controller.inputW) * 0.5)"
+                      :y="controller.y + ((controller.h - controller.inputH) * 0.5)"
+                      :width="controller.inputW"
+                      :height="controller.inputH"
+                    >
+                      <div class="subCategoryDesignEditor__controllerValueShell" xmlns="http://www.w3.org/1999/xhtml">
+                        <input
+                          v-if="interiorLibraryControllerEditingId === controller.id"
+                          :data-interior-controller-input="controller.id"
+                          v-model="interiorLibraryControllerInputDraft"
+                          class="subCategoryDesignEditor__controllerValueInput"
+                          type="text"
+                          dir="ltr"
+                          @pointerdown="handleInteriorLibraryControllerValuePointerDown"
+                          @keydown.enter.prevent="commitInteriorLibraryControllerEditing"
+                          @keydown.esc.prevent="clearInteriorLibraryControllerEditing"
+                          @blur="commitInteriorLibraryControllerEditing"
+                        />
+                        <button
+                          v-else
+                          type="button"
+                          class="subCategoryDesignEditor__controllerValueButton"
+                          :class="{ 'is-hovered': interiorLibraryHoveredControllerId === controller.id }"
+                          @pointerdown="handleInteriorLibraryControllerValuePointerDown"
+                          @click.stop="beginInteriorLibraryControllerEditing(controller.id)"
+                        >
+                          {{ formatInteriorControllerDisplayValue(interiorLibraryControllerParamValues[controller.id]) }}
+                        </button>
+                      </div>
+                    </foreignObject>
+                  </g>
                 </g>
                 <template v-if="interiorLibraryShowDimensions">
                   <g
@@ -14946,6 +15690,12 @@ onBeforeUnmount(() => {
                 {{ interiorLibraryPreviewMode === "model3d"
                   ? "برای این طرح هنوز preview سه بعدی قابل نمایش نیست."
                   : "برای این طرح هنوز preview خطی قابل نمایش نیست." }}
+              </div>
+              <div
+                v-if="interiorLibraryPreviewMode === 'front2d' && interiorLibraryControllerTestMode && interiorLibraryControllerState.message"
+                class="subCategoryDesignEditor__controllerHint"
+              >
+                {{ interiorLibraryControllerState.message }}
               </div>
             </div>
           </div>
@@ -15923,11 +16673,5 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
-
-  <InteriorControllerTestModal
-    v-if="interiorControllerTestOpen"
-    :display-unit="currentEditorDisplayUnit"
-    @close="closeInteriorControllerTest"
-  />
 
 </template>

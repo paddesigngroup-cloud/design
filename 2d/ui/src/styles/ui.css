@@ -3994,6 +3994,16 @@ textarea {
 .subCategoryDesignEditor__frontSvg.is-clickable {
   cursor: none;
 }
+.subCategoryDesignEditor__viewerWrap--interior.is-resize-horizontal,
+.subCategoryDesignEditor__frontSvg.is-resize-horizontal,
+.subCategoryDesignEditor__viewerWrap--interior.is-resize-vertical,
+.subCategoryDesignEditor__frontSvg.is-resize-vertical,
+.subCategoryDesignEditor__viewerWrap--interior.is-drag-horizontal,
+.subCategoryDesignEditor__frontSvg.is-drag-horizontal,
+.subCategoryDesignEditor__viewerWrap--interior.is-drag-vertical,
+.subCategoryDesignEditor__frontSvg.is-drag-vertical {
+  cursor: none;
+}
 .subCategoryDesignEditor__viewerWrap--interior.is-drawing-dimension,
 .subCategoryDesignEditor__frontSvg.is-drawing-dimension,
 .subCategoryDesignEditor__viewerWrap--interior.is-drawing-guide,
@@ -4002,6 +4012,93 @@ textarea {
 }
 .subCategoryDesignEditor__instanceLayer {
   pointer-events: none;
+}
+.subCategoryDesignEditor__controllerOverlay {
+  pointer-events: none;
+}
+.subCategoryDesignEditor__controllerRect {
+  fill: rgba(47, 127, 211, 0.04);
+  stroke: rgba(47, 127, 211, 0.68);
+  stroke-width: 1.8px;
+}
+.subCategoryDesignEditor__controllerOverlay.is-selected .subCategoryDesignEditor__controllerRect {
+  fill: rgba(47, 127, 211, 0.08);
+  stroke: rgba(47, 127, 211, 0.92);
+  stroke-width: 2.2px;
+}
+.subCategoryDesignEditor__controllerHandle {
+  pointer-events: none;
+}
+.subCategoryDesignEditor__controllerBody {
+  fill: rgba(36, 182, 192, 0.92);
+  stroke: rgba(62, 98, 107, 0.88);
+  stroke-width: 2px;
+  pointer-events: none;
+}
+.subCategoryDesignEditor__controllerHotspot {
+  fill: rgba(255, 255, 255, 0.001);
+  stroke: none;
+  pointer-events: auto;
+}
+.subCategoryDesignEditor__controllerHandle.is-hovered .subCategoryDesignEditor__controllerBody,
+.subCategoryDesignEditor__controllerHandle.is-dragging .subCategoryDesignEditor__controllerBody,
+.subCategoryDesignEditor__controllerHandle.is-editing .subCategoryDesignEditor__controllerBody {
+  fill: rgba(46, 197, 208, 0.98);
+  stroke: rgba(28, 75, 84, 0.96);
+}
+.subCategoryDesignEditor__controllerValueShell {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.subCategoryDesignEditor__controllerValueButton,
+.subCategoryDesignEditor__controllerValueInput {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  border: 1px solid rgba(138, 149, 158, 0.72);
+  background: rgba(255, 255, 255, 0.9);
+  color: #2f6fd0;
+  font-family: "Aptos", "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  opacity: 0.9;
+  pointer-events: auto;
+}
+.subCategoryDesignEditor__controllerValueButton {
+  cursor: text;
+}
+.subCategoryDesignEditor__controllerValueButton.is-hovered,
+.subCategoryDesignEditor__controllerValueButton:hover,
+.subCategoryDesignEditor__controllerValueButton:focus-visible,
+.subCategoryDesignEditor__controllerValueInput:focus {
+  background: rgba(255, 255, 255, 0.97);
+  border-color: rgba(47, 111, 208, 0.86);
+  box-shadow: 0 0 0 2px rgba(47, 111, 208, 0.12);
+  outline: none;
+}
+.subCategoryDesignEditor__controllerValueInput {
+  cursor: text;
+}
+.subCategoryDesignEditor__controllerHint {
+  position: absolute;
+  left: 20px;
+  bottom: 20px;
+  z-index: 4;
+  max-width: min(480px, calc(100% - 40px));
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(118, 45, 71, 0.16);
+  background: rgba(255, 255, 255, 0.94);
+  color: #5b2236;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
 }
 .subCategoryDesignEditor__instanceHitBox {
   fill: rgba(255, 255, 255, 0.001);
