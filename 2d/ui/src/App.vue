@@ -15593,6 +15593,7 @@ onBeforeUnmount(() => {
                     :y="interiorLibraryControllerRect.y"
                     :width="interiorLibraryControllerRect.w"
                     :height="interiorLibraryControllerRect.h"
+                    :style="{ '--controller-line-color': interiorLibrarySelectedControllerOverlay?.lineColor || '#2f7fd3' }"
                     class="subCategoryDesignEditor__controllerRect"
                   />
                   <g
