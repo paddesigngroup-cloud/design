@@ -72,6 +72,8 @@ class SubCategoryDesignPartPreviewItem(BaseModel):
 class SubCategoryDesignInteriorInstanceItem(BaseModel):
     id: uuid.UUID
     internal_part_group_id: uuid.UUID
+    controller_type: str | None = None
+    controller_bindings: dict[str, dict[str, str | None]] = Field(default_factory=dict)
     instance_code: str
     line_color: str | None = None
     ui_order: int
@@ -91,6 +93,8 @@ class SubCategoryDesignInteriorInstancePreviewItem(BaseModel):
     internal_part_group_id: uuid.UUID
     internal_part_group_code: str
     internal_part_group_title: str
+    controller_type: str | None = None
+    controller_bindings: dict[str, dict[str, str | None]] = Field(default_factory=dict)
     instance_code: str
     line_color: str | None = None
     ui_order: int
@@ -255,6 +259,8 @@ def _serialize_design(item: SubCategoryDesign, *, include_interior: bool = True,
                 SubCategoryDesignInteriorInstanceItem(
                     id=instance.id,
                     internal_part_group_id=instance.internal_part_group_id,
+                    controller_type=None,
+                    controller_bindings={},
                     instance_code=str(instance.instance_code or "").strip(),
                     line_color=str(getattr(instance, "line_color", "") or "").strip() or None,
                     ui_order=int(instance.ui_order or 0),
@@ -302,6 +308,8 @@ def _serialize_preview(
             internal_part_group_id=item.internal_part_group_id,
             internal_part_group_code=item.internal_part_group_code,
             internal_part_group_title=item.internal_part_group_title,
+            controller_type=item.controller_type,
+            controller_bindings=item.controller_bindings,
             instance_code=item.instance_code,
             line_color=str(getattr(item, "line_color", "") or "").strip() or None,
             ui_order=item.ui_order,
@@ -660,6 +668,8 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
                 internal_part_group_id=instance.internal_part_group_id,
                 internal_part_group_code="",
                 internal_part_group_title="",
+                controller_type=None,
+                controller_bindings={},
                 instance_code=str(instance.instance_code or ""),
                 ui_order=int(instance.ui_order or 0),
                 placement_z=float(instance.placement_z or 0),

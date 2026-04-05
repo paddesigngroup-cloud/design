@@ -350,6 +350,18 @@ const PART_FORMULA_FIELDS = [
   { key: "formula_cy", label: "فرمول Cy" },
   { key: "formula_cz", label: "فرمول Cz" },
 ];
+const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH = "width_controler_internal_group_parts";
+const INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS = [
+  { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH, label: "کنترلر قطعات عرضی" },
+];
+const INTERNAL_GROUP_CONTROLLER_DEFINITIONS = {
+  [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH]: [
+    { key: "left", label: "کنترلر ضلع چپ" },
+    { key: "top", label: "کنترلر ضلع بالا" },
+    { key: "right", label: "کنترلر ضلع راست" },
+    { key: "bottom_offset", label: "کنترلر ارتفاع کل" },
+  ],
+};
 const editableTemplates = ref([]);
 const editableCategories = ref([]);
 const editablePartKinds = ref(PART_KINDS_CATALOG.map((item) => ({ ...item })));
@@ -390,6 +402,11 @@ const internalPartGroupDefaultsEditorGroups = ref([]);
 const internalPartGroupDefaultsValues = ref({});
 const internalPartGroupDefaultsActiveGroupId = ref("");
 const internalPartGroupDefaultsApplying = ref(false);
+const internalPartGroupControllerEditorOpen = ref(false);
+const internalPartGroupControllerEditorRowId = ref(null);
+const internalPartGroupControllerEditorType = ref("");
+const internalPartGroupControllerEditorBindings = ref({});
+const internalPartGroupControllerEditorApplying = ref(false);
 const baseFormulaBuilderOpen = ref(false);
 const baseFormulaBuilderMode = ref("create");
 const baseFormulaBuilderEntity = ref("base_formulas");
@@ -1300,6 +1317,9 @@ const activeInternalPartGroupDefaultsGroup = computed(() =>
   activeInternalPartGroupDefaultsGroups.value.find((group) => String(group.id) === String(internalPartGroupDefaultsActiveGroupId.value))
   || activeInternalPartGroupDefaultsGroups.value[0]
   || null
+);
+const activeInternalPartGroupControllerRow = computed(() =>
+  editableInternalPartGroups.value.find((item) => String(item.id) === String(internalPartGroupControllerEditorRowId.value)) || null
 );
 const activeInteriorInstanceEditorGroups = computed(() => buildInteriorInstanceGroups(interiorInstanceEditorDraft.value));
 const activeInteriorInstanceEditorGroup = computed(() =>
@@ -2348,6 +2368,12 @@ function normalizeInternalPartGroupPayload(item) {
       .map((param) => String(param.param_code || "").trim())
       .filter(Boolean)
   );
+  const controllerType = normalizeInternalPartGroupControllerType(item.controller_type);
+  const controllerBindings = normalizeInternalPartGroupControllerBindings(
+    controllerType,
+    item.controller_bindings,
+    allowedParamCodes,
+  );
   return {
     admin_id: item.admin_id,
     group_id: Number(item.group_id),
@@ -2392,6 +2418,8 @@ function normalizeInternalPartGroupPayload(item) {
           }];
         })
     ),
+    controller_type: controllerType || null,
+    controller_bindings: controllerBindings,
   };
 }
 
@@ -3252,7 +3280,7 @@ function buildNewSubCategoryDesignDraft() {
 
 function buildNewInternalPartGroupDraft() {
   const nextId = editableInternalPartGroups.value.reduce((max, item) => Math.max(max, Number(item.group_id) || 0), 0) + 1;
-  return {
+  return ensureInternalPartGroupControllerConfig({
     id: null,
     admin_id: null,
     group_id: nextId,
@@ -3265,7 +3293,9 @@ function buildNewInternalPartGroupDraft() {
     param_groups: [],
     param_defaults: {},
     param_overrides: {},
-  };
+    controller_type: "",
+    controller_bindings: {},
+  });
 }
 
 function resetSubCategoryDesignEditorState() {
@@ -3322,6 +3352,98 @@ async function closeInternalPartGroupDefaultsEditor() {
     if (!ok) return;
   }
   resetInternalPartGroupDefaultsEditorState();
+}
+
+function resetInternalPartGroupControllerEditorState() {
+  internalPartGroupControllerEditorOpen.value = false;
+  internalPartGroupControllerEditorRowId.value = null;
+  internalPartGroupControllerEditorType.value = "";
+  internalPartGroupControllerEditorBindings.value = {};
+  internalPartGroupControllerEditorApplying.value = false;
+}
+
+function getInternalPartGroupControllerEditorBindingsNormalized() {
+  const row = activeInternalPartGroupControllerRow.value;
+  const allowedCodes = row ? new Set(getInternalPartGroupSelectedParamColumns(row).map((column) => column.key)) : new Set();
+  return normalizeInternalPartGroupControllerBindings(
+    internalPartGroupControllerEditorType.value,
+    internalPartGroupControllerEditorBindings.value,
+    allowedCodes,
+  );
+}
+
+function hasInternalPartGroupControllerChanges() {
+  const row = activeInternalPartGroupControllerRow.value;
+  if (!row) return false;
+  const currentType = normalizeInternalPartGroupControllerType(row.controller_type);
+  const nextType = normalizeInternalPartGroupControllerType(internalPartGroupControllerEditorType.value);
+  if (currentType !== nextType) return true;
+  const currentBindings = normalizeInternalPartGroupControllerBindings(currentType, row.controller_bindings);
+  const nextBindings = getInternalPartGroupControllerEditorBindingsNormalized();
+  const keys = new Set([
+    ...Object.keys(currentBindings || {}),
+    ...Object.keys(nextBindings || {}),
+  ]);
+  return Array.from(keys).some((key) =>
+    String(currentBindings?.[key]?.param_code || "").trim() !== String(nextBindings?.[key]?.param_code || "").trim()
+  );
+}
+
+async function closeInternalPartGroupControllerEditor() {
+  if (internalPartGroupControllerEditorApplying.value) return;
+  if (hasInternalPartGroupControllerChanges()) {
+    const ok = await showConfirm("تغییرات کنترلر گروه اعمال نشده‌اند. پنجره بسته شود؟", {
+      title: "بستن کنترلر گروه",
+      confirmText: "بستن",
+      cancelText: "بازگشت",
+    });
+    if (!ok) return;
+  }
+  resetInternalPartGroupControllerEditorState();
+}
+
+function syncInternalPartGroupControllerEditorBindings() {
+  internalPartGroupControllerEditorBindings.value = normalizeInternalPartGroupControllerBindings(
+    internalPartGroupControllerEditorType.value,
+    internalPartGroupControllerEditorBindings.value,
+  );
+}
+
+function openInternalPartGroupControllerEditor(item) {
+  const row = findEditableInternalPartGroupById(item?.id);
+  if (!row?.id) return;
+  ensureInternalPartGroupParamDefaults(row);
+  ensureInternalPartGroupControllerConfig(row);
+  internalPartGroupControllerEditorRowId.value = row.id;
+  internalPartGroupControllerEditorType.value = normalizeInternalPartGroupControllerType(row.controller_type);
+  internalPartGroupControllerEditorBindings.value = normalizeInternalPartGroupControllerBindings(
+    row.controller_type,
+    row.controller_bindings,
+  );
+  internalPartGroupControllerEditorOpen.value = true;
+}
+
+function updateInternalPartGroupControllerEditorType(value) {
+  internalPartGroupControllerEditorType.value = normalizeInternalPartGroupControllerType(value);
+  syncInternalPartGroupControllerEditorBindings();
+}
+
+async function applyInternalPartGroupControllerEditor() {
+  const row = activeInternalPartGroupControllerRow.value;
+  if (!row || internalPartGroupControllerEditorApplying.value) return;
+  internalPartGroupControllerEditorApplying.value = true;
+  ensureInternalPartGroupParamDefaults(row);
+  ensureInternalPartGroupControllerConfig(row);
+  row.controller_type = normalizeInternalPartGroupControllerType(internalPartGroupControllerEditorType.value);
+  row.controller_bindings = getInternalPartGroupControllerEditorBindingsNormalized();
+  try {
+    await persistInternalPartGroupRow(row);
+  } catch (error) {
+    showAlert(error?.message || "ذخیره کنترلر گروه قطعات داخلی انجام نشد.", { title: "خطا" });
+    internalPartGroupControllerEditorApplying.value = false;
+    return;
+  }
+  resetInternalPartGroupControllerEditorState();
 }
 
 function findEditableInternalPartGroupById(value) {
@@ -3662,34 +3784,38 @@ async function loadConstructionInternalPartGroups() {
     const res = await fetch(url);
     if (!res.ok) throw new Error("load-failed");
     editableInternalPartGroups.value = (await res.json()).map((item) =>
-      ensureInternalPartGroupParamDefaults(withConstructionDraftState({
-        ...item,
-        line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
-        param_groups: Array.isArray(item.param_groups) ? item.param_groups.map((group) => ({
-          ...group,
-          param_group_id: Number(group.param_group_id),
-          param_group_code: String(group.param_group_code || "").trim(),
-          param_group_title: String(group.param_group_title || "").trim(),
-          param_group_icon_path: normalizeIconFileName(group.param_group_icon_path) || "",
-          enabled: group.enabled !== false,
-          ui_order: Number(group.ui_order) || 0,
-        })) : [],
-        param_defaults: Object.fromEntries(
-          Object.entries(item.param_defaults || {}).map(([key, value]) => [String(key || "").trim(), value == null ? "" : String(value)])
-        ),
-        param_overrides: Object.fromEntries(
-          Object.entries(item.param_overrides || {}).map(([key, override]) => [String(key || "").trim(), {
-            display_title: String(override?.display_title || "").trim(),
-            description_text: String(override?.description_text || "").trim(),
-            icon_path: normalizeIconFileName(override?.icon_path) || "",
-            input_mode: override?.input_mode === "binary" ? "binary" : "value",
-            binary_off_label: String(override?.binary_off_label || "").trim() || "0",
-            binary_on_label: String(override?.binary_on_label || "").trim() || "1",
-            binary_off_icon_path: normalizeIconFileName(override?.binary_off_icon_path) || "",
-            binary_on_icon_path: normalizeIconFileName(override?.binary_on_icon_path) || "",
-          }])
-        ),
-      }))
+      ensureInternalPartGroupControllerConfig(
+        ensureInternalPartGroupParamDefaults(withConstructionDraftState({
+          ...item,
+          line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+          param_groups: Array.isArray(item.param_groups) ? item.param_groups.map((group) => ({
+            ...group,
+            param_group_id: Number(group.param_group_id),
+            param_group_code: String(group.param_group_code || "").trim(),
+            param_group_title: String(group.param_group_title || "").trim(),
+            param_group_icon_path: normalizeIconFileName(group.param_group_icon_path) || "",
+            enabled: group.enabled !== false,
+            ui_order: Number(group.ui_order) || 0,
+          })) : [],
+          param_defaults: Object.fromEntries(
+            Object.entries(item.param_defaults || {}).map(([key, value]) => [String(key || "").trim(), value == null ? "" : String(value)])
+          ),
+          param_overrides: Object.fromEntries(
+            Object.entries(item.param_overrides || {}).map(([key, override]) => [String(key || "").trim(), {
+              display_title: String(override?.display_title || "").trim(),
+              description_text: String(override?.description_text || "").trim(),
+              icon_path: normalizeIconFileName(override?.icon_path) || "",
+              input_mode: override?.input_mode === "binary" ? "binary" : "value",
+              binary_off_label: String(override?.binary_off_label || "").trim() || "0",
+              binary_on_label: String(override?.binary_on_label || "").trim() || "1",
+              binary_off_icon_path: normalizeIconFileName(override?.binary_off_icon_path) || "",
+              binary_on_icon_path: normalizeIconFileName(override?.binary_on_icon_path) || "",
+            }])
+          ),
+          controller_type: normalizeInternalPartGroupControllerType(item.controller_type),
+          controller_bindings: normalizeInternalPartGroupControllerBindings(item.controller_type, item.controller_bindings),
+        }))
+      )
     );
   } catch (_) {
     showAlert("خواندن جدول گروه قطعات داخلی از دیتابیس انجام نشد.", { title: "خطا" });
@@ -4867,9 +4993,12 @@ function openInternalPartGroupEditor(item = null) {
             binary_on_icon_path: normalizeIconFileName(override?.binary_on_icon_path) || "",
           }])
         ),
+        controller_type: normalizeInternalPartGroupControllerType(item.controller_type),
+        controller_bindings: normalizeInternalPartGroupControllerBindings(item.controller_type, item.controller_bindings),
       }
     : buildNewInternalPartGroupDraft();
   ensureInternalPartGroupParamDefaults(internalPartGroupEditorDraft.value);
+  ensureInternalPartGroupControllerConfig(internalPartGroupEditorDraft.value);
   internalPartGroupParamGroupsOpen.value = false;
   internalPartGroupEditorOpen.value = true;
 }
@@ -6118,6 +6247,78 @@ function ensureInternalPartGroupParamDefaults(item) {
   return item;
 }
 
+function normalizeInternalPartGroupControllerType(value) {
+  const normalized = String(value || "").trim();
+  return INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS.some((item) => item.value === normalized) ? normalized : "";
+}
+
+function buildInternalPartGroupControllerBindingsByType(controllerType) {
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
+  const definitions = INTERNAL_GROUP_CONTROLLER_DEFINITIONS[normalizedType] || [];
+  return Object.fromEntries(
+    definitions.map((definition) => [definition.key, { param_code: null }])
+  );
+}
+
+function normalizeInternalPartGroupControllerBindings(controllerType, bindings, allowedCodes = null) {
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
+  if (!normalizedType) return {};
+  const definitions = INTERNAL_GROUP_CONTROLLER_DEFINITIONS[normalizedType] || [];
+  const allowed = allowedCodes instanceof Set ? allowedCodes : null;
+  return Object.fromEntries(
+    definitions.map((definition) => {
+      const rawParamCode = String(bindings?.[definition.key]?.param_code || "").trim();
+      const normalizedParamCode = rawParamCode && (!allowed || allowed.has(rawParamCode)) ? rawParamCode : null;
+      return [definition.key, { param_code: normalizedParamCode }];
+    })
+  );
+}
+
+function ensureInternalPartGroupControllerConfig(item) {
+  if (!item) return item;
+  const allowedCodes = new Set(getInternalPartGroupSelectedParamColumns(item).map((column) => column.key));
+  item.controller_type = normalizeInternalPartGroupControllerType(item.controller_type);
+  item.controller_bindings = normalizeInternalPartGroupControllerBindings(
+    item.controller_type,
+    item.controller_bindings,
+    allowedCodes,
+  );
+  return item;
+}
+
+function getInternalPartGroupControllerDefinitions(controllerType) {
+  return (INTERNAL_GROUP_CONTROLLER_DEFINITIONS[normalizeInternalPartGroupControllerType(controllerType)] || []).map((item) => ({ ...item }));
+}
+
+function getInternalPartGroupControllerParamOptions(row) {
+  return getInternalPartGroupSelectedParamColumns(row).map((column) => ({
+    value: column.key,
+    label: column.label || column.key,
+  }));
+}
+
+function getInternalPartGroupControllerTypeLabel(value) {
+  const normalized = normalizeInternalPartGroupControllerType(value);
+  return INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS.find((item) => item.value === normalized)?.label || "";
+}
+
+function getInternalPartGroupControllerSummary(item) {
+  const controllerType = normalizeInternalPartGroupControllerType(item?.controller_type);
+  if (!controllerType) {
+    return { text: "بدون کنترلر", detail: "", connected: 0, total: 0 };
+  }
+  const definitions = getInternalPartGroupControllerDefinitions(controllerType);
+  const allowedCodes = new Set(getInternalPartGroupSelectedParamColumns(item).map((column) => column.key));
+  const bindings = normalizeInternalPartGroupControllerBindings(controllerType, item?.controller_bindings, allowedCodes);
+  const connected = definitions.filter((definition) => String(bindings?.[definition.key]?.param_code || "").trim()).length;
+  return {
+    text: `${toPersianDigits(connected)} / ${toPersianDigits(definitions.length)} متصل`,
+    detail: getInternalPartGroupControllerTypeLabel(controllerType),
+    connected,
+    total: definitions.length,
+  };
+}
+
 function buildInternalPartGroupDefaultsGroups(row) {
   if (!row) return [];
   const selectedParamGroupIds = new Set(
@@ -6431,8 +6632,7 @@ async function persistInternalPartGroupRow(row) {
   if (!res.ok) {
     throw new Error(await readApiErrorMessage(res, "ذخیره پیش‌فرض‌های گروه قطعات داخلی انجام نشد."));
   }
-  const savedRow = withConstructionDraftState(await res.json());
-  ensureInternalPartGroupParamDefaults(savedRow);
+  const savedRow = ensureInternalPartGroupControllerConfig(ensureInternalPartGroupParamDefaults(withConstructionDraftState(await res.json())));
   editableInternalPartGroups.value = editableInternalPartGroups.value.map((item) =>
     String(item.id) === String(savedRow.id) ? savedRow : item
   );
@@ -13356,6 +13556,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--outlineColor">رنگ خطوط</th>
                     <th class="constructionDialog__col constructionDialog__col--defaults">پیش‌فرض‌ها</th>
+                    <th class="constructionDialog__col constructionDialog__col--defaults">کنترلر گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--id">تعداد قطعات</th>
                     <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
                   </tr>
@@ -13402,6 +13603,16 @@ onBeforeUnmount(() => {
                         </button>
                       </div>
                     </td>
+                    <td class="constructionDialog__col constructionDialog__col--defaults">
+                      <div class="constructionDialog__defaultsActions">
+                        <button type="button" class="constructionDialog__defaultsBtn" :title="'تنظیم نوع و اتصال کنترلرهای گروه داخلی'" @click="openInternalPartGroupControllerEditor(item)">
+                          <span class="constructionDialog__defaultsBtnValue">{{ getInternalPartGroupControllerSummary(item).text }}</span>
+                          <span class="constructionDialog__defaultsBtnLabel">
+                            {{ getInternalPartGroupControllerSummary(item).detail || "کنترلر" }}
+                          </span>
+                        </button>
+                      </div>
+                    </td>
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.parts?.length || 0) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--actions">
                       <div class="constructionDialog__actionsCell">
@@ -13411,7 +13622,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionInternalPartGroups.length">
-                    <td class="constructionDialog__col constructionDialog__col--title" colspan="8">هنوز گروهی برای قطعات داخلی ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="9">هنوز گروهی برای قطعات داخلی ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -14100,6 +14311,89 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__textBtn is-primary" :disabled="internalPartGroupDefaultsApplying" @click="applyInternalPartGroupDefaultsEditor">
           <span v-if="internalPartGroupDefaultsApplying" class="constructionDialog__spinner"></span>
           <span>{{ internalPartGroupDefaultsApplying ? "در حال اعمال..." : "اعمال" }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="internalPartGroupControllerEditorOpen" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeInternalPartGroupControllerEditor"></div>
+    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
+      <div class="subCategoryPreview__header">
+        <div>
+          <div class="subCategoryPreview__title">کنترلر گروه قطعات داخلی</div>
+          <div class="subCategoryPreview__caption">
+            {{ activeInternalPartGroupControllerRow?.group_title || "گروه داخلی" }}
+            <span v-if="activeInternalPartGroupControllerRow">
+              {{ toPersianDigits(activeInternalPartGroupControllerRow.group_id) }}
+            </span>
+          </div>
+        </div>
+        <button type="button" class="constructionDialog__textBtn" @click="closeInternalPartGroupControllerEditor">بستن</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        نوع کنترلر گروه و پارامتر متصل به هر دستک در این بخش مشخص می‌شود. در این فاز فقط کنترلر قطعات عرضی فعال است.
+      </div>
+      <div class="subCategoryPreview__body">
+        <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
+          <div class="subCategoryPreview__panelHead">
+            <div class="subCategoryPreview__panelTitle">نوع کنترلر</div>
+            <div class="subCategoryPreview__panelCaption">منبع پیش‌فرض عدد دستک‌ها از پارامترهای همین گروه داخلی خوانده می‌شود.</div>
+          </div>
+          <div class="constructionDialog__controllerForm">
+            <label class="constructionDialog__field">
+              <span class="constructionDialog__fieldLabel">نوع کنترلر گروه</span>
+              <select
+                :value="internalPartGroupControllerEditorType"
+                class="constructionDialog__input"
+                @change="updateInternalPartGroupControllerEditorType($event.target.value)"
+              >
+                <option value="">بدون کنترلر</option>
+                <option v-for="option in INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+
+            <div v-if="internalPartGroupControllerEditorType" class="constructionDialog__controllerCards">
+              <div
+                v-for="definition in getInternalPartGroupControllerDefinitions(internalPartGroupControllerEditorType)"
+                :key="definition.key"
+                class="constructionDialog__controllerCard"
+              >
+                <div class="constructionDialog__controllerCardMeta">
+                  <div class="constructionDialog__controllerCardTitle">{{ definition.label }}</div>
+                  <div class="constructionDialog__controllerCardCaption">{{ definition.key }}</div>
+                </div>
+                <select
+                  v-model="internalPartGroupControllerEditorBindings[definition.key].param_code"
+                  class="constructionDialog__input"
+                  :disabled="!getInternalPartGroupControllerParamOptions(activeInternalPartGroupControllerRow).length"
+                >
+                  <option :value="null">بدون اتصال</option>
+                  <option
+                    v-for="option in getInternalPartGroupControllerParamOptions(activeInternalPartGroupControllerRow)"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div
+              v-if="internalPartGroupControllerEditorType && !getInternalPartGroupControllerParamOptions(activeInternalPartGroupControllerRow).length"
+              class="designMenu__cabinetState"
+            >
+              برای این گروه داخلی هنوز پارامتری انتخاب نشده است. ابتدا گروه‌های پارامتری همین گروه داخلی را تنظیم کنید.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" :disabled="internalPartGroupControllerEditorApplying" @click="closeInternalPartGroupControllerEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" :disabled="internalPartGroupControllerEditorApplying" @click="applyInternalPartGroupControllerEditor">
+          <span v-if="internalPartGroupControllerEditorApplying" class="constructionDialog__spinner"></span>
+          <span>{{ internalPartGroupControllerEditorApplying ? "در حال اعمال..." : "اعمال" }}</span>
         </button>
       </div>
     </div>

@@ -55,6 +55,8 @@ class ResolvedInteriorInstanceSnapshot:
     internal_part_group_id: uuid.UUID
     internal_part_group_code: str
     internal_part_group_title: str
+    controller_type: str | None
+    controller_bindings: dict[str, dict[str, str | None]]
     instance_code: str
     line_color: str | None
     ui_order: int
@@ -85,6 +87,8 @@ class DesignExecutionContext:
     internal_group_param_codes: dict[uuid.UUID, set[str]]
     internal_group_display_values: dict[uuid.UUID, dict[str, str | None]]
     internal_group_display_meta: dict[uuid.UUID, dict[str, dict[str, object]]]
+    internal_group_controller_types: dict[uuid.UUID, str | None]
+    internal_group_controller_bindings: dict[uuid.UUID, dict[str, dict[str, str | None]]]
     parsed_expression_cache: dict[str, ast.Expression]
     expression_name_cache: dict[str, set[str]]
     source_state: dict[str, object]
@@ -307,6 +311,8 @@ async def resolve_base_formula_values(session: AsyncSession, *, admin_id: uuid.U
         internal_group_param_codes={},
         internal_group_display_values={},
         internal_group_display_meta={},
+        internal_group_controller_types={},
+        internal_group_controller_bindings={},
         parsed_expression_cache={},
         expression_name_cache={},
         source_state={},
@@ -889,6 +895,18 @@ async def build_design_execution_context(
         internal_group_param_codes=group_param_codes,
         internal_group_display_values=group_display_values,
         internal_group_display_meta=group_display_meta,
+        internal_group_controller_types={
+            group_id: (str(getattr(group, "controller_type", "")).strip() or None)
+            for group_id, group in groups_by_id.items()
+        },
+        internal_group_controller_bindings={
+            group_id: {
+                str(slot): {"param_code": (str((binding or {}).get("param_code") or "").strip() or None)}
+                for slot, binding in dict(getattr(group, "controller_bindings", {}) or {}).items()
+                if str(slot).strip()
+            }
+            for group_id, group in groups_by_id.items()
+        },
         parsed_expression_cache=parsed_expression_cache,
         expression_name_cache=expression_name_cache,
         source_state={
@@ -945,6 +963,14 @@ async def _build_legacy_execution_context(
         internal_group_param_codes={internal_group.id: set(group_param_codes)},
         internal_group_display_values={internal_group.id: dict(group_values)},
         internal_group_display_meta={internal_group.id: {str(key): dict(value or {}) for key, value in group_meta.items()}},
+        internal_group_controller_types={internal_group.id: str(getattr(internal_group, "controller_type", "")).strip() or None},
+        internal_group_controller_bindings={
+            internal_group.id: {
+                str(slot): {"param_code": (str((binding or {}).get("param_code") or "").strip() or None)}
+                for slot, binding in dict(getattr(internal_group, "controller_bindings", {}) or {}).items()
+                if str(slot).strip()
+            }
+        },
         parsed_expression_cache={},
         expression_name_cache={},
         source_state={},
@@ -1151,6 +1177,12 @@ async def resolve_internal_instance_preview(
         internal_part_group_id=internal_group.id,
         internal_part_group_code=str(internal_group.code or "").strip(),
         internal_part_group_title=str(internal_group.group_title or internal_group.title or "").strip(),
+        controller_type=resolved_context.internal_group_controller_types.get(internal_group.id),
+        controller_bindings={
+            str(slot): {"param_code": (str((binding or {}).get("param_code") or "").strip() or None)}
+            for slot, binding in dict(resolved_context.internal_group_controller_bindings.get(internal_group.id, {}) or {}).items()
+            if str(slot).strip()
+        },
         instance_code=str(instance_code or "").strip(),
         line_color=str(line_color or getattr(internal_group, "line_color", "") or "").strip() or None,
         ui_order=int(ui_order),

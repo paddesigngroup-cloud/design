@@ -355,6 +355,8 @@ class InternalPartGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
     code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     line_color: Mapped[str] = mapped_column(String(7), nullable=False, default="#8A98A3", server_default="#8A98A3")
+    controller_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    controller_bindings: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 

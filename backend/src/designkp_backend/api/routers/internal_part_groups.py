@@ -27,6 +27,10 @@ from designkp_backend.services.sub_category_defaults import normalize_default_va
 
 router = APIRouter(prefix="/internal-part-groups", tags=["internal_part_groups"])
 DEFAULT_INTERNAL_LINE_COLOR = "#8A98A3"
+INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH = "width_controler_internal_group_parts"
+INTERNAL_GROUP_CONTROLLER_SLOTS_BY_TYPE = {
+    INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH: ("left", "top", "right", "bottom_offset"),
+}
 
 
 def _normalize_hex_color(value: str | None, fallback: str = DEFAULT_INTERNAL_LINE_COLOR) -> str:
@@ -97,6 +101,8 @@ class InternalPartGroupItemResponse(BaseModel):
     param_groups: list[InternalPartGroupParamGroupItem]
     param_defaults: dict[str, str | None]
     param_overrides: dict[str, "InternalPartGroupParamOverrideItem"]
+    controller_type: str | None = None
+    controller_bindings: dict[str, "InternalPartGroupControllerBindingItem"]
 
     model_config = {"from_attributes": True}
 
@@ -112,6 +118,10 @@ class InternalPartGroupParamOverrideItem(BaseModel):
     binary_on_icon_path: str | None = None
 
 
+class InternalPartGroupControllerBindingItem(BaseModel):
+    param_code: str | None = None
+
+
 class InternalPartGroupCreate(BaseModel):
     admin_id: uuid.UUID | None = None
     group_id: int | None = Field(default=None, ge=1)
@@ -124,6 +134,8 @@ class InternalPartGroupCreate(BaseModel):
     param_groups: list[InternalPartGroupParamGroupSelectionPayload] = Field(default_factory=list)
     param_defaults: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
     param_overrides: dict[str, "InternalPartGroupParamOverridePayload"] = Field(default_factory=dict)
+    controller_type: str | None = Field(default=None, max_length=128)
+    controller_bindings: dict[str, "InternalPartGroupControllerBindingPayload"] = Field(default_factory=dict)
 
 
 class InternalPartGroupUpdate(BaseModel):
@@ -138,6 +150,8 @@ class InternalPartGroupUpdate(BaseModel):
     param_groups: list[InternalPartGroupParamGroupSelectionPayload] = Field(default_factory=list)
     param_defaults: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
     param_overrides: dict[str, "InternalPartGroupParamOverridePayload"] = Field(default_factory=dict)
+    controller_type: str | None = Field(default=None, max_length=128)
+    controller_bindings: dict[str, "InternalPartGroupControllerBindingPayload"] = Field(default_factory=dict)
 
 
 class InternalPartGroupParamOverridePayload(BaseModel):
@@ -149,6 +163,10 @@ class InternalPartGroupParamOverridePayload(BaseModel):
     binary_on_label: str | None = Field(default=None, max_length=255)
     binary_off_icon_path: str | None = Field(default=None, max_length=255)
     binary_on_icon_path: str | None = Field(default=None, max_length=255)
+
+
+class InternalPartGroupControllerBindingPayload(BaseModel):
+    param_code: str | None = Field(default=None, max_length=128)
 
 
 InternalPartGroupItemResponse.model_rebuild()
@@ -167,6 +185,46 @@ async def internal_part_group_param_groups_table_ready(session: AsyncSession) ->
 async def internal_part_group_param_defaults_table_ready(session: AsyncSession) -> bool:
     result = await session.execute(select(func.to_regclass("internal_part_group_param_defaults")))
     return bool(result.one()[0])
+
+
+def _normalize_controller_type(value: str | None) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _normalize_optional_string(value: object) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _normalize_controller_bindings_payload(
+    controller_type: str | None,
+    bindings: dict[str, InternalPartGroupControllerBindingPayload] | dict[str, object] | None,
+) -> dict[str, dict[str, str | None]]:
+    normalized_type = _normalize_controller_type(controller_type)
+    if not normalized_type:
+        return {}
+    allowed_slots = INTERNAL_GROUP_CONTROLLER_SLOTS_BY_TYPE.get(normalized_type)
+    if not allowed_slots:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported internal group controller type: {normalized_type}")
+    raw_bindings = dict(bindings or {})
+    invalid_slots = sorted(str(key or "").strip() for key in raw_bindings if str(key or "").strip() not in allowed_slots)
+    if invalid_slots:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported controller bindings for {normalized_type}: {', '.join(invalid_slots)}",
+        )
+    normalized: dict[str, dict[str, str | None]] = {}
+    for slot in allowed_slots:
+        raw_value = raw_bindings.get(slot)
+        if isinstance(raw_value, InternalPartGroupControllerBindingPayload):
+            param_code = _normalize_optional_string(raw_value.param_code)
+        elif isinstance(raw_value, dict):
+            param_code = _normalize_optional_string(raw_value.get("param_code"))
+        else:
+            param_code = None
+        normalized[slot] = {"param_code": param_code}
+    return normalized
 
 
 async def _ensure_unique_group_code(session: AsyncSession, *, code: str, exclude_id: uuid.UUID | None = None) -> None:
@@ -215,6 +273,11 @@ def _serialize_group(
         if not param_code:
             continue
         defaults_map[str(param_code)] = row.default_value
+    controller_type = _normalize_controller_type(getattr(item, "controller_type", None))
+    controller_bindings = _normalize_controller_bindings_payload(
+        controller_type,
+        getattr(item, "controller_bindings", None),
+    )
     return InternalPartGroupItemResponse(
         id=item.id,
         admin_id=item.admin_id,
@@ -235,6 +298,8 @@ def _serialize_group(
         ] if include_param_groups else [],
         param_defaults=defaults_map,
         param_overrides={},
+        controller_type=controller_type,
+        controller_bindings=controller_bindings,
     )
 
 
@@ -517,6 +582,37 @@ async def _apply_group_param_defaults(
         defaults_by_param_id[int(param.param_id)].default_value = normalize_default_value(raw_value)
 
 
+async def _apply_group_controller_config(
+    session: AsyncSession,
+    group: InternalPartGroup,
+    *,
+    controller_type: str | None,
+    controller_bindings: dict[str, InternalPartGroupControllerBindingPayload],
+) -> None:
+    normalized_type = _normalize_controller_type(controller_type)
+    normalized_bindings = _normalize_controller_bindings_payload(normalized_type, controller_bindings)
+    if not normalized_type:
+        group.controller_type = None
+        group.controller_bindings = {}
+        return
+    params = await _params_for_internal_group(session, group)
+    allowed_codes = {
+        str(param.param_code).strip()
+        for param in params
+        if str(param.param_code or "").strip()
+    }
+    for slot, binding in normalized_bindings.items():
+        param_code = _normalize_optional_string(binding.get("param_code"))
+        if param_code and param_code not in allowed_codes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown controller param code for this internal group scope: {param_code}",
+            )
+        normalized_bindings[slot] = {"param_code": param_code}
+    group.controller_type = normalized_type
+    group.controller_bindings = normalized_bindings
+
+
 @router.get("", response_model=list[InternalPartGroupItemResponse])
 async def list_internal_part_groups(
     admin_id: uuid.UUID | None = Query(default=None),
@@ -578,6 +674,8 @@ async def create_internal_part_group(payload: InternalPartGroupCreate, session: 
         code=code,
         title=title,
         line_color=_normalize_hex_color(payload.line_color, DEFAULT_INTERNAL_LINE_COLOR),
+        controller_type=None,
+        controller_bindings={},
         sort_order=payload.sort_order if payload.sort_order is not None else next_group_id,
         is_system=payload.is_system,
     )
@@ -592,6 +690,12 @@ async def create_internal_part_group(payload: InternalPartGroupCreate, session: 
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Internal-group defaults table is not available yet. Run database migrations first.")
     if include_param_defaults:
         await _apply_group_param_defaults(session, item, payload.param_defaults, payload.param_overrides)
+    await _apply_group_controller_config(
+        session,
+        item,
+        controller_type=payload.controller_type,
+        controller_bindings=payload.controller_bindings,
+    )
     await session.commit()
     item = await _load_group(
         session,
@@ -639,6 +743,12 @@ async def update_internal_part_group(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Internal-group defaults table is not available yet. Run database migrations first.")
     if include_param_defaults:
         await _apply_group_param_defaults(session, item, payload.param_defaults, payload.param_overrides)
+    await _apply_group_controller_config(
+        session,
+        item,
+        controller_type=payload.controller_type,
+        controller_bindings=payload.controller_bindings,
+    )
     await session.commit()
     item = await _load_group(
         session,

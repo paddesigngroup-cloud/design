@@ -2966,6 +2966,54 @@ textarea {
   flex-direction: column;
   gap: 6px;
 }
+.constructionDialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.constructionDialog__fieldLabel {
+  font-family: Vazirmatn, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: #5b2236;
+}
+.constructionDialog__controllerForm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.constructionDialog__controllerCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.constructionDialog__controllerCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(118, 45, 71, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+}
+.constructionDialog__controllerCardMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.constructionDialog__controllerCardTitle {
+  font-family: Vazirmatn, sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+}
+.constructionDialog__controllerCardCaption {
+  font-family: "Aptos Mono", "Consolas", monospace;
+  font-size: 11px;
+  direction: ltr;
+  text-align: left;
+  color: #7a2f49;
+}
 .constructionDialog__defaultsPreviewBtn {
   width: 100%;
   min-height: 34px;
