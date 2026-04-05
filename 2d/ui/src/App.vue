@@ -953,7 +953,7 @@ function updateInteriorInstanceFromControllerValues(nextValues) {
   for (const [controllerId, valueMm] of Object.entries(nextValues || {})) {
     const paramCode = String(bindings?.[controllerId]?.param_code || "").trim();
     if (!paramCode) continue;
-    nextParamValues[paramCode] = String(Math.max(0, Number(valueMm) || 0));
+    nextParamValues[paramCode] = String(Math.round(Math.max(0, Number(valueMm) || 0)));
   }
   const nextInstance = normalizeInteriorInstanceRecord({
     ...instance,
@@ -1122,6 +1122,24 @@ function stopInteriorLibraryControllerDrag() {
   persistActiveInteriorLibraryControllerInstance().catch((error) => {
     showAlert(error?.message || "ذخیره کنترلر نمونه داخلی انجام نشد.", { title: "خطا" });
   });
+}
+
+function cancelInteriorLibraryControllerInteraction() {
+  clearInteriorLibraryControllerEditing();
+  if (interiorLibraryControllerPointerState.value.pointerId != null) {
+    interiorLibraryFrontSvgEl.value?.releasePointerCapture?.(interiorLibraryControllerPointerState.value.pointerId);
+  }
+  interiorLibraryControllerPointerState.value = {
+    mode: "idle",
+    pointerId: null,
+    controllerId: "",
+    startPoint: null,
+    startPan: null,
+    startValues: null,
+    pointerToAnchor: null,
+    dirty: false,
+  };
+  clearInteriorLibraryControllerDraftValues();
 }
 
 function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
@@ -2054,10 +2072,12 @@ const interiorLibraryControllerVisuals = computed(() => {
   if (!interiorLibraryControllerState.value.enabled || !interiorLibraryControllerRect.value) return [];
   const rect = interiorLibraryControllerRect.value;
   const scale = interiorLibraryControllerVisualScale.value;
-  const gap = 4 * scale;
-  const handleSize = 31.92 * scale;
-  const horizontal = { w: handleSize, h: handleSize, inputW: 62.5 * scale, inputH: 22.5 * scale };
-  const vertical = { w: handleSize, h: handleSize, inputW: 62.5 * scale, inputH: 22.5 * scale };
+  const gap = Math.max(4 * scale, 3);
+  const handleSize = Math.max(31.92 * scale, 24);
+  const inputW = Math.max(62.5 * scale, 52);
+  const inputH = Math.max(22.5 * scale, 20);
+  const horizontal = { w: handleSize, h: handleSize, inputW, inputH };
+  const vertical = { w: handleSize, h: handleSize, inputW, inputH };
   return [
     {
       id: "left",
@@ -2505,8 +2525,8 @@ function formatInteriorControllerRawValue(valueMm, unit = currentEditorDisplayUn
   const numeric = Math.max(0, Number(valueMm) || 0);
   const normalizedUnit = String(unit || "cm").trim().toLowerCase();
   if (normalizedUnit === "mm") return String(Math.round(numeric));
-  if (normalizedUnit === "inch") return (numeric / 25.4).toFixed(2);
-  return (numeric / 10).toFixed(1);
+  if (normalizedUnit === "inch") return trimInteriorControllerDisplayNumber(numeric / 25.4, 2);
+  return trimInteriorControllerDisplayNumber(numeric / 10, 1);
 }
 
 function formatInteriorControllerDisplayValue(valueMm) {
@@ -2520,6 +2540,12 @@ function parseInteriorControllerInputToMm(value) {
   if (unit === "mm") return numeric;
   if (unit === "inch") return numeric * 25.4;
   return numeric * 10;
+}
+
+function trimInteriorControllerDisplayNumber(value, decimals = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "0";
+  return numeric.toFixed(Math.max(0, decimals)).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
 }
 
 function buildInteriorLibraryControllerRectFromFrameValues(frame, values) {
@@ -2576,6 +2602,7 @@ function buildInteriorLibraryControllerOverlayForInstance(instance, frame) {
     groupId: String(group?.id || "").trim(),
     groupCode: String(group?.code || "").trim(),
     groupTitle: String(group?.group_title || group?.title || "").trim(),
+    lineColor: resolveInteriorInstanceLineColor(instance),
     bindings,
     values,
     rect,
@@ -12204,6 +12231,13 @@ onMounted(() => {
 
   const onEsc = (e) => {
     if (String(e.key || "") !== "Escape") return;
+    if (interiorLibraryOpen.value && interiorLibraryPreviewMode.value === "front2d"
+      && (interiorLibraryControllerEditingId.value || interiorLibraryControllerPointerState.value.mode === "controller")) {
+      cancelInteriorLibraryControllerInteraction();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const t = e.target;
     const tag = (t?.tagName || "").toUpperCase();
     if (t?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -15545,6 +15579,7 @@ onBeforeUnmount(() => {
                       :y="overlay.rect.y"
                       :width="overlay.rect.w"
                       :height="overlay.rect.h"
+                      :style="{ '--controller-line-color': overlay.lineColor || '#2f7fd3' }"
                       class="subCategoryDesignEditor__controllerRect"
                     />
                   </g>
@@ -15601,7 +15636,7 @@ onBeforeUnmount(() => {
                           dir="ltr"
                           @pointerdown="handleInteriorLibraryControllerValuePointerDown"
                           @keydown.enter.prevent="commitInteriorLibraryControllerEditing"
-                          @keydown.esc.prevent="clearInteriorLibraryControllerEditing"
+                          @keydown.esc.prevent.stop="cancelInteriorLibraryControllerInteraction"
                           @blur="commitInteriorLibraryControllerEditing"
                         />
                         <button
