@@ -914,7 +914,10 @@ function updateInteriorLibraryHoverState(point) {
 function hitTestInteriorLibraryController(point) {
   for (let index = interiorLibraryControllerVisuals.value.length - 1; index >= 0; index -= 1) {
     const item = interiorLibraryControllerVisuals.value[index];
-    if (pointInInteriorControllerHotspot(point, item)) return item;
+    const hotspot = getInteriorControllerMatchingHotspot(point, item);
+    if (hotspot) {
+      return { ...item, activeHotspot: hotspot };
+    }
   }
   return null;
 }
@@ -2112,6 +2115,61 @@ const interiorLibraryFrontSnapLines = computed(() => {
 const interiorLibraryFrontSnapPoints = computed(() =>
   collectInteriorSnapPoints(interiorLibraryFrontSnapLines.value)
 );
+
+function buildInteriorControllerSnapLineKey(line) {
+  const values = [
+    Number(line?.x1) || 0,
+    Number(line?.y1) || 0,
+    Number(line?.x2) || 0,
+    Number(line?.y2) || 0,
+  ];
+  const forward = values.map((value) => value.toFixed(3)).join("|");
+  const reversed = [values[2], values[3], values[0], values[1]].map((value) => value.toFixed(3)).join("|");
+  return forward < reversed ? forward : reversed;
+}
+
+const interiorLibraryControllerSnapLines = computed(() => {
+  const selectedId = String(interiorLibrarySelectedInstanceId.value || "").trim();
+  const selectedInstance = interiorLibraryPreviewInstances2d.value.find((instance) => String(instance?.id || "").trim() === selectedId);
+  const selectedLineKeys = new Set([
+    ...((selectedInstance?.outerLines || []).map((line) => buildInteriorControllerSnapLineKey(line))),
+    ...((selectedInstance?.innerLines || []).map((line) => buildInteriorControllerSnapLineKey(line))),
+  ]);
+  const outer = (interiorLibraryPreviewSvgLines.value?.outer || []).map((line) => ({
+    x1: Number(line?.x1) || 0,
+    y1: Number(line?.y1) || 0,
+    x2: Number(line?.x2) || 0,
+    y2: Number(line?.y2) || 0,
+  }));
+  const designInner = (interiorLibraryShowInnerLines.value ? (interiorLibraryPreviewSvgLines.value?.inner || []) : [])
+    .map((line) => ({
+      x1: Number(line?.x1) || 0,
+      y1: Number(line?.y1) || 0,
+      x2: Number(line?.x2) || 0,
+      y2: Number(line?.y2) || 0,
+    }))
+    .filter((line) => !selectedLineKeys.has(buildInteriorControllerSnapLineKey(line)));
+  const interiorInstanceLines = interiorLibraryPreviewInstances2d.value
+    .filter((instance) => String(instance?.id || "").trim() !== selectedId)
+    .flatMap((instance) => ([
+      ...((instance?.outerLines || []).map((line) => ({
+        x1: Number(line?.x1) || 0,
+        y1: Number(line?.y1) || 0,
+        x2: Number(line?.x2) || 0,
+        y2: Number(line?.y2) || 0,
+      }))),
+      ...((instance?.innerLines || []).map((line) => ({
+        x1: Number(line?.x1) || 0,
+        y1: Number(line?.y1) || 0,
+        x2: Number(line?.x2) || 0,
+        y2: Number(line?.y2) || 0,
+      }))),
+    ]));
+  return [...outer, ...designInner, ...interiorInstanceLines];
+});
+const interiorLibraryControllerSnapPoints = computed(() =>
+  collectInteriorSnapPoints(interiorLibraryControllerSnapLines.value)
+);
 const interiorLibraryFrontSnapTolerance = computed(() => {
   const viewBox = String(interiorLibraryFrontSvgViewBox.value || "").split(/\s+/).map(Number);
   const viewportWidth = Math.max(320, Number(interiorLibraryFrontViewport.value?.width) || FRONT_VIEW_WIDTH);
@@ -2246,9 +2304,9 @@ const interiorLibraryOverlayCursorOffset = computed(() => {
   const scale = Number(interiorLibraryCursorVisualScale.value) || 1;
   const icon = String(interiorLibraryOverlayCursorIcon.value || "");
   if (icon.includes("clicker_32")) {
-    return { x: 9 * scale, y: 6 * scale, size: 32 * scale };
+    return { x: 13.5 * scale, y: 1.5 * scale, size: 32 * scale };
   }
-  return { x: 6 * scale, y: 4 * scale, size: 32 * scale };
+  return { x: 4.5 * scale, y: 3.5 * scale, size: 32 * scale };
 });
 const interiorLibraryModelCursorStyle = computed(() => {
   const point = interiorLibraryViewerCursorPoint.value;
@@ -2568,15 +2626,19 @@ function pointInInteriorControllerRect(point, rect, pad = 0) {
 }
 
 function pointInInteriorControllerHotspot(point, controller) {
+  return !!getInteriorControllerMatchingHotspot(point, controller);
+}
+
+function getInteriorControllerMatchingHotspot(point, controller) {
   const x = Number(point?.x) || 0;
   const y = Number(point?.y) || 0;
-  return getInteriorControllerHotspots(controller).some((hotspot) => {
+  return getInteriorControllerHotspots(controller).find((hotspot) => {
     const hx = Number(hotspot?.x);
     const hy = Number(hotspot?.y);
     const radius = Number(hotspot?.radius);
     if (!Number.isFinite(hx) || !Number.isFinite(hy) || !Number.isFinite(radius)) return false;
     return Math.hypot(x - hx, y - hy) <= radius;
-  });
+  }) || null;
 }
 
 function getInteriorControllerHotspots(controller) {
@@ -2599,7 +2661,7 @@ function getInteriorControllerHotspots(controller) {
 function snapInteriorControllerAxis(controllerId, axisValue) {
   const tolerance = Number(interiorLibraryFrontSnapTolerance.value) || 0;
   const isHorizontalAxis = controllerId === "left" || controllerId === "right";
-  const lineCandidates = interiorLibraryFrontSnapLines.value
+  const lineCandidates = interiorLibraryControllerSnapLines.value
     .map((line) => {
       const x1 = Number(line?.x1) || 0;
       const y1 = Number(line?.y1) || 0;
@@ -2613,7 +2675,7 @@ function snapInteriorControllerAxis(controllerId, axisValue) {
       return null;
     })
     .filter((value) => Number.isFinite(value));
-  const pointCandidates = interiorLibraryFrontSnapPoints.value
+  const pointCandidates = interiorLibraryControllerSnapPoints.value
     .map((point) => isHorizontalAxis ? Number(point?.x) : Number(point?.y))
     .filter((value) => Number.isFinite(value));
   let bestValue = Number(axisValue) || 0;
