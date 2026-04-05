@@ -1161,7 +1161,8 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
   } else if (controllerId === "bottom_offset") {
     const startAnchorY = (Number(state.startPoint?.y) || frame.y) - (Number(pointerToAnchor.y) || 0);
     const rawRectY = (Number(startRect?.y) || frame.y) + (snappedY - startAnchorY);
-    const clampedRectY = Math.max(frame.y, Math.min(rawRectY, (frame.y + frame.h) - (Number(startRect?.h) || 0)));
+    const snappedRectY = snapInteriorControllerRectY(rawRectY, Number(startRect?.h) || 0, ignoreAxisValues);
+    const clampedRectY = Math.max(frame.y, Math.min(snappedRectY, (frame.y + frame.h) - (Number(startRect?.h) || 0)));
     const bottomOffsetMm = ((frame.y + frame.h) - (clampedRectY + (Number(startRect?.h) || 0))) / frame.scale;
     nextValues.bottom_offset = Math.min(Math.max(0, bottomOffsetMm), Math.max(0, frameHeight - nextValues.top));
   }
@@ -2651,6 +2652,24 @@ function getInteriorControllerHotspots(controller) {
 function snapInteriorControllerAxis(controllerId, axisValue, ignoreValues = []) {
   const tolerance = Number(interiorLibraryFrontSnapTolerance.value) || 0;
   const isHorizontalAxis = controllerId === "left" || controllerId === "right";
+  const { lineCandidates, pointCandidates } = getInteriorControllerAxisCandidates(isHorizontalAxis, tolerance);
+  const ignored = (Array.isArray(ignoreValues) ? ignoreValues : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  let bestValue = Number(axisValue) || 0;
+  let bestDistance = tolerance + 0.0001;
+  for (const candidate of [...lineCandidates, ...pointCandidates]) {
+    if (ignored.some((value) => Math.abs(candidate - value) <= 0.75)) continue;
+    const distance = Math.abs(candidate - axisValue);
+    if (distance <= tolerance && distance < bestDistance) {
+      bestDistance = distance;
+      bestValue = candidate;
+    }
+  }
+  return bestValue;
+}
+
+function getInteriorControllerAxisCandidates(isHorizontalAxis, tolerance) {
   const lineCandidates = interiorLibraryFrontSnapLines.value
     .map((line) => {
       const x1 = Number(line?.x1) || 0;
@@ -2668,20 +2687,35 @@ function snapInteriorControllerAxis(controllerId, axisValue, ignoreValues = []) 
   const pointCandidates = interiorLibraryFrontSnapPoints.value
     .map((point) => isHorizontalAxis ? Number(point?.x) : Number(point?.y))
     .filter((value) => Number.isFinite(value));
+  return { lineCandidates, pointCandidates };
+}
+
+function snapInteriorControllerRectY(rectY, rectHeight, ignoreValues = []) {
+  const tolerance = Number(interiorLibraryFrontSnapTolerance.value) || 0;
+  const { lineCandidates, pointCandidates } = getInteriorControllerAxisCandidates(false, tolerance);
   const ignored = (Array.isArray(ignoreValues) ? ignoreValues : [])
     .map((value) => Number(value))
     .filter((value) => Number.isFinite(value));
-  let bestValue = Number(axisValue) || 0;
+  const safeRectY = Number(rectY) || 0;
+  const safeRectHeight = Math.max(0, Number(rectHeight) || 0);
+  const rawTop = safeRectY;
+  const rawBottom = safeRectY + safeRectHeight;
+  let bestRectY = safeRectY;
   let bestDistance = tolerance + 0.0001;
   for (const candidate of [...lineCandidates, ...pointCandidates]) {
     if (ignored.some((value) => Math.abs(candidate - value) <= 0.75)) continue;
-    const distance = Math.abs(candidate - axisValue);
-    if (distance <= tolerance && distance < bestDistance) {
-      bestDistance = distance;
-      bestValue = candidate;
+    const topDistance = Math.abs(candidate - rawTop);
+    if (topDistance <= tolerance && topDistance < bestDistance) {
+      bestDistance = topDistance;
+      bestRectY = candidate;
+    }
+    const bottomDistance = Math.abs(candidate - rawBottom);
+    if (bottomDistance <= tolerance && bottomDistance < bestDistance) {
+      bestDistance = bottomDistance;
+      bestRectY = candidate - safeRectHeight;
     }
   }
-  return bestValue;
+  return bestRectY;
 }
 
 function buildInteriorControllerHorizontalArrowPath(direction, x, y, width, height) {
