@@ -13,3 +13,5 @@
 12,4,1,front side drawer,بدنه جلو کشو,w-f50,dr_b_h-f52,w-f50,fr_ba_s_dr_th,dr_b_h-f52,((w-f50)/2)+f53,(fr_ba_s_dr_th/2)+f54,((dr_b_h-f52)/2)+f55,system
 13,4,2,back side drawer,بدنه عقب کشو,w-f56,dr_b_h-f57,w-f56,fr_ba_s_dr_th,dr_b_h-f57,((w-f56)/2)+f58,f59-(fr_ba_s_dr_th/2),((dr_b_h-f57)/2)+f60,system
 14,4,3,left side drawer,بدنه کشو چپ,dr_g_d-f61,dr_b_h-f62,le_ri_s_dr_th,dr_g_d-f61,dr_b_h-f62,(le_ri_s_dr_th/2)+f63,((dr_g_d-f61)/2)+f64,((dr_b_h-f62)/2)+f65,system
+15,4,4,right side drawer,بدنه کشو راست,dr_g_d-f66,dr_b_h-f67,le_ri_s_dr_th,dr_g_d-f66,dr_b_h-f67,w-f68-(le_ri_s_dr_th/2),((dr_g_d-f66)/2)+f69,((dr_b_h-f67)/2)+f70,system
+16,4,5,bottom drawer,کف کشو,w-f71,dr_g_d-f72,w-f71,dr_g_d-f72,bo_dr_th,((w-f71)/2)+f73,((dr_g_d-f72)/2)+f74,(bo_dr_th/2)+f75,system

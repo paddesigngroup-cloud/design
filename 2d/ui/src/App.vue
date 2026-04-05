@@ -374,13 +374,21 @@ const PART_FORMULA_FIELDS = [
   { key: "formula_cz", label: "فرمول Cz" },
 ];
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH = "width_controler_internal_group_parts";
+const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP = "width_controller_internal_group_part";
 const INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS = [
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH, label: "کنترلر قطعات عرضی" },
+  { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP, label: "قطعه عرضی" },
 ];
 const INTERNAL_GROUP_CONTROLLER_DEFINITIONS = {
   [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH]: [
     { key: "left", label: "کنترلر ضلع چپ" },
     { key: "top", label: "کنترلر ضلع بالا" },
+    { key: "right", label: "کنترلر ضلع راست" },
+    { key: "bottom_offset", label: "کنترلر ارتفاع کل" },
+  ],
+  [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP]: [
+    { key: "left", label: "کنترلر ضلع چپ" },
+    { key: "top", label: "کنترلر ضلع بالا", hidden: true },
     { key: "right", label: "کنترلر ضلع راست" },
     { key: "bottom_offset", label: "کنترلر ارتفاع کل" },
   ],
@@ -2219,8 +2227,8 @@ const interiorLibraryControllerState = computed(() => {
   let message = "";
   if (interiorLibraryControllerTestMode.value && interiorLibraryPreviewMode.value === "front2d") {
     if (!instance) message = "برای نمایش کنترلرها، ابتدا یک نمونه داخلی را انتخاب کنید.";
-    else if (!group || normalizeInternalPartGroupControllerType(group?.controller_type) !== INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH) message = "برای این نمونه، کنترلر قطعات عرضی روی گروه داخلی تنظیم نشده است.";
-    else if (!hasAllBindings) message = "اتصال هر ۴ پارامتر کنترلر برای این گروه کامل نیست.";
+    else if (!group || !normalizeInternalPartGroupControllerType(group?.controller_type)) message = "برای این نمونه، کنترلر قطعه عرضی روی گروه داخلی تنظیم نشده است.";
+    else if (!hasAllBindings) message = `اتصال هر ${toPersianDigits(interiorLibraryControllerDefinitions.value.length)} پارامتر کنترلر برای این گروه کامل نیست.`;
     else if (!interiorLibrarySelectedControllerOverlay.value?.rect) message = "مقادیر کنترلرهای این نمونه قابل محاسبه نیست.";
   }
   return { enabled, message };
@@ -2235,7 +2243,13 @@ const interiorLibraryControllerVisuals = computed(() => {
   const inputH = Math.max(22.5 * scale, 20);
   const horizontal = { w: handleSize, h: handleSize, inputW, inputH };
   const vertical = { w: handleSize, h: handleSize, inputW, inputH };
-  return [
+  const allowedKeys = new Set(
+    interiorLibraryControllerDefinitions.value
+      .filter((definition) => !definition?.hidden)
+      .map((definition) => String(definition.key || "").trim())
+      .filter(Boolean)
+  );
+  const handles = [
     {
       id: "left",
       kind: "horizontal",
@@ -2281,6 +2295,7 @@ const interiorLibraryControllerVisuals = computed(() => {
       ...vertical,
     },
   ];
+  return handles.filter((handle) => allowedKeys.has(handle.id));
 });
 watch(interiorLibraryControllerVisuals, () => {
   interiorLibraryControllerVisualsToken.value += 1;
@@ -2720,9 +2735,9 @@ function buildInteriorLibraryControllerRectFromFrameValues(frame, values) {
   if (!frame) return null;
   const left = Number(values?.left);
   const right = Number(values?.right);
-  const top = Number(values?.top);
+  const top = Number.isFinite(Number(values?.top)) ? Number(values?.top) : null;
   const bottomOffset = Number(values?.bottom_offset);
-  if (![left, right, top, bottomOffset].every(Number.isFinite)) return null;
+  if (![left, right, bottomOffset].every(Number.isFinite) || top == null) return null;
   const widthMm = Math.max(0, (frame.maxX - frame.minX) - left - right);
   const heightMm = Math.max(0, top);
   const x = frame.x + (left * frame.scale);
@@ -2748,7 +2763,7 @@ function deriveInteriorLibraryControllerValuesFromGeometry(instance, frame) {
 
 function buildInteriorLibraryControllerOverlayForInstance(instance, frame) {
   const group = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
-  if (!group || normalizeInternalPartGroupControllerType(group.controller_type) !== INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH) return null;
+  if (!group || !normalizeInternalPartGroupControllerType(group.controller_type)) return null;
   const definitions = getInternalPartGroupControllerDefinitions(group.controller_type);
   if (!definitions.length) return null;
   const allowedCodes = new Set(getInternalPartGroupSelectedParamColumns(group).map((column) => column.key));
@@ -2763,6 +2778,9 @@ function buildInteriorLibraryControllerOverlayForInstance(instance, frame) {
       return [definition.key, Number.isFinite(parsedValue) ? parsedValue : geometryValues[definition.key]];
     })
   );
+  if (!Number.isFinite(Number(values.top))) {
+    values.top = geometryValues.top;
+  }
   const rect = buildInteriorLibraryControllerRectFromFrameValues(frame, values);
   if (!rect) return null;
   return {
@@ -15289,7 +15307,7 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__textBtn" @click="closeInternalPartGroupControllerEditor">بستن</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        نوع کنترلر گروه و پارامتر متصل به هر دستک در این بخش مشخص می‌شود. در این فاز فقط کنترلر قطعات عرضی فعال است.
+        نوع کنترلر گروه و پارامتر متصل به هر دستک در این بخش مشخص می‌شود. در این فاز فقط کنترلر قطعه عرضی فعال است.
       </div>
       <div class="subCategoryPreview__body">
         <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
