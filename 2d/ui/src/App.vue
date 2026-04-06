@@ -373,12 +373,20 @@ const PART_FORMULA_FIELDS = [
   { key: "formula_cz", label: "فرمول Cz" },
 ];
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH = "width_controler_internal_group_parts";
+const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT = "width_controler_internal_group_parts_right";
+const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_LEFT = "width_controler_internal_group_parts_left";
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP = "width_controller_internal_group_part";
+const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_RIGHT = "width_controller_internal_group_part_right";
+const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_LEFT = "width_controller_internal_group_part_left";
 const INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT = "height_controller_internal_group_part";
 const INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT = "height_controller_internal_group_part_left";
 const INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS = [
-  { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH, label: "کنترلر قطعات عرضی" },
-  { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP, label: "قطعه عرضی" },
+  { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH, label: "قطعات عرضی وسط" },
+  { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT, label: "قطعات عرضی راست" },
+  { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_LEFT, label: "قطعات عرضی چپ" },
+  { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP, label: "قطعه عرضی وسط" },
+  { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_RIGHT, label: "قطعه عرضی راست" },
+  { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_LEFT, label: "قطعه عرضی چپ" },
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT, label: "کنترلر ارتفاعی راست" },
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT, label: "کنترلر ارتفاعی چپ" },
 ];
@@ -389,7 +397,31 @@ const INTERNAL_GROUP_CONTROLLER_DEFINITIONS = {
     { key: "right", label: "کنترلر ضلع راست" },
     { key: "bottom_offset", label: "کنترلر ضلع پایین" },
   ],
+  [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT]: [
+    { key: "left", label: "کنترلر ضلع چپ" },
+    { key: "top", label: "کنترلر ضلع بالا" },
+    { key: "right", label: "کنترلر ضلع راست" },
+    { key: "bottom_offset", label: "کنترلر ضلع پایین" },
+  ],
+  [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_LEFT]: [
+    { key: "left", label: "کنترلر ضلع چپ" },
+    { key: "top", label: "کنترلر ضلع بالا" },
+    { key: "right", label: "کنترلر ضلع راست" },
+    { key: "bottom_offset", label: "کنترلر ضلع پایین" },
+  ],
   [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP]: [
+    { key: "left", label: "کنترلر ضلع چپ" },
+    { key: "top", label: "کنترلر ضلع بالا", hidden: true },
+    { key: "right", label: "کنترلر ضلع راست" },
+    { key: "bottom_offset", label: "کنترلر ضلع پایین" },
+  ],
+  [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_RIGHT]: [
+    { key: "left", label: "کنترلر ضلع چپ" },
+    { key: "top", label: "کنترلر ضلع بالا", hidden: true },
+    { key: "right", label: "کنترلر ضلع راست" },
+    { key: "bottom_offset", label: "کنترلر ضلع پایین" },
+  ],
+  [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_LEFT]: [
     { key: "left", label: "کنترلر ضلع چپ" },
     { key: "top", label: "کنترلر ضلع بالا", hidden: true },
     { key: "right", label: "کنترلر ضلع راست" },
@@ -413,6 +445,46 @@ function isHeightInternalGroupControllerType(controllerType) {
   const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
   return normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT
     || normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT;
+}
+
+function getInternalGroupControllerBehavior(controllerType) {
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
+  const baseBehavior = {
+    leftMode: "edge_inset",
+    rightMode: "edge_inset",
+    topMode: isHeightInternalGroupControllerType(normalizedType) ? "edge_inset" : "span",
+    leftIconPlacement: "outside",
+    rightIconPlacement: "outside",
+  };
+  if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT || normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_RIGHT) {
+    return {
+      ...baseBehavior,
+      leftMode: "span_from_right",
+      leftIconPlacement: "inside",
+    };
+  }
+  if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_LEFT || normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_LEFT) {
+    return {
+      ...baseBehavior,
+      rightMode: "span_from_left",
+      rightIconPlacement: "inside",
+    };
+  }
+  return baseBehavior;
+}
+
+function getInternalGroupControllerHorizontalMode(controllerType, controllerId) {
+  const behavior = getInternalGroupControllerBehavior(controllerType);
+  if (controllerId === "left") return behavior.leftMode;
+  if (controllerId === "right") return behavior.rightMode;
+  return "edge_inset";
+}
+
+function getInternalGroupControllerIconPlacement(controllerType, controllerId) {
+  const behavior = getInternalGroupControllerBehavior(controllerType);
+  if (controllerId === "left") return behavior.leftIconPlacement;
+  if (controllerId === "right") return behavior.rightIconPlacement;
+  return "outside";
 }
 const editableTemplates = ref([]);
 const editableCategories = ref([]);
@@ -1092,6 +1164,7 @@ function applyInteriorLibraryControllerInput(controllerId, nextValueMm) {
   if (!frame || !Number.isFinite(nextValueMm)) return false;
   const controllerType = activeInteriorLibrarySelectedGroup.value?.controller_type;
   const isHeightController = isHeightInternalGroupControllerType(controllerType);
+  const horizontalMode = getInternalGroupControllerHorizontalMode(controllerType, controllerId);
   const safeValue = Math.max(0, Number(nextValueMm) || 0);
   const nextValues = {
     left: Number(values.left) || 0,
@@ -1104,9 +1177,17 @@ function applyInteriorLibraryControllerInput(controllerId, nextValueMm) {
   const minWidth = 240;
   const minHeight = 1;
   if (controllerId === "left") {
-    nextValues.left = Math.min(Math.max(0, safeValue), Math.max(0, frameWidth - nextValues.right - minWidth));
+    if (horizontalMode === "span_from_right") {
+      nextValues.left = Math.min(Math.max(minWidth, safeValue), Math.max(minWidth, frameWidth - nextValues.right));
+    } else {
+      nextValues.left = Math.min(Math.max(0, safeValue), Math.max(0, frameWidth - nextValues.right - minWidth));
+    }
   } else if (controllerId === "right") {
-    nextValues.right = Math.min(Math.max(0, safeValue), Math.max(0, frameWidth - nextValues.left - minWidth));
+    if (horizontalMode === "span_from_left") {
+      nextValues.right = Math.min(Math.max(minWidth, safeValue), Math.max(minWidth, frameWidth - nextValues.left));
+    } else {
+      nextValues.right = Math.min(Math.max(0, safeValue), Math.max(0, frameWidth - nextValues.left - minWidth));
+    }
   } else if (controllerId === "top") {
     if (isHeightController) {
       nextValues.top = Math.min(Math.max(0, safeValue), Math.max(0, frameHeight - nextValues.bottom_offset - minHeight));
@@ -1276,6 +1357,7 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
   if (!frame || !startValues || !currentPoint) return;
   const controllerType = activeInteriorLibrarySelectedGroup.value?.controller_type;
   const isHeightController = isHeightInternalGroupControllerType(controllerType);
+  const horizontalMode = getInternalGroupControllerHorizontalMode(controllerType, controllerId);
   const startRect = buildInteriorLibraryControllerRectFromFrameValues(frame, startValues, controllerType);
   const pointerToAnchor = state.pointerToAnchor || { x: 0, y: 0 };
   const anchorX = (Number(currentPoint.x) || 0) - (Number(pointerToAnchor.x) || 0);
@@ -1296,11 +1378,23 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
     bottom_offset: Number(startValues.bottom_offset) || 0,
   };
   if (controllerId === "left") {
-    const leftMm = (snappedX - frame.x) / frame.scale;
-    nextValues.left = Math.min(Math.max(0, leftMm), Math.max(0, frameWidth - nextValues.right - minWidth));
+    if (horizontalMode === "span_from_right") {
+      const rightEdge = frame.x + frame.w - ((Number(startValues.right) || 0) * frame.scale);
+      const widthMm = (rightEdge - snappedX) / frame.scale;
+      nextValues.left = Math.min(Math.max(minWidth, widthMm), Math.max(minWidth, frameWidth - nextValues.right));
+    } else {
+      const leftMm = (snappedX - frame.x) / frame.scale;
+      nextValues.left = Math.min(Math.max(0, leftMm), Math.max(0, frameWidth - nextValues.right - minWidth));
+    }
   } else if (controllerId === "right") {
-    const rightMm = ((frame.x + frame.w) - snappedX) / frame.scale;
-    nextValues.right = Math.min(Math.max(0, rightMm), Math.max(0, frameWidth - nextValues.left - minWidth));
+    if (horizontalMode === "span_from_left") {
+      const leftEdge = frame.x + ((Number(startValues.left) || 0) * frame.scale);
+      const widthMm = (snappedX - leftEdge) / frame.scale;
+      nextValues.right = Math.min(Math.max(minWidth, widthMm), Math.max(minWidth, frameWidth - nextValues.left));
+    } else {
+      const rightMm = ((frame.x + frame.w) - snappedX) / frame.scale;
+      nextValues.right = Math.min(Math.max(0, rightMm), Math.max(0, frameWidth - nextValues.left - minWidth));
+    }
   } else if (controllerId === "top") {
     if (isHeightController) {
       const topInset = (snappedY - frame.y) / frame.scale;
@@ -2286,6 +2380,7 @@ const interiorLibraryControllerState = computed(() => {
 const interiorLibraryControllerVisuals = computed(() => {
   if (!interiorLibraryControllerState.value.enabled || !interiorLibraryControllerRect.value) return [];
   const rect = interiorLibraryControllerRect.value;
+  const controllerType = activeInteriorLibrarySelectedGroup.value?.controller_type;
   const scale = interiorLibraryControllerVisualScale.value;
   const gap = Math.max(4 * scale, 3);
   const handleSize = Math.max(31.92 * scale, 24);
@@ -2304,8 +2399,11 @@ const interiorLibraryControllerVisuals = computed(() => {
       id: "left",
       kind: "horizontal",
       direction: "left",
+      iconPlacement: getInternalGroupControllerIconPlacement(controllerType, "left"),
       anchor: { x: rect.x, y: rect.y + (rect.h * 0.5) },
-      x: rect.x - horizontal.w,
+      x: getInternalGroupControllerIconPlacement(controllerType, "left") === "inside"
+        ? rect.x
+        : rect.x - horizontal.w,
       y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
       fieldX: rect.x - horizontal.w - gap - horizontal.inputW,
       fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
@@ -2326,8 +2424,11 @@ const interiorLibraryControllerVisuals = computed(() => {
       id: "right",
       kind: "horizontal",
       direction: "right",
+      iconPlacement: getInternalGroupControllerIconPlacement(controllerType, "right"),
       anchor: { x: rect.x + rect.w, y: rect.y + (rect.h * 0.5) },
-      x: rect.x + rect.w,
+      x: getInternalGroupControllerIconPlacement(controllerType, "right") === "inside"
+        ? rect.x + rect.w - horizontal.w
+        : rect.x + rect.w,
       y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
       fieldX: rect.x + rect.w + horizontal.w + gap,
       fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
@@ -2810,17 +2911,32 @@ function trimInteriorControllerDisplayNumber(value, decimals = 0) {
 
 function buildInteriorLibraryControllerRectFromFrameValues(frame, values, controllerType) {
   if (!frame) return null;
-  const left = Number(values?.left);
-  const right = Number(values?.right);
+  const rawLeft = Number(values?.left);
+  const rawRight = Number(values?.right);
   const top = Number.isFinite(Number(values?.top)) ? Number(values?.top) : null;
   const bottomOffset = Number(values?.bottom_offset);
-  if (![left, right, bottomOffset].every(Number.isFinite) || top == null) return null;
+  if (![rawLeft, rawRight, bottomOffset].every(Number.isFinite) || top == null) return null;
   const isHeightController = isHeightInternalGroupControllerType(controllerType);
-  const widthMm = Math.max(0, (frame.maxX - frame.minX) - left - right);
+  const leftMode = getInternalGroupControllerHorizontalMode(controllerType, "left");
+  const rightMode = getInternalGroupControllerHorizontalMode(controllerType, "right");
   const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
   const heightMm = isHeightController
     ? Math.max(0, frameHeight - top - bottomOffset)
     : Math.max(0, top);
+  const frameWidth = Math.max(0, frame.maxX - frame.minX);
+  const widthFromLeft = rightMode === "span_from_left"
+    ? Math.min(Math.max(0, rawRight), Math.max(0, frameWidth - rawLeft))
+    : null;
+  const widthFromRight = leftMode === "span_from_right"
+    ? Math.min(Math.max(0, rawLeft), Math.max(0, frameWidth - rawRight))
+    : null;
+  const widthMm = widthFromLeft ?? widthFromRight ?? Math.max(0, frameWidth - rawLeft - rawRight);
+  const left = rightMode === "span_from_left"
+    ? Math.max(0, rawLeft)
+    : Math.max(0, frameWidth - rawRight - widthMm);
+  const right = leftMode === "span_from_right"
+    ? Math.max(0, rawRight)
+    : Math.max(0, frameWidth - rawLeft - widthMm);
   const x = frame.x + (left * frame.scale);
   const w = widthMm * frame.scale;
   const h = heightMm * frame.scale;
@@ -2835,11 +2951,18 @@ function deriveInteriorLibraryControllerValuesFromGeometry(instance, frame, cont
   const bounds = data?.bounds;
   if (!bounds) return null;
   const isHeightController = isHeightInternalGroupControllerType(controllerType);
+  const leftMode = getInternalGroupControllerHorizontalMode(controllerType, "left");
+  const rightMode = getInternalGroupControllerHorizontalMode(controllerType, "right");
+  const boundsMinX = Number(bounds.minX) || 0;
+  const boundsMaxX = Number(bounds.maxX) || 0;
+  const widthMm = Math.max(0, boundsMaxX - boundsMinX);
+  const leftInset = Math.max(0, boundsMinX - frame.minX);
+  const rightInset = Math.max(0, frame.maxX - boundsMaxX);
   const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
   const topInset = Math.max(0, frame.maxZ - (Number(bounds.maxZ) || 0));
   return {
-    left: Math.max(0, (Number(bounds.minX) || 0) - frame.minX),
-    right: Math.max(0, frame.maxX - (Number(bounds.maxX) || 0)),
+    left: leftMode === "span_from_right" ? widthMm : leftInset,
+    right: rightMode === "span_from_left" ? widthMm : rightInset,
     top: isHeightController
       ? Math.min(frameHeight, topInset)
       : Math.max(0, (Number(bounds.maxZ) || 0) - (Number(bounds.minZ) || 0)),
