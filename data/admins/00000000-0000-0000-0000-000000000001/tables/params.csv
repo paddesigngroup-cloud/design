@@ -157,4 +157,13 @@
 156,4,b_o_dr,bottom_offset_drawer,فاصله_پایین_کشو,18,10,system
 157,4,p_f_dr_b,push_front_drawer_box,هل دادن_جعبه_کشو_به_جلو,18,11,system
 158,4,bo_dr_ca,bottom_drawer_calculation,محاسبه_کف_کشو,23,10,system
-159,5,p_to_pa,punch_top_partition,کسر_بالای_جدا_کننده,28,1,system
+159,5,p_to_pa,punch_top_partition,کسر_بالا_جدا_کننده,27,1,system
+160,5,p_bo_pa,punch_bottom_partition,کسر_پایین_جداکننده,27,2,system
+161,5,p_fr_pa,punch_front_partition,کسر_جلو_جدا_کننده,27,3,system
+162,5,p_ba_pa,punch_back_partition,کسر_عقب_جدا_کننده,27,4,system
+163,5,ri_o_pa,right_offset_partition,فاصله_راست_جداکننده,27,5,system
+164,5,p_to_bar,punch_top_bar,کسر_بالا_قید,28,1,system
+165,5,p_bo_bar,punch_bottom_bar,کسر_پایین_قید,28,2,system
+166,5,p_fr_bar,punch_front_bar,کسر_جلو_قید,28,3,system
+167,5,p_ba_bar,punch_back_bar,کسر_عقب_قید,28,4,system
+168,5,ri_o_bar,right_offset_bar,فاصله_راست_قید,28,5,system
