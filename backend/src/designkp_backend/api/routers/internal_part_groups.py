@@ -29,11 +29,13 @@ router = APIRouter(prefix="/internal-part-groups", tags=["internal_part_groups"]
 DEFAULT_INTERNAL_LINE_COLOR = "#8A98A3"
 INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH = "width_controler_internal_group_parts"
 INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP = "width_controller_internal_group_part"
-INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT = "height_controller_internal_group_part"
+INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT = "height_controller_internal_group_part"
+INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT = "height_controller_internal_group_part_left"
 INTERNAL_GROUP_CONTROLLER_SLOTS_BY_TYPE = {
     INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH: ("left", "top", "right", "bottom_offset"),
     INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP: ("left", "top", "right", "bottom_offset"),
-    INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT: ("left", "top", "right", "bottom_offset"),
+    INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT: ("left", "top", "right", "bottom_offset"),
+    INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT: ("left", "top", "right", "bottom_offset"),
 }
 
 

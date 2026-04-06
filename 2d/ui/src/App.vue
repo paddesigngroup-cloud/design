@@ -374,32 +374,46 @@ const PART_FORMULA_FIELDS = [
 ];
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH = "width_controler_internal_group_parts";
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP = "width_controller_internal_group_part";
-const INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT = "height_controller_internal_group_part";
+const INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT = "height_controller_internal_group_part";
+const INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT = "height_controller_internal_group_part_left";
 const INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS = [
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH, label: "کنترلر قطعات عرضی" },
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP, label: "قطعه عرضی" },
-  { value: INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT, label: "قطعه ارتفاعی" },
+  { value: INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT, label: "کنترلر ارتفاعی راست" },
+  { value: INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT, label: "کنترلر ارتفاعی چپ" },
 ];
 const INTERNAL_GROUP_CONTROLLER_DEFINITIONS = {
   [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH]: [
     { key: "left", label: "کنترلر ضلع چپ" },
     { key: "top", label: "کنترلر ضلع بالا" },
     { key: "right", label: "کنترلر ضلع راست" },
-    { key: "bottom_offset", label: "کنترلر ارتفاع کل" },
+    { key: "bottom_offset", label: "کنترلر ضلع پایین" },
   ],
   [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP]: [
     { key: "left", label: "کنترلر ضلع چپ" },
     { key: "top", label: "کنترلر ضلع بالا", hidden: true },
     { key: "right", label: "کنترلر ضلع راست" },
-    { key: "bottom_offset", label: "کنترلر ارتفاع کل" },
+    { key: "bottom_offset", label: "کنترلر ضلع پایین" },
   ],
-  [INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT]: [
+  [INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT]: [
     { key: "left", label: "کنترلر ضلع چپ", hidden: true },
     { key: "top", label: "کنترلر ضلع بالا" },
     { key: "right", label: "کنترلر ضلع راست" },
-    { key: "bottom_offset", label: "کنترلر ارتفاع کل" },
+    { key: "bottom_offset", label: "کنترلر ضلع پایین" },
+  ],
+  [INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT]: [
+    { key: "left", label: "کنترلر ضلع چپ" },
+    { key: "top", label: "کنترلر ضلع بالا" },
+    { key: "right", label: "کنترلر ضلع راست", hidden: true },
+    { key: "bottom_offset", label: "کنترلر ضلع پایین" },
   ],
 };
+
+function isHeightInternalGroupControllerType(controllerType) {
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
+  return normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT
+    || normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT;
+}
 const editableTemplates = ref([]);
 const editableCategories = ref([]);
 const editablePartKinds = ref(PART_KINDS_CATALOG.map((item) => ({ ...item })));
@@ -1077,8 +1091,7 @@ function applyInteriorLibraryControllerInput(controllerId, nextValueMm) {
   const values = interiorLibraryControllerParamValues.value;
   if (!frame || !Number.isFinite(nextValueMm)) return false;
   const controllerType = activeInteriorLibrarySelectedGroup.value?.controller_type;
-  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
-  const isHeightController = normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT;
+  const isHeightController = isHeightInternalGroupControllerType(controllerType);
   const safeValue = Math.max(0, Number(nextValueMm) || 0);
   const nextValues = {
     left: Number(values.left) || 0,
@@ -1262,8 +1275,7 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
   const startValues = state.startValues;
   if (!frame || !startValues || !currentPoint) return;
   const controllerType = activeInteriorLibrarySelectedGroup.value?.controller_type;
-  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
-  const isHeightController = normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT;
+  const isHeightController = isHeightInternalGroupControllerType(controllerType);
   const startRect = buildInteriorLibraryControllerRectFromFrameValues(frame, startValues, controllerType);
   const pointerToAnchor = state.pointerToAnchor || { x: 0, y: 0 };
   const anchorX = (Number(currentPoint.x) || 0) - (Number(pointerToAnchor.x) || 0);
@@ -2803,8 +2815,7 @@ function buildInteriorLibraryControllerRectFromFrameValues(frame, values, contro
   const top = Number.isFinite(Number(values?.top)) ? Number(values?.top) : null;
   const bottomOffset = Number(values?.bottom_offset);
   if (![left, right, bottomOffset].every(Number.isFinite) || top == null) return null;
-  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
-  const isHeightController = normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT;
+  const isHeightController = isHeightInternalGroupControllerType(controllerType);
   const widthMm = Math.max(0, (frame.maxX - frame.minX) - left - right);
   const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
   const heightMm = isHeightController
@@ -2823,8 +2834,7 @@ function deriveInteriorLibraryControllerValuesFromGeometry(instance, frame, cont
   const data = buildFrontViewLinesFromBoxes(getViewerBoxesFromInteriorInstance(instance));
   const bounds = data?.bounds;
   if (!bounds) return null;
-  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
-  const isHeightController = normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT;
+  const isHeightController = isHeightInternalGroupControllerType(controllerType);
   const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
   const topInset = Math.max(0, frame.maxZ - (Number(bounds.maxZ) || 0));
   return {
@@ -15419,7 +15429,7 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__textBtn" @click="closeInternalPartGroupControllerEditor">بستن</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        نوع کنترلر گروه و پارامتر متصل به هر دستک در این بخش مشخص می‌شود. در این فاز فقط کنترلر قطعه عرضی فعال است.
+        نوع کنترلر گروه و پارامتر متصل به هر دستک در این بخش مشخص می‌شود.
       </div>
       <div class="subCategoryPreview__body">
         <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
