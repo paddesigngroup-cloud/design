@@ -155,4 +155,6 @@
 154,4,l_o_dr,left_offset_drawer,فاصله_چپ_کشو,18,8,system
 155,4,r_o_dr,right_offset_drawer,فاصله_راست_کشو,18,9,system
 156,4,b_o_dr,bottom_offset_drawer,فاصله_پایین_کشو,18,10,system
-157,1,p_f_dr_b,push_front_drawer_box,هل دادن_جعبه_کشو_به_جلو,18,11,system
+157,4,p_f_dr_b,push_front_drawer_box,هل دادن_جعبه_کشو_به_جلو,18,11,system
+158,4,bo_dr_ca,bottom_drawer_calculation,محاسبه_کف_کشو,23,10,system
+159,5,p_to_pa,punch_top_partition,کسر_بالای_جدا_کننده,28,1,system

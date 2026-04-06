@@ -1,28 +1,28 @@
-param_group_id,param_group_code,org_param_group_title,param_group_icon_path,ui_order,show_in_order_attrs,admin_mode
+﻿param_group_id,param_group_code,org_param_group_title,param_group_icon_path,ui_order,show_in_order_attrs,admin_mode
 1,attributes,صفات,attributes-2c1094fb50bb.webp,0,1,system
-2,thicknesses,ضخامت,thicknesses-19c6f949396e.webp,1,1,system
-3,floor,کف,staged-floor-properties-011973d354d2.webp,2,1,system
-4,roof,تاق,staged-roof-properties-ac8d949ff090.webp,3,1,system
-5,left side,بدنه چپ,left-side-properties-3187db2c44d0.webp,4,1,system
-6,right side,بدنه راست,right-side-properties-f48dc7dc6569.webp,5,1,system
-8,back,پشت,back-properties-0f51bf870da2.webp,6,1,system
+2,thicknesses,ضخامت,thicknesses-19c6f949396e.webp,1,0,system
+3,floor,کف,staged-floor-c9dcf6c1e7f8.webp,2,0,system
+4,roof,تاق,staged-roof-0e33a3a24f7a.webp,3,0,system
+5,left side,بدنه چپ,left-side-properties-3187db2c44d0.webp,4,0,system
+6,right side,بدنه راست,right-side-properties-f48dc7dc6569.webp,5,0,system
+8,back,پشت,back-properties-0f51bf870da2.webp,6,0,system
 10,gap,گپ,gap-properties-b3e9ccdc4b2c.webp,7,1,system
-12,front horizontal stretcher,تیرک افقی جلو,stretcher-properties-f8a4048605d8.webp,8,1,system
-13,back horizontal stretcher,تیرک افقی عقب,staged-shelve-properties-33057b7980c7.webp,9,1,system
-14,top vertical stretcher,تیرک عمودی بالا,staged-toe-kick-properties-ff9c331c5187.webp,10,1,system
-15,bottom vertical stretcher,تیرک عمودی پایین,,11,1,system
-16,fix shelve,طبقه ثابت,,12,1,system
-17,moving shelve,طبقه متحرک,,13,1,system
-18,drawer preferences,تنظیمات کشو,,14,1,system
-19,front side drawer,بدنه کشو جلو,,15,1,system
-20,back side drawer,بدنه کشو عقب,,16,1,system
-21,left side drawer,بدنه کشو چپ,,17,1,system
-22,right side drawer,بدنه کشو راست,,18,1,system
-23,floor drawer,کف کشو,,19,1,system
-24,width stretcher drawer,تیرک عرضی کشو,,20,1,system
-25,depth stretcher drawer,تیرک عمقی کشو,,21,1,system
-7,door,درب,door-properties-767330f806b3.webp,22,1,system
+12,front horizontal stretcher,تیرک افقی جلو,stretcher-properties-f8a4048605d8.webp,8,0,system
+13,back horizontal stretcher,تیرک افقی عقب,staged-back-horizontal-stretcher-4b18a7b7dde1.webp,9,0,system
+14,top vertical stretcher,تیرک عمودی بالا,staged-top-vertical-stretcher-a8b1c9528d77.webp,10,0,system
+15,bottom vertical stretcher,تیرک عمودی پایین,staged-bottom-vertical-stretcher-d4d8af74b35a.webp,11,0,system
+16,fix shelve,طبقه ثابت,staged-fix-shelve-c2bd98c9ac81.webp,12,0,system
+17,moving shelve,طبقه متحرک,staged-moving-shelve-55494164e9db.webp,13,0,system
+18,drawer preferences,تنظیمات کشو,staged-drawer-preferences-529c3ca0fc14.webp,14,0,system
+19,front side drawer,بدنه کشو جلو,staged-front-side-drawer-5b9c81e6d487.webp,15,0,system
+20,back side drawer,بدنه کشو عقب,staged-back-side-drawer-9ec87f0f6c16.webp,16,0,system
+21,left side drawer,بدنه کشو چپ,staged-left-side-drawer-28bb3a73eb7e.webp,17,0,system
+22,right side drawer,بدنه کشو راست,staged-right-side-drawer-bd1b830bb0f1.webp,18,0,system
+23,floor drawer,کف کشو,staged-floor-drawer-b12f3f9a766a.webp,19,0,system
+24,width stretcher drawer,تیرک عرضی کشو,staged-width-stretcher-drawer-fe03855a6c7c.webp,20,0,system
+25,depth stretcher drawer,تیرک عمقی کشو,staged-depth-stretcher-drawer-df17578ceb10.webp,21,0,system
+7,door,درب,door-properties-767330f806b3.webp,22,0,system
 9,panel,پنل نما,panel-properties-ee589acb4fd1.webp,23,1,system
-26,toe kick,پاخور,,24,1,system
-27,frame,قاب,,25,1,system
+26,toe kick,پاخور,staged-toe-kick-93070d05965a.webp,24,0,system
+27,frame,قاب,staged-frame-340ba0905268.webp,25,0,system
 11,counter,صفحه,counter-properties-bea86392ade8.webp,26,1,system

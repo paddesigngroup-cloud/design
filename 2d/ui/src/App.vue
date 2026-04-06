@@ -1076,6 +1076,9 @@ function applyInteriorLibraryControllerInput(controllerId, nextValueMm) {
   const frame = interiorLibraryControllerFrameRect.value;
   const values = interiorLibraryControllerParamValues.value;
   if (!frame || !Number.isFinite(nextValueMm)) return false;
+  const controllerType = activeInteriorLibrarySelectedGroup.value?.controller_type;
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
+  const isHeightController = normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT;
   const safeValue = Math.max(0, Number(nextValueMm) || 0);
   const nextValues = {
     left: Number(values.left) || 0,
@@ -1092,9 +1095,17 @@ function applyInteriorLibraryControllerInput(controllerId, nextValueMm) {
   } else if (controllerId === "right") {
     nextValues.right = Math.min(Math.max(0, safeValue), Math.max(0, frameWidth - nextValues.left - minWidth));
   } else if (controllerId === "top") {
-    nextValues.top = Math.min(Math.max(minHeight, safeValue), Math.max(minHeight, frameHeight - nextValues.bottom_offset));
+    if (isHeightController) {
+      nextValues.top = Math.min(Math.max(0, safeValue), Math.max(0, frameHeight - nextValues.bottom_offset - minHeight));
+    } else {
+      nextValues.top = Math.min(Math.max(minHeight, safeValue), Math.max(minHeight, frameHeight - nextValues.bottom_offset));
+    }
   } else if (controllerId === "bottom_offset") {
-    nextValues.bottom_offset = Math.min(Math.max(0, safeValue), Math.max(0, frameHeight - nextValues.top));
+    if (isHeightController) {
+      nextValues.bottom_offset = Math.min(Math.max(0, safeValue), Math.max(0, frameHeight - nextValues.top - minHeight));
+    } else {
+      nextValues.bottom_offset = Math.min(Math.max(0, safeValue), Math.max(0, frameHeight - nextValues.top));
+    }
   } else {
     return false;
   }
@@ -1250,7 +1261,10 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
   const frame = interiorLibraryControllerFrameRect.value;
   const startValues = state.startValues;
   if (!frame || !startValues || !currentPoint) return;
-  const startRect = buildInteriorLibraryControllerRectFromFrameValues(frame, startValues);
+  const controllerType = activeInteriorLibrarySelectedGroup.value?.controller_type;
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
+  const isHeightController = normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT;
+  const startRect = buildInteriorLibraryControllerRectFromFrameValues(frame, startValues, controllerType);
   const pointerToAnchor = state.pointerToAnchor || { x: 0, y: 0 };
   const anchorX = (Number(currentPoint.x) || 0) - (Number(pointerToAnchor.x) || 0);
   const anchorY = (Number(currentPoint.y) || 0) - (Number(pointerToAnchor.y) || 0);
@@ -1276,16 +1290,32 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
     const rightMm = ((frame.x + frame.w) - snappedX) / frame.scale;
     nextValues.right = Math.min(Math.max(0, rightMm), Math.max(0, frameWidth - nextValues.left - minWidth));
   } else if (controllerId === "top") {
-    const bottomY = (Number(startRect?.y) || frame.y) + (Number(startRect?.h) || 0);
-    const topMm = (bottomY - snappedY) / frame.scale;
-    nextValues.top = Math.min(Math.max(minHeight, topMm), Math.max(minHeight, frameHeight - nextValues.bottom_offset));
+    if (isHeightController) {
+      const topInset = (snappedY - frame.y) / frame.scale;
+      nextValues.top = Math.min(
+        Math.max(0, topInset),
+        Math.max(0, frameHeight - nextValues.bottom_offset - minHeight)
+      );
+    } else {
+      const bottomY = (Number(startRect?.y) || frame.y) + (Number(startRect?.h) || 0);
+      const topMm = (bottomY - snappedY) / frame.scale;
+      nextValues.top = Math.min(Math.max(minHeight, topMm), Math.max(minHeight, frameHeight - nextValues.bottom_offset));
+    }
   } else if (controllerId === "bottom_offset") {
-    const startAnchorY = (Number(state.startPoint?.y) || frame.y) - (Number(pointerToAnchor.y) || 0);
-    const rawRectY = (Number(startRect?.y) || frame.y) + (snappedY - startAnchorY);
-    const snappedRectY = snapInteriorControllerRectY(rawRectY, Number(startRect?.h) || 0, ignoreAxisValues);
-    const clampedRectY = Math.max(frame.y, Math.min(snappedRectY, (frame.y + frame.h) - (Number(startRect?.h) || 0)));
-    const bottomOffsetMm = ((frame.y + frame.h) - (clampedRectY + (Number(startRect?.h) || 0))) / frame.scale;
-    nextValues.bottom_offset = Math.min(Math.max(0, bottomOffsetMm), Math.max(0, frameHeight - nextValues.top));
+    if (isHeightController) {
+      const bottomInset = ((frame.y + frame.h) - snappedY) / frame.scale;
+      nextValues.bottom_offset = Math.min(
+        Math.max(0, bottomInset),
+        Math.max(0, frameHeight - nextValues.top - minHeight)
+      );
+    } else {
+      const startAnchorY = (Number(state.startPoint?.y) || frame.y) - (Number(pointerToAnchor.y) || 0);
+      const rawRectY = (Number(startRect?.y) || frame.y) + (snappedY - startAnchorY);
+      const snappedRectY = snapInteriorControllerRectY(rawRectY, Number(startRect?.h) || 0, ignoreAxisValues);
+      const clampedRectY = Math.max(frame.y, Math.min(snappedRectY, (frame.y + frame.h) - (Number(startRect?.h) || 0)));
+      const bottomOffsetMm = ((frame.y + frame.h) - (clampedRectY + (Number(startRect?.h) || 0))) / frame.scale;
+      nextValues.bottom_offset = Math.min(Math.max(0, bottomOffsetMm), Math.max(0, frameHeight - nextValues.top));
+    }
   }
   interiorLibraryControllerDraftValues.value = nextValues;
   interiorLibraryControllerPointerState.value = {
@@ -2225,6 +2255,7 @@ const interiorLibraryControllerRect = computed(() =>
   buildInteriorLibraryControllerRectFromFrameValues(
     interiorLibraryControllerFrameRect.value,
     interiorLibraryControllerParamValues.value,
+    activeInteriorLibrarySelectedGroup.value?.controller_type,
   ) || interiorLibrarySelectedControllerOverlay.value?.rect || null
 );
 const interiorLibraryControllerState = computed(() => {
@@ -2765,15 +2796,20 @@ function trimInteriorControllerDisplayNumber(value, decimals = 0) {
   return numeric.toFixed(Math.max(0, decimals)).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
 }
 
-function buildInteriorLibraryControllerRectFromFrameValues(frame, values) {
+function buildInteriorLibraryControllerRectFromFrameValues(frame, values, controllerType) {
   if (!frame) return null;
   const left = Number(values?.left);
   const right = Number(values?.right);
   const top = Number.isFinite(Number(values?.top)) ? Number(values?.top) : null;
   const bottomOffset = Number(values?.bottom_offset);
   if (![left, right, bottomOffset].every(Number.isFinite) || top == null) return null;
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
+  const isHeightController = normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT;
   const widthMm = Math.max(0, (frame.maxX - frame.minX) - left - right);
-  const heightMm = Math.max(0, top);
+  const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
+  const heightMm = isHeightController
+    ? Math.max(0, frameHeight - top - bottomOffset)
+    : Math.max(0, top);
   const x = frame.x + (left * frame.scale);
   const w = widthMm * frame.scale;
   const h = heightMm * frame.scale;
@@ -2782,15 +2818,21 @@ function buildInteriorLibraryControllerRectFromFrameValues(frame, values) {
   return { x, y, w, h, left, right, top, bottom_offset: bottomOffset };
 }
 
-function deriveInteriorLibraryControllerValuesFromGeometry(instance, frame) {
+function deriveInteriorLibraryControllerValuesFromGeometry(instance, frame, controllerType) {
   if (!instance || !frame) return null;
   const data = buildFrontViewLinesFromBoxes(getViewerBoxesFromInteriorInstance(instance));
   const bounds = data?.bounds;
   if (!bounds) return null;
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
+  const isHeightController = normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT;
+  const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
+  const topInset = Math.max(0, frame.maxZ - (Number(bounds.maxZ) || 0));
   return {
     left: Math.max(0, (Number(bounds.minX) || 0) - frame.minX),
     right: Math.max(0, frame.maxX - (Number(bounds.maxX) || 0)),
-    top: Math.max(0, (Number(bounds.maxZ) || 0) - (Number(bounds.minZ) || 0)),
+    top: isHeightController
+      ? Math.min(frameHeight, topInset)
+      : Math.max(0, (Number(bounds.maxZ) || 0) - (Number(bounds.minZ) || 0)),
     bottom_offset: Math.max(0, (Number(bounds.minZ) || 0) - frame.minZ),
   };
 }
@@ -2803,7 +2845,7 @@ function buildInteriorLibraryControllerOverlayForInstance(instance, frame) {
   const allowedCodes = new Set(getInternalPartGroupSelectedParamColumns(group).map((column) => column.key));
   const bindings = normalizeInternalPartGroupControllerBindings(group.controller_type, group.controller_bindings, allowedCodes);
   if (!definitions.every((definition) => String(bindings?.[definition.key]?.param_code || "").trim())) return null;
-  const geometryValues = deriveInteriorLibraryControllerValuesFromGeometry(instance, frame) || {};
+  const geometryValues = deriveInteriorLibraryControllerValuesFromGeometry(instance, frame, group?.controller_type) || {};
   const values = Object.fromEntries(
     definitions.map((definition) => {
       const paramCode = String(bindings?.[definition.key]?.param_code || "").trim();
@@ -2815,7 +2857,7 @@ function buildInteriorLibraryControllerOverlayForInstance(instance, frame) {
   if (!Number.isFinite(Number(values.top))) {
     values.top = geometryValues.top;
   }
-  const rect = buildInteriorLibraryControllerRectFromFrameValues(frame, values);
+  const rect = buildInteriorLibraryControllerRectFromFrameValues(frame, values, group?.controller_type);
   if (!rect) return null;
   return {
     instanceId: String(instance?.id || "").trim(),
