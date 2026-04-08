@@ -1113,13 +1113,13 @@ async def resolve_internal_instance_preview(
         )
     )
     meta = _merge_param_meta_layers(
-        copied_group_meta,
-        copied_meta,
         {
             str(key): dict(value or {})
             for key, value in _normalize_param_meta(param_meta).items()
             if str(key or "").strip() in group_param_codes
         },
+        copied_group_meta,
+        copied_meta,
     )
     auto_param_codes = set(resolved_context.auto_param_codes)
     auto_values: dict[str, float] = {}

@@ -556,14 +556,28 @@ async def build_order_design_snapshot(
             param_values={str(key): value for key, value in dict(instance.param_values or {}).items()},
         )
         param_meta = {str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()}
-        if not param_meta and effective_param_values:
+        expected_param_codes = {str(key).strip() for key in dict(effective_param_values or {}).keys() if str(key).strip()}
+        missing_param_meta_codes = expected_param_codes.difference(param_meta.keys())
+        if expected_param_codes and (not param_meta or missing_param_meta_codes):
             _, resolved_param_meta = await build_sub_category_param_display_snapshot(
                 session,
                 sub_category=sub_category,
-                codes=set(effective_param_values.keys()) or None,
+                codes=expected_param_codes,
                 context=context,
             )
-            param_meta = {str(key): dict(value or {}) for key, value in resolved_param_meta.items()}
+            for key, value in resolved_param_meta.items():
+                code = str(key or "").strip()
+                if not code:
+                    continue
+                current_meta = dict(param_meta.get(code) or {})
+                for meta_key, meta_value in dict(value or {}).items():
+                    if meta_value is None:
+                        continue
+                    if isinstance(meta_value, str) and not meta_value.strip():
+                        continue
+                    if meta_key not in current_meta or current_meta.get(meta_key) in (None, ""):
+                        current_meta[str(meta_key)] = meta_value
+                param_meta[code] = current_meta
         resolved = await resolve_internal_instance_preview(
             session,
             admin_id=order.admin_id,

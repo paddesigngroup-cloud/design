@@ -2789,6 +2789,7 @@ function buildInternalGroupDefaultsTree(group) {
 function buildInteriorInstanceGroups(instance) {
   const groupsById = new Map();
   const sourceInternalGroup = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
+  const subCategoryOverrides = activeInteriorLibrarySubCategory.value?.param_overrides || {};
   const metaEntries = Object.entries(instance?.param_meta || {}).filter(([key]) => String(key || "").trim());
   if (!metaEntries.length && sourceInternalGroup) {
     return buildInternalGroupDefaultsTree(sourceInternalGroup).map((group) => ({
@@ -2805,7 +2806,28 @@ function buildInteriorInstanceGroups(instance) {
     const groupId = String(meta?.group_id || "").trim() || "__ungrouped__";
     const sourceGroup = constructionSubCategoryParamTree.value.find((row) => String(row.id) === groupId);
     const baseLabel = constructionSubCategoryParamMetaByCode.value[code]?.label || code;
-    const fallbackOverride = normalizeInternalPartGroupParamOverride(sourceInternalGroup?.param_overrides?.[code], baseLabel);
+    const groupOverride = normalizeInternalPartGroupParamOverride(sourceInternalGroup?.param_overrides?.[code], baseLabel);
+    const subCategoryOverride = normalizeInternalPartGroupParamOverride(subCategoryOverrides?.[code], baseLabel);
+    const fallbackOverride = {
+      ...subCategoryOverride,
+      ...groupOverride,
+      display_title: groupOverride.display_title || subCategoryOverride.display_title || baseLabel,
+      description_text: groupOverride.description_text || subCategoryOverride.description_text || "",
+      icon_path: groupOverride.icon_path || subCategoryOverride.icon_path || "",
+      binary_off_label: (
+        (String(groupOverride.binary_off_label || "").trim() || "0") !== "0"
+          ? groupOverride.binary_off_label
+          : (String(subCategoryOverride.binary_off_label || "").trim() || "0")
+      ) || "0",
+      binary_on_label: (
+        (String(groupOverride.binary_on_label || "").trim() || "1") !== "1"
+          ? groupOverride.binary_on_label
+          : (String(subCategoryOverride.binary_on_label || "").trim() || "1")
+      ) || "1",
+      binary_off_icon_path: groupOverride.binary_off_icon_path || subCategoryOverride.binary_off_icon_path || "",
+      binary_on_icon_path: groupOverride.binary_on_icon_path || subCategoryOverride.binary_on_icon_path || "",
+      input_mode: groupOverride.input_mode === "binary" || subCategoryOverride.input_mode === "binary" ? "binary" : "value",
+    };
     const groupIconFileName = normalizeIconFileName(meta?.group_icon_path) || sourceGroup?.iconFileName || "";
     if (!groupsById.has(groupId)) {
       groupsById.set(groupId, {
@@ -2820,14 +2842,17 @@ function buildInteriorInstanceGroups(instance) {
     if (groupEntry && !groupEntry.iconUrl && groupIconFileName) {
       groupEntry.iconUrl = getSubCategoryDefaultIconUrl(groupIconFileName);
     }
+    const resolvedInputMode = meta?.input_mode === "binary" || fallbackOverride.input_mode === "binary" ? "binary" : "value";
+    const resolvedBinaryOffLabel = String(meta?.binary_off_label || "").trim();
+    const resolvedBinaryOnLabel = String(meta?.binary_on_label || "").trim();
     groupEntry.items.push({
       key: code,
       displayTitle: String(meta?.label || fallbackOverride.display_title || baseLabel).trim() || code,
       descriptionText: String(meta?.description_text || fallbackOverride.description_text || "").trim(),
-      inputMode: meta?.input_mode === "binary" ? "binary" : "value",
+      inputMode: resolvedInputMode,
       iconUrl: getSubCategoryDefaultIconUrl(meta?.icon_path || fallbackOverride.icon_path),
-      binaryOffLabel: String(meta?.binary_off_label || fallbackOverride.binary_off_label || "").trim() || "0",
-      binaryOnLabel: String(meta?.binary_on_label || fallbackOverride.binary_on_label || "").trim() || "1",
+      binaryOffLabel: (resolvedBinaryOffLabel && resolvedBinaryOffLabel !== "0" ? resolvedBinaryOffLabel : fallbackOverride.binary_off_label) || "0",
+      binaryOnLabel: (resolvedBinaryOnLabel && resolvedBinaryOnLabel !== "1" ? resolvedBinaryOnLabel : fallbackOverride.binary_on_label) || "1",
       binaryOffIconUrl: getSubCategoryDefaultIconUrl(meta?.binary_off_icon_path || fallbackOverride.binary_off_icon_path),
       binaryOnIconUrl: getSubCategoryDefaultIconUrl(meta?.binary_on_icon_path || fallbackOverride.binary_on_icon_path),
       value: getInteriorInstanceEffectiveValue(instance, code),
@@ -6268,9 +6293,12 @@ async function ensureOrderDesignInteriorParamMetaLoaded(orderDesignId) {
   const interiors = Array.isArray(item?.interior_instances) ? item.interior_instances : [];
   if (!interiors.length) return;
   const needsRefresh = interiors.some((instance) => {
-    const hasValues = Object.keys(instance?.param_values || {}).length > 0;
     const metaCount = Object.keys(instance?.param_meta || {}).length;
-    return hasValues && metaCount === 0;
+    const sourceInternalGroup = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
+    const expectedMetaCount = sourceInternalGroup
+      ? buildInternalGroupDefaultsTree(sourceInternalGroup).reduce((sum, group) => sum + group.items.length, 0)
+      : Object.keys(instance?.param_values || {}).length;
+    return expectedMetaCount > 0 && metaCount < expectedMetaCount;
   });
   if (!needsRefresh) return;
   try {
