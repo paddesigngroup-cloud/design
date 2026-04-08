@@ -781,44 +781,54 @@ function getInteriorLibrarySnappedFrontPoint(point) {
     ? { x: interiorLibraryCurrentSnapPoint.value.x, y: interiorLibraryCurrentSnapPoint.value.y }
     : rawPoint;
 }
+function setInteriorLibraryPointRef(targetRef, point, tolerance = 0.35) {
+  const current = targetRef.value;
+  if (!point || typeof point !== "object") {
+    if (current !== null) targetRef.value = null;
+    return;
+  }
+  const nextX = Number(point.x) || 0;
+  const nextY = Number(point.y) || 0;
+  if (current) {
+    const dx = (Number(current.x) || 0) - nextX;
+    const dy = (Number(current.y) || 0) - nextY;
+    if ((dx * dx + dy * dy) <= (tolerance * tolerance)) return;
+  }
+  targetRef.value = { x: nextX, y: nextY };
+}
 function syncInteriorLibraryCursorPoint(rawPoint, snappedPoint = null) {
   const source = snappedPoint && typeof snappedPoint === "object"
     ? snappedPoint
     : rawPoint;
-  interiorLibraryCursorPoint.value = source && typeof source === "object"
-    ? {
-        x: Number(source.x) || 0,
-        y: Number(source.y) || 0,
-      }
-    : null;
+  setInteriorLibraryPointRef(interiorLibraryCursorPoint, source, 0.18);
 }
 function clearInteriorLibraryCursorPoint() {
-  interiorLibraryCursorPoint.value = null;
+  setInteriorLibraryPointRef(interiorLibraryCursorPoint, null);
 }
 function syncInteriorLibraryViewerCursorPoint(event) {
   const wrapEl = interiorLibraryViewerWrapEl.value;
   if (!wrapEl || !event) {
-    interiorLibraryViewerCursorPoint.value = null;
+    setInteriorLibraryPointRef(interiorLibraryViewerCursorPoint, null);
     return;
   }
   const rect = wrapEl.getBoundingClientRect();
   if (!rect.width || !rect.height) {
-    interiorLibraryViewerCursorPoint.value = null;
+    setInteriorLibraryPointRef(interiorLibraryViewerCursorPoint, null);
     return;
   }
   const clientX = Number(event.clientX);
   const clientY = Number(event.clientY);
   if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
-    interiorLibraryViewerCursorPoint.value = null;
+    setInteriorLibraryPointRef(interiorLibraryViewerCursorPoint, null);
     return;
   }
-  interiorLibraryViewerCursorPoint.value = {
+  setInteriorLibraryPointRef(interiorLibraryViewerCursorPoint, {
     x: Math.max(0, Math.min(rect.width, clientX - rect.left)),
     y: Math.max(0, Math.min(rect.height, clientY - rect.top)),
-  };
+  }, 0.5);
 }
 function clearInteriorLibraryViewerCursorPoint() {
-  interiorLibraryViewerCursorPoint.value = null;
+  setInteriorLibraryPointRef(interiorLibraryViewerCursorPoint, null);
 }
 function createInteriorLibraryAnnotationDraft(type, point) {
   return {
@@ -1686,7 +1696,6 @@ function onInteriorLibraryFrontSvgPointerMove(event) {
     applyInteriorLibraryControllerDrag(interiorLibraryControllerPointerState.value.controllerId, rawPoint);
     return;
   }
-  syncInteriorLibraryCursorPoint(rawPoint, interiorLibraryCurrentSnapPoint.value);
   interiorLibraryPendingPointerPoint.value = rawPoint;
   scheduleInteriorLibraryPointerProcessing();
 }
