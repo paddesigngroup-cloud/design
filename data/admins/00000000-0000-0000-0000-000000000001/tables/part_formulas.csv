@@ -16,3 +16,4 @@
 15,4,4,right side drawer,بدنه کشو راست,dr_g_d-f66,dr_b_h-f67,le_ri_s_dr_th,dr_g_d-f66,dr_b_h-f67,w-f68-(le_ri_s_dr_th/2),((dr_g_d-f66)/2)+f69,((dr_b_h-f67)/2)+f70,system
 16,4,5,bottom drawer,کف کشو,w-f71,dr_g_d-f72,w-f71,dr_g_d-f72,bo_dr_th,((w-f71)/2)+f73,((dr_g_d-f72)/2)+f74,(bo_dr_th/2)+f75,system
 17,5,1,partition,جدا کننده,h-f76,d-f77,u_th,d-f77,h-f76,w-f78-((u_th)/2),((d-f77)/2)+f79,f80+((h-f76)/2)+u_f_h,system
+18,5,2,bar,قید,h-f81,bar_w,u_th,bar_w,h-f81,w-f82-((u_th)/2),((bar_w)/2)+f83,f84+((h-f81)/2)+u_f_h,system

@@ -79,3 +79,7 @@
 78,f78,((ri_p)*(p_th))+(ri_g)+(ri_n)+ri_o_pa,system
 79,f79,((d_th_ca)*(d_th))+((f_th_ca)*(f_th))+((fr_p)*(p_th))+(fr_g)+(fr_n)+(p_fr_pa),system
 80,f80,((bo_p)*(p_th))+(bo_g)+p_bo_pa+u_f_o,system
+81,f81,((bo_p)*(p_th))+(bo_g)+((to_p)*(p_th))+(to_g)+(c_th)+(c_g)+p_to_bar+p_bo_bar+u_f_o,system
+82,f82,((ri_p)*(p_th))+(ri_g)+(ri_n)+ri_o_bar,system
+83,f83,((d_th_ca)*(d_th))+((f_th_ca)*(f_th))+((fr_p)*(p_th))+(fr_g)+(fr_n)+(p_fr_bar),system
+84,f84,((bo_p)*(p_th))+(bo_g)+p_bo_bar+u_f_o,system
