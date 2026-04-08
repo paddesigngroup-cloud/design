@@ -8,12 +8,28 @@
 7,2,2,top_bac_h_stre,تیرک افقی عقب بالا,w-f30,t_ba_h_st_w,w-f30,t_ba_h_st_w,u_th,((w-f30)/2)+f31,d-f32-((t_ba_h_st_w)/2),h-f33-((u_th)/2)+u_f_h,system
 8,2,3,top_bac_v_stre,تیرک عمودی عقب بالا,w-f34,to_ba_v_st_w,w-f34,u_th,to_ba_v_st_w,((w-f34)/2)+f35,d-f36-((u_th)/2),h-f37-((to_ba_v_st_w)/2)+u_f_h,system
 9,2,4,bot_bac_v_stre,تیرک عمودی عقب پایین,w-f38,bo_ba_v_st_w,w-f38,u_th,bo_ba_v_st_w,((w-f38)/2)+f39,d-f40-((u_th)/2),((bo_ba_v_st_w)/2)+f41+u_f_h,system
-10,3,1,fix_shelve,طبقه ثابت,w-f42,d-f43,w-f42,d-f43,u_th,((w-f42)/2)+f44,((d-f43)/2)+f45,((u_th)/2)+f_s_cz+f51,system
+10,3,1,fix_shelve,طبقه فیکس,w-f42,d-f43,w-f42,d-f43,u_th,((w-f42)/2)+f44,((d-f43)/2)+f45,((u_th)/2)+f_s_cz+f51,system
 11,3,2,moving_shelve,طبقه متحرک,w-(f46),d-(f47),w-(f46),d-(f47),u_th,((w-f46)/2)+f48,((d-f47)/2)+f49,((u_th)/2)+m_s_cz+f51,system
-12,4,1,front side drawer,بدنه جلو کشو,w-f50,dr_b_h-f52,w-f50,fr_ba_s_dr_th,dr_b_h-f52,((w-f50)/2)+f53,(fr_ba_s_dr_th/2)+f54,((dr_b_h-f52)/2)+f55,system
-13,4,2,back side drawer,بدنه عقب کشو,w-f56,dr_b_h-f57,w-f56,fr_ba_s_dr_th,dr_b_h-f57,((w-f56)/2)+f58,f59-(fr_ba_s_dr_th/2),((dr_b_h-f57)/2)+f60,system
-14,4,3,left side drawer,بدنه کشو چپ,dr_g_d-f61,dr_b_h-f62,le_ri_s_dr_th,dr_g_d-f61,dr_b_h-f62,(le_ri_s_dr_th/2)+f63,((dr_g_d-f61)/2)+f64,((dr_b_h-f62)/2)+f65,system
-15,4,4,right side drawer,بدنه کشو راست,dr_g_d-f66,dr_b_h-f67,le_ri_s_dr_th,dr_g_d-f66,dr_b_h-f67,w-f68-(le_ri_s_dr_th/2),((dr_g_d-f66)/2)+f69,((dr_b_h-f67)/2)+f70,system
-16,4,5,bottom drawer,کف کشو,w-f71,dr_g_d-f72,w-f71,dr_g_d-f72,bo_dr_th,((w-f71)/2)+f73,((dr_g_d-f72)/2)+f74,(bo_dr_th/2)+f75,system
-17,5,1,partition,جدا کننده,h-f76,d-f77,u_th,d-f77,h-f76,w-f78-((u_th)/2),((d-f77)/2)+f79,f80+((h-f76)/2)+u_f_h,system
-18,5,2,bar,قید,h-f81,bar_w,u_th,bar_w,h-f81,w-f82-((u_th)/2),((bar_w)/2)+f83,f84+((h-f81)/2)+u_f_h,system
+12,4,1,front_side_drawer,بدنه کشو جلو,w-f50,dr_b_h-f52,w-f50,fr_ba_s_dr_th,dr_b_h-f52,((w-f50)/2)+f53,(fr_ba_s_dr_th/2)+f54,((dr_b_h-f52)/2)+f55,system
+13,4,2,back_side_drawer,بدنه کشو عقب,w-f56,dr_b_h-f57,w-f56,fr_ba_s_dr_th,dr_b_h-f57,((w-f56)/2)+f58,f59-(fr_ba_s_dr_th/2),((dr_b_h-f57)/2)+f60,system
+14,4,3,left_side_drawer,بدنه کشو چپ,dr_g_d-f61,dr_b_h-f62,le_ri_s_dr_th,dr_g_d-f61,dr_b_h-f62,(le_ri_s_dr_th/2)+f63,((dr_g_d-f61)/2)+f64,((dr_b_h-f62)/2)+f65,system
+15,4,4,right_side_drawer,بدنه کشو راست,dr_g_d-f66,dr_b_h-f67,le_ri_s_dr_th,dr_g_d-f66,dr_b_h-f67,w-f68-(le_ri_s_dr_th/2),((dr_g_d-f66)/2)+f69,((dr_b_h-f67)/2)+f70,system
+16,4,5,bottom_drawer,کف کشو,w-f71,dr_g_d-f72,w-f71,dr_g_d-f72,bo_dr_th,((w-f71)/2)+f73,((dr_g_d-f72)/2)+f74,(bo_dr_th/2)+f75,system
+17,5,1,right_space_partition,جدا کننده فضای راست,h-f76,d-f77,u_th,d-f77,h-f76,w-f78-((u_th)/2),((d-f77)/2)+f79,f80+((h-f76)/2)+u_f_h,system
+18,5,2,right_space_bar,قید فضای راست,h-f81,bar_w,u_th,bar_w,h-f81,w-f82-((u_th)/2),((bar_w)/2)+f83,f84+((h-f81)/2)+u_f_h,system
+19,5,3,left_space_partition,جدا کننده فضای چپ,h-f76,d-f77,u_th,d-f77,h-f76,((u_th)/2)+f85,((d-f77)/2)+f79,f80+((h-f76)/2)+u_f_h,system
+20,5,4,left_space_bar,قید فضای چپ,h-f81,bar_w,u_th,bar_w,h-f81,((u_th)/2)+f86,((bar_w)/2)+f83,f84+((h-f81)/2)+u_f_h,system
+21,3,3,fix_right_space_shelve,طبقه فیکس فضای راست,(f_sh_w)-f87,d-f43,(f_sh_w)-f87,d-f43,u_th,w-f88-(((f_sh_w)-f87)/2),((d-f43)/2)+f45,((u_th)/2)+f_s_cz+f51,system
+22,3,4,moving_right_space_shelve,طبقه متحرک فضای راست,(m_sh_w)-f89,d-(f47),(m_sh_w)-f89,d-(f47),u_th,w-f90-(((m_sh_w)-f89)/2),((d-f47)/2)+f49,((u_th)/2)+m_s_cz+f51,system
+23,3,5,fix_left_space_shelve,طبقه فیکس فضای چپ,(f_sh_w)-f91,d-f43,(f_sh_w)-f91,d-f43,u_th,f92+(((f_sh_w)-f91)/2),((d-f43)/2)+f45,((u_th)/2)+f_s_cz+f51,system
+24,3,6,moving_left_space_shelve,طبقه متحرک فضای چپ,(m_sh_w)-f93,d-(f47),(m_sh_w)-f93,d-(f47),u_th,f94+(((m_sh_w)-f93)/2),((d-f47)/2)+f49,((u_th)/2)+m_s_cz+f51,system
+25,4,6,front_side_right_space_drawer,بدنه کشو جلو فضای راست,(dr_w)-f95,dr_b_h-f52,(dr_w)-f95,fr_ba_s_dr_th,dr_b_h-f52,w-f96-((dr_w-f95)/2),(fr_ba_s_dr_th/2)+f54,((dr_b_h-f52)/2)+f55,system
+26,4,7,back_side_right_space_drawer,بدنه کشو عقب فضای راست,(dr_w)-f97,dr_b_h-f57,(dr_w)-f97,fr_ba_s_dr_th,dr_b_h-f57,w-f98-((dr_w-f97)/2),f59-(fr_ba_s_dr_th/2),((dr_b_h-f57)/2)+f60,system
+27,4,8,left_side_right_space_drawer,بدنه کشو چپ فضای راست,dr_g_d-f61,dr_b_h-f62,le_ri_s_dr_th,dr_g_d-f61,dr_b_h-f62,w-f99-(le_ri_s_dr_th/2),((dr_g_d-f61)/2)+f64,((dr_b_h-f62)/2)+f65,system
+28,4,9,right_side_right_space_drawer,بدنه کشو راست فضای راست,dr_g_d-f66,dr_b_h-f67,le_ri_s_dr_th,dr_g_d-f66,dr_b_h-f67,w-f100-(le_ri_s_dr_th/2),((dr_g_d-f66)/2)+f69,((dr_b_h-f67)/2)+f70,system
+29,4,10,bottom_right_space_drawer,کف کشو فضای راست,(dr_w)-f101,dr_g_d-f72,(dr_w)-f101,dr_g_d-f72,bo_dr_th,w-f102-((dr_w-f101)/2),((dr_g_d-f72)/2)+f74,(bo_dr_th/2)+f75,system
+30,4,11,front_side_left_space_drawer,بدنه کشو جلو فضای چپ,(dr_w)-f95,dr_b_h-f52,(dr_w)-f95,fr_ba_s_dr_th,dr_b_h-f52,f53+((dr_w-f95)/2),(fr_ba_s_dr_th/2)+f54,((dr_b_h-f52)/2)+f55,system
+31,4,12,back_side_left_space_drawer,بدنه کشو عقب فضای چپ,(dr_w)-f97,dr_b_h-f57,(dr_w)-f97,fr_ba_s_dr_th,dr_b_h-f57,f58+((dr_w-f97)/2),f59-(fr_ba_s_dr_th/2),((dr_b_h-f57)/2)+f60,system
+32,4,13,left_side_left_space_drawer,بدنه کشو چپ فضای چپ,dr_g_d-f61,dr_b_h-f62,le_ri_s_dr_th,dr_g_d-f61,dr_b_h-f62,f63+(le_ri_s_dr_th/2),((dr_g_d-f61)/2)+f64,((dr_b_h-f62)/2)+f65,system
+33,4,14,right_side_left_space_drawer,بدنه کشو راست فضای چپ,dr_g_d-f66,dr_b_h-f67,le_ri_s_dr_th,dr_g_d-f66,dr_b_h-f67,f103+(le_ri_s_dr_th/2),((dr_g_d-f66)/2)+f69,((dr_b_h-f67)/2)+f70,system
+34,4,15,bottom_left_space_drawer,کف کشو فضای چپ,(dr_w)-f101,dr_g_d-f72,(dr_w)-f101,dr_g_d-f72,bo_dr_th,f73+((dr_w-f101)/2),((dr_g_d-f72)/2)+f74,(bo_dr_th/2)+f75,system

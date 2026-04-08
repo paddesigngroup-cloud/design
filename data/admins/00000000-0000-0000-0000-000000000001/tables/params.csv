@@ -167,3 +167,8 @@
 166,5,p_fr_bar,push_front_bar,هل_دادن_قید_به_جلو,29,3,system
 167,5,bar_w,bar_width,عرض_قید,29,1,system
 168,5,ri_o_bar,right_offset_bar,فاصله_راست_قید,29,5,system
+169,5,le_o_pa,left_offset_partition,فاصله_چپ_جداکننده,28,6,system
+170,1,le_o_bar,left_offset_bar,فاصله_چپ_قید,29,6,system
+171,3,f_sh_w,fix_shelve_width,عرض_طبقه_ثابت,16,0,system
+172,3,m_sh_w,moving_shelve_width,عرض_طبقه_متحرک,17,0,system
+173,4,dr_w,drawer_width,عرض_کشو,18,0,system
