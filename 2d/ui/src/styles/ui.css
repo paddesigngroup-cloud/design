@@ -4240,6 +4240,23 @@ option {
   font-size: 11px;
   color: #7c3f57;
 }
+.subCategoryDesignEditor__contextMenu {
+  position: fixed;
+  z-index: 4050;
+  display: grid;
+  gap: 8px;
+  min-width: 176px;
+  padding: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(118, 45, 71, 0.16);
+  background: rgba(255, 255, 255, 0.985);
+  box-shadow: 0 22px 44px rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(10px);
+  direction: rtl;
+}
+.subCategoryDesignEditor__contextMenu .menuItem {
+  width: 100%;
+}
 .subCategoryDesignEditor__frontSvg text {
   user-select: none;
 }

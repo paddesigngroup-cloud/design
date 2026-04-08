@@ -327,6 +327,13 @@ const interiorLibraryOverlapPickerState = ref({
   clientX: 0,
   clientY: 0,
 });
+const interiorLibraryInstanceContextMenu = ref({
+  visible: false,
+  x: 0,
+  y: 0,
+  instanceId: "",
+  source: "",
+});
 const interiorLibraryFrontPan = ref({ x: 0, y: 0 });
 const interiorLibraryFrontPanning = ref(false);
 const interiorLibraryViewerCursorPoint = ref(null);
@@ -870,6 +877,7 @@ function clearInteriorLibraryAnnotationSelection() {
 }
 function clearInteriorLibraryInstanceSelection() {
   interiorLibrarySelectedInstanceId.value = "";
+  closeInteriorInstanceContextMenu();
 }
 function removeSelectedInteriorLibraryAnnotation() {
   if (!interiorLibrarySelectedAnnotation.value) return;
@@ -897,6 +905,28 @@ function showInteriorLibraryOverlapPicker(clientX, clientY, items) {
   };
   interiorLibraryPickerPreviewInstanceId.value = "";
 }
+function closeInteriorInstanceContextMenu() {
+  interiorLibraryInstanceContextMenu.value = {
+    visible: false,
+    x: 0,
+    y: 0,
+    instanceId: "",
+    source: "",
+  };
+}
+function openInteriorInstanceContextMenu({ instanceId, x, y, source }) {
+  const normalizedId = String(instanceId || "").trim();
+  if (!normalizedId) return;
+  selectInteriorLibraryInstance(normalizedId);
+  hideInteriorLibraryOverlapPicker();
+  interiorLibraryInstanceContextMenu.value = {
+    visible: true,
+    x: Number(x) || 0,
+    y: Number(y) || 0,
+    instanceId: normalizedId,
+    source: String(source || "").trim() || "card",
+  };
+}
 function setInteriorLibraryOverlapPreview(instanceId) {
   interiorLibraryPickerPreviewInstanceId.value = String(instanceId || "").trim();
 }
@@ -921,6 +951,25 @@ const interiorLibraryOverlapPickerStyle = computed(() => {
   );
   const left = Math.max(gutter, Math.min((Number(state.clientX) || 0) + 10, viewportWidth - menuWidth - gutter));
   const top = Math.max(gutter, Math.min((Number(state.clientY) || 0) + 10, viewportHeight - estimatedHeight - gutter));
+  return {
+    left: `${Math.round(left)}px`,
+    top: `${Math.round(top)}px`,
+  };
+});
+const activeInteriorLibraryContextMenuInstance = computed(() =>
+  activeInteriorLibraryInstances.value.find(
+    (item) => String(item?.id || "").trim() === String(interiorLibraryInstanceContextMenu.value?.instanceId || "").trim()
+  ) || null
+);
+const interiorLibraryInstanceContextMenuStyle = computed(() => {
+  const state = interiorLibraryInstanceContextMenu.value || {};
+  const menuWidth = 176;
+  const estimatedHeight = 116;
+  const gutter = 8;
+  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
+  const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
+  const left = Math.max(gutter, Math.min((Number(state.x) || 0), viewportWidth - menuWidth - gutter));
+  const top = Math.max(gutter, Math.min((Number(state.y) || 0), viewportHeight - estimatedHeight - gutter));
   return {
     left: `${Math.round(left)}px`,
     top: `${Math.round(top)}px`,
@@ -1582,6 +1631,46 @@ function onInteriorLibraryFrontSvgPointerDown(event) {
   }
   event.preventDefault();
   event.stopPropagation();
+}
+function handleInteriorLibraryInstanceCardContextMenu(item, event) {
+  const instanceId = String(item?.id || "").trim();
+  if (!instanceId) return;
+  event.preventDefault();
+  event.stopPropagation();
+  openInteriorInstanceContextMenu({
+    instanceId,
+    x: event.clientX,
+    y: event.clientY,
+    source: "card",
+  });
+}
+function onInteriorLibraryFrontSvgContextMenu(event) {
+  if (interiorLibraryPreviewMode.value !== "front2d") return;
+  const rawPoint = getInteriorLibraryFrontSvgPoint(event);
+  if (!rawPoint) return;
+  const rendered = interiorLibraryRenderedAnnotations.value;
+  const hitDimension = interiorLibraryShowDimensions.value
+    ? hitTestInteriorAnnotationList(rendered.dimensions, rawPoint, 12)
+    : null;
+  const hitGuide = !hitDimension && interiorLibraryShowGuideAnnotations.value
+    ? hitTestInteriorAnnotationList(rendered.guides, rawPoint, 10)
+    : null;
+  if (hitDimension || hitGuide) return;
+  const selectedRect = interiorLibraryControllerRect.value;
+  const selectedInstanceId = String(interiorLibrarySelectedInstanceId.value || "").trim();
+  const selectedHit = selectedRect && selectedInstanceId && pointInInteriorRect(rawPoint, selectedRect, 0)
+    ? { instanceId: selectedInstanceId }
+    : null;
+  const overlay = selectedHit || interiorLibraryControllerOverlays.value.find((item) => pointInInteriorRect(rawPoint, item?.rect, 0));
+  if (!overlay?.instanceId) return;
+  event.preventDefault();
+  event.stopPropagation();
+  openInteriorInstanceContextMenu({
+    instanceId: overlay.instanceId,
+    x: event.clientX,
+    y: event.clientY,
+    source: "preview",
+  });
 }
 function onInteriorLibraryOverlapPickerPointerDown(event) {
   event.stopPropagation();
@@ -2672,6 +2761,7 @@ watch(interiorLibraryOpen, (open) => {
   if (!open) {
     stopInteriorLibraryPointerProcessing();
     enable2dInput();
+    closeInteriorInstanceContextMenu();
     return;
   }
   disable2dInput();
@@ -2708,7 +2798,25 @@ watch(activeInteriorLibraryInstances, (items) => {
   if (pickerItems.length && pickerItems.some((item) => !ids.has(String(item?.id || "").trim()))) {
     hideInteriorLibraryOverlapPicker();
   }
+  if (interiorLibraryInstanceContextMenu.value.visible && !ids.has(String(interiorLibraryInstanceContextMenu.value.instanceId || "").trim())) {
+    closeInteriorInstanceContextMenu();
+  }
 }, { immediate: true });
+watch(activeInteriorLibraryTargetId, () => {
+  closeInteriorInstanceContextMenu();
+});
+watch(interiorInstanceEditorOpen, (open) => {
+  if (open) closeInteriorInstanceContextMenu();
+});
+watch(
+  () => String(interiorLibrarySelectedInstanceId.value || "").trim(),
+  (nextId) => {
+    const menu = interiorLibraryInstanceContextMenu.value;
+    if (menu.visible && String(menu.instanceId || "").trim() !== nextId) {
+      closeInteriorInstanceContextMenu();
+    }
+  }
+);
 watch(activeInteriorLibrarySelectedInstance, () => {
   clearInteriorLibraryControllerEditing();
   clearInteriorLibraryControllerDraftValues();
@@ -6508,6 +6616,7 @@ function resetInteriorInstanceEditorState() {
   interiorInstanceEditorDraft.value = null;
   interiorInstanceEditorActiveGroupId.value = "";
   interiorInstanceEditorApplying.value = false;
+  closeInteriorInstanceContextMenu();
 }
 
 function closeInteriorInstanceEditor() {
@@ -6773,6 +6882,9 @@ async function deleteInteriorInstanceFromDesign(instance) {
       if (String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || "")) {
         interiorLibrarySelectedInstanceId.value = "";
       }
+      if (String(interiorLibraryInstanceContextMenu.value?.instanceId || "") === String(instance.id || "")) {
+        closeInteriorInstanceContextMenu();
+      }
       syncOpenSubCategoryDesignDraftToCollection();
       if (String(interiorInstanceEditorDraft.value?.id || "") === String(instance.id)) {
         closeInteriorInstanceEditor();
@@ -6795,6 +6907,9 @@ async function deleteInteriorInstanceFromDesign(instance) {
     if (String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || "")) {
       interiorLibrarySelectedInstanceId.value = "";
     }
+    if (String(interiorLibraryInstanceContextMenu.value?.instanceId || "") === String(instance.id || "")) {
+      closeInteriorInstanceContextMenu();
+    }
     await refreshOrderDesignGeometryFromServer(orderDesign.id);
     if (String(interiorInstanceEditorDraft.value?.id || "") === String(instance.id)) {
       closeInteriorInstanceEditor();
@@ -6802,6 +6917,57 @@ async function deleteInteriorInstanceFromDesign(instance) {
   } catch (error) {
     showAlert(error?.message || "حذف نمونه داخلی طرح ثبت‌شده انجام نشد.", { title: "خطا" });
   }
+}
+
+async function duplicateInteriorInstanceInDesign(instance) {
+  const normalized = normalizeInteriorInstanceRecord(instance);
+  if (!normalized?.id) return null;
+  if (subCategoryDesignEditorOpen.value) {
+    const draft = subCategoryDesignEditorDraft.value;
+    if (!draft?.id) return null;
+    const res = await fetch(
+      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances/${encodeURIComponent(String(normalized.id))}/duplicate`,
+      { method: "POST" }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "کپی نمونه داخلی انجام نشد."));
+    const duplicated = await res.json();
+    syncInteriorInstanceInDraft(duplicated);
+    syncOpenSubCategoryDesignDraftToCollection();
+    selectInteriorLibraryInstance(duplicated.id);
+    await refreshSubCategoryDesignPreview();
+    closeInteriorInstanceContextMenu();
+    return duplicated;
+  }
+  const orderDesign = activeInteriorLibraryOrderDesign.value;
+  if (!orderDesign?.id) return null;
+  const res = await fetch(
+    `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(normalized.id))}/duplicate`,
+    { method: "POST" }
+  );
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, "کپی نمونه داخلی طرح ثبت‌شده انجام نشد."));
+  const duplicated = await res.json();
+  syncInteriorInstanceInOrderDesignCollection(orderDesign.id, duplicated);
+  selectInteriorLibraryInstance(duplicated.id);
+  await refreshOrderDesignGeometryFromServer(orderDesign.id);
+  closeInteriorInstanceContextMenu();
+  return duplicated;
+}
+
+async function duplicateInteriorInstanceFromContextMenu() {
+  const target = activeInteriorLibraryContextMenuInstance.value;
+  if (!target) return;
+  try {
+    await duplicateInteriorInstanceInDesign(target);
+  } catch (error) {
+    showAlert(error?.message || "کپی نمونه داخلی انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function deleteInteriorInstanceFromContextMenu() {
+  const target = activeInteriorLibraryContextMenuInstance.value;
+  if (!target) return;
+  closeInteriorInstanceContextMenu();
+  await deleteInteriorInstanceFromDesign(target);
 }
 
 function onSubCategoryDesignSubCategoryChange() {
@@ -12038,6 +12204,7 @@ function openInteriorLibraryForDesign(orderDesignId) {
 
 function closeInteriorLibrary() {
   interiorLibraryOpen.value = false;
+  closeInteriorInstanceContextMenu();
   interiorLibraryControllerEditingId.value = "";
   interiorLibraryControllerInputDraft.value = "";
   interiorLibraryControllerDraftValues.value = null;
@@ -12685,6 +12852,10 @@ onMounted(() => {
     const el = e.target;
     if (!(el instanceof Element)) return;
     if (el.closest(".stageQuickBar")) return;
+    if (interiorLibraryInstanceContextMenu.value.visible) {
+      if (el.closest(".subCategoryDesignEditor__contextMenu")) return;
+      closeInteriorInstanceContextMenu();
+    }
     if (interiorLibraryOverlapPickerState.value.visible && !el.closest(".subCategoryDesignEditor__overlapPicker")) {
       hideInteriorLibraryOverlapPicker();
     }
@@ -12725,6 +12896,12 @@ onMounted(() => {
 
   const onEsc = (e) => {
     if (String(e.key || "") !== "Escape") return;
+    if (interiorLibraryInstanceContextMenu.value.visible) {
+      closeInteriorInstanceContextMenu();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (interiorLibraryOpen.value && interiorLibraryPreviewMode.value === "front2d"
       && (interiorLibraryControllerEditingId.value || interiorLibraryControllerPointerState.value.mode === "controller")) {
       cancelInteriorLibraryControllerInteraction();
@@ -15847,6 +16024,7 @@ onBeforeUnmount(() => {
                 :viewBox="interiorLibraryFrontSvgViewBox"
                 class="subCategoryDesignEditor__frontSvg"
                 :class="interiorLibraryFrontCursorClass"
+                @contextmenu.prevent.stop="onInteriorLibraryFrontSvgContextMenu"
                 @pointerdown="onInteriorLibraryFrontSvgPointerDown"
                 @pointermove="onInteriorLibraryFrontSvgPointerMove"
                 @pointerup="onInteriorLibraryFrontSvgPointerUp"
@@ -16346,11 +16524,12 @@ onBeforeUnmount(() => {
           <div v-else-if="!interiorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز هیچ گروه داخلی به این طرح اضافه نشده است.</div>
           <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
             <div
-              v-for="item in interiorLibraryInstanceCards"
+              v-for="(item, itemIndex) in interiorLibraryInstanceCards"
               :key="item.id"
               class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard"
               :class="{ 'is-active': String(interiorLibrarySelectedInstanceId || '') === String(item.id || '') }"
               @click="selectInteriorLibraryInstance(item.id)"
+              @contextmenu.prevent.stop="handleInteriorLibraryInstanceCardContextMenu(item, $event)"
             >
               <div class="subCategoryDesignEditor__interiorGroupHead">
                 <span class="subCategoryDesignEditor__partMeta" dir="rtl">
@@ -16383,7 +16562,7 @@ onBeforeUnmount(() => {
                       @change="applyInteriorInstanceLineColor(item, $event.target.value)"
                     />
                   </label>
-                  <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits((Number(item.ui_order) || 0) + 1) }}</span>
+                  <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits(itemIndex + 1) }}</span>
                 </div>
               </div>
             </div>
@@ -16431,6 +16610,16 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__textBtn" @click="closeInteriorLibrary">بستن</button>
       </div>
     </div>
+  </div>
+
+  <div
+    v-if="interiorLibraryOpen && interiorLibraryInstanceContextMenu.visible && activeInteriorLibraryContextMenuInstance"
+    class="subCategoryDesignEditor__contextMenu"
+    :style="interiorLibraryInstanceContextMenuStyle"
+    @pointerdown.stop
+  >
+    <button type="button" class="menuItem menuItem--grow" @click="duplicateInteriorInstanceFromContextMenu">کپی</button>
+    <button type="button" class="menuItem menuItem--grow menuItem--danger" @click="deleteInteriorInstanceFromContextMenu">حذف</button>
   </div>
 
   <div v-if="interiorInstanceEditorOpen && interiorInstanceEditorDraft" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">

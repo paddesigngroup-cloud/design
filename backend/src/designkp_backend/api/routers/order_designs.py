@@ -374,6 +374,25 @@ def _normalize_interior_param_values(
     }
 
 
+def _next_generated_interior_instance_code(
+    *,
+    existing_instances: list[object],
+    group_code: str | None,
+    fallback_order: int,
+) -> str:
+    prefix = str(group_code or "interior").strip() or "interior"
+    existing_codes = {
+        str(getattr(item, "instance_code", "") or "").strip()
+        for item in list(existing_instances or [])
+    }
+    suffix = max(1, int(fallback_order) + 1)
+    while True:
+        candidate = f"{prefix}-{suffix:02d}"
+        if candidate not in existing_codes:
+            return candidate
+        suffix += 1
+
+
 def _serialize_interior_instance_item(instance: OrderDesignInteriorInstance) -> OrderDesignInteriorInstanceItem:
     return OrderDesignInteriorInstanceItem(
         id=instance.id,
@@ -890,7 +909,11 @@ async def create_order_design_interior_instance(
     )
     existing_instances = list(item.interior_instances or [])
     next_order = payload.ui_order if payload.ui_order is not None else (max([int(row.ui_order or 0) for row in existing_instances], default=-1) + 1)
-    next_code = str(payload.instance_code or "").strip() or f"{str(group.code or 'interior').strip() or 'interior'}-{next_order + 1:02d}"
+    next_code = str(payload.instance_code or "").strip() or _next_generated_interior_instance_code(
+        existing_instances=existing_instances,
+        group_code=getattr(group, "code", None),
+        fallback_order=next_order,
+    )
     target = OrderDesignInteriorInstance(
         order_design_id=item.id,
         source_instance_id=None,
@@ -905,6 +928,70 @@ async def create_order_design_interior_instance(
         part_snapshots=[],
         viewer_boxes=[],
         status="draft",
+    )
+    session.add(target)
+    await session.flush()
+    item = await _require_item(session, item.id)
+    if target not in list(item.interior_instances or []):
+        item.interior_instances = [*list(item.interior_instances or []), target]
+    await refresh_order_design_interior_instance(
+        session,
+        item=item,
+        order=order,
+        source_design=source_design,
+        instance=target,
+        internal_group=group,
+    )
+    refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
+    refresh_order_design_snapshot_state(item=item, source_design=source_design)
+    response = _serialize_interior_instance_item(target)
+    await session.commit()
+    return response
+
+
+@router.post("/{item_id}/interior-instances/{instance_id}/duplicate", response_model=OrderDesignInteriorInstanceItem, status_code=status.HTTP_201_CREATED)
+async def duplicate_order_design_interior_instance(
+    item_id: uuid.UUID,
+    instance_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> OrderDesignInteriorInstanceItem:
+    if not await interior_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interior-instance tables are not available yet. Run database migrations first.")
+    item = await _require_item(session, item_id)
+    source = next((instance for instance in item.interior_instances if instance.id == instance_id), None)
+    if not source:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design interior instance not found.")
+    order = await require_accessible_order(session, order_id=item.order_id)
+    group = await require_accessible_internal_part_group(
+        session,
+        admin_id=order.admin_id,
+        group_id=source.internal_part_group_id,
+    )
+    source_design = await require_accessible_sub_category_design(
+        session,
+        admin_id=order.admin_id,
+        design_id=item.sub_category_design_id,
+    )
+    existing_instances = list(item.interior_instances or [])
+    next_order = max([int(row.ui_order or 0) for row in existing_instances], default=-1) + 1
+    target = OrderDesignInteriorInstance(
+        order_design_id=item.id,
+        source_instance_id=source.source_instance_id,
+        internal_part_group_id=source.internal_part_group_id,
+        instance_code=_next_generated_interior_instance_code(
+            existing_instances=existing_instances,
+            group_code=getattr(group, "code", None),
+            fallback_order=next_order,
+        ),
+        line_color=_normalize_hex_color(getattr(source, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR) if getattr(source, "line_color", None) else _normalize_hex_color(getattr(group, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR),
+        ui_order=int(next_order),
+        placement_z=float(source.placement_z or 0),
+        interior_box_snapshot={},
+        param_values=_normalize_interior_param_values(dict(source.param_values or {})),
+        param_meta={},
+        part_snapshots=[],
+        viewer_boxes=[],
+        status=str(source.status or "draft").strip() or "draft",
     )
     session.add(target)
     await session.flush()

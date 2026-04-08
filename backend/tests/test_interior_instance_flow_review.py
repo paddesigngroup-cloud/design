@@ -4,6 +4,8 @@ import asyncio
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+
 from designkp_backend.api.routers import order_designs as order_router
 from designkp_backend.api.routers import sub_category_designs as subcat_router
 
@@ -68,6 +70,11 @@ def test_subcategory_add_refreshes_only_target_instance(monkeypatch) -> None:
                 design.interior_instances.append(item)
         return design
 
+    async def fake_require_group(_session, *, admin_id, group_id):
+        assert admin_id == design.admin_id
+        assert group_id == payload.internal_part_group_id
+        return SimpleNamespace(id=group_id, line_color="#8A98A3")
+
     async def fake_refresh(_session, *, design, instance):
         refresh_calls.append(str(instance.id))
         instance.part_snapshots = [{"part_code": "inner-A"}]
@@ -86,6 +93,7 @@ def test_subcategory_add_refreshes_only_target_instance(monkeypatch) -> None:
     monkeypatch.setattr(subcat_router, "interior_instance_tables_ready", fake_interior_ready)
     monkeypatch.setattr(subcat_router, "_next_interior_instance_state", fake_next_state)
     monkeypatch.setattr(subcat_router, "_load_design", fake_load_design)
+    monkeypatch.setattr(subcat_router, "require_accessible_internal_part_group", fake_require_group)
     monkeypatch.setattr(subcat_router, "_refresh_design_interior_instance", fake_refresh)
     monkeypatch.setattr(subcat_router, "SubCategoryDesignInteriorInstance", _FakeInteriorInstance)
 
@@ -142,6 +150,111 @@ def test_subcategory_delete_stays_lightweight(monkeypatch) -> None:
     assert session.flush_count == 1
     assert session.commit_count == 1
     assert refresh_called is False
+
+
+def test_subcategory_duplicate_refreshes_only_clone_and_keeps_source_values(monkeypatch) -> None:
+    source_instance = SimpleNamespace(
+        id=uuid4(),
+        internal_part_group_id=uuid4(),
+        instance_code="inner-01",
+        ui_order=1,
+        placement_z=24.5,
+        line_color="#112233",
+        param_values={"depth": "550"},
+        status="draft",
+    )
+    design = SimpleNamespace(
+        id=uuid4(),
+        admin_id=uuid4(),
+        sub_category_id=uuid4(),
+        interior_instances=[source_instance],
+    )
+    session = _FakeMutationSession()
+    refresh_calls: list[str] = []
+
+    async def fake_interior_ready(_session) -> bool:
+        return True
+
+    async def fake_load_design(_session, _design_uuid):
+        for item in session.added:
+            if item not in design.interior_instances:
+                design.interior_instances.append(item)
+        return design
+
+    async def fake_require_group(_session, *, admin_id, group_id):
+        assert admin_id == design.admin_id
+        assert group_id == source_instance.internal_part_group_id
+        return SimpleNamespace(id=group_id, code="inner", line_color="#445566")
+
+    async def fake_next_state(_session, **kwargs):
+        assert kwargs["group_id"] == source_instance.internal_part_group_id
+        assert kwargs["placement_z"] == source_instance.placement_z
+        assert kwargs["ui_order"] == 2
+        assert kwargs["param_values"] == source_instance.param_values
+        return "inner-03", 2, {"width": 99}, {"depth": "550"}, {"depth": {"label": "عمق"}}
+
+    async def fake_refresh(_session, *, design, instance):
+        refresh_calls.append(str(instance.id))
+        instance.part_snapshots = [{"part_code": "clone"}]
+        instance.viewer_boxes = [{"width": 99}]
+        instance.status = "draft"
+
+    class _FakeInteriorInstance:
+        def __init__(self, **kwargs) -> None:
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+            self.id = None
+            self.part_snapshots = []
+            self.viewer_boxes = []
+            self.status = kwargs.get("status", "draft")
+
+    monkeypatch.setattr(subcat_router, "interior_instance_tables_ready", fake_interior_ready)
+    monkeypatch.setattr(subcat_router, "_load_design", fake_load_design)
+    monkeypatch.setattr(subcat_router, "require_accessible_internal_part_group", fake_require_group)
+    monkeypatch.setattr(subcat_router, "_next_interior_instance_state", fake_next_state)
+    monkeypatch.setattr(subcat_router, "_refresh_design_interior_instance", fake_refresh)
+    monkeypatch.setattr(subcat_router, "SubCategoryDesignInteriorInstance", _FakeInteriorInstance)
+
+    duplicated = asyncio.run(
+        subcat_router.duplicate_sub_category_design_interior_instance(
+            design.id,
+            source_instance.id,
+            session,
+        )
+    )
+
+    assert duplicated.instance_code == "inner-03"
+    assert duplicated.ui_order == 2
+    assert duplicated.line_color == "#112233"
+    assert duplicated.param_values == {"depth": "550"}
+    assert len(refresh_calls) == 1
+    assert refresh_calls[0] == str(session.added[0].id)
+    assert session.commit_count == 1
+
+
+def test_subcategory_duplicate_returns_404_for_unknown_instance(monkeypatch) -> None:
+    design = SimpleNamespace(id=uuid4(), interior_instances=[])
+    session = _FakeMutationSession()
+
+    async def fake_interior_ready(_session) -> bool:
+        return True
+
+    async def fake_load_design(_session, _design_uuid):
+        return design
+
+    monkeypatch.setattr(subcat_router, "interior_instance_tables_ready", fake_interior_ready)
+    monkeypatch.setattr(subcat_router, "_load_design", fake_load_design)
+
+    with pytest.raises(subcat_router.HTTPException) as exc_info:
+        asyncio.run(
+            subcat_router.duplicate_sub_category_design_interior_instance(
+                design.id,
+                uuid4(),
+                session,
+            )
+        )
+
+    assert exc_info.value.status_code == 404
 
 
 def test_order_design_add_refreshes_incrementally_and_keeps_defaults(monkeypatch) -> None:
@@ -327,6 +440,146 @@ def test_order_design_add_uses_created_instance_when_reloaded_collection_is_empt
     assert len(item.interior_instances) == 1
     assert result["instance_code"] == "grp-01"
     assert session.commit_count == 1
+
+
+def test_order_design_duplicate_recomputes_clone_and_aggregate_state(monkeypatch) -> None:
+    source = SimpleNamespace(
+        id=uuid4(),
+        source_instance_id=uuid4(),
+        internal_part_group_id=uuid4(),
+        instance_code="grp-01",
+        ui_order=1,
+        placement_z=12.0,
+        line_color="#223344",
+        param_values={"depth": "550"},
+        status="draft",
+    )
+    item = SimpleNamespace(
+        id=uuid4(),
+        order_id=uuid4(),
+        sub_category_design_id=uuid4(),
+        interior_instances=[source],
+        order_attr_values={},
+        order_attr_meta={},
+        part_snapshots=[],
+        viewer_boxes=[],
+    )
+    group = SimpleNamespace(id=source.internal_part_group_id, code="grp", line_color="#556677")
+    order = SimpleNamespace(id=item.order_id, admin_id=uuid4())
+    source_design = SimpleNamespace(id=item.sub_category_design_id)
+    session = _FakeMutationSession()
+    refresh_calls = 0
+    aggregate_calls = 0
+    state_refresh_calls = 0
+
+    async def fake_interior_ready(_session) -> bool:
+        return True
+
+    async def fake_require_item(_session, _item_id):
+        for added in session.added:
+            if added not in item.interior_instances:
+                item.interior_instances.append(added)
+        return item
+
+    async def fake_require_order(_session, *, order_id):
+        assert order_id == item.order_id
+        return order
+
+    async def fake_require_group(_session, *, admin_id, group_id):
+        assert admin_id == order.admin_id
+        assert group_id == source.internal_part_group_id
+        return group
+
+    async def fake_require_source_design(_session, *, admin_id, design_id):
+        assert admin_id == order.admin_id
+        assert design_id == item.sub_category_design_id
+        return source_design
+
+    async def fake_refresh(_session, *, item, order, source_design, instance, internal_group=None):
+        nonlocal refresh_calls
+        refresh_calls += 1
+        assert internal_group is group
+        instance.param_values = {"depth": "550", "width": "900"}
+        instance.param_meta = {"depth": {"label": "عمق"}}
+        instance.part_snapshots = [{"part_code": "clone"}]
+        instance.viewer_boxes = [{"width": 88}]
+
+    def fake_refresh_aggregates(*, item, source_design):
+        nonlocal aggregate_calls
+        aggregate_calls += 1
+        assert item.interior_instances[-1] is session.added[0]
+        assert session.added[0].part_snapshots == [{"part_code": "clone"}]
+        assert session.added[0].viewer_boxes == [{"width": 88}]
+
+    def fake_refresh_snapshot_state(*, item, source_design):
+        nonlocal state_refresh_calls
+        state_refresh_calls += 1
+
+    def fake_serialize_instance(instance):
+        return {
+            "id": str(instance.id),
+            "instance_code": str(instance.instance_code),
+            "ui_order": int(instance.ui_order),
+            "param_values": dict(instance.param_values),
+        }
+
+    monkeypatch.setattr(order_router, "interior_instance_tables_ready", fake_interior_ready)
+    monkeypatch.setattr(order_router, "_require_item", fake_require_item)
+    monkeypatch.setattr(order_router, "require_accessible_order", fake_require_order)
+    monkeypatch.setattr(order_router, "require_accessible_internal_part_group", fake_require_group)
+    monkeypatch.setattr(order_router, "require_accessible_sub_category_design", fake_require_source_design)
+    monkeypatch.setattr(order_router, "refresh_order_design_interior_instance", fake_refresh)
+    monkeypatch.setattr(order_router, "refresh_order_design_aggregate_snapshots", fake_refresh_aggregates)
+    monkeypatch.setattr(order_router, "refresh_order_design_snapshot_state", fake_refresh_snapshot_state)
+    monkeypatch.setattr(order_router, "_serialize_interior_instance_item", fake_serialize_instance)
+
+    result = asyncio.run(
+        order_router.duplicate_order_design_interior_instance(
+            item.id,
+            source.id,
+            session,
+        )
+    )
+
+    assert refresh_calls == 1
+    assert aggregate_calls == 1
+    assert state_refresh_calls == 1
+    assert result["instance_code"] == "grp-03"
+    assert result["ui_order"] == 2
+    assert result["param_values"] == {"depth": "550", "width": "900"}
+    assert session.added[0].source_instance_id == source.source_instance_id
+    assert session.added[0].line_color == "#223344"
+    assert session.commit_count == 1
+
+
+def test_order_design_duplicate_returns_404_for_unknown_instance(monkeypatch) -> None:
+    item = SimpleNamespace(
+        id=uuid4(),
+        order_id=uuid4(),
+        sub_category_design_id=uuid4(),
+        interior_instances=[],
+    )
+    session = _FakeMutationSession()
+
+    async def fake_interior_ready(_session) -> bool:
+        return True
+
+    async def fake_require_item(_session, _item_id):
+        return item
+
+    monkeypatch.setattr(order_router, "interior_instance_tables_ready", fake_interior_ready)
+    monkeypatch.setattr(order_router, "_require_item", fake_require_item)
+
+    with pytest.raises(order_router.HTTPException) as exc_info:
+        asyncio.run(
+            order_router.duplicate_order_design_interior_instance(
+                item.id,
+                uuid4(),
+                session,
+            )
+        )
+
+    assert exc_info.value.status_code == 404
 
 
 def test_order_design_delete_rebuilds_full_snapshot(monkeypatch) -> None:
