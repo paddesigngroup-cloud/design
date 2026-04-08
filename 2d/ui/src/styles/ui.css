@@ -58,6 +58,67 @@ select,
 textarea {
   font: inherit;
 }
+option {
+  font: inherit;
+  font-family: inherit;
+}
+
+.interiorLibraryPartKindFilter {
+  margin-top: 10px;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 70%;
+}
+
+.interiorLibraryPartKindFilter option {
+  font-family: Vazirmatn, sans-serif;
+  font-weight: 700;
+  font-size: 130%;
+  line-height: 1.6;
+}
+
+.interiorLibraryPartList {
+  margin-top: 12px;
+}
+
+.interiorLibraryLoadingPopup {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(118, 45, 71, 0.16);
+  box-shadow: 0 14px 28px rgba(52, 20, 31, 0.14);
+  backdrop-filter: blur(10px);
+}
+
+.interiorLibraryLoadingPopup__spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(118, 45, 71, 0.16);
+  border-top-color: var(--c-menu);
+  border-radius: 999px;
+  animation: interiorLibraryLoadingSpin 0.75s linear infinite;
+}
+
+.interiorLibraryLoadingPopup__text {
+  font-family: Vazirmatn, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+@keyframes interiorLibraryLoadingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .ltr {
   direction: ltr;
   text-align: left;

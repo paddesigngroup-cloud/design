@@ -285,6 +285,7 @@ let orderDesignCatalogLoadRequestSeq = 0;
 let orderDesignCatalogReloadQueued = false;
 const interiorLibraryOpen = ref(false);
 const interiorLibraryForcedOrderDesignId = ref("");
+const interiorLibraryPartKindFilter = ref("");
 const interiorInstanceEditorOpen = ref(false);
 const interiorInstanceEditorDraft = ref(null);
 const interiorInstanceEditorActiveGroupId = ref("");
@@ -292,6 +293,7 @@ const interiorLibraryControllerEditingId = ref("");
 const interiorLibraryControllerInputDraft = ref("");
 const interiorLibraryHoveredControllerId = ref("");
 const interiorLibraryControllerDraftValues = ref(null);
+const interiorLibraryControllerApplying = ref(false);
 const interiorLibraryControllerPointerState = ref({
   mode: "idle",
   pointerId: null,
@@ -1209,11 +1211,37 @@ function applyInteriorLibraryControllerInput(controllerId, nextValueMm) {
 async function persistActiveInteriorLibraryControllerInstance() {
   const instance = activeInteriorLibrarySelectedInstance.value;
   if (!instance?.id) return;
-  if (subCategoryDesignEditorOpen.value) {
-    const draft = subCategoryDesignEditorDraft.value;
-    if (!draft?.id) return;
+  interiorLibraryControllerApplying.value = true;
+  try {
+    if (subCategoryDesignEditorOpen.value) {
+      const draft = subCategoryDesignEditorDraft.value;
+      if (!draft?.id) return;
+      const res = await fetch(
+        `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            placement_z: Number(instance.placement_z) || 0,
+            ui_order: Math.max(0, Number(instance.ui_order) || 0),
+            instance_code: String(instance.instance_code || "").trim() || "interior",
+            line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+            param_values: Object.fromEntries(
+              Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+            ),
+          }),
+        }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره کنترلر نمونه داخلی انجام نشد."));
+      syncInteriorInstanceInDraft(await res.json());
+      syncOpenSubCategoryDesignDraftToCollection();
+      await refreshSubCategoryDesignPreview();
+      return;
+    }
+    const orderDesign = activeInteriorLibraryOrderDesign.value;
+    if (!orderDesign?.id) return;
     const res = await fetch(
-      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
+      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -1228,33 +1256,12 @@ async function persistActiveInteriorLibraryControllerInstance() {
         }),
       }
     );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره کنترلر نمونه داخلی انجام نشد."));
-    syncInteriorInstanceInDraft(await res.json());
-    syncOpenSubCategoryDesignDraftToCollection();
-    await refreshSubCategoryDesignPreview();
-    return;
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره کنترلر نمونه داخلی طرح ثبت‌شده انجام نشد."));
+    syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
+    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+  } finally {
+    interiorLibraryControllerApplying.value = false;
   }
-  const orderDesign = activeInteriorLibraryOrderDesign.value;
-  if (!orderDesign?.id) return;
-  const res = await fetch(
-    `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        placement_z: Number(instance.placement_z) || 0,
-        ui_order: Math.max(0, Number(instance.ui_order) || 0),
-        instance_code: String(instance.instance_code || "").trim() || "interior",
-        line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-        param_values: Object.fromEntries(
-          Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
-        ),
-      }),
-    }
-  );
-  if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره کنترلر نمونه داخلی طرح ثبت‌شده انجام نشد."));
-  syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-  await refreshOrderDesignGeometryFromServer(orderDesign.id);
 }
 
 function commitInteriorLibraryControllerEditing() {
@@ -1759,6 +1766,14 @@ const constructionPartKindOptions = computed(() =>
     value: Number(item.part_kind_id) || 0,
     label: `${toPersianDigits(item.part_kind_id)} - ${String(item.org_part_kind_title || item.title || "").trim()}`,
   }))
+);
+const constructionInternalPartKindOptions = computed(() =>
+  constructionPartKinds.value
+    .filter((item) => normalizeBooleanFlag(item.is_internal, false))
+    .map((item) => ({
+      value: Number(item.part_kind_id) || 0,
+      label: String(item.org_part_kind_title || item.title || "").trim(),
+    }))
 );
 const systemPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => item.admin_id === null).length);
 const adminPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => item.admin_id === currentAdminId.value).length);
@@ -2707,6 +2722,10 @@ function extractFormulaNamesLocal(expression) {
   return Array.from(new Set(String(expression || "").match(/[A-Za-z_][A-Za-z0-9_]*/g) || []));
 }
 
+const constructionPartFormulasById = computed(() =>
+  new Map(constructionPartFormulas.value.map((item) => [Number(item.part_formula_id) || 0, item]))
+);
+
 function collectInternalGroupParamCodesLocal(group) {
   const formulasById = new Map(
     constructionPartFormulas.value.map((item) => [Number(item.part_formula_id) || 0, item])
@@ -2739,6 +2758,27 @@ function collectInternalGroupParamCodesLocal(group) {
     if (nested) pending.push(...extractFormulaNamesLocal(nested));
   }
   return Array.from(resolved);
+}
+
+function getInteriorLibrarySelectedPartKindId() {
+  const parsed = Number(String(interiorLibraryPartKindFilter.value || "").trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function getInternalPartGroupPartKindIds(group) {
+  const partKindIds = new Set();
+  for (const part of Array.isArray(group?.parts) ? group.parts : []) {
+    const formula = constructionPartFormulasById.value.get(Number(part?.part_formula_id) || 0);
+    const partKindId = Number(formula?.part_kind_id) || 0;
+    if (partKindId > 0) partKindIds.add(partKindId);
+  }
+  return partKindIds;
+}
+
+function matchesInteriorLibraryPartKindFilter(group) {
+  const selectedPartKindId = getInteriorLibrarySelectedPartKindId();
+  if (!selectedPartKindId) return true;
+  return getInternalPartGroupPartKindIds(group).has(selectedPartKindId);
 }
 
 function buildInternalGroupDefaultsTree(group) {
@@ -3209,32 +3249,38 @@ function buildInteriorControllerVerticalArrowPath(direction, x, y, width, height
 
 const interiorLibraryGroupCards = computed(() => {
   const groups = constructionInternalPartGroups.value;
-  return groups.map((group) => {
-    const groupTree = buildInternalGroupDefaultsTree(group);
-    return {
-      ...group,
-      lineColor: normalizeHexColor(group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
-      groupTree,
-      relatedGroups: groupTree.map((row) => ({ id: String(row.id), title: row.title, count: row.items.length })),
-      paramCount: groupTree.reduce((sum, row) => sum + row.items.length, 0),
-    };
-  });
+  return groups
+    .filter((group) => matchesInteriorLibraryPartKindFilter(group))
+    .map((group) => {
+      const groupTree = buildInternalGroupDefaultsTree(group);
+      return {
+        ...group,
+        lineColor: normalizeHexColor(group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+        groupTree,
+        relatedGroups: groupTree.map((row) => ({ id: String(row.id), title: row.title, count: row.items.length })),
+        paramCount: groupTree.reduce((sum, row) => sum + row.items.length, 0),
+      };
+    });
 });
 const interiorLibraryInstanceCards = computed(() =>
   activeInteriorLibraryInstances.value
     .slice()
     .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
     .map((instance) => {
-    const group = constructionInternalPartGroupsById.value.get(String(instance.internal_part_group_id));
-    const groups = buildInteriorInstanceGroups(instance);
-    return {
-      ...instance,
-      groupTitle: String(group?.group_title || group?.title || instance.instance_code || "گروه داخلی").trim(),
-      groupCode: String(group?.code || "").trim(),
-      lineColor: resolveInteriorInstanceLineColor(instance),
-      groups,
-    };
-  })
+      const group = constructionInternalPartGroupsById.value.get(String(instance.internal_part_group_id));
+      const groups = buildInteriorInstanceGroups(instance);
+      return {
+        ...instance,
+        groupTitle: String(group?.group_title || group?.title || instance.instance_code || "گروه داخلی").trim(),
+        groupCode: String(group?.code || "").trim(),
+        lineColor: resolveInteriorInstanceLineColor(instance),
+        groups,
+      };
+    })
+    .filter((instance) => {
+      const group = constructionInternalPartGroupsById.value.get(String(instance.internal_part_group_id || "").trim());
+      return matchesInteriorLibraryPartKindFilter(group);
+    })
 );
 const activeInteriorLibraryOutlineColor = computed(() => {
   if (subCategoryDesignEditorOpen.value) {
@@ -15650,6 +15696,10 @@ onBeforeUnmount(() => {
   <div v-if="interiorLibraryOpen" class="appDialog" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeInteriorLibrary"></div>
     <div class="appDialog__card appDialog__card--subDesign" dir="rtl">
+      <div v-if="interiorLibraryControllerApplying" class="interiorLibraryLoadingPopup" role="status" aria-live="polite" aria-busy="true">
+        <span class="interiorLibraryLoadingPopup__spinner" aria-hidden="true"></span>
+        <span class="interiorLibraryLoadingPopup__text">در حال اعمال تغییرات کنترلر...</span>
+      </div>
       <div class="formulaBuilder__head">
         <div class="constructionDialog__sectionTitle formulaBuilder__title">قطعات داخلی</div>
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeInteriorLibrary">×</button>
@@ -16288,9 +16338,13 @@ onBeforeUnmount(() => {
 
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances">
           <div class="subCategoryDesignEditor__panelTitle">نمونه‌های داخلی این طرح</div>
+          <select v-model="interiorLibraryPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+            <option value="">همه انواع قطعات داخلی</option>
+            <option v-for="option in constructionInternalPartKindOptions" :key="`interior-instance-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+          </select>
           <div v-if="!activeInteriorLibraryTargetId" class="designMenu__cabinetState">برای افزودن نمونه داخلی، ابتدا یک طرح معتبر را باز یا انتخاب کنید.</div>
           <div v-else-if="!interiorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز هیچ گروه داخلی به این طرح اضافه نشده است.</div>
-          <div v-else class="subCategoryDesignEditor__partList">
+          <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
             <div
               v-for="item in interiorLibraryInstanceCards"
               :key="item.id"
@@ -16338,9 +16392,13 @@ onBeforeUnmount(() => {
 
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorSidebar">
           <div class="subCategoryDesignEditor__panelTitle">گروه‌های قطعات داخلی</div>
+          <select v-model="interiorLibraryPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+            <option value="">همه انواع قطعات داخلی</option>
+            <option v-for="option in constructionInternalPartKindOptions" :key="`interior-group-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+          </select>
           <div v-if="constructionLoading" class="constructionDialog__loading">در حال خواندن گروه‌های داخلی...</div>
           <div v-else-if="!interiorLibraryGroupCards.length" class="designMenu__cabinetState">هنوز گروه قطعات داخلی برای استفاده ثبت نشده است.</div>
-          <div v-else class="subCategoryDesignEditor__partList">
+          <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
             <div v-for="item in interiorLibraryGroupCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
               <div class="subCategoryDesignEditor__interiorGroupHead">
                 <span class="subCategoryDesignEditor__partMeta" dir="rtl">
