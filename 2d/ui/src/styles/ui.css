@@ -3075,6 +3075,50 @@ option {
   text-align: left;
   color: #7a2f49;
 }
+.doorPartGroupPreview {
+  margin: 12px 0 16px;
+  border: 1px solid rgba(118, 45, 71, 0.12);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(249,243,245,0.92));
+  padding: 10px;
+}
+.doorPartGroupPreview--controller {
+  margin-top: 0;
+}
+.doorPartGroupPreview__svg {
+  width: 100%;
+  height: 320px;
+  display: block;
+}
+.doorPartGroupPreview__frame {
+  fill: rgba(255,255,255,0.92);
+  stroke: rgba(118, 45, 71, 0.14);
+  stroke-width: 2;
+}
+.doorPartGroupPreview__part {
+  cursor: pointer;
+  stroke-width: 3;
+  transition: fill 0.16s ease, stroke 0.16s ease, transform 0.16s ease;
+}
+.doorPartGroupPreview__part.is-vertical {
+  fill: rgba(0, 145, 255, 0.16);
+  stroke: rgba(0, 145, 255, 0.7);
+}
+.doorPartGroupPreview__part.is-horizontal {
+  fill: rgba(90, 60, 66, 0.14);
+  stroke: rgba(90, 60, 66, 0.62);
+}
+.doorPartGroupPreview__part.is-selected {
+  fill: rgba(36, 189, 117, 0.22);
+  stroke: rgba(36, 189, 117, 0.9);
+}
+.doorPartGroupPreview__label {
+  font-family: Vazirmatn, sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  fill: #5b2236;
+  pointer-events: none;
+}
 .constructionDialog__defaultsPreviewBtn {
   width: 100%;
   min-height: 34px;
@@ -4037,6 +4081,12 @@ option {
 }
 .subCategoryDesignEditor__annotationToolBtn {
   margin: 0;
+}
+.doorLibrary__emptyState {
+  align-self: center;
+  margin-top: auto;
+  margin-bottom: 28px;
+  max-width: min(480px, calc(100% - 48px));
 }
 .subCategoryDesignEditor__frontSvg {
   display: block;

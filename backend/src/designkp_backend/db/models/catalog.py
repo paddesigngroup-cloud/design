@@ -88,6 +88,7 @@ class Param(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
     param_group: Mapped["ParamGroup"] = relationship(back_populates="params")
     sub_category_defaults: Mapped[list["SubCategoryParamDefault"]] = relationship(back_populates="param")
     internal_part_group_defaults: Mapped[list["InternalPartGroupParamDefault"]] = relationship(back_populates="param")
+    door_part_group_defaults: Mapped[list["DoorPartGroupParamDefault"]] = relationship(back_populates="param")
 
 
 class BaseFormula(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -284,6 +285,10 @@ class SubCategoryDesign(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
         back_populates="design",
         cascade="all, delete-orphan",
     )
+    door_instances: Mapped[list["SubCategoryDesignDoorInstance"]] = relationship(
+        back_populates="design",
+        cascade="all, delete-orphan",
+    )
 
 
 class SubCategoryDesignPart(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -469,12 +474,24 @@ class DoorPartGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Versio
     group_title: Mapped[str] = mapped_column(String(255), nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    line_color: Mapped[str] = mapped_column(String(7), nullable=False, default="#8A98A3", server_default="#8A98A3")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    controller_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    controller_selection: Mapped[list[dict[str, object]] | None] = mapped_column(JSONB, nullable=True)
+    controller_bindings: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
     admin: Mapped["Admin | None"] = relationship()
     parts: Mapped[list["DoorPartGroupItem"]] = relationship(
         back_populates="group",
+        cascade="all, delete-orphan",
+    )
+    param_groups: Mapped[list["DoorPartGroupParamGroup"]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )
+    param_defaults: Mapped[list["DoorPartGroupParamDefault"]] = relationship(
+        back_populates="door_part_group",
         cascade="all, delete-orphan",
     )
 
@@ -507,6 +524,50 @@ class DoorPartGroupItem(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
     part_formula: Mapped["PartFormula"] = relationship()
 
 
+class DoorPartGroupParamGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "door_part_group_param_groups"
+
+    group_ref_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("door_part_groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    param_group_id: Mapped[int] = mapped_column(
+        ForeignKey("param_groups.param_group_id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    param_group_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    param_group_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    param_group_icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+    group: Mapped["DoorPartGroup"] = relationship(back_populates="param_groups")
+    param_group: Mapped["ParamGroup"] = relationship()
+
+
+class DoorPartGroupParamDefault(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "door_part_group_param_defaults"
+
+    door_part_group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("door_part_groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    param_id: Mapped[int] = mapped_column(
+        ForeignKey("params.param_id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    door_part_group: Mapped["DoorPartGroup"] = relationship(back_populates="param_defaults")
+    param: Mapped["Param"] = relationship(back_populates="door_part_group_defaults")
+
+
 class SubCategoryDesignInteriorInstance(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
     __tablename__ = "sub_category_design_interior_instances"
 
@@ -535,3 +596,34 @@ class SubCategoryDesignInteriorInstance(UUIDPrimaryKeyMixin, TimestampMixin, Sof
 
     design: Mapped["SubCategoryDesign"] = relationship(back_populates="interior_instances")
     internal_part_group: Mapped["InternalPartGroup"] = relationship()
+
+
+class SubCategoryDesignDoorInstance(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "sub_category_design_door_instances"
+
+    design_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sub_category_designs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    door_part_group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("door_part_groups.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    instance_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    line_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    structural_part_formula_ids: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list)
+    dependent_interior_instance_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    controller_box_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    param_values: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    param_meta: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    part_snapshots: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
+    viewer_boxes: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", server_default="draft")
+
+    design: Mapped["SubCategoryDesign"] = relationship(back_populates="door_instances")
+    door_part_group: Mapped["DoorPartGroup"] = relationship()

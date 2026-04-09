@@ -12,14 +12,18 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from designkp_backend.db.models.catalog import (
+    DoorPartGroup,
+    DoorPartGroupParamDefault,
     BaseFormula,
     InternalPartGroup,
     InternalPartGroupParamDefault,
     Param,
     ParamGroup,
     PartFormula,
+    PartKind,
     SubCategory,
     SubCategoryDesign,
+    SubCategoryDesignDoorInstance,
     SubCategoryDesignInteriorInstance,
     SubCategoryDesignPart,
     SubCategoryDesignPartSnapshot,
@@ -65,6 +69,27 @@ class ResolvedInteriorInstanceSnapshot:
     param_values: dict[str, str | None]
     param_meta: dict[str, dict[str, object]]
     auto_params: dict[str, float]
+    part_snapshots: list[dict[str, object]]
+    viewer_boxes: list[dict[str, object]]
+
+
+@dataclass(slots=True)
+class ResolvedDoorInstanceSnapshot:
+    instance_id: uuid.UUID | None
+    door_part_group_id: uuid.UUID
+    door_part_group_code: str
+    door_part_group_title: str
+    controller_type: str | None
+    controller_bindings: dict[str, dict[str, str | None]]
+    instance_code: str
+    line_color: str | None
+    ui_order: int
+    structural_part_formula_ids: list[int]
+    dependent_interior_instance_ids: list[str]
+    controller_box_snapshot: dict[str, object]
+    param_values: dict[str, str | None]
+    param_meta: dict[str, dict[str, object]]
+    computed_params: dict[str, float]
     part_snapshots: list[dict[str, object]]
     viewer_boxes: list[dict[str, object]]
 
@@ -242,6 +267,22 @@ async def interior_instance_tables_ready(session: AsyncSession) -> bool:
     return bool(subcat_table) and bool(order_table)
 
 
+async def door_instance_tables_ready(session: AsyncSession) -> bool:
+    result = await session.execute(
+        select(
+            func.to_regclass("sub_category_design_door_instances"),
+            func.to_regclass("order_design_door_instances"),
+        )
+    )
+    subcat_table, order_table = result.one()
+    return bool(subcat_table) and bool(order_table)
+
+
+async def door_part_group_param_defaults_table_ready(session: AsyncSession) -> bool:
+    result = await session.execute(select(func.to_regclass("door_part_group_param_defaults")))
+    return bool(result.one()[0])
+
+
 async def require_accessible_part_formulas(
     session: AsyncSession,
     *,
@@ -260,6 +301,30 @@ async def require_accessible_part_formulas(
     missing = [str(item) for item in part_formula_ids if int(item) not in found_ids]
     if missing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown part formulas for this admin scope: {', '.join(missing)}")
+    return items
+
+
+async def require_accessible_door_part_formulas(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    part_formula_ids: list[int],
+) -> list[PartFormula]:
+    if not part_formula_ids:
+        return []
+    stmt = (
+        select(PartFormula)
+        .join(PartKind, PartKind.part_kind_id == PartFormula.part_kind_id)
+        .where(PartFormula.part_formula_id.in_(part_formula_ids))
+        .where(PartKind.part_scope == "door")
+    )
+    if admin_id is not None:
+        stmt = stmt.where(or_(PartFormula.admin_id.is_(None), PartFormula.admin_id == admin_id))
+    items = (await session.scalars(stmt.order_by(PartFormula.sort_order.asc(), PartFormula.part_formula_id.asc()))).all()
+    found_ids = {int(item.part_formula_id) for item in items}
+    missing = [str(item) for item in part_formula_ids if int(item) not in found_ids]
+    if missing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown door part formulas for this admin scope: {', '.join(missing)}")
     return items
 
 
@@ -637,6 +702,105 @@ async def require_accessible_internal_part_group(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Internal part group not found for this admin scope.")
     return item
+
+
+async def require_accessible_door_part_group(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    group_id: uuid.UUID,
+) -> DoorPartGroup:
+    include_param_defaults = await door_part_group_param_defaults_table_ready(session)
+    stmt = (
+        select(DoorPartGroup)
+        .options(
+            selectinload(DoorPartGroup.parts),
+            selectinload(DoorPartGroup.param_groups),
+        )
+        .where(DoorPartGroup.id == group_id)
+    )
+    if include_param_defaults:
+        stmt = stmt.options(selectinload(DoorPartGroup.param_defaults).selectinload(DoorPartGroupParamDefault.param))
+    if admin_id is not None:
+        stmt = stmt.where(or_(DoorPartGroup.admin_id.is_(None), DoorPartGroup.admin_id == admin_id))
+    item = await session.scalar(stmt)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Door part group not found for this admin scope.")
+    return item
+
+
+async def collect_door_group_selected_param_codes(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    group: DoorPartGroup,
+) -> set[str]:
+    selected_param_group_ids = {
+        int(item.param_group_id)
+        for item in list(group.__dict__.get("param_groups") or [])
+        if bool(item.enabled) and int(item.param_group_id or 0) > 0
+    }
+    if not selected_param_group_ids:
+        return set()
+    stmt = select(Param).where(Param.param_group_id.in_(sorted(selected_param_group_ids)))
+    if admin_id is not None:
+        stmt = stmt.where(or_(Param.admin_id.is_(None), Param.admin_id == admin_id))
+    params = (await session.scalars(stmt.order_by(Param.ui_order.asc(), Param.param_id.asc()))).all()
+    return {
+        str(item.param_code).strip()
+        for item in params
+        if str(item.param_code or "").strip()
+    }
+
+
+async def build_door_group_param_display_snapshot(
+    session: AsyncSession,
+    *,
+    group: DoorPartGroup,
+    codes: set[str] | None = None,
+    admin_id: uuid.UUID | None = None,
+) -> tuple[dict[str, str | None], dict[str, dict[str, object]]]:
+    selected_param_group_ids = {
+        int(item.param_group_id)
+        for item in list(group.__dict__.get("param_groups") or [])
+        if bool(item.enabled) and int(item.param_group_id or 0) > 0
+    }
+    if not selected_param_group_ids:
+        return {}, {}
+    defaults_by_code = {
+        str(getattr(getattr(row, "param", None), "param_code", "")).strip(): row.default_value
+        for row in list(group.__dict__.get("param_defaults") or [])
+        if str(getattr(getattr(row, "param", None), "param_code", "")).strip()
+    }
+    stmt = (
+        select(Param, ParamGroup)
+        .join(ParamGroup, ParamGroup.param_group_id == Param.param_group_id)
+        .where(Param.param_group_id.in_(sorted(selected_param_group_ids)))
+        .order_by(ParamGroup.ui_order.asc(), Param.ui_order.asc(), Param.param_id.asc())
+    )
+    if admin_id is not None:
+        stmt = stmt.where(or_(Param.admin_id.is_(None), Param.admin_id == admin_id))
+    rows = (await session.execute(stmt)).all()
+    filter_codes = {str(item).strip() for item in (codes or set()) if str(item).strip()} if codes else None
+    values: dict[str, str | None] = {}
+    meta: dict[str, dict[str, object]] = {}
+    for param, group_row in rows:
+        code = str(param.param_code or "").strip()
+        if not code or (filter_codes is not None and code not in filter_codes):
+            continue
+        values[code] = defaults_by_code.get(code)
+        meta[code] = {
+            "label": str(param.param_title_fa or code).strip() or code,
+            "group_id": int(group_row.param_group_id or 0),
+            "group_title": str(group_row.org_param_group_title or group_row.title or group_row.param_group_code or "").strip() or None,
+            "group_icon_path": str(group_row.param_group_icon_path or "").strip() or None,
+            "group_ui_order": int(group_row.ui_order or 0),
+            "group_show_in_order_attrs": bool(group_row.show_in_order_attrs),
+            "param_id": int(param.param_id or 0),
+            "param_ui_order": int(param.ui_order or 0),
+            "input_mode": "value",
+        }
+    return values, meta
 
 
 async def collect_internal_group_selected_param_codes(
@@ -1196,6 +1360,222 @@ async def resolve_internal_instance_preview(
     )
 
 
+def _normalize_door_controller_bindings(raw_bindings: dict[str, object] | None) -> dict[str, dict[str, str | None]]:
+    normalized: dict[str, dict[str, str | None]] = {}
+    for key, value in dict(raw_bindings or {}).items():
+        binding = dict(value or {}) if isinstance(value, dict) else {}
+        normalized[str(key)] = {"param_code": (str(binding.get("param_code") or "").strip() or None)}
+    return normalized
+
+
+def _box_front_extents(box: dict[str, object]) -> dict[str, float]:
+    width = _round_number(_coerce_numeric(box.get("width")))
+    height = _round_number(_coerce_numeric(box.get("height")))
+    cx = _round_number(_coerce_numeric(box.get("cx")))
+    cz = _round_number(_coerce_numeric(box.get("cz")))
+    min_x = _round_number(cx - (width * 0.5))
+    max_x = _round_number(cx + (width * 0.5))
+    min_z = _round_number(cz - (height * 0.5))
+    max_z = _round_number(cz + (height * 0.5))
+    return {
+        "width": width,
+        "height": height,
+        "cx": cx,
+        "cz": cz,
+        "min_x": min_x,
+        "max_x": max_x,
+        "min_z": min_z,
+        "max_z": max_z,
+    }
+
+
+def _compute_door_controller_box_snapshot(
+    *,
+    structural_part_formula_ids: list[int],
+    source_boxes_by_formula_id: dict[int, dict[str, object]],
+) -> tuple[dict[str, object], dict[str, float]]:
+    normalized_ids = [int(item) for item in structural_part_formula_ids if int(item) > 0]
+    unique_ids: list[int] = []
+    seen: set[int] = set()
+    for item in normalized_ids:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique_ids.append(item)
+    if not unique_ids:
+        return {}, {}
+    if len(unique_ids) != 4:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Door instance requires exactly 4 structural parts.")
+    selected = []
+    for formula_id in unique_ids:
+        box = source_boxes_by_formula_id.get(int(formula_id))
+        if not isinstance(box, dict):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Missing source box for structural part formula: {formula_id}")
+        extents = _box_front_extents(box)
+        axis = "vertical" if extents["height"] >= extents["width"] else "horizontal"
+        selected.append({"part_formula_id": formula_id, "axis": axis, "box": dict(box), "extents": extents})
+    vertical = [item for item in selected if item["axis"] == "vertical"]
+    horizontal = [item for item in selected if item["axis"] == "horizontal"]
+    if len(vertical) != 2 or len(horizontal) != 2:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Door instance structural parts must resolve to exactly 2 vertical and 2 horizontal members.")
+    vertical.sort(key=lambda item: (float(item["extents"]["min_x"]), int(item["part_formula_id"])))
+    horizontal.sort(key=lambda item: (-float(item["extents"]["max_z"]), int(item["part_formula_id"])))
+    left, right = vertical
+    top, bottom = horizontal
+    width_back_to_back = _round_number(float(right["extents"]["max_x"]) - float(left["extents"]["min_x"]))
+    height_back_to_back = _round_number(float(top["extents"]["max_z"]) - float(bottom["extents"]["min_z"]))
+    min_x = min(float(item["extents"]["min_x"]) for item in selected)
+    max_x = max(float(item["extents"]["max_x"]) for item in selected)
+    min_z = min(float(item["extents"]["min_z"]) for item in selected)
+    max_z = max(float(item["extents"]["max_z"]) for item in selected)
+    snapshot = {
+        "min_x": _round_number(min_x),
+        "max_x": _round_number(max_x),
+        "min_z": _round_number(min_z),
+        "max_z": _round_number(max_z),
+        "width": _round_number(max_x - min_x),
+        "height": _round_number(max_z - min_z),
+        "cx": _round_number((min_x + max_x) * 0.5),
+        "cz": _round_number((min_z + max_z) * 0.5),
+        "structural_part_formula_ids": unique_ids,
+    }
+    computed = {
+        "width_back_to_back": width_back_to_back,
+        "height_back_to_back": height_back_to_back,
+    }
+    return snapshot, computed
+
+
+async def resolve_door_instance_preview(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    sub_category: SubCategory,
+    door_part_group: DoorPartGroup,
+    instance_id: uuid.UUID | None,
+    instance_code: str,
+    line_color: str | None,
+    ui_order: int,
+    structural_part_formula_ids: list[int],
+    dependent_interior_instance_ids: list[str] | None = None,
+    controller_box_snapshot: dict[str, object] | None = None,
+    param_values: dict[str, object] | None = None,
+    param_meta: dict[str, dict[str, object]] | None = None,
+    source_boxes_by_formula_id: dict[int, dict[str, object]] | None = None,
+    base_raw_values: dict[str, str | None] | None = None,
+    base_numeric_params: dict[str, float] | None = None,
+    context: DesignExecutionContext | None = None,
+) -> ResolvedDoorInstanceSnapshot:
+    resolved_context = context or await build_design_execution_context(
+        session,
+        admin_id=admin_id,
+        sub_category=sub_category,
+        part_formula_ids=set(),
+        include_sub_category_display=True,
+    )
+    normalized_source_boxes = {
+        int(key): dict(value or {})
+        for key, value in dict(source_boxes_by_formula_id or {}).items()
+        if int(key) > 0 and isinstance(value, dict)
+    }
+    next_box_snapshot, computed_params = _compute_door_controller_box_snapshot(
+        structural_part_formula_ids=list(structural_part_formula_ids or []),
+        source_boxes_by_formula_id=normalized_source_boxes,
+    )
+    selected_param_codes = await collect_door_group_selected_param_codes(
+        session,
+        admin_id=admin_id,
+        group=door_part_group,
+    )
+    persisted_values = {
+        code: value
+        for code, value in _normalize_raw_param_values(param_values).items()
+        if code in selected_param_codes
+    }
+    raw_base_values = _normalize_raw_param_values(base_raw_values or resolved_context.sub_category_raw_params)
+    numeric_base_values = {
+        str(key): float(value)
+        for key, value in dict(base_numeric_params or resolved_context.sub_category_numeric_params).items()
+    }
+    meta_values, default_meta = await build_door_group_param_display_snapshot(
+        session,
+        group=door_part_group,
+        codes=selected_param_codes,
+        admin_id=admin_id,
+    )
+    bindings = _normalize_door_controller_bindings(getattr(door_part_group, "controller_bindings", None))
+    persisted_values = _merge_param_value_layers(meta_values, persisted_values)
+    for binding_key, computed_value in computed_params.items():
+        bound_code = str((bindings.get(binding_key) or {}).get("param_code") or "").strip()
+        if bound_code and bound_code in selected_param_codes:
+            persisted_values[bound_code] = str(int(computed_value) if float(computed_value).is_integer() else computed_value)
+    merged_meta = _merge_param_meta_layers(default_meta, _normalize_param_meta(param_meta))
+    effective_numeric_params = dict(numeric_base_values)
+    for code, value in persisted_values.items():
+        effective_numeric_params[code] = _round_number(_coerce_numeric(value))
+    resolved_base_formulas = resolve_base_formula_values_with_context(resolved_context, params=effective_numeric_params)
+    door_formula_ids = [
+        int(item.part_formula_id)
+        for item in sorted(list(door_part_group.__dict__.get("parts") or []), key=lambda row: (int(row.ui_order or 0), int(row.part_formula_id or 0)))
+        if bool(item.enabled) and int(item.part_formula_id or 0) > 0
+    ]
+    formulas = await require_accessible_door_part_formulas(
+        session,
+        admin_id=admin_id,
+        part_formula_ids=door_formula_ids,
+    )
+    formulas_by_id = {int(item.part_formula_id): item for item in formulas}
+    part_snapshots: list[dict[str, object]] = []
+    viewer_boxes: list[dict[str, object]] = []
+    for selection in sorted(list(door_part_group.__dict__.get("parts") or []), key=lambda row: (int(row.ui_order or 0), int(row.part_formula_id or 0))):
+        if not bool(selection.enabled):
+            continue
+        formula = formulas_by_id.get(int(selection.part_formula_id or 0))
+        if formula is None:
+            continue
+        resolved_part_formulas = resolve_part_formula_values(
+            formula,
+            params=effective_numeric_params,
+            base_formulas=resolved_base_formulas,
+            context=resolved_context,
+        )
+        viewer_payload = build_part_viewer_payload(formula, resolved_part_formulas)
+        part_snapshots.append(
+            {
+                "part_formula_id": int(formula.part_formula_id),
+                "part_kind_id": int(formula.part_kind_id),
+                "part_code": formula.part_code,
+                "part_title": formula.part_title,
+                "enabled": True,
+                "ui_order": int(selection.ui_order or 0),
+                "resolved_part_formulas": resolved_part_formulas,
+                "viewer_payload": viewer_payload,
+            }
+        )
+        box = viewer_payload.get("box")
+        if isinstance(box, dict):
+            viewer_boxes.append(dict(box))
+    return ResolvedDoorInstanceSnapshot(
+        instance_id=instance_id,
+        door_part_group_id=door_part_group.id,
+        door_part_group_code=str(door_part_group.code or "").strip(),
+        door_part_group_title=str(door_part_group.group_title or door_part_group.title or "").strip(),
+        controller_type=str(getattr(door_part_group, "controller_type", "") or "").strip() or None,
+        controller_bindings=bindings,
+        instance_code=str(instance_code or "").strip(),
+        line_color=str(line_color or getattr(door_part_group, "line_color", "") or "").strip() or None,
+        ui_order=int(ui_order),
+        structural_part_formula_ids=[int(item) for item in structural_part_formula_ids if int(item) > 0],
+        dependent_interior_instance_ids=[str(item).strip() for item in list(dependent_interior_instance_ids or []) if str(item).strip()],
+        controller_box_snapshot=dict(controller_box_snapshot or {}) if dict(controller_box_snapshot or {}) else next_box_snapshot,
+        param_values={str(key): (None if value is None else str(value)) for key, value in persisted_values.items()},
+        param_meta={str(key): dict(value or {}) for key, value in merged_meta.items()},
+        computed_params=computed_params,
+        part_snapshots=part_snapshots,
+        viewer_boxes=viewer_boxes,
+    )
+
+
 async def compose_sub_category_design_preview(
     session: AsyncSession,
     *,
@@ -1203,7 +1583,8 @@ async def compose_sub_category_design_preview(
     sub_category: SubCategory,
     part_selections: list[dict[str, object]],
     interior_instances: list[SubCategoryDesignInteriorInstance] | None = None,
-) -> tuple[dict[str, str | None], dict[str, float], list[ResolvedPartSnapshot], list[ResolvedInteriorInstanceSnapshot]]:
+    door_instances: list[SubCategoryDesignDoorInstance] | None = None,
+) -> tuple[dict[str, str | None], dict[str, float], list[ResolvedPartSnapshot], list[ResolvedInteriorInstanceSnapshot], list[ResolvedDoorInstanceSnapshot]]:
     selected_ids = [int(item["part_formula_id"]) for item in part_selections if int(item.get("part_formula_id") or 0) > 0 and bool(item.get("enabled", True))]
     context = await build_design_execution_context(
         session,
@@ -1241,6 +1622,11 @@ async def compose_sub_category_design_preview(
         )
     base_boxes = [item.viewer_payload["box"] for item in snapshots if isinstance(item.viewer_payload.get("box"), dict)]
     interior_box_snapshot = derive_interior_box_snapshot(base_boxes)
+    source_boxes_by_formula_id = {
+        int(item.part_formula.part_formula_id): dict(item.viewer_payload["box"])
+        for item in snapshots
+        if isinstance(item.viewer_payload.get("box"), dict)
+    }
     resolved_interior: list[ResolvedInteriorInstanceSnapshot] = []
     for instance in sorted(list(interior_instances or []), key=lambda item: (int(item.ui_order or 0), str(item.instance_code or ""))):
         internal_group = context.internal_groups_by_id.get(instance.internal_part_group_id)
@@ -1267,7 +1653,45 @@ async def compose_sub_category_design_preview(
                 context=context,
             )
         )
-    return raw_params, resolved_base_formulas, snapshots, resolved_interior
+    resolved_doors: list[ResolvedDoorInstanceSnapshot] = []
+    for instance in sorted(list(door_instances or []), key=lambda item: (int(item.ui_order or 0), str(item.instance_code or ""))):
+        door_group = await require_accessible_door_part_group(
+            session,
+            admin_id=admin_id,
+            group_id=instance.door_part_group_id,
+        )
+        allowed_dependent_ids = {
+            str(item.id)
+            for item in list(interior_instances or [])
+            if getattr(item, "id", None) is not None
+        }
+        normalized_dependent_ids = [
+            str(item).strip()
+            for item in list(getattr(instance, "dependent_interior_instance_ids", []) or [])
+            if str(item).strip() and str(item).strip() in allowed_dependent_ids
+        ]
+        resolved_doors.append(
+            await resolve_door_instance_preview(
+                session,
+                admin_id=admin_id,
+                sub_category=sub_category,
+                door_part_group=door_group,
+                instance_id=instance.id,
+                instance_code=str(instance.instance_code or ""),
+                line_color=str(getattr(instance, "line_color", "") or "").strip() or None,
+                ui_order=int(instance.ui_order or 0),
+                structural_part_formula_ids=list(getattr(instance, "structural_part_formula_ids", []) or []),
+                dependent_interior_instance_ids=normalized_dependent_ids,
+                controller_box_snapshot=dict(getattr(instance, "controller_box_snapshot", {}) or {}),
+                param_values=dict(getattr(instance, "param_values", {}) or {}),
+                param_meta={str(key): dict(value or {}) for key, value in dict(getattr(instance, "param_meta", {}) or {}).items()},
+                source_boxes_by_formula_id=source_boxes_by_formula_id,
+                base_raw_values=raw_params,
+                base_numeric_params=numeric_params,
+                context=context,
+            )
+        )
+    return raw_params, resolved_base_formulas, snapshots, resolved_interior, resolved_doors
 
 
 async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDesign) -> None:
@@ -1276,6 +1700,8 @@ async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDes
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found for this design.")
     schema_ready = await interior_instance_tables_ready(session)
     interior_instances = list(design.__dict__.get("interior_instances") or []) if schema_ready else []
+    door_schema_ready = await door_instance_tables_ready(session)
+    door_instances = list(design.__dict__.get("door_instances") or []) if door_schema_ready else []
 
     part_selections = [
         {
@@ -1285,12 +1711,13 @@ async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDes
         }
         for part in design.parts
     ]
-    raw_params, resolved_base_formulas, snapshots, resolved_interior = await compose_sub_category_design_preview(
+    raw_params, resolved_base_formulas, snapshots, resolved_interior, resolved_doors = await compose_sub_category_design_preview(
         session,
         admin_id=design.admin_id,
         sub_category=sub_category,
         part_selections=part_selections,
         interior_instances=interior_instances,
+        door_instances=door_instances,
     )
 
     snapshots_by_formula_id = {int(item.part_formula.part_formula_id): item for item in snapshots}
@@ -1327,6 +1754,18 @@ async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDes
             instance.viewer_boxes = []
             continue
         instance.interior_box_snapshot = computed.interior_box_snapshot
+        instance.param_values = computed.param_values
+        instance.param_meta = computed.param_meta
+        instance.part_snapshots = computed.part_snapshots
+        instance.viewer_boxes = computed.viewer_boxes
+    door_by_id = {item.instance_id: item for item in resolved_doors if item.instance_id is not None}
+    for instance in door_instances:
+        computed = door_by_id.get(instance.id)
+        if not computed:
+            instance.part_snapshots = []
+            instance.viewer_boxes = []
+            continue
+        instance.controller_box_snapshot = computed.controller_box_snapshot
         instance.param_values = computed.param_values
         instance.param_meta = computed.param_meta
         instance.part_snapshots = computed.part_snapshots

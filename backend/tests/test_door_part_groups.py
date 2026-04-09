@@ -8,7 +8,11 @@ import pytest
 
 from designkp_backend.api.routers import door_part_groups as router
 from designkp_backend.api.routers.door_part_groups import (
+    DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING,
+    DoorPartGroupControllerBindingPayload,
+    DoorPartGroupControllerSelectionPayload,
     DoorPartGroupCreate,
+    DoorPartGroupParamGroupSelectionPayload,
     DoorPartGroupPartSelectionPayload,
     DoorPartGroupUpdate,
     create_door_part_group,
@@ -37,11 +41,22 @@ class FakeSession:
     async def flush(self) -> None:
         return None
 
+    async def delete(self, _item) -> None:
+        return None
+
     async def scalar(self, stmt):
         text = str(stmt)
         if "max(door_part_groups.group_id)" in text:
             return 3
         return self.item
+
+    async def scalars(self, stmt):
+        return SimpleNamespace(all=lambda: [])
+
+    async def execute(self, stmt):
+        if "to_regclass" in str(stmt):
+            return SimpleNamespace(one=lambda: ("door_part_group_param_groups",))
+        raise AssertionError(f"Unexpected execute call: {stmt}")
 
 
 def test_create_door_part_group_uses_payload(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,6 +76,30 @@ def test_create_door_part_group_uses_payload(monkeypatch: pytest.MonkeyPatch) ->
             )
         ]
 
+    async def fake_replace_group_param_groups(session, *, group, param_groups):
+        group.__dict__["param_groups"] = [
+            SimpleNamespace(
+                id=uuid4(),
+                param_group_id=param_groups[0].param_group_id,
+                param_group_code="door_width",
+                param_group_title="گروه عرض درب",
+                param_group_icon_path=None,
+                enabled=True,
+                ui_order=0,
+            )
+        ]
+
+    async def fake_apply_group_controller_config(session, *, group, controller_type, controller_selection, controller_bindings):
+        group.controller_type = controller_type
+        group.controller_selection = [
+            {"axis": str(item.axis), "part_formula_id": int(item.part_formula_id)}
+            for item in controller_selection
+        ]
+        group.controller_bindings = {
+            key: {"param_code": str(value.param_code) if value.param_code is not None else None}
+            for key, value in controller_bindings.items()
+        }
+
     async def fake_load_group(session, group_uuid):
         if getattr(session.added, "id", None) is None:
             session.added.id = uuid4()
@@ -68,6 +107,8 @@ def test_create_door_part_group_uses_payload(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
     monkeypatch.setattr(router, "_replace_group_parts", fake_replace_group_parts)
+    monkeypatch.setattr(router, "_replace_group_param_groups", fake_replace_group_param_groups)
+    monkeypatch.setattr(router, "_apply_group_controller_config", fake_apply_group_controller_config)
     monkeypatch.setattr(router, "_ensure_unique_group_code", lambda *args, **kwargs: asyncio.sleep(0))
     monkeypatch.setattr(router, "_load_group", fake_load_group)
 
@@ -77,15 +118,31 @@ def test_create_door_part_group_uses_payload(monkeypatch: pytest.MonkeyPatch) ->
         group_id=4,
         group_title="گروه درب",
         code="door_group",
+        line_color="#8A98A3",
         sort_order=4,
         is_system=True,
         parts=[DoorPartGroupPartSelectionPayload(part_formula_id=12, enabled=True, ui_order=0)],
+        param_groups=[DoorPartGroupParamGroupSelectionPayload(param_group_id=9, enabled=True, ui_order=0)],
+        controller_type=DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING,
+        controller_selection=[
+            DoorPartGroupControllerSelectionPayload(axis="vertical", part_formula_id=12),
+            DoorPartGroupControllerSelectionPayload(axis="horizontal", part_formula_id=13),
+        ],
+        controller_bindings={
+            "width_back_to_back": DoorPartGroupControllerBindingPayload(param_code="door_width"),
+            "height_back_to_back": DoorPartGroupControllerBindingPayload(param_code="door_height"),
+        },
     )
 
     result = asyncio.run(create_door_part_group(payload, session))
 
     assert result.group_id == 4
+    assert result.line_color == "#8A98A3"
     assert result.parts[0].part_formula_id == 12
+    assert result.param_groups[0].param_group_id == 9
+    assert result.controller_type == DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING
+    assert [item.axis for item in result.controller_selection] == ["vertical", "horizontal"]
+    assert result.controller_bindings["width_back_to_back"].param_code == "door_width"
 
 
 def test_update_door_part_group_updates_basic_fields(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -95,11 +152,27 @@ def test_update_door_part_group_updates_basic_fields(monkeypatch: pytest.MonkeyP
     async def fake_replace_group_parts(session, *, group, parts):
         group.__dict__["parts"] = []
 
+    async def fake_replace_group_param_groups(session, *, group, param_groups):
+        group.__dict__["param_groups"] = []
+
+    async def fake_apply_group_controller_config(session, *, group, controller_type, controller_selection, controller_bindings):
+        group.controller_type = controller_type
+        group.controller_selection = [
+            {"axis": str(item.axis), "part_formula_id": int(item.part_formula_id)}
+            for item in controller_selection
+        ]
+        group.controller_bindings = {
+            key: {"param_code": str(value.param_code) if value.param_code is not None else None}
+            for key, value in controller_bindings.items()
+        }
+
     async def fake_load_group(session, group_uuid):
         return session.item
 
     monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
     monkeypatch.setattr(router, "_replace_group_parts", fake_replace_group_parts)
+    monkeypatch.setattr(router, "_replace_group_param_groups", fake_replace_group_param_groups)
+    monkeypatch.setattr(router, "_apply_group_controller_config", fake_apply_group_controller_config)
     monkeypatch.setattr(router, "_ensure_unique_group_code", lambda *args, **kwargs: asyncio.sleep(0))
     monkeypatch.setattr(router, "_load_group", fake_load_group)
 
@@ -110,9 +183,14 @@ def test_update_door_part_group_updates_basic_fields(monkeypatch: pytest.MonkeyP
         group_title="قدیمی",
         code="old_code",
         title="قدیمی",
+        line_color="#8A98A3",
         sort_order=4,
         is_system=True,
         parts=[],
+        param_groups=[],
+        controller_type=None,
+        controller_selection=[],
+        controller_bindings={},
     )
     session = FakeSession(item=existing)
     payload = DoorPartGroupUpdate(
@@ -120,13 +198,27 @@ def test_update_door_part_group_updates_basic_fields(monkeypatch: pytest.MonkeyP
         group_id=4,
         group_title="جدید",
         code="new_code",
+        line_color="#0091FF",
         sort_order=7,
         is_system=False,
         parts=[],
+        param_groups=[],
+        controller_type=DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING,
+        controller_selection=[
+            DoorPartGroupControllerSelectionPayload(axis="vertical", part_formula_id=21),
+            DoorPartGroupControllerSelectionPayload(axis="horizontal", part_formula_id=22),
+        ],
+        controller_bindings={
+            "width_back_to_back": DoorPartGroupControllerBindingPayload(param_code="door_width"),
+            "height_back_to_back": DoorPartGroupControllerBindingPayload(param_code="door_height"),
+        },
     )
 
     result = asyncio.run(update_door_part_group(existing.id, payload, session))
 
     assert result.group_title == "جدید"
     assert existing.code == "new_code"
+    assert existing.line_color == "#0091FF"
     assert existing.sort_order == 7
+    assert result.controller_type == DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING
+    assert existing.controller_selection[0]["axis"] == "vertical"

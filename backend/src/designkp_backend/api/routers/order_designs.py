@@ -17,6 +17,7 @@ from designkp_backend.services.order_designs import (
     SNAPSHOT_META_KEY,
     build_order_design_snapshot,
     build_order_design_snapshot_checksum,
+    door_instance_tables_ready,
     interior_instance_tables_ready,
     next_order_design_instance_code,
     next_order_design_sort_order,
@@ -155,8 +156,9 @@ def _box_signature(box: dict[str, object]) -> str:
 def _merge_viewer_boxes(
     root_boxes: list[dict[str, object]] | None,
     interior_payloads: list[dict[str, object]] | None,
+    door_payloads: list[dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
-    if not interior_payloads:
+    if not interior_payloads and not door_payloads:
         return [dict(box or {}) for box in list(root_boxes or [])]
     merged: list[dict[str, object]] = []
     seen: set[str] = set()
@@ -175,11 +177,20 @@ def _merge_viewer_boxes(
                 continue
             seen.add(signature)
             merged.append(payload)
+    for door in list(door_payloads or []):
+        for box in list(door.get("viewer_boxes") or []):
+            payload = dict(box or {})
+            signature = _box_signature(payload)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            merged.append(payload)
     return merged
 
 
 def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> OrderDesignItem:
     category = getattr(getattr(item.sub_category_design, "sub_category", None), "category", None)
+    loaded_door_instances = list(getattr(item, "__dict__", {}).get("door_instances") or [])
     interior_payloads = (
         [
             {
@@ -208,6 +219,29 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
         ]
         if include_interior else []
     )
+    door_payloads = (
+        [
+            {
+                "id": instance.id,
+                "door_part_group_id": instance.door_part_group_id,
+                "controller_type": None,
+                "controller_bindings": {},
+                "instance_code": str(instance.instance_code or "").strip(),
+                "line_color": str(getattr(instance, "line_color", "") or "").strip() or None,
+                "ui_order": int(instance.ui_order or 0),
+                "structural_part_formula_ids": [int(row) for row in list(instance.structural_part_formula_ids or []) if int(row) > 0],
+                "dependent_interior_instance_ids": [str(row).strip() for row in list(instance.dependent_interior_instance_ids or []) if str(row).strip()],
+                "controller_box_snapshot": dict(instance.controller_box_snapshot or {}),
+                "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(instance.param_values or {}).items()},
+                "param_meta": {str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()},
+                "part_snapshots": [dict(row or {}) for row in list(instance.part_snapshots or [])],
+                "viewer_boxes": [dict(row or {}) for row in list(instance.viewer_boxes or [])],
+                "status": str(instance.status or "draft").strip() or "draft",
+            }
+            for instance in sorted(loaded_door_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
+        ]
+        if include_interior else []
+    )
     return OrderDesignItem(
         id=item.id,
         order_id=item.order_id,
@@ -230,8 +264,8 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
             for key, value in strip_snapshot_state_from_meta(dict(item.order_attr_meta or {})).items()
         },
         part_snapshots=[dict(row or {}) for row in list(item.part_snapshots or [])],
-        viewer_boxes=_merge_viewer_boxes(list(item.viewer_boxes or []), interior_payloads),
-        interior_instances=interior_payloads,
+        viewer_boxes=_merge_viewer_boxes(list(item.viewer_boxes or []), interior_payloads, door_payloads),
+        interior_instances=interior_payloads + door_payloads,
         snapshot_checksum=str(item.snapshot_checksum or "").strip(),
     )
 
@@ -242,6 +276,8 @@ async def _require_item(session: AsyncSession, item_id: uuid.UUID) -> OrderDesig
     )
     if await interior_instance_tables_ready(session):
         stmt = stmt.options(selectinload(OrderDesign.interior_instances))
+    if await door_instance_tables_ready(session):
+        stmt = stmt.options(selectinload(OrderDesign.door_instances))
     item = await session.scalar(
         stmt.where(and_(OrderDesign.id == item_id, OrderDesign.deleted_at.is_(None)))
     )
@@ -257,6 +293,8 @@ async def _require_item_any_status(session: AsyncSession, item_id: uuid.UUID) ->
     )
     if await interior_instance_tables_ready(session):
         stmt = stmt.options(selectinload(OrderDesign.interior_instances))
+    if await door_instance_tables_ready(session):
+        stmt = stmt.options(selectinload(OrderDesign.door_instances))
     item = await session.scalar(stmt.where(OrderDesign.id == item_id))
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design not found.")
@@ -539,10 +577,18 @@ async def list_order_designs(
 ) -> list[OrderDesignItem]:
     order = await require_accessible_order(session, order_id=order_id)
     include_interior = await interior_instance_tables_ready(session)
+    include_doors = await door_instance_tables_ready(session)
+    base_stmt = select(OrderDesign)
+    if include_interior:
+        base_stmt = base_stmt.options(selectinload(OrderDesign.interior_instances))
+    if include_doors:
+        base_stmt = base_stmt.options(selectinload(OrderDesign.door_instances))
+    base_stmt = base_stmt.options(
+        selectinload(OrderDesign.sub_category_design).selectinload(SubCategoryDesign.sub_category).selectinload(SubCategory.category)
+    )
     items = (
         await session.scalars(
-            (select(OrderDesign).options(selectinload(OrderDesign.interior_instances)) if include_interior else select(OrderDesign))
-            .options(selectinload(OrderDesign.sub_category_design).selectinload(SubCategoryDesign.sub_category).selectinload(SubCategory.category))
+            base_stmt
             .where(and_(OrderDesign.order_id == order_id, OrderDesign.deleted_at.is_(None)))
             .order_by(OrderDesign.sort_order.asc(), OrderDesign.instance_code.asc())
         )
@@ -568,13 +614,12 @@ async def list_order_designs(
             await session.commit()
             items = (
                 await session.scalars(
-                    (select(OrderDesign).options(selectinload(OrderDesign.interior_instances)) if include_interior else select(OrderDesign))
-                    .options(selectinload(OrderDesign.sub_category_design).selectinload(SubCategoryDesign.sub_category).selectinload(SubCategory.category))
+                    base_stmt
                     .where(and_(OrderDesign.order_id == order_id, OrderDesign.deleted_at.is_(None)))
                     .order_by(OrderDesign.sort_order.asc(), OrderDesign.instance_code.asc())
                 )
             ).all()
-    return [_serialize_item(item, include_interior=include_interior) for item in items]
+    return [_serialize_item(item, include_interior=(include_interior or include_doors)) for item in items]
 
 
 @router.post("", response_model=OrderDesignItem, status_code=status.HTTP_201_CREATED)

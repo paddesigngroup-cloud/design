@@ -9,13 +9,16 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from designkp_backend.db.models.account import Order, OrderDesign, OrderDesignInteriorInstance
+from designkp_backend.db.models.account import Order, OrderDesign, OrderDesignDoorInstance, OrderDesignInteriorInstance
 from designkp_backend.db.models.catalog import (
+    DoorPartGroup,
+    DoorPartGroupParamDefault,
     InternalPartGroup,
     Param,
     ParamGroup,
     SubCategory,
     SubCategoryDesign,
+    SubCategoryDesignDoorInstance,
     SubCategoryDesignInteriorInstance,
     SubCategoryDesignPart,
     SubCategoryParamDefault,
@@ -30,10 +33,14 @@ from designkp_backend.services.sub_category_designs import (
     build_sub_category_param_display_snapshot,
     build_part_viewer_payload,
     build_source_state_signature,
+    door_instance_tables_ready,
+    door_part_group_param_defaults_table_ready,
     interior_instance_tables_ready,
     merge_subcategory_and_internal_group_defaults,
+    require_accessible_door_part_group,
     require_accessible_internal_part_group,
     require_accessible_sub_category,
+    resolve_door_instance_preview,
     resolve_internal_instance_preview,
     resolve_base_formula_values_with_context,
     resolve_part_formula_values,
@@ -57,6 +64,7 @@ def build_order_design_snapshot_checksum(
     source_design: SubCategoryDesign,
     order_attr_values: dict[str, object],
     interior_instances: list[OrderDesignInteriorInstance | SubCategoryDesignInteriorInstance] | None,
+    door_instances: list[OrderDesignDoorInstance | SubCategoryDesignDoorInstance] | None = None,
     source_state: dict[str, object] | None = None,
 ) -> str:
     payload = {
@@ -105,6 +113,7 @@ def _normalize_snapshot_marker(
     *,
     source_design: SubCategoryDesign,
     interior_instances: list[OrderDesignInteriorInstance | SubCategoryDesignInteriorInstance] | None,
+    door_instances: list[OrderDesignDoorInstance | SubCategoryDesignDoorInstance] | None = None,
 ) -> dict[str, object]:
     return {
         "sub_category_design_version": int(getattr(source_design, "version_id", 0) or 0),
@@ -124,6 +133,44 @@ def _normalize_snapshot_marker(
                 ),
             )
         ],
+        "door_instances": [
+            {
+                "id": str(getattr(instance, "id", "") or ""),
+                "door_part_group_id": str(getattr(instance, "door_part_group_id", "") or ""),
+                "instance_code": str(getattr(instance, "instance_code", "") or ""),
+                "line_color": str(getattr(instance, "line_color", "") or ""),
+                "ui_order": int(getattr(instance, "ui_order", 0) or 0),
+                "structural_part_formula_ids": [int(row) for row in list(getattr(instance, "structural_part_formula_ids", []) or []) if int(row) > 0],
+                "dependent_interior_instance_ids": [str(row).strip() for row in list(getattr(instance, "dependent_interior_instance_ids", []) or []) if str(row).strip()],
+                "param_values": {
+                    str(key): value
+                    for key, value in sorted(dict(getattr(instance, "param_values", {}) or {}).items(), key=lambda row: str(row[0]))
+                },
+            }
+            for instance in sorted(
+                list(door_instances or []),
+                key=lambda row: (
+                    int(getattr(row, "ui_order", 0) or 0),
+                    str(getattr(row, "instance_code", "") or ""),
+                    str(getattr(row, "id", "") or ""),
+                ),
+            )
+        ],
+        "door_instances": [
+            {
+                "id": str(getattr(instance, "id", "") or ""),
+                "version_id": int(getattr(instance, "version_id", 0) or 0),
+                "updated_at": str(getattr(instance, "updated_at", "") or ""),
+            }
+            for instance in sorted(
+                list(door_instances or []),
+                key=lambda row: (
+                    int(getattr(row, "ui_order", 0) or 0),
+                    str(getattr(row, "instance_code", "") or ""),
+                    str(getattr(row, "id", "") or ""),
+                ),
+            )
+        ],
     }
 
 
@@ -131,10 +178,12 @@ def order_design_snapshot_marker(
     *,
     source_design: SubCategoryDesign,
     interior_instances: list[OrderDesignInteriorInstance | SubCategoryDesignInteriorInstance] | None,
+    door_instances: list[OrderDesignDoorInstance | SubCategoryDesignDoorInstance] | None = None,
 ) -> str:
     payload = _normalize_snapshot_marker(
         source_design=source_design,
         interior_instances=interior_instances,
+        door_instances=door_instances,
     )
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -163,11 +212,13 @@ def order_design_snapshot_looks_fresh(
     snapshot_checksum: str | None,
     source_design: SubCategoryDesign,
     interior_instances: list[OrderDesignInteriorInstance | SubCategoryDesignInteriorInstance] | None,
+    door_instances: list[OrderDesignDoorInstance | SubCategoryDesignDoorInstance] | None = None,
 ) -> bool:
     state = read_order_design_snapshot_state(meta)
     expected_marker = order_design_snapshot_marker(
         source_design=source_design,
         interior_instances=interior_instances,
+        door_instances=door_instances,
     )
     stored_marker = str(state.get("marker") or "")
     stored_checksum = str(state.get("checksum") or "")
@@ -201,6 +252,8 @@ async def require_accessible_sub_category_design(
     )
     if await interior_instance_tables_ready(session):
         stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
+    if await door_instance_tables_ready(session):
+        stmt = stmt.options(selectinload(SubCategoryDesign.door_instances))
     item = await session.scalar(
         stmt
         .where(
@@ -330,6 +383,39 @@ async def _load_accessible_internal_groups(
     return groups_by_id
 
 
+async def _load_accessible_door_groups(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID,
+    group_ids: set[uuid.UUID],
+) -> dict[uuid.UUID, DoorPartGroup]:
+    if not group_ids:
+        return {}
+    include_param_defaults = await door_part_group_param_defaults_table_ready(session)
+    stmt = (
+        select(DoorPartGroup)
+        .options(selectinload(DoorPartGroup.parts), selectinload(DoorPartGroup.param_groups))
+        .where(
+            and_(
+                DoorPartGroup.id.in_(list(group_ids)),
+                or_(DoorPartGroup.admin_id.is_(None), DoorPartGroup.admin_id == admin_id),
+            )
+        )
+    )
+    if include_param_defaults:
+        stmt = stmt.options(selectinload(DoorPartGroup.param_defaults).selectinload(DoorPartGroupParamDefault.param))
+    groups = (
+        await session.scalars(
+            stmt
+        )
+    ).all()
+    groups_by_id = {item.id: item for item in groups}
+    missing = [group_id for group_id in group_ids if group_id not in groups_by_id]
+    if missing:
+        await require_accessible_door_part_group(session, admin_id=admin_id, group_id=missing[0])
+    return groups_by_id
+
+
 def _strip_inherited_internal_param_values(
     *,
     source_base_values: dict[str, str | None],
@@ -403,6 +489,7 @@ def _build_order_source_state(
     source_design: SubCategoryDesign,
     order_attr_values: dict[str, str | None],
     interior_instances: list[OrderDesignInteriorInstance | SubCategoryDesignInteriorInstance],
+    door_instances: list[OrderDesignDoorInstance | SubCategoryDesignDoorInstance] | None = None,
 ) -> dict[str, object]:
     payload = {
         "context_signature": str(context.source_state.get("signature") or ""),
@@ -434,6 +521,31 @@ def _build_order_source_state(
                 ),
             )
         ],
+        "door_instances": [
+            {
+                "id": str(getattr(instance, "id", "") or ""),
+                "version_id": int(getattr(instance, "version_id", 0) or 0),
+                "updated_at": str(getattr(instance, "updated_at", "") or ""),
+                "door_part_group_id": str(getattr(instance, "door_part_group_id", "") or ""),
+                "instance_code": str(getattr(instance, "instance_code", "") or ""),
+                "line_color": str(getattr(instance, "line_color", "") or ""),
+                "ui_order": int(getattr(instance, "ui_order", 0) or 0),
+                "structural_part_formula_ids": [int(row) for row in list(getattr(instance, "structural_part_formula_ids", []) or []) if int(row) > 0],
+                "dependent_interior_instance_ids": [str(row).strip() for row in list(getattr(instance, "dependent_interior_instance_ids", []) or []) if str(row).strip()],
+                "param_values": {
+                    str(key): value
+                    for key, value in sorted(dict(getattr(instance, "param_values", {}) or {}).items(), key=lambda row: str(row[0]))
+                },
+            }
+            for instance in sorted(
+                list(door_instances or []),
+                key=lambda row: (
+                    int(getattr(row, "ui_order", 0) or 0),
+                    str(getattr(row, "instance_code", "") or ""),
+                    str(getattr(row, "id", "") or ""),
+                ),
+            )
+        ],
     }
     return {
         "payload": payload,
@@ -448,6 +560,7 @@ async def build_order_design_snapshot(
     source_design: SubCategoryDesign,
     override_attr_values: dict[str, object] | None = None,
     interior_instances: list[OrderDesignInteriorInstance | SubCategoryDesignInteriorInstance] | None = None,
+    door_instances: list[OrderDesignDoorInstance | SubCategoryDesignDoorInstance] | None = None,
 ) -> dict[str, object]:
     sub_category = await require_accessible_sub_category(
         session,
@@ -455,9 +568,14 @@ async def build_order_design_snapshot(
         sub_category_id=source_design.sub_category_id,
     )
     schema_ready = await interior_instance_tables_ready(session)
+    door_schema_ready = await door_instance_tables_ready(session)
     sorted_interior_instances = (
         sorted(list(interior_instances or []), key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
         if schema_ready else []
+    )
+    sorted_door_instances = (
+        sorted(list(door_instances or []), key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
+        if door_schema_ready else []
     )
     context = await build_design_execution_context(
         session,
@@ -528,6 +646,11 @@ async def build_order_design_snapshot(
         )
 
     resolved_interior_instances: list[dict[str, object]] = []
+    source_boxes_by_formula_id = {
+        int(row["part_formula_id"]): dict((row.get("viewer_payload") or {}).get("box") or {})
+        for row in part_snapshots
+        if isinstance((row.get("viewer_payload") or {}).get("box"), dict)
+    }
     internal_groups_by_id = await _load_accessible_internal_groups(
         session,
         admin_id=order.admin_id,
@@ -617,12 +740,71 @@ async def build_order_design_snapshot(
         )
         viewer_boxes.extend([dict(box or {}) for box in resolved.viewer_boxes])
         part_snapshots.extend([dict(row or {}) for row in resolved.part_snapshots])
+    resolved_door_instances: list[dict[str, object]] = []
+    door_groups_by_id = await _load_accessible_door_groups(
+        session,
+        admin_id=order.admin_id,
+        group_ids={instance.door_part_group_id for instance in sorted_door_instances},
+    ) if sorted_door_instances else {}
+    valid_interior_ids = {str(getattr(instance, "id", "") or "") for instance in sorted_interior_instances if str(getattr(instance, "id", "") or "").strip()}
+    for instance in sorted_door_instances:
+        door_group = door_groups_by_id.get(instance.door_part_group_id)
+        if door_group is None:
+            door_group = await require_accessible_door_part_group(session, admin_id=order.admin_id, group_id=instance.door_part_group_id)
+        resolved = await resolve_door_instance_preview(
+            session,
+            admin_id=order.admin_id,
+            sub_category=sub_category,
+            door_part_group=door_group,
+            instance_id=getattr(instance, "id", None),
+            instance_code=str(instance.instance_code or ""),
+            line_color=str(getattr(instance, "line_color", "") or "").strip() or None,
+            ui_order=int(getattr(instance, "ui_order", 0) or 0),
+            structural_part_formula_ids=list(getattr(instance, "structural_part_formula_ids", []) or []),
+            dependent_interior_instance_ids=[
+                str(row).strip()
+                for row in list(getattr(instance, "dependent_interior_instance_ids", []) or [])
+                if str(row).strip() and str(row).strip() in valid_interior_ids
+            ],
+            controller_box_snapshot=dict(getattr(instance, "controller_box_snapshot", {}) or {}),
+            param_values=dict(getattr(instance, "param_values", {}) or {}),
+            param_meta=dict(getattr(instance, "param_meta", {}) or {}),
+            source_boxes_by_formula_id=source_boxes_by_formula_id,
+            base_raw_values=raw_params,
+            base_numeric_params=numeric_params,
+            context=context,
+        )
+        resolved_door_instances.append(
+            {
+                "id": resolved.instance_id,
+                "door_part_group_id": resolved.door_part_group_id,
+                "door_part_group_code": resolved.door_part_group_code,
+                "door_part_group_title": resolved.door_part_group_title,
+                "controller_type": resolved.controller_type,
+                "controller_bindings": resolved.controller_bindings,
+                "instance_code": resolved.instance_code,
+                "line_color": resolved.line_color,
+                "ui_order": resolved.ui_order,
+                "structural_part_formula_ids": resolved.structural_part_formula_ids,
+                "dependent_interior_instance_ids": resolved.dependent_interior_instance_ids,
+                "controller_box_snapshot": resolved.controller_box_snapshot,
+                "param_values": resolved.param_values,
+                "param_meta": resolved.param_meta,
+                "computed_params": resolved.computed_params,
+                "part_snapshots": resolved.part_snapshots,
+                "viewer_boxes": resolved.viewer_boxes,
+                "status": str(getattr(instance, "status", "draft") or "draft"),
+            }
+        )
+        viewer_boxes.extend([dict(box or {}) for box in resolved.viewer_boxes])
+        part_snapshots.extend([dict(row or {}) for row in resolved.part_snapshots])
 
     source_state = _build_order_source_state(
         context=context,
         source_design=source_design,
         order_attr_values=order_attr_values,
         interior_instances=sorted_interior_instances,
+        door_instances=sorted_door_instances,
     )
     return {
         "sub_category_id": sub_category.id,
@@ -633,6 +815,7 @@ async def build_order_design_snapshot(
         "part_snapshots": part_snapshots,
         "viewer_boxes": viewer_boxes,
         "interior_instances": resolved_interior_instances,
+        "door_instances": resolved_door_instances,
         "source_state": source_state,
     }
 
@@ -647,7 +830,9 @@ async def sync_order_design_snapshot(
 ) -> bool:
     current_order = order or await require_accessible_order(session, order_id=item.order_id)
     schema_ready = await interior_instance_tables_ready(session)
+    door_schema_ready = await door_instance_tables_ready(session)
     current_interior_instances = list(item.interior_instances or []) if schema_ready else []
+    current_door_instances = list(getattr(item, "door_instances", []) or []) if door_schema_ready else []
     current_source_design = source_design or await require_accessible_sub_category_design(
         session,
         admin_id=current_order.admin_id,
@@ -658,6 +843,7 @@ async def sync_order_design_snapshot(
         snapshot_checksum=str(item.snapshot_checksum or ""),
         source_design=current_source_design,
         interior_instances=current_interior_instances,
+        door_instances=current_door_instances,
     ):
         return False
     snapshot = await build_order_design_snapshot(
@@ -666,16 +852,19 @@ async def sync_order_design_snapshot(
         source_design=current_source_design,
         override_attr_values=dict(item.order_attr_values or {}),
         interior_instances=current_interior_instances,
+        door_instances=current_door_instances,
     )
     next_checksum = build_order_design_snapshot_checksum(
         source_design=current_source_design,
         order_attr_values=dict(item.order_attr_values or {}),
         interior_instances=current_interior_instances,
+        door_instances=current_door_instances,
         source_state=dict(snapshot.get("source_state") or {}),
     )
     next_marker = order_design_snapshot_marker(
         source_design=current_source_design,
         interior_instances=current_interior_instances,
+        door_instances=current_door_instances,
     )
     if not force and read_order_design_snapshot_checksum(dict(item.order_attr_meta or {})) == next_checksum:
         return False
@@ -705,6 +894,27 @@ async def sync_order_design_snapshot(
                 continue
             if dict(instance.interior_box_snapshot or {}) != resolved["interior_box_snapshot"]:
                 instance.interior_box_snapshot = resolved["interior_box_snapshot"]
+                changed = True
+            if dict(instance.param_values or {}) != resolved["param_values"]:
+                instance.param_values = resolved["param_values"]
+                changed = True
+            if dict(instance.param_meta or {}) != resolved["param_meta"]:
+                instance.param_meta = resolved["param_meta"]
+                changed = True
+            if list(instance.part_snapshots or []) != resolved["part_snapshots"]:
+                instance.part_snapshots = resolved["part_snapshots"]
+                changed = True
+            if list(instance.viewer_boxes or []) != resolved["viewer_boxes"]:
+                instance.viewer_boxes = resolved["viewer_boxes"]
+                changed = True
+    if door_schema_ready:
+        door_by_id = {str(getattr(instance, "id", "")): instance for instance in list(getattr(item, "door_instances", []) or [])}
+        for resolved in list(snapshot.get("door_instances") or []):
+            instance = door_by_id.get(str(resolved.get("id") or ""))
+            if not instance:
+                continue
+            if dict(instance.controller_box_snapshot or {}) != resolved["controller_box_snapshot"]:
+                instance.controller_box_snapshot = resolved["controller_box_snapshot"]
                 changed = True
             if dict(instance.param_values or {}) != resolved["param_values"]:
                 instance.param_values = resolved["param_values"]

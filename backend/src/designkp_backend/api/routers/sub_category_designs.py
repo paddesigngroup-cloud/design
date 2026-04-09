@@ -11,16 +11,19 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.catalog import Category, SubCategory, SubCategoryDesign, SubCategoryDesignInteriorInstance, SubCategoryDesignPart
+from designkp_backend.db.models.catalog import Category, SubCategory, SubCategoryDesign, SubCategoryDesignDoorInstance, SubCategoryDesignInteriorInstance, SubCategoryDesignPart
 from designkp_backend.services.admin_access import require_admin_if_present
 from designkp_backend.services.sub_category_designs import (
     build_sub_category_param_display_snapshot,
     compose_sub_category_design_preview,
+    door_instance_tables_ready,
     derive_interior_box_snapshot,
     interior_instance_tables_ready,
     rebuild_design_snapshots,
+    require_accessible_door_part_group,
     require_accessible_internal_part_group,
     require_accessible_sub_category,
+    resolve_door_instance_preview,
     resolve_internal_instance_preview,
     serialize_resolved_part_snapshot,
 )
@@ -116,6 +119,7 @@ class SubCategoryDesignPreviewResponse(BaseModel):
     viewer_boxes: list[dict[str, object]]
     parts: list[SubCategoryDesignPartPreviewItem]
     interior_instances: list[SubCategoryDesignInteriorInstancePreviewItem]
+    door_instances: list[dict[str, object]] = Field(default_factory=list)
 
 
 class SubCategoryDesignItem(BaseModel):
@@ -134,6 +138,7 @@ class SubCategoryDesignItem(BaseModel):
     is_system: bool
     parts: list[SubCategoryDesignPartItem]
     interior_instances: list[SubCategoryDesignInteriorInstanceItem]
+    door_instances: list[dict[str, object]] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -165,6 +170,7 @@ class SubCategoryDesignPreviewDraftRequest(BaseModel):
     sub_category_id: uuid.UUID
     parts: list[SubCategoryDesignPartSelectionPayload] = Field(default_factory=list)
     interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
+    door_instances: list["SubCategoryDesignDoorInstanceDraftPayload"] = Field(default_factory=list)
 
 
 class SubCategoryDesignInteriorInstanceDraftPayload(BaseModel):
@@ -175,6 +181,19 @@ class SubCategoryDesignInteriorInstanceDraftPayload(BaseModel):
     ui_order: int = Field(ge=0)
     placement_z: float = 0
     interior_box_snapshot: dict[str, object] = Field(default_factory=dict)
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    param_meta: dict[str, dict[str, object]] = Field(default_factory=dict)
+
+
+class SubCategoryDesignDoorInstanceDraftPayload(BaseModel):
+    id: uuid.UUID | None = None
+    door_part_group_id: uuid.UUID
+    instance_code: str = Field(min_length=1, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
+    ui_order: int = Field(ge=0)
+    structural_part_formula_ids: list[int] = Field(default_factory=list)
+    dependent_interior_instance_ids: list[uuid.UUID | str] = Field(default_factory=list)
+    controller_box_snapshot: dict[str, object] = Field(default_factory=dict)
     param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
     param_meta: dict[str, dict[str, object]] = Field(default_factory=dict)
 
@@ -196,6 +215,43 @@ class SubCategoryDesignInteriorInstanceUpdate(BaseModel):
     ui_order: int = Field(ge=0)
     instance_code: str = Field(min_length=1, max_length=64)
     line_color: str | None = Field(default=None, min_length=7, max_length=7)
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
+class SubCategoryDesignDoorInstanceItem(BaseModel):
+    id: uuid.UUID
+    door_part_group_id: uuid.UUID
+    controller_type: str | None = None
+    controller_bindings: dict[str, dict[str, str | None]] = Field(default_factory=dict)
+    instance_code: str
+    line_color: str | None = None
+    ui_order: int
+    structural_part_formula_ids: list[int] = Field(default_factory=list)
+    dependent_interior_instance_ids: list[str] = Field(default_factory=list)
+    controller_box_snapshot: dict[str, object] = Field(default_factory=dict)
+    param_values: dict[str, str | None] = Field(default_factory=dict)
+    param_meta: dict[str, dict[str, object]] = Field(default_factory=dict)
+    part_snapshots: list[dict[str, object]] = Field(default_factory=list)
+    viewer_boxes: list[dict[str, object]] = Field(default_factory=list)
+    status: str
+
+
+class SubCategoryDesignDoorInstanceCreate(BaseModel):
+    door_part_group_id: uuid.UUID
+    ui_order: int | None = Field(default=None, ge=0)
+    instance_code: str | None = Field(default=None, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
+    structural_part_formula_ids: list[int] = Field(default_factory=list)
+    dependent_interior_instance_ids: list[uuid.UUID | str] = Field(default_factory=list)
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
+class SubCategoryDesignDoorInstanceUpdate(BaseModel):
+    ui_order: int = Field(ge=0)
+    instance_code: str = Field(min_length=1, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
+    structural_part_formula_ids: list[int] = Field(default_factory=list)
+    dependent_interior_instance_ids: list[uuid.UUID | str] = Field(default_factory=list)
     param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
@@ -236,6 +292,7 @@ async def _ensure_unique_design_code(
 
 
 def _serialize_design(item: SubCategoryDesign, *, include_interior: bool = True, design_outline_color: str = "#7A4A2B") -> SubCategoryDesignItem:
+    loaded_door_instances = list(getattr(item, "__dict__", {}).get("door_instances") or [])
     return SubCategoryDesignItem(
         id=item.id,
         admin_id=item.admin_id,
@@ -276,6 +333,26 @@ def _serialize_design(item: SubCategoryDesign, *, include_interior: bool = True,
             ]
             if include_interior else []
         ),
+        door_instances=[
+            {
+                "id": instance.id,
+                "door_part_group_id": instance.door_part_group_id,
+                "controller_type": None,
+                "controller_bindings": {},
+                "instance_code": str(instance.instance_code or "").strip(),
+                "line_color": str(getattr(instance, "line_color", "") or "").strip() or None,
+                "ui_order": int(instance.ui_order or 0),
+                "structural_part_formula_ids": [int(row) for row in list(instance.structural_part_formula_ids or []) if int(row) > 0],
+                "dependent_interior_instance_ids": [str(row).strip() for row in list(instance.dependent_interior_instance_ids or []) if str(row).strip()],
+                "controller_box_snapshot": dict(instance.controller_box_snapshot or {}),
+                "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(instance.param_values or {}).items()},
+                "param_meta": {str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()},
+                "part_snapshots": [dict(row or {}) for row in list(instance.part_snapshots or [])],
+                "viewer_boxes": [dict(row or {}) for row in list(instance.viewer_boxes or [])],
+                "status": str(instance.status or "draft").strip() or "draft",
+            }
+            for instance in sorted(loaded_door_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
+        ] if include_interior else [],
     )
 
 
@@ -288,6 +365,7 @@ def _serialize_preview(
     resolved_base_formulas: dict[str, float],
     snapshots: list,
     interior_instances: list,
+    door_instances: list | None = None,
 ) -> SubCategoryDesignPreviewResponse:
     parts = [
         SubCategoryDesignPartPreviewItem(
@@ -336,9 +414,36 @@ def _serialize_preview(
                 for item in interior_preview_items
                 for box in list(item.viewer_boxes or [])
             ],
+            *[
+                dict(box or {})
+                for item in list(door_instances or [])
+                for box in list(getattr(item, "viewer_boxes", []) or [])
+            ],
         ],
         parts=parts,
         interior_instances=interior_preview_items,
+        door_instances=[
+            {
+                "id": item.instance_id,
+                "door_part_group_id": item.door_part_group_id,
+                "door_part_group_code": item.door_part_group_code,
+                "door_part_group_title": item.door_part_group_title,
+                "controller_type": item.controller_type,
+                "controller_bindings": item.controller_bindings,
+                "instance_code": item.instance_code,
+                "line_color": str(getattr(item, "line_color", "") or "").strip() or None,
+                "ui_order": int(item.ui_order or 0),
+                "structural_part_formula_ids": [int(row) for row in list(item.structural_part_formula_ids or []) if int(row) > 0],
+                "dependent_interior_instance_ids": [str(row).strip() for row in list(item.dependent_interior_instance_ids or []) if str(row).strip()],
+                "controller_box_snapshot": dict(item.controller_box_snapshot or {}),
+                "param_values": dict(item.param_values or {}),
+                "param_meta": dict(item.param_meta or {}),
+                "computed_params": dict(item.computed_params or {}),
+                "part_snapshots": [dict(row or {}) for row in list(item.part_snapshots or [])],
+                "viewer_boxes": [dict(row or {}) for row in list(item.viewer_boxes or [])],
+            }
+            for item in list(door_instances or [])
+        ],
     )
 
 
@@ -361,6 +466,8 @@ async def _load_design(session: AsyncSession, design_uuid: uuid.UUID) -> SubCate
     )
     if await interior_instance_tables_ready(session):
         stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
+    if await door_instance_tables_ready(session):
+        stmt = stmt.options(selectinload(SubCategoryDesign.door_instances))
     item = await session.scalar(
         stmt.where(
             and_(
@@ -433,12 +540,15 @@ async def list_sub_category_designs(
 ) -> list[SubCategoryDesignItem]:
     await require_admin_if_present(session, admin_id)
     include_interior = await interior_instance_tables_ready(session)
+    include_doors = await door_instance_tables_ready(session)
     stmt = select(SubCategoryDesign).options(
         selectinload(SubCategoryDesign.parts),
         selectinload(SubCategoryDesign.sub_category).selectinload(SubCategory.category),
     )
     if include_interior:
         stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
+    if include_doors:
+        stmt = stmt.options(selectinload(SubCategoryDesign.door_instances))
     if admin_id is None:
         stmt = stmt.where(
             and_(
@@ -464,7 +574,7 @@ async def list_sub_category_designs(
     return [
         _serialize_design(
             item,
-            include_interior=include_interior,
+            include_interior=(include_interior or include_doors),
             design_outline_color=getattr(getattr(item.sub_category, "category", None), "design_outline_color", "#7A4A2B"),
         )
         for item in items
@@ -590,12 +700,31 @@ async def preview_sub_category_design_draft(
 ) -> SubCategoryDesignPreviewResponse:
     await require_admin_if_present(session, payload.admin_id)
     sub_category = await require_accessible_sub_category(session, admin_id=payload.admin_id, sub_category_id=payload.sub_category_id)
-    raw_params, resolved_base_formulas, snapshots, interior_instances = await compose_sub_category_design_preview(
+    raw_params, resolved_base_formulas, snapshots, interior_instances, door_instances = await compose_sub_category_design_preview(
         session,
         admin_id=payload.admin_id,
         sub_category=sub_category,
         part_selections=[item.model_dump() for item in payload.parts],
         interior_instances=payload.interior_instances,
+        door_instances=[
+            SubCategoryDesignDoorInstance(
+                id=item.id or uuid.uuid4(),
+                design_id=uuid.uuid4(),
+                door_part_group_id=item.door_part_group_id,
+                instance_code=str(item.instance_code or "").strip(),
+                line_color=item.line_color,
+                ui_order=int(item.ui_order or 0),
+                structural_part_formula_ids=[int(row) for row in list(item.structural_part_formula_ids or []) if int(row) > 0],
+                dependent_interior_instance_ids=[str(row).strip() for row in list(item.dependent_interior_instance_ids or []) if str(row).strip()],
+                controller_box_snapshot=dict(item.controller_box_snapshot or {}),
+                param_values={str(key): value for key, value in dict(item.param_values or {}).items()},
+                param_meta={str(key): dict(value or {}) for key, value in dict(item.param_meta or {}).items()},
+                part_snapshots=[],
+                viewer_boxes=[],
+                status="draft",
+            )
+            for item in list(payload.door_instances or [])
+        ],
     )
     return _serialize_preview(
         design_id=None,
@@ -605,6 +734,7 @@ async def preview_sub_category_design_draft(
         resolved_base_formulas=resolved_base_formulas,
         snapshots=snapshots,
         interior_instances=interior_instances,
+        door_instances=door_instances,
     )
 
 
@@ -620,6 +750,7 @@ async def rebuild_sub_category_design_parts(design_uuid: uuid.UUID, session: Asy
 async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> SubCategoryDesignPreviewResponse:
     item = await _load_design(session, design_uuid)
     include_interior = await interior_instance_tables_ready(session)
+    include_doors = await door_instance_tables_ready(session)
     sub_category = await session.get(SubCategory, item.sub_category_id)
     if not sub_category or sub_category.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found for this design.")
@@ -650,6 +781,7 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
                 viewer_payload=viewer_payload if isinstance(viewer_payload, dict) else {},
             )
         )
+    loaded_door_instances = list(getattr(item, "__dict__", {}).get("door_instances") or [])
     return SubCategoryDesignPreviewResponse(
         design_id=item.id,
         sub_category_id=sub_category.id,
@@ -660,7 +792,11 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
             dict(box or {})
             for instance in sorted(item.interior_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
             for box in list(instance.viewer_boxes or [])
-        ] if include_interior else []),
+        ] if include_interior else []) + ([
+            dict(box or {})
+            for instance in sorted(loaded_door_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
+            for box in list(instance.viewer_boxes or [])
+        ] if include_doors else []),
         parts=parts,
         interior_instances=[
             SubCategoryDesignInteriorInstancePreviewItem(
@@ -682,10 +818,38 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
             )
             for instance in sorted(item.interior_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
         ] if include_interior else [],
+        door_instances=[
+            {
+                "id": instance.id,
+                "door_part_group_id": instance.door_part_group_id,
+                "controller_type": None,
+                "controller_bindings": {},
+                "instance_code": str(instance.instance_code or ""),
+                "line_color": str(getattr(instance, "line_color", "") or "").strip() or None,
+                "ui_order": int(instance.ui_order or 0),
+                "structural_part_formula_ids": [int(row) for row in list(instance.structural_part_formula_ids or []) if int(row) > 0],
+                "dependent_interior_instance_ids": [str(row).strip() for row in list(instance.dependent_interior_instance_ids or []) if str(row).strip()],
+                "controller_box_snapshot": dict(instance.controller_box_snapshot or {}),
+                "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(instance.param_values or {}).items()},
+                "param_meta": {str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()},
+                "part_snapshots": [dict(row or {}) for row in list(instance.part_snapshots or [])],
+                "viewer_boxes": [dict(row or {}) for row in list(instance.viewer_boxes or [])],
+                "status": str(instance.status or "draft").strip() or "draft",
+            }
+            for instance in sorted(loaded_door_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
+        ] if include_doors else [],
     )
 
 
 def _normalize_interior_param_values(payload: dict[str, str | int | float | bool | None]) -> dict[str, str | None]:
+    return {
+        str(key): (None if value is None else str(value))
+        for key, value in dict(payload or {}).items()
+        if str(key or "").strip()
+    }
+
+
+def _normalize_door_param_values(payload: dict[str, str | int | float | bool | None]) -> dict[str, str | None]:
     return {
         str(key): (None if value is None else str(value))
         for key, value in dict(payload or {}).items()
@@ -700,6 +864,25 @@ def _next_generated_interior_instance_code(
     fallback_order: int,
 ) -> str:
     prefix = str(group_code or "interior").strip() or "interior"
+    existing_codes = {
+        str(getattr(item, "instance_code", "") or "").strip()
+        for item in list(existing_instances or [])
+    }
+    suffix = max(1, int(fallback_order) + 1)
+    while True:
+        candidate = f"{prefix}-{suffix:02d}"
+        if candidate not in existing_codes:
+            return candidate
+        suffix += 1
+
+
+def _next_generated_door_instance_code(
+    *,
+    existing_instances: list[object],
+    group_code: str | None,
+    fallback_order: int,
+) -> str:
+    prefix = str(group_code or "door").strip() or "door"
     existing_codes = {
         str(getattr(item, "instance_code", "") or "").strip()
         for item in list(existing_instances or [])
@@ -790,6 +973,88 @@ async def _next_interior_instance_state(
         param_meta={},
     )
     return next_code, next_order, resolved.interior_box_snapshot, resolved.param_values, resolved.param_meta
+
+
+async def _refresh_design_door_instance(
+    session: AsyncSession,
+    *,
+    design: SubCategoryDesign,
+    instance: SubCategoryDesignDoorInstance,
+) -> None:
+    sub_category = await require_accessible_sub_category(session, admin_id=design.admin_id, sub_category_id=design.sub_category_id)
+    group = await require_accessible_door_part_group(session, admin_id=design.admin_id, group_id=instance.door_part_group_id)
+    part_boxes = {
+        int(part.part_formula_id): dict(snapshot.viewer_payload.get("box") or {})
+        for part in list(design.parts or [])
+        for snapshot in list(part.snapshots or [])[:1]
+        if bool(part.enabled) and isinstance(snapshot.viewer_payload, dict) and isinstance(snapshot.viewer_payload.get("box"), dict)
+    }
+    resolved = await resolve_door_instance_preview(
+        session,
+        admin_id=design.admin_id,
+        sub_category=sub_category,
+        door_part_group=group,
+        instance_id=instance.id,
+        instance_code=str(instance.instance_code or ""),
+        line_color=str(getattr(instance, "line_color", "") or "").strip() or None,
+        ui_order=int(instance.ui_order or 0),
+        structural_part_formula_ids=list(instance.structural_part_formula_ids or []),
+        dependent_interior_instance_ids=[str(row).strip() for row in list(instance.dependent_interior_instance_ids or []) if str(row).strip()],
+        controller_box_snapshot=dict(instance.controller_box_snapshot or {}),
+        param_values=dict(instance.param_values or {}),
+        param_meta=dict(instance.param_meta or {}),
+        source_boxes_by_formula_id=part_boxes,
+    )
+    instance.controller_box_snapshot = resolved.controller_box_snapshot
+    instance.param_values = resolved.param_values
+    instance.param_meta = resolved.param_meta
+    instance.part_snapshots = resolved.part_snapshots
+    instance.viewer_boxes = resolved.viewer_boxes
+
+
+async def _next_door_instance_state(
+    session: AsyncSession,
+    *,
+    design: SubCategoryDesign,
+    group_id: uuid.UUID,
+    ui_order: int | None,
+    instance_code: str | None,
+    structural_part_formula_ids: list[int],
+    dependent_interior_instance_ids: list[uuid.UUID | str],
+    param_values: dict[str, str | int | float | bool | None],
+) -> tuple[str, int, dict[str, object], dict[str, str | None], dict[str, dict[str, object]]]:
+    sub_category = await require_accessible_sub_category(session, admin_id=design.admin_id, sub_category_id=design.sub_category_id)
+    group = await require_accessible_door_part_group(session, admin_id=design.admin_id, group_id=group_id)
+    existing = list(getattr(design, "door_instances", []) or [])
+    next_order = ui_order if ui_order is not None else (max([int(item.ui_order or 0) for item in existing], default=-1) + 1)
+    next_code = str(instance_code or "").strip() or _next_generated_door_instance_code(
+        existing_instances=existing,
+        group_code=getattr(group, "code", None),
+        fallback_order=next_order,
+    )
+    part_boxes = {
+        int(part.part_formula_id): dict(snapshot.viewer_payload.get("box") or {})
+        for part in list(design.parts or [])
+        for snapshot in list(part.snapshots or [])[:1]
+        if bool(part.enabled) and isinstance(snapshot.viewer_payload, dict) and isinstance(snapshot.viewer_payload.get("box"), dict)
+    }
+    normalized_dependent_ids = [str(row).strip() for row in list(dependent_interior_instance_ids or []) if str(row).strip()]
+    resolved = await resolve_door_instance_preview(
+        session,
+        admin_id=design.admin_id,
+        sub_category=sub_category,
+        door_part_group=group,
+        instance_id=None,
+        instance_code=next_code,
+        line_color=str(getattr(group, "line_color", "") or "").strip() or None,
+        ui_order=next_order,
+        structural_part_formula_ids=structural_part_formula_ids,
+        dependent_interior_instance_ids=normalized_dependent_ids,
+        param_values=_normalize_door_param_values(param_values),
+        param_meta={},
+        source_boxes_by_formula_id=part_boxes,
+    )
+    return next_code, next_order, resolved.controller_box_snapshot, resolved.param_values, resolved.param_meta
 
 
 @router.post("/{design_uuid}/interior-instances", response_model=SubCategoryDesignInteriorInstanceItem, status_code=status.HTTP_201_CREATED)
@@ -927,6 +1192,193 @@ async def delete_sub_category_design_interior_instance(
     item = next((row for row in design.interior_instances if row.id == instance_id), None)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design interior instance not found.")
+    await session.delete(item)
+    await session.flush()
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{design_uuid}/door-instances", response_model=SubCategoryDesignDoorInstanceItem, status_code=status.HTTP_201_CREATED)
+async def create_sub_category_design_door_instance(
+    design_uuid: uuid.UUID,
+    payload: SubCategoryDesignDoorInstanceCreate,
+    session: AsyncSession = Depends(get_db_session),
+) -> SubCategoryDesignDoorInstanceItem:
+    if not await door_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Door-instance tables are not available yet. Run database migrations first.")
+    design = await _load_design(session, design_uuid)
+    group = await require_accessible_door_part_group(session, admin_id=design.admin_id, group_id=payload.door_part_group_id)
+    next_code, next_order, controller_box_snapshot, param_values, param_meta = await _next_door_instance_state(
+        session,
+        design=design,
+        group_id=payload.door_part_group_id,
+        ui_order=payload.ui_order,
+        instance_code=payload.instance_code,
+        structural_part_formula_ids=[int(row) for row in list(payload.structural_part_formula_ids or []) if int(row) > 0],
+        dependent_interior_instance_ids=list(payload.dependent_interior_instance_ids or []),
+        param_values=payload.param_values,
+    )
+    item = SubCategoryDesignDoorInstance(
+        design=design,
+        door_part_group_id=payload.door_part_group_id,
+        instance_code=next_code,
+        line_color=_normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else _normalize_hex_color(getattr(group, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR),
+        ui_order=next_order,
+        structural_part_formula_ids=[int(row) for row in list(payload.structural_part_formula_ids or []) if int(row) > 0],
+        dependent_interior_instance_ids=[str(row).strip() for row in list(payload.dependent_interior_instance_ids or []) if str(row).strip()],
+        controller_box_snapshot=controller_box_snapshot,
+        param_values=param_values,
+        param_meta=param_meta,
+        status="draft",
+    )
+    session.add(item)
+    await session.flush()
+    design = await _load_design(session, design.id)
+    target = next(instance for instance in design.door_instances if instance.id == item.id)
+    await _refresh_design_door_instance(session, design=design, instance=target)
+    await session.commit()
+    design = await _load_design(session, design.id)
+    target = next(instance for instance in design.door_instances if instance.id == item.id)
+    return SubCategoryDesignDoorInstanceItem.model_validate({
+        "id": target.id,
+        "door_part_group_id": target.door_part_group_id,
+        "controller_type": str(getattr(group, "controller_type", "") or "").strip() or None,
+        "controller_bindings": dict(getattr(group, "controller_bindings", {}) or {}),
+        "instance_code": str(target.instance_code or ""),
+        "line_color": str(getattr(target, "line_color", "") or "").strip() or None,
+        "ui_order": int(target.ui_order or 0),
+        "structural_part_formula_ids": [int(row) for row in list(target.structural_part_formula_ids or []) if int(row) > 0],
+        "dependent_interior_instance_ids": [str(row).strip() for row in list(target.dependent_interior_instance_ids or []) if str(row).strip()],
+        "controller_box_snapshot": dict(target.controller_box_snapshot or {}),
+        "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(target.param_values or {}).items()},
+        "param_meta": {str(key): dict(value or {}) for key, value in dict(target.param_meta or {}).items()},
+        "part_snapshots": [dict(row or {}) for row in list(target.part_snapshots or [])],
+        "viewer_boxes": [dict(row or {}) for row in list(target.viewer_boxes or [])],
+        "status": str(target.status or "draft").strip() or "draft",
+    })
+
+
+@router.patch("/{design_uuid}/door-instances/{instance_id}", response_model=SubCategoryDesignDoorInstanceItem)
+async def update_sub_category_design_door_instance(
+    design_uuid: uuid.UUID,
+    instance_id: uuid.UUID,
+    payload: SubCategoryDesignDoorInstanceUpdate,
+    session: AsyncSession = Depends(get_db_session),
+) -> SubCategoryDesignDoorInstanceItem:
+    if not await door_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Door-instance tables are not available yet. Run database migrations first.")
+    design = await _load_design(session, design_uuid)
+    item = next((row for row in getattr(design, "door_instances", []) if row.id == instance_id), None)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design door instance not found.")
+    item.instance_code = str(payload.instance_code or "").strip()
+    item.line_color = _normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else None
+    item.ui_order = int(payload.ui_order)
+    item.structural_part_formula_ids = [int(row) for row in list(payload.structural_part_formula_ids or []) if int(row) > 0]
+    item.dependent_interior_instance_ids = [str(row).strip() for row in list(payload.dependent_interior_instance_ids or []) if str(row).strip()]
+    item.param_values = _normalize_door_param_values(payload.param_values)
+    await session.flush()
+    design = await _load_design(session, design.id)
+    target = next(instance for instance in design.door_instances if instance.id == item.id)
+    await _refresh_design_door_instance(session, design=design, instance=target)
+    await session.commit()
+    design = await _load_design(session, design.id)
+    target = next(instance for instance in design.door_instances if instance.id == item.id)
+    group = await require_accessible_door_part_group(session, admin_id=design.admin_id, group_id=target.door_part_group_id)
+    return SubCategoryDesignDoorInstanceItem.model_validate({
+        "id": target.id,
+        "door_part_group_id": target.door_part_group_id,
+        "controller_type": str(getattr(group, "controller_type", "") or "").strip() or None,
+        "controller_bindings": dict(getattr(group, "controller_bindings", {}) or {}),
+        "instance_code": str(target.instance_code or ""),
+        "line_color": str(getattr(target, "line_color", "") or "").strip() or None,
+        "ui_order": int(target.ui_order or 0),
+        "structural_part_formula_ids": [int(row) for row in list(target.structural_part_formula_ids or []) if int(row) > 0],
+        "dependent_interior_instance_ids": [str(row).strip() for row in list(target.dependent_interior_instance_ids or []) if str(row).strip()],
+        "controller_box_snapshot": dict(target.controller_box_snapshot or {}),
+        "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(target.param_values or {}).items()},
+        "param_meta": {str(key): dict(value or {}) for key, value in dict(target.param_meta or {}).items()},
+        "part_snapshots": [dict(row or {}) for row in list(target.part_snapshots or [])],
+        "viewer_boxes": [dict(row or {}) for row in list(target.viewer_boxes or [])],
+        "status": str(target.status or "draft").strip() or "draft",
+    })
+
+
+@router.post("/{design_uuid}/door-instances/{instance_id}/duplicate", response_model=SubCategoryDesignDoorInstanceItem, status_code=status.HTTP_201_CREATED)
+async def duplicate_sub_category_design_door_instance(
+    design_uuid: uuid.UUID,
+    instance_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> SubCategoryDesignDoorInstanceItem:
+    if not await door_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Door-instance tables are not available yet. Run database migrations first.")
+    design = await _load_design(session, design_uuid)
+    source = next((row for row in getattr(design, "door_instances", []) if row.id == instance_id), None)
+    if not source:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design door instance not found.")
+    group = await require_accessible_door_part_group(session, admin_id=design.admin_id, group_id=source.door_part_group_id)
+    next_code, next_order, controller_box_snapshot, param_values, param_meta = await _next_door_instance_state(
+        session,
+        design=design,
+        group_id=source.door_part_group_id,
+        ui_order=max([int(row.ui_order or 0) for row in list(getattr(design, "door_instances", []) or [])], default=-1) + 1,
+        instance_code=None,
+        structural_part_formula_ids=list(source.structural_part_formula_ids or []),
+        dependent_interior_instance_ids=list(source.dependent_interior_instance_ids or []),
+        param_values=dict(source.param_values or {}),
+    )
+    item = SubCategoryDesignDoorInstance(
+        design=design,
+        door_part_group_id=source.door_part_group_id,
+        instance_code=next_code,
+        line_color=_normalize_hex_color(getattr(source, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR) if getattr(source, "line_color", None) else _normalize_hex_color(getattr(group, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR),
+        ui_order=next_order,
+        structural_part_formula_ids=[int(row) for row in list(source.structural_part_formula_ids or []) if int(row) > 0],
+        dependent_interior_instance_ids=[str(row).strip() for row in list(source.dependent_interior_instance_ids or []) if str(row).strip()],
+        controller_box_snapshot=controller_box_snapshot,
+        param_values=param_values,
+        param_meta=param_meta,
+        status=str(source.status or "draft").strip() or "draft",
+    )
+    session.add(item)
+    await session.flush()
+    design = await _load_design(session, design.id)
+    target = next(instance for instance in design.door_instances if instance.id == item.id)
+    await _refresh_design_door_instance(session, design=design, instance=target)
+    await session.commit()
+    design = await _load_design(session, design.id)
+    target = next(instance for instance in design.door_instances if instance.id == item.id)
+    return SubCategoryDesignDoorInstanceItem.model_validate({
+        "id": target.id,
+        "door_part_group_id": target.door_part_group_id,
+        "controller_type": str(getattr(group, "controller_type", "") or "").strip() or None,
+        "controller_bindings": dict(getattr(group, "controller_bindings", {}) or {}),
+        "instance_code": str(target.instance_code or ""),
+        "line_color": str(getattr(target, "line_color", "") or "").strip() or None,
+        "ui_order": int(target.ui_order or 0),
+        "structural_part_formula_ids": [int(row) for row in list(target.structural_part_formula_ids or []) if int(row) > 0],
+        "dependent_interior_instance_ids": [str(row).strip() for row in list(target.dependent_interior_instance_ids or []) if str(row).strip()],
+        "controller_box_snapshot": dict(target.controller_box_snapshot or {}),
+        "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(target.param_values or {}).items()},
+        "param_meta": {str(key): dict(value or {}) for key, value in dict(target.param_meta or {}).items()},
+        "part_snapshots": [dict(row or {}) for row in list(target.part_snapshots or [])],
+        "viewer_boxes": [dict(row or {}) for row in list(target.viewer_boxes or [])],
+        "status": str(target.status or "draft").strip() or "draft",
+    })
+
+
+@router.delete("/{design_uuid}/door-instances/{instance_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_sub_category_design_door_instance(
+    design_uuid: uuid.UUID,
+    instance_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    if not await door_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Door-instance tables are not available yet. Run database migrations first.")
+    design = await _load_design(session, design_uuid)
+    item = next((row for row in getattr(design, "door_instances", []) if row.id == instance_id), None)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design door instance not found.")
     await session.delete(item)
     await session.flush()
     await session.commit()

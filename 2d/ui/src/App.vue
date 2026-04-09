@@ -101,6 +101,7 @@ const stageEl = ref(null);
 const stageCardEl = ref(null);
 const stageGlbViewerRef = ref(null);
 const interiorLibraryFrontSvgEl = ref(null);
+const doorLibraryFrontSvgEl = ref(null);
 const homeBtnEl = ref(null);
 const menuPanelEl = ref(null);
 const mainMenuBtnEl = ref(null);
@@ -313,6 +314,18 @@ const interiorLibraryForcedOrderDesignId = ref("");
 const doorLibraryForcedOrderDesignId = ref("");
 const interiorLibraryPartKindFilter = ref("");
 const doorLibraryPartKindFilter = ref("");
+const doorLibraryPreviewMode = ref("front2d");
+const doorLibraryPreview3dRef = ref(null);
+const doorLibraryPreviewOpacity = ref(100);
+const doorLibraryAnnotationTool = ref(null);
+const doorLibraryAnnotations = ref(createEmptyInteriorLibraryAnnotations());
+const doorLibraryAnnotationDraft = ref(null);
+const doorLibrarySelectedAnnotation = ref(null);
+const doorLibraryCurrentSnapPoint = ref(null);
+const doorLibraryCursorPoint = ref(null);
+const doorLibraryHoverMode = ref(null);
+const doorLibraryViewerCursorPoint = ref(null);
+const doorLibraryModelPanning = ref(false);
 const interiorInstanceEditorOpen = ref(false);
 const interiorInstanceEditorDraft = ref(null);
 const interiorInstanceEditorActiveGroupId = ref("");
@@ -416,6 +429,7 @@ const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_RIGHT = "width_controller_inte
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_LEFT = "width_controller_internal_group_part_left";
 const INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT = "height_controller_internal_group_part";
 const INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT = "height_controller_internal_group_part_left";
+const DOOR_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING = "back_to_back_opening";
 const INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS = [
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH, label: "قطعات عرضی وسط" },
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT, label: "قطعات عرضی راست" },
@@ -476,6 +490,13 @@ const INTERNAL_GROUP_CONTROLLER_DEFINITIONS = {
     { key: "bottom_offset", label: "کنترلر ضلع پایین" },
   ],
 };
+const DOOR_GROUP_CONTROLLER_TYPE_OPTIONS = [
+  { value: DOOR_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING, label: "دو درب لولایی" },
+];
+const DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS = [
+  { key: "width_back_to_back", label: "عرض پشت تا پشت" },
+  { key: "height_back_to_back", label: "ارتفاع پشت تا پشت" },
+];
 
 function isHeightInternalGroupControllerType(controllerType) {
   const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
@@ -558,6 +579,14 @@ const internalPartGroupEditorOpen = ref(false);
 const internalPartGroupEditorDraft = ref(null);
 const doorPartGroupEditorOpen = ref(false);
 const doorPartGroupEditorDraft = ref(null);
+const doorPartGroupParamGroupsOpen = ref(false);
+const doorPartGroupControllerEditorOpen = ref(false);
+const doorPartGroupDefaultsEditorOpen = ref(false);
+const doorPartGroupDefaultsEditorRowId = ref(null);
+const doorPartGroupDefaultsEditorGroups = ref([]);
+const doorPartGroupDefaultsValues = ref({});
+const doorPartGroupDefaultsActiveGroupId = ref("");
+const doorPartGroupDefaultsApplying = ref(false);
 const internalPartGroupParamGroupsOpen = ref(false);
 const internalPartGroupDefaultsEditorOpen = ref(false);
 const internalPartGroupDefaultsEditorRowId = ref(null);
@@ -595,6 +624,7 @@ const constructionDeletedPartFormulaIds = ref([]);
 const constructionImportInputEl = ref(null);
 const constructionParamsTableWrapEl = ref(null);
 const interiorLibraryAddingGroupKey = ref("");
+const doorLibraryAddingGroupKey = ref("");
 const interiorInstanceEditorApplying = ref(false);
 const INTERIOR_LIBRARY_FRONT_ZOOM_MIN = 0.1;
 const INTERIOR_LIBRARY_FRONT_ZOOM_MAX = 20000;
@@ -603,6 +633,12 @@ const INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR = 1.6;
 const INTERIOR_LIBRARY_POINTER_EPS = 0.4;
 const INTERIOR_LIBRARY_INSTANCE_HIT_PADDING = 6;
 const INTERIOR_LIBRARY_INSTANCE_HIT_DISTANCE = 10;
+const doorLibraryViewerWrapEl = ref(null);
+const doorLibraryFrontZoom = ref(1);
+const doorLibraryFrontPan = ref({ x: 0, y: 0 });
+const doorLibraryFrontPanning = ref(false);
+let doorLibraryFrontPanSession = null;
+let doorLibraryFrontLastMiddleClickMs = 0;
 function isOrderDesignSaving(designId) {
   const key = String(designId || "").trim();
   return !!key && orderDesignSavingIds.value.includes(key);
@@ -730,8 +766,127 @@ function setInteriorLibraryPreviewOpacity(value) {
   interiorLibraryPreviewOpacity.value = nextValue;
   interiorLibraryPreview3dRef.value?.setPlaceholderOpacity?.(nextValue);
 }
+function setDoorLibraryPreviewMode(mode) {
+  doorLibraryPreviewMode.value = mode === "model3d" ? "model3d" : "front2d";
+  if (doorLibraryPreviewMode.value === "model3d") {
+    nextTick(() => {
+      resetDoorLibraryPreviewView();
+      setDoorLibraryPreviewOpacity(doorLibraryPreviewOpacity.value);
+    });
+    return;
+  }
+  resetDoorLibraryPreviewView();
+}
+function setDoorLibraryPreviewOpacity(value) {
+  const nextValue = Math.max(0, Math.min(100, Number(value) || 0));
+  doorLibraryPreviewOpacity.value = nextValue;
+  doorLibraryPreview3dRef.value?.setPlaceholderOpacity?.(nextValue);
+}
 function toggleInteriorLibraryGuideTool() {
   interiorLibraryShowInnerLines.value = !interiorLibraryShowInnerLines.value;
+}
+function changeDoorLibraryFrontZoom(nextZoom) {
+  const boundedZoom = Math.min(
+    INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
+    Math.max(
+      INTERIOR_LIBRARY_FRONT_ZOOM_MIN,
+      Number(nextZoom) || 1
+    )
+  );
+  doorLibraryFrontZoom.value = boundedZoom;
+}
+function zoomDoorLibraryFrontIn() {
+  changeDoorLibraryFrontZoom((Number(doorLibraryFrontZoom.value) || 1) * INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR);
+}
+function zoomDoorLibraryFrontOut() {
+  changeDoorLibraryFrontZoom((Number(doorLibraryFrontZoom.value) || 1) / INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR);
+}
+function handleDoorLibraryPreviewWheel(event) {
+  const deltaY = Number(event?.deltaY) || 0;
+  if (!Number.isFinite(deltaY) || deltaY === 0) return;
+  if (doorLibraryPreviewMode.value === "model3d") {
+    doorLibraryPreview3dRef.value?.zoomByFactor?.(deltaY < 0 ? INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR : (1 / INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR));
+    return;
+  }
+  if (deltaY < 0) zoomDoorLibraryFrontIn();
+  else zoomDoorLibraryFrontOut();
+}
+function stopDoorLibraryFrontPan() {
+  doorLibraryFrontPanSession = null;
+  doorLibraryFrontPanning.value = false;
+  window.removeEventListener("pointermove", onDoorLibraryFrontPanMove);
+  window.removeEventListener("pointerup", onDoorLibraryFrontPanUp);
+}
+function onDoorLibraryFrontPanMove(event) {
+  const session = doorLibraryFrontPanSession;
+  if (!session) return;
+  const rectWidth = Math.max(1, Number(session.rectWidth) || 1);
+  const rectHeight = Math.max(1, Number(session.rectHeight) || 1);
+  const zoom = Math.min(
+    INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
+    Math.max(INTERIOR_LIBRARY_FRONT_ZOOM_MIN, Number(doorLibraryFrontZoom.value) || 1)
+  );
+  const viewWidth = session.baseWidth / zoom;
+  const viewHeight = session.baseHeight / zoom;
+  const dx = Number(event?.clientX) - session.startClientX;
+  const dy = Number(event?.clientY) - session.startClientY;
+  doorLibraryFrontPan.value = {
+    x: session.startPanX - (dx / rectWidth) * viewWidth,
+    y: session.startPanY - (dy / rectHeight) * viewHeight,
+  };
+}
+function onDoorLibraryFrontPanUp() {
+  stopDoorLibraryFrontPan();
+}
+function startDoorLibraryFrontPan(event) {
+  if (Number(event?.button) !== 1) return;
+  const now = performance.now();
+  if (now - doorLibraryFrontLastMiddleClickMs <= 300) {
+    doorLibraryFrontLastMiddleClickMs = 0;
+    event.preventDefault();
+    resetDoorLibraryPreviewView(true);
+    return;
+  }
+  doorLibraryFrontLastMiddleClickMs = now;
+  const currentTarget = event?.currentTarget;
+  const rect = currentTarget?.getBoundingClientRect?.();
+  doorLibraryFrontPanSession = {
+    startClientX: Number(event.clientX) || 0,
+    startClientY: Number(event.clientY) || 0,
+    startPanX: Number(doorLibraryFrontPan.value?.x) || 0,
+    startPanY: Number(doorLibraryFrontPan.value?.y) || 0,
+    rectWidth: rect?.width || currentTarget?.clientWidth || 1,
+    rectHeight: rect?.height || currentTarget?.clientHeight || 1,
+    baseWidth: Number(doorLibraryFrontBaseViewBoxRect.value?.width) || FRONT_VIEW_WIDTH,
+    baseHeight: Number(doorLibraryFrontBaseViewBoxRect.value?.height) || FRONT_VIEW_HEIGHT,
+  };
+  doorLibraryFrontPanning.value = true;
+  event.preventDefault();
+  window.addEventListener("pointermove", onDoorLibraryFrontPanMove);
+  window.addEventListener("pointerup", onDoorLibraryFrontPanUp, { once: true });
+}
+function resetDoorLibraryPreviewView(zoomIn = false) {
+  if (doorLibraryPreviewMode.value === "model3d") {
+    doorLibraryModelPanning.value = false;
+    doorLibraryPreview3dRef.value?.fitCameraToAll?.();
+    return;
+  }
+  doorLibraryFrontZoom.value = zoomIn ? INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR : 1;
+  doorLibraryFrontPan.value = { x: 0, y: 0 };
+  stopDoorLibraryFrontPan();
+}
+function resetDoorLibraryAnnotations() {
+  doorLibraryAnnotations.value = createEmptyInteriorLibraryAnnotations();
+  doorLibraryAnnotationDraft.value = null;
+  doorLibrarySelectedAnnotation.value = null;
+  doorLibraryAnnotationTool.value = null;
+  doorLibraryCurrentSnapPoint.value = null;
+  doorLibraryHoverMode.value = null;
+}
+function stopDoorLibraryModelPanCursor() {
+  doorLibraryModelPanning.value = false;
+  window.removeEventListener("pointerup", stopDoorLibraryModelPanCursor);
+  window.removeEventListener("pointercancel", stopDoorLibraryModelPanCursor);
 }
 function toggleInteriorLibraryDimensionsVisibility() {
   interiorLibraryShowDimensions.value = !interiorLibraryShowDimensions.value;
@@ -860,6 +1015,80 @@ function syncInteriorLibraryViewerCursorPoint(event) {
 function clearInteriorLibraryViewerCursorPoint() {
   setInteriorLibraryPointRef(interiorLibraryViewerCursorPoint, null);
 }
+function getDoorLibraryFrontSvgPoint(event) {
+  const svgEl = doorLibraryFrontSvgEl.value;
+  if (!svgEl || !event) return null;
+  const rect = svgEl.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  const clientX = Number(event.clientX);
+  const clientY = Number(event.clientY);
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+  const viewBox = String(doorLibraryFrontSvgViewBox.value || "").split(/\s+/).map(Number);
+  if (viewBox.length !== 4 || viewBox.some((value) => !Number.isFinite(value))) return null;
+  const [vx, vy, vw, vh] = viewBox;
+  return {
+    x: vx + ((clientX - rect.left) / rect.width) * vw,
+    y: vy + ((clientY - rect.top) / rect.height) * vh,
+  };
+}
+function getDoorLibrarySnappedFrontPoint(point) {
+  const rawPoint = point && typeof point === "object"
+    ? { x: Number(point.x) || 0, y: Number(point.y) || 0 }
+    : null;
+  if (!rawPoint) {
+    doorLibraryCurrentSnapPoint.value = null;
+    return null;
+  }
+  const snapped = snapInteriorPointToGeometry(
+    rawPoint,
+    doorLibraryFrontSnapLines.value,
+    doorLibraryFrontSnapTolerance.value
+  );
+  doorLibraryCurrentSnapPoint.value = snapped?.point
+    ? {
+        x: Number(snapped.point.x) || 0,
+        y: Number(snapped.point.y) || 0,
+        kind: snapped.kind === "edge" ? "edge" : "corner",
+      }
+    : null;
+  return doorLibraryCurrentSnapPoint.value
+    ? { x: doorLibraryCurrentSnapPoint.value.x, y: doorLibraryCurrentSnapPoint.value.y }
+    : rawPoint;
+}
+function syncDoorLibraryCursorPoint(rawPoint, snappedPoint = null) {
+  const source = snappedPoint && typeof snappedPoint === "object"
+    ? snappedPoint
+    : rawPoint;
+  setInteriorLibraryPointRef(doorLibraryCursorPoint, source, 0.18);
+}
+function clearDoorLibraryCursorPoint() {
+  setInteriorLibraryPointRef(doorLibraryCursorPoint, null);
+}
+function syncDoorLibraryViewerCursorPoint(event) {
+  const wrapEl = doorLibraryViewerWrapEl.value;
+  if (!wrapEl || !event) {
+    setInteriorLibraryPointRef(doorLibraryViewerCursorPoint, null);
+    return;
+  }
+  const rect = wrapEl.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    setInteriorLibraryPointRef(doorLibraryViewerCursorPoint, null);
+    return;
+  }
+  const clientX = Number(event.clientX);
+  const clientY = Number(event.clientY);
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+    setInteriorLibraryPointRef(doorLibraryViewerCursorPoint, null);
+    return;
+  }
+  setInteriorLibraryPointRef(doorLibraryViewerCursorPoint, {
+    x: Math.max(0, Math.min(rect.width, clientX - rect.left)),
+    y: Math.max(0, Math.min(rect.height, clientY - rect.top)),
+  }, 0.5);
+}
+function clearDoorLibraryViewerCursorPoint() {
+  setInteriorLibraryPointRef(doorLibraryViewerCursorPoint, null);
+}
 function createInteriorLibraryAnnotationDraft(type, point) {
   return {
     type: type === "guide" ? "guide" : "dimension",
@@ -884,10 +1113,30 @@ function buildInteriorLibraryAnnotationRecord(type, startPoint, currentPoint) {
   }
   return record;
 }
+function measureDoorLibraryAnnotationMm(annotation) {
+  if (!annotation?.start || !annotation?.end) return Math.max(0, Number(annotation?.valueMm) || Number(annotation?.value) || 0);
+  return String(annotation?.axis || "").trim() === "vertical"
+    ? Math.abs((Number(annotation.end.y) || 0) - (Number(annotation.start.y) || 0))
+    : Math.abs((Number(annotation.end.x) || 0) - (Number(annotation.start.x) || 0));
+}
+function buildDoorLibraryAnnotationRecord(type, startPoint, currentPoint) {
+  const record = buildInteriorAnnotationRecord(type, startPoint, currentPoint);
+  if (record.type === "dimension") {
+    record.valueMm = measureDoorLibraryAnnotationMm(record);
+  }
+  return record;
+}
 function updateInteriorLibraryAnnotationDraft(point) {
   if (!interiorLibraryAnnotationDraft.value) return;
   interiorLibraryAnnotationDraft.value = {
     ...interiorLibraryAnnotationDraft.value,
+    currentPoint: { x: Number(point?.x) || 0, y: Number(point?.y) || 0 },
+  };
+}
+function updateDoorLibraryAnnotationDraft(point) {
+  if (!doorLibraryAnnotationDraft.value) return;
+  doorLibraryAnnotationDraft.value = {
+    ...doorLibraryAnnotationDraft.value,
     currentPoint: { x: Number(point?.x) || 0, y: Number(point?.y) || 0 },
   };
 }
@@ -912,8 +1161,27 @@ function commitInteriorLibraryAnnotationDraft() {
   interiorLibraryAnnotationDraft.value = null;
   interiorLibraryCurrentSnapPoint.value = null;
 }
+function commitDoorLibraryAnnotationDraft() {
+  const draft = doorLibraryAnnotationDraft.value;
+  if (!draft?.type || !draft?.startPoint || !draft?.currentPoint) return;
+  const nextRecord = buildDoorLibraryAnnotationRecord(draft.type, draft.startPoint, draft.currentPoint);
+  if (!isInteriorAnnotationMeaningful(nextRecord)) {
+    doorLibraryAnnotationDraft.value = null;
+    return;
+  }
+  doorLibraryAnnotations.value = {
+    ...doorLibraryAnnotations.value,
+    dimensions: [...(doorLibraryAnnotations.value.dimensions || []), nextRecord],
+  };
+  doorLibrarySelectedAnnotation.value = { type: nextRecord.type, id: nextRecord.id };
+  doorLibraryAnnotationDraft.value = null;
+  doorLibraryCurrentSnapPoint.value = null;
+}
 function clearInteriorLibraryAnnotationSelection() {
   interiorLibrarySelectedAnnotation.value = null;
+}
+function clearDoorLibraryAnnotationSelection() {
+  doorLibrarySelectedAnnotation.value = null;
 }
 function clearInteriorLibraryInstanceSelection() {
   interiorLibrarySelectedInstanceId.value = "";
@@ -926,6 +1194,14 @@ function removeSelectedInteriorLibraryAnnotation() {
     interiorLibrarySelectedAnnotation.value
   );
   interiorLibrarySelectedAnnotation.value = null;
+}
+function removeSelectedDoorLibraryAnnotation() {
+  if (!doorLibrarySelectedAnnotation.value) return;
+  doorLibraryAnnotations.value = removeSelectedInteriorAnnotation(
+    doorLibraryAnnotations.value,
+    doorLibrarySelectedAnnotation.value
+  );
+  doorLibrarySelectedAnnotation.value = null;
 }
 function hideInteriorLibraryOverlapPicker() {
   interiorLibraryOverlapPickerState.value = {
@@ -1784,6 +2060,89 @@ function onInteriorLibraryViewerPointerDown(event) {
   }
   startInteriorLibraryFrontPan(event);
 }
+function onDoorLibraryFrontSvgPointerDown(event) {
+  if (doorLibraryPreviewMode.value !== "front2d" || Number(event?.button) !== 0) return;
+  const rawPoint = getDoorLibraryFrontSvgPoint(event);
+  if (!rawPoint) return;
+  syncDoorLibraryCursorPoint(rawPoint, doorLibraryCurrentSnapPoint.value);
+  const hitDimension = hitTestInteriorAnnotationList(doorLibraryRenderedAnnotations.value.dimensions, rawPoint, 12);
+  if (hitDimension) {
+    doorLibrarySelectedAnnotation.value = {
+      type: "dimension",
+      id: String(hitDimension?.id || ""),
+    };
+    doorLibraryAnnotationDraft.value = null;
+    doorLibraryCurrentSnapPoint.value = null;
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+  clearDoorLibraryAnnotationSelection();
+  if (doorLibraryAnnotationTool.value !== "dimension") {
+    doorLibraryCurrentSnapPoint.value = null;
+    return;
+  }
+  const point = getDoorLibrarySnappedFrontPoint(rawPoint);
+  if (!point) return;
+  if (!doorLibraryAnnotationDraft.value) {
+    doorLibraryAnnotationDraft.value = createInteriorLibraryAnnotationDraft("dimension", point);
+  } else {
+    updateDoorLibraryAnnotationDraft(point);
+    commitDoorLibraryAnnotationDraft();
+  }
+  event.preventDefault();
+  event.stopPropagation();
+}
+function onDoorLibraryFrontSvgPointerMove(event) {
+  const rawPoint = getDoorLibraryFrontSvgPoint(event);
+  if (!rawPoint) return;
+  syncDoorLibraryCursorPoint(rawPoint, null);
+  if (doorLibraryAnnotationTool.value === "dimension") {
+    const snappedPoint = getDoorLibrarySnappedFrontPoint(rawPoint);
+    syncDoorLibraryCursorPoint(rawPoint, snappedPoint);
+    if (snappedPoint && doorLibraryAnnotationDraft.value) {
+      updateDoorLibraryAnnotationDraft(snappedPoint);
+    }
+    doorLibraryHoverMode.value = null;
+    return;
+  }
+  doorLibraryCurrentSnapPoint.value = null;
+  const hitDimension = hitTestInteriorAnnotationList(doorLibraryRenderedAnnotations.value.dimensions, rawPoint, 12);
+  doorLibraryHoverMode.value = hitDimension ? "clicker" : null;
+}
+function onDoorLibraryFrontSvgPointerLeave() {
+  doorLibraryCurrentSnapPoint.value = null;
+  clearDoorLibraryCursorPoint();
+  doorLibraryHoverMode.value = null;
+}
+function onDoorLibraryViewerPointerMove(event) {
+  if (doorLibraryPreviewMode.value === "model3d") {
+    syncDoorLibraryViewerCursorPoint(event);
+    return;
+  }
+  if (doorLibraryPreviewMode.value === "front2d" && doorLibraryFrontPanning.value) {
+    const rawPoint = getDoorLibraryFrontSvgPoint(event);
+    if (rawPoint) syncDoorLibraryCursorPoint(rawPoint, null);
+  }
+}
+function onDoorLibraryViewerPointerLeave() {
+  clearDoorLibraryViewerCursorPoint();
+  if (doorLibraryPreviewMode.value === "model3d") {
+    stopDoorLibraryModelPanCursor();
+  }
+}
+function onDoorLibraryViewerPointerDown(event) {
+  if (doorLibraryPreviewMode.value === "model3d") {
+    syncDoorLibraryViewerCursorPoint(event);
+    if (Number(event?.button) === 1 || Number(event?.button) === 2) {
+      doorLibraryModelPanning.value = true;
+      window.addEventListener("pointerup", stopDoorLibraryModelPanCursor, { once: true });
+      window.addEventListener("pointercancel", stopDoorLibraryModelPanCursor, { once: true });
+    }
+    return;
+  }
+  startDoorLibraryFrontPan(event);
+}
 function getInteriorLibraryAddingGroupKey(group) {
   const groupId = String(group?.id || "").trim();
   if (!groupId) return "";
@@ -1791,6 +2150,14 @@ function getInteriorLibraryAddingGroupKey(group) {
 }
 function isAddingInteriorGroup(group) {
   return String(interiorLibraryAddingGroupKey.value || "") === getInteriorLibraryAddingGroupKey(group);
+}
+
+function getDoorLibraryAddingGroupKey(group) {
+  return String(group?.id || group?.code || group?.group_title || "");
+}
+
+function isAddingDoorGroup(group) {
+  return String(doorLibraryAddingGroupKey.value || "") === getDoorLibraryAddingGroupKey(group);
 }
 const paramGroupIconInputEl = ref(null);
 const constructionImportPreviewRows = ref([]);
@@ -2116,6 +2483,15 @@ const activeInternalPartGroupDefaultsGroup = computed(() =>
   || activeInternalPartGroupDefaultsGroups.value[0]
   || null
 );
+const activeDoorPartGroupDefaultsRow = computed(() =>
+  editableDoorPartGroups.value.find((item) => String(item.id) === String(doorPartGroupDefaultsEditorRowId.value)) || null
+);
+const activeDoorPartGroupDefaultsGroups = computed(() => doorPartGroupDefaultsEditorGroups.value);
+const activeDoorPartGroupDefaultsGroup = computed(() =>
+  activeDoorPartGroupDefaultsGroups.value.find((group) => String(group.id) === String(doorPartGroupDefaultsActiveGroupId.value))
+  || activeDoorPartGroupDefaultsGroups.value[0]
+  || null
+);
 const activeInternalPartGroupControllerRow = computed(() =>
   editableInternalPartGroups.value.find((item) => String(item.id) === String(internalPartGroupControllerEditorRowId.value)) || null
 );
@@ -2161,6 +2537,24 @@ const constructionInteriorPartFormulaOptions = computed(() =>
       };
     })
 );
+const constructionDoorPartFormulaOptions = computed(() =>
+  constructionPartFormulas.value
+    .filter((item) => {
+      const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
+      return isDoorPartKind(partKind);
+    })
+    .map((item) => {
+      const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
+      return {
+        id: Number(item.part_formula_id),
+        title: String(item.part_title || item.title || item.part_code || "").trim(),
+        code: String(item.part_code || "").trim(),
+        partKindTitle: String(partKind?.org_part_kind_title || partKind?.title || "").trim(),
+        formulaWidth: String(item.formula_width || "").trim(),
+        formulaHeight: String(item.formula_height || "").trim(),
+      };
+    })
+);
 const constructionInternalParamGroupOptions = computed(() =>
   constructionParamGroups.value
     .map((item) => ({
@@ -2173,6 +2567,7 @@ const constructionInternalParamGroupOptions = computed(() =>
     .filter((item) => item.id > 0 && item.title)
     .sort((a, b) => a.uiOrder - b.uiOrder || a.id - b.id)
 );
+const constructionDoorParamGroupOptions = computed(() => constructionInternalParamGroupOptions.value.map((item) => ({ ...item })));
 const constructionInternalPartGroupsById = computed(() =>
   new Map(
     constructionInternalPartGroups.value
@@ -2218,6 +2613,27 @@ const activeDoorLibraryOrderDesign = computed(() => {
   if (!targetId) return null;
   return orderDesignCatalog.value.find((item) => String(item.id) === targetId) || null;
 });
+function isDoorDependentPartFormulaId(partFormulaId) {
+  const formula = constructionPartFormulasById.value.get(Number(partFormulaId) || 0);
+  return normalizeBooleanFlag(formula?.door_dependent, false);
+}
+function getDoorDependentViewerBoxesFromPartRows(parts) {
+  return (Array.isArray(parts) ? parts : [])
+    .filter((row) => isDoorDependentPartFormulaId(row?.part_formula_id))
+    .map((row) => row?.viewer_payload?.box)
+    .filter((box) => box && typeof box === "object")
+    .map((box) => ({ ...(box || {}) }));
+}
+function getDoorDependentViewerBoxesFromInteriorInstances(instances) {
+  return (Array.isArray(instances) ? instances : [])
+    .flatMap((instance) => getDoorDependentViewerBoxesFromPartRows(instance?.part_snapshots || []));
+}
+function getViewerBoxesFromDoorInstances(instances) {
+  return (Array.isArray(instances) ? instances : [])
+    .flatMap((instance) => Array.isArray(instance?.viewer_boxes) ? instance.viewer_boxes : [])
+    .filter((box) => box && typeof box === "object")
+    .map((box) => ({ ...(box || {}) }));
+}
 const doorLibraryGroupCards = computed(() =>
   constructionDoorPartGroups.value
     .filter((group) => {
@@ -2238,6 +2654,14 @@ const activeInteriorLibrarySourceDesign = computed(() => {
     || cabinetDesignCatalog.value.find((item) => String(item.id) === sourceId)
     || null;
 });
+const activeDoorLibrarySourceDesign = computed(() => {
+  if (subCategoryDesignEditorOpen.value) return null;
+  const sourceId = String(activeDoorLibraryOrderDesign.value?.sub_category_design_id || "").trim();
+  if (!sourceId) return null;
+  return editableSubCategoryDesigns.value.find((item) => String(item.id) === sourceId)
+    || cabinetDesignCatalog.value.find((item) => String(item.id) === sourceId)
+    || null;
+});
 const activeInteriorLibraryTargetId = computed(() =>
   subCategoryDesignEditorOpen.value
     ? String(subCategoryDesignEditorDraft.value?.id || "").trim()
@@ -2247,6 +2671,11 @@ const activeInteriorLibraryInstances = computed(() =>
   subCategoryDesignEditorOpen.value
     ? (subCategoryDesignEditorDraft.value?.interior_instances || [])
     : (activeInteriorLibraryOrderDesign.value?.interior_instances || [])
+);
+const activeDoorLibraryInstances = computed(() =>
+  subCategoryDesignEditorOpen.value
+    ? (subCategoryDesignEditorDraft.value?.door_instances || [])
+    : (activeDoorLibraryOrderDesign.value?.door_instances || [])
 );
 const activeInteriorLibraryBaseParamValues = computed(() => {
   if (subCategoryDesignEditorOpen.value) {
@@ -2386,8 +2815,161 @@ const activeInteriorLibraryStructureViewerBoxes = computed(() => {
   if (sourceBoxes.length) return sourceBoxes;
   return [];
 });
+const activeDoorLibraryViewerBoxes = computed(() => {
+  if (subCategoryDesignEditorOpen.value) {
+    const previewBoxes = [
+      ...getDoorDependentViewerBoxesFromPartRows(subCategoryDesignEditorPreview.value?.parts || []),
+      ...getDoorDependentViewerBoxesFromInteriorInstances(subCategoryDesignEditorPreview.value?.interior_instances || []),
+      ...getViewerBoxesFromDoorInstances(subCategoryDesignEditorPreview.value?.door_instances || []),
+    ];
+    if (previewBoxes.length) return previewBoxes;
+    return [];
+  }
+  const rootBoxes = [
+    ...getDoorDependentViewerBoxesFromPartRows(activeDoorLibraryOrderDesign.value?.part_snapshots || []),
+    ...getDoorDependentViewerBoxesFromInteriorInstances(activeDoorLibraryOrderDesign.value?.interior_instances || []),
+    ...getViewerBoxesFromDoorInstances(activeDoorLibraryOrderDesign.value?.door_instances || []),
+  ];
+  if (rootBoxes.length) return rootBoxes;
+  const sourceBoxes = [
+    ...getDoorDependentViewerBoxesFromPartRows(activeDoorLibrarySourceDesign.value?.preview?.parts || []),
+    ...getDoorDependentViewerBoxesFromInteriorInstances(activeDoorLibrarySourceDesign.value?.preview?.interior_instances || []),
+    ...getViewerBoxesFromDoorInstances(activeDoorLibrarySourceDesign.value?.preview?.door_instances || []),
+  ];
+  if (sourceBoxes.length) return sourceBoxes;
+  return [];
+});
 const interiorLibraryFrontView = computed(() =>
   buildFrontViewLinesFromBoxes(activeInteriorLibraryStructureViewerBoxes.value || [])
+);
+const doorLibraryFrontView = computed(() =>
+  buildFrontViewLinesFromBoxes(activeDoorLibraryViewerBoxes.value || [])
+);
+const doorLibraryFrontBaseViewBox = computed(() => {
+  const bounds = doorLibraryFrontView.value?.bounds;
+  if (!bounds) return `0 0 ${FRONT_VIEW_WIDTH} ${FRONT_VIEW_HEIGHT}`;
+  const pad = FRONT_VIEW_PAD;
+  const width = Math.max(1, (Number(bounds.maxX) || 0) - (Number(bounds.minX) || 0));
+  const height = Math.max(1, (Number(bounds.maxZ) || 0) - (Number(bounds.minZ) || 0));
+  const minX = (Number(bounds.minX) || 0) - pad;
+  const minY = -((Number(bounds.maxZ) || 0) + pad);
+  return `${minX} ${minY} ${width + (pad * 2)} ${height + (pad * 2)}`;
+});
+const doorLibraryFrontBaseViewBoxRect = computed(() => {
+  const parts = String(doorLibraryFrontBaseViewBox.value || "").split(/\s+/).map(Number);
+  return {
+    x: Number.isFinite(parts[0]) ? parts[0] : 0,
+    y: Number.isFinite(parts[1]) ? parts[1] : 0,
+    width: Number.isFinite(parts[2]) ? parts[2] : FRONT_VIEW_WIDTH,
+    height: Number.isFinite(parts[3]) ? parts[3] : FRONT_VIEW_HEIGHT,
+  };
+});
+const doorLibraryFrontSvgViewBox = computed(() => {
+  const base = doorLibraryFrontBaseViewBoxRect.value;
+  const zoom = Math.min(
+    INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
+    Math.max(INTERIOR_LIBRARY_FRONT_ZOOM_MIN, Number(doorLibraryFrontZoom.value) || 1)
+  );
+  const width = Math.max(1, (Number(base.width) || FRONT_VIEW_WIDTH) / zoom);
+  const height = Math.max(1, (Number(base.height) || FRONT_VIEW_HEIGHT) / zoom);
+  const x = Number(base.x) + (((Number(base.width) || FRONT_VIEW_WIDTH) - width) * 0.5) + (Number(doorLibraryFrontPan.value?.x) || 0);
+  const y = Number(base.y) + (((Number(base.height) || FRONT_VIEW_HEIGHT) - height) * 0.5) + (Number(doorLibraryFrontPan.value?.y) || 0);
+  return `${x} ${y} ${width} ${height}`;
+});
+const doorLibraryFrontSvgViewBoxRect = computed(() => {
+  const parts = String(doorLibraryFrontSvgViewBox.value || "").split(/\s+/).map(Number);
+  return {
+    x: Number.isFinite(parts[0]) ? parts[0] : 0,
+    y: Number.isFinite(parts[1]) ? parts[1] : 0,
+    width: Number.isFinite(parts[2]) ? parts[2] : FRONT_VIEW_WIDTH,
+    height: Number.isFinite(parts[3]) ? parts[3] : FRONT_VIEW_HEIGHT,
+  };
+});
+const doorLibraryFrontSnapLines = computed(() => ([
+  ...(doorLibraryFrontView.value?.outer || []).map((line) => ({
+    x1: Number(line?.ax) || 0,
+    y1: -(Number(line?.az) || 0),
+    x2: Number(line?.bx) || 0,
+    y2: -(Number(line?.bz) || 0),
+  })),
+  ...(doorLibraryFrontView.value?.inner || []).map((line) => ({
+    x1: Number(line?.ax) || 0,
+    y1: -(Number(line?.az) || 0),
+    x2: Number(line?.bx) || 0,
+    y2: -(Number(line?.bz) || 0),
+  })),
+]));
+const doorLibraryFrontSnapPoints = computed(() =>
+  collectInteriorSnapPoints(doorLibraryFrontSnapLines.value)
+);
+const doorLibraryFrontSnapTolerance = computed(() => {
+  const viewBox = String(doorLibraryFrontSvgViewBox.value || "").split(/\s+/).map(Number);
+  const width = Number.isFinite(viewBox[2]) ? viewBox[2] : FRONT_VIEW_WIDTH;
+  return Math.max(6, (width / FRONT_VIEW_WIDTH) * 12);
+});
+const doorLibraryAnnotationColors = computed(() => ({
+  dimension: String(walls3dSnapshot.value?.state?.dimColor || "#E8A559").trim() || "#E8A559",
+  selected: "#2F7FD3",
+}));
+const doorLibraryRenderedAnnotations = computed(() => {
+  const dimensions = (doorLibraryAnnotations.value?.dimensions || []).map((item) => buildRenderedInteriorAnnotation(item, "dimension"));
+  let draftDimension = null;
+  if (doorLibraryAnnotationDraft.value?.type && doorLibraryAnnotationDraft.value?.startPoint && doorLibraryAnnotationDraft.value?.currentPoint) {
+    const draftRecord = buildDoorLibraryAnnotationRecord(
+      doorLibraryAnnotationDraft.value.type,
+      doorLibraryAnnotationDraft.value.startPoint,
+      doorLibraryAnnotationDraft.value.currentPoint
+    );
+    if (isInteriorAnnotationMeaningful(draftRecord)) {
+      draftDimension = buildRenderedInteriorAnnotation(draftRecord, "dimension");
+    }
+  }
+  return { dimensions, draftDimension };
+});
+const doorLibraryFrontCursorClass = computed(() => {
+  if (doorLibraryFrontPanning.value && doorLibraryPreviewMode.value === "front2d") return "is-panning";
+  if (doorLibraryPreviewMode.value === "model3d" && doorLibraryModelPanning.value) return "is-panning";
+  if (doorLibraryAnnotationTool.value === "dimension") return "is-drawing-dimension";
+  if (doorLibraryHoverMode.value === "clicker") return "is-clickable";
+  return "is-idle";
+});
+const doorLibraryFrontShowPanCursor = computed(() =>
+  doorLibraryPreviewMode.value === "front2d"
+  && doorLibraryFrontPanning.value
+  && !!doorLibraryCursorPoint.value
+);
+const doorLibraryCursorVisualScale = computed(() => {
+  const zoom = Math.min(
+    INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
+    Math.max(INTERIOR_LIBRARY_FRONT_ZOOM_MIN, Number(doorLibraryFrontZoom.value) || 1)
+  );
+  return 1 / zoom;
+});
+const doorLibraryOverlayCursorIcon = computed(() => {
+  if (doorLibraryFrontPanning.value || !doorLibraryCursorPoint.value) return "";
+  if (doorLibraryAnnotationTool.value === "dimension") return "";
+  if (doorLibraryHoverMode.value === "clicker") return "/icons/clicker_32.png";
+  return "/icons/cursor_32.png";
+});
+const doorLibraryOverlayCursorOffset = computed(() => {
+  const scale = Number(doorLibraryCursorVisualScale.value) || 1;
+  const icon = String(doorLibraryOverlayCursorIcon.value || "");
+  if (icon.includes("clicker_32")) {
+    return { x: 13.5 * scale, y: 1.5 * scale, size: 32 * scale };
+  }
+  return { x: 4.5 * scale, y: 3.5 * scale, size: 32 * scale };
+});
+const doorLibraryModelCursorStyle = computed(() => {
+  const point = doorLibraryViewerCursorPoint.value;
+  if (!point) return null;
+  return {
+    left: `${Math.round(Number(point.x) || 0)}px`,
+    top: `${Math.round(Number(point.y) || 0)}px`,
+    transform: "translate(-50%, -50%)",
+  };
+});
+const doorLibraryShouldShowSnapMarkers = computed(() =>
+  doorLibraryAnnotationTool.value === "dimension"
 );
 const interiorLibraryPreviewProjection = computed(() => {
   const bounds = interiorLibraryFrontView.value?.bounds;
@@ -2855,6 +3437,20 @@ watch(interiorLibraryOpen, (open) => {
     return;
   }
   disable2dInput();
+});
+watch(doorLibraryAnnotationTool, (tool) => {
+  if (tool === "dimension") return;
+  doorLibraryAnnotationDraft.value = null;
+  doorLibraryCurrentSnapPoint.value = null;
+});
+watch(doorLibraryPreviewMode, () => {
+  stopDoorLibraryModelPanCursor();
+  clearDoorLibraryViewerCursorPoint();
+});
+watch(doorLibraryOpen, (open) => {
+  if (!open) {
+    stopDoorLibraryModelPanCursor();
+  }
 });
 watch(interiorLibraryViewerWrapEl, (el) => {
   if (interiorLibraryFrontViewportObserver) {
@@ -3476,24 +4072,29 @@ const interiorLibraryInstanceCards = computed(() =>
       };
     })
     .filter((instance) => {
-      const group = constructionInternalPartGroupsById.value.get(String(instance.internal_part_group_id || "").trim());
+        const group = constructionInternalPartGroupsById.value.get(String(instance.internal_part_group_id || "").trim());
       return matchesInteriorLibraryPartKindFilter(group);
     })
 );
-const constructionDoorPartFormulaOptions = computed(() =>
-  constructionPartFormulas.value
-    .filter((item) => {
-      const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
-      return isDoorPartKind(partKind);
-    })
-    .map((item) => {
-      const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
+const doorLibraryInstanceCards = computed(() =>
+  activeDoorLibraryInstances.value
+    .slice()
+    .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
+    .map((instance) => {
+      const group = constructionDoorPartGroupsById.value.get(String(instance.door_part_group_id));
       return {
-        id: Number(item.part_formula_id),
-        title: String(item.part_title || item.title || item.part_code || "").trim(),
-        code: String(item.part_code || "").trim(),
-        partKindTitle: String(partKind?.org_part_kind_title || partKind?.title || "").trim(),
+        ...instance,
+        groupTitle: String(group?.group_title || group?.title || instance.instance_code || "گروه درب").trim(),
+        groupCode: String(group?.code || "").trim(),
+        lineColor: normalizeHexColor(instance?.line_color || group?.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+        partsCount: Array.isArray(instance?.part_snapshots) ? instance.part_snapshots.length : (Array.isArray(group?.parts) ? group.parts.length : 0),
       };
+    })
+    .filter((instance) => {
+      const filter = String(doorLibraryPartKindFilter.value || "").trim();
+      if (!filter) return true;
+      const group = constructionDoorPartGroupsById.value.get(String(instance.door_part_group_id || "").trim());
+      return Array.isArray(group?.parts) && group.parts.some((part) => String(part?.part_kind_id || "") === filter);
     })
 );
 const activeInteriorLibraryOutlineColor = computed(() => {
@@ -3870,6 +4471,60 @@ function normalizeInternalPartGroupPayload(item) {
   };
 }
 
+function normalizeDoorPartGroupPayload(item) {
+  const selectedParamGroupIds = new Set(
+    (Array.isArray(item?.param_groups) ? item.param_groups : [])
+      .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
+      .map((group) => Number(group.param_group_id))
+  );
+  const allowedParamCodes = new Set(
+    constructionParams.value
+      .filter((param) => selectedParamGroupIds.has(Number(param?.param_group_id)))
+      .map((param) => String(param.param_code || "").trim())
+      .filter(Boolean)
+  );
+  const controllerType = normalizeDoorPartGroupControllerType(item.controller_type);
+  const controllerBindings = normalizeDoorPartGroupControllerBindings(
+    controllerType,
+    item.controller_bindings,
+    allowedParamCodes,
+  );
+  return {
+    admin_id: item.admin_id,
+    group_id: Number(item.group_id),
+    group_title: String(item.group_title || "").trim(),
+    code: String(item.code || "").trim(),
+    line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+    sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.group_id),
+    is_system: !!item.is_system,
+    parts: (Array.isArray(item.parts) ? item.parts : [])
+      .filter((part) => Number(part?.part_formula_id) > 0)
+      .map((part, index) => ({
+        part_formula_id: Number(part.part_formula_id),
+        enabled: part.enabled !== false,
+        ui_order: Number.isFinite(Number(part.ui_order)) ? Number(part.ui_order) : index,
+      })),
+    param_groups: (Array.isArray(item.param_groups) ? item.param_groups : [])
+      .filter((group) => Number(group?.param_group_id) > 0)
+      .map((group, index) => ({
+        param_group_id: Number(group.param_group_id),
+        enabled: group.enabled !== false,
+        ui_order: Number.isFinite(Number(group.ui_order)) ? Number(group.ui_order) : index,
+      })),
+    param_defaults: Object.fromEntries(
+      Object.entries(item.param_defaults || {})
+        .filter(([key]) => allowedParamCodes.has(String(key || "").trim()))
+        .map(([key, value]) => [String(key || "").trim(), value == null ? null : String(value)])
+    ),
+    controller_type: controllerType || null,
+    controller_selection: normalizeDoorPartGroupControllerSelection(controllerType, item.controller_selection).map((row) => ({
+      axis: row.axis,
+      part_formula_id: Number(row.part_formula_id),
+    })),
+    controller_bindings: controllerBindings,
+  };
+}
+
 function normalizeInteriorInstanceRecord(item) {
   if (!item || !item.id) return null;
   return {
@@ -3891,6 +4546,33 @@ function normalizeInteriorInstanceRecord(item) {
     viewer_boxes: Array.isArray(item.viewer_boxes) ? item.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
     status: String(item.status || "draft").trim() || "draft",
   };
+}
+
+function normalizeEditableDoorPartGroupRecord(item) {
+  return withConstructionDraftState(ensureDoorPartGroupControllerConfig({
+    ...item,
+    line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+    parts: Array.isArray(item.parts) ? item.parts.map((part) => ({
+      ...part,
+      part_formula_id: Number(part.part_formula_id),
+      enabled: part.enabled !== false,
+      ui_order: Number(part.ui_order) || 0,
+    })) : [],
+    param_groups: Array.isArray(item.param_groups) ? item.param_groups.map((group) => ({
+      param_group_id: Number(group.param_group_id),
+      param_group_code: String(group.param_group_code || "").trim(),
+      param_group_title: String(group.param_group_title || "").trim(),
+      param_group_icon_path: normalizeIconFileName(group.param_group_icon_path) || "",
+      enabled: group.enabled !== false,
+      ui_order: Number(group.ui_order) || 0,
+    })) : [],
+    param_defaults: Object.fromEntries(
+      Object.entries(item.param_defaults || {}).map(([key, value]) => [String(key || "").trim(), value == null ? "" : String(value)])
+    ),
+    controller_type: normalizeDoorPartGroupControllerType(item.controller_type),
+    controller_selection: normalizeDoorPartGroupControllerSelection(item.controller_type, item.controller_selection),
+    controller_bindings: normalizeDoorPartGroupControllerBindings(item.controller_type, item.controller_bindings),
+  }));
 }
 
 function toPersianDigits(value) {
@@ -4723,6 +5405,7 @@ function buildNewSubCategoryDesignDraft() {
     is_system: true,
     parts: [],
     interior_instances: [],
+    door_instances: [],
   });
 }
 
@@ -4748,16 +5431,22 @@ function buildNewInternalPartGroupDraft() {
 
 function buildNewDoorPartGroupDraft() {
   const nextId = editableDoorPartGroups.value.reduce((max, item) => Math.max(max, Number(item.group_id) || 0), 0) + 1;
-  return {
+  return ensureDoorPartGroupControllerConfig({
     id: null,
     admin_id: null,
     group_id: nextId,
     group_title: `گروه درب ${toPersianDigits(nextId)}`,
     code: `door_part_group_${nextId}`,
+    line_color: DEFAULT_INTERIOR_LINE_COLOR,
     sort_order: nextId,
     is_system: true,
     parts: [],
-  };
+    param_groups: [],
+    param_defaults: {},
+    controller_type: "",
+    controller_selection: [],
+    controller_bindings: {},
+  });
 }
 
 function resetSubCategoryDesignEditorState() {
@@ -4778,6 +5467,13 @@ function closeInternalPartGroupEditor() {
   internalPartGroupEditorOpen.value = false;
   internalPartGroupEditorDraft.value = null;
   internalPartGroupParamGroupsOpen.value = false;
+}
+
+function closeDoorPartGroupEditor() {
+  doorPartGroupEditorOpen.value = false;
+  doorPartGroupEditorDraft.value = null;
+  doorPartGroupParamGroupsOpen.value = false;
+  doorPartGroupControllerEditorOpen.value = false;
 }
 
 function hasInternalPartGroupDefaultsChanges() {
@@ -4941,6 +5637,22 @@ async function refreshSubCategoryDesignPreview() {
           ui_order: Number(item.ui_order) || 0,
           placement_z: Number(item.placement_z) || 0,
           interior_box_snapshot: { ...(item.interior_box_snapshot || {}) },
+          param_values: Object.fromEntries(
+            Object.entries(item.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+          ),
+          param_meta: Object.fromEntries(
+            Object.entries(item.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])
+          ),
+        })),
+        door_instances: (Array.isArray(draft.door_instances) ? draft.door_instances : []).map((item) => ({
+          id: item.id || null,
+          door_part_group_id: item.door_part_group_id,
+          instance_code: String(item.instance_code || "").trim() || "door",
+          line_color: item.line_color ? normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+          ui_order: Number(item.ui_order) || 0,
+          structural_part_formula_ids: (Array.isArray(item.structural_part_formula_ids) ? item.structural_part_formula_ids : []).map((row) => Number(row) || 0).filter(Boolean),
+          dependent_interior_instance_ids: (Array.isArray(item.dependent_interior_instance_ids) ? item.dependent_interior_instance_ids : []).map((row) => String(row || "").trim()).filter(Boolean),
+          controller_box_snapshot: { ...(item.controller_box_snapshot || {}) },
           param_values: Object.fromEntries(
             Object.entries(item.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
           ),
@@ -5163,6 +5875,7 @@ function normalizeOrderDesignRecord(item) {
     part_snapshots: Array.isArray(item.part_snapshots) ? item.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
     viewer_boxes: Array.isArray(item.viewer_boxes) ? item.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
     interior_instances: Array.isArray(item.interior_instances) ? item.interior_instances.map(normalizeInteriorInstanceRecord).filter(Boolean) : [],
+    door_instances: Array.isArray(item.door_instances) ? item.door_instances.map(normalizeDoorInstanceRecord).filter(Boolean) : [],
   };
 }
 
@@ -6467,12 +7180,13 @@ function openInternalPartGroupEditor(item = null) {
 
 function openDoorPartGroupEditor(item = null) {
   doorPartGroupEditorDraft.value = item
-    ? {
+    ? ensureDoorPartGroupControllerConfig({
         id: item.id,
         admin_id: item.admin_id,
         group_id: item.group_id,
         group_title: item.group_title,
         code: item.code,
+        line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
         sort_order: item.sort_order,
         is_system: item.is_system,
         parts: Array.isArray(item.parts) ? item.parts.map((part) => ({
@@ -6480,8 +7194,24 @@ function openDoorPartGroupEditor(item = null) {
           enabled: part.enabled !== false,
           ui_order: Number(part.ui_order) || 0,
         })) : [],
-      }
+        param_groups: Array.isArray(item.param_groups) ? item.param_groups.map((group) => ({
+          param_group_id: Number(group.param_group_id),
+          param_group_code: String(group.param_group_code || "").trim(),
+          param_group_title: String(group.param_group_title || "").trim(),
+          param_group_icon_path: normalizeIconFileName(group.param_group_icon_path) || "",
+          enabled: group.enabled !== false,
+          ui_order: Number(group.ui_order) || 0,
+        })) : [],
+        param_defaults: Object.fromEntries(
+          Object.entries(item.param_defaults || {}).map(([key, value]) => [String(key || "").trim(), value == null ? "" : String(value)])
+        ),
+        controller_type: normalizeDoorPartGroupControllerType(item.controller_type),
+        controller_selection: normalizeDoorPartGroupControllerSelection(item.controller_type, item.controller_selection),
+        controller_bindings: normalizeDoorPartGroupControllerBindings(item.controller_type, item.controller_bindings),
+      })
     : buildNewDoorPartGroupDraft();
+  doorPartGroupParamGroupsOpen.value = false;
+  doorPartGroupControllerEditorOpen.value = false;
   doorPartGroupEditorOpen.value = true;
 }
 
@@ -6496,6 +7226,82 @@ function togglePartFormulaInDoorGroup(partFormulaId) {
     nextParts.splice(existingIndex, 1);
   }
   doorPartGroupEditorDraft.value.parts = nextParts;
+  ensureDoorPartGroupControllerConfig(doorPartGroupEditorDraft.value);
+}
+
+function toggleDoorPartGroupParamGroupsPanel() {
+  if (!doorPartGroupEditorDraft.value) return;
+  doorPartGroupParamGroupsOpen.value = !doorPartGroupParamGroupsOpen.value;
+}
+
+function isParamGroupSelectedInDoorGroup(paramGroupId) {
+  return !!doorPartGroupEditorDraft.value?.param_groups?.some((group) => Number(group.param_group_id) === Number(paramGroupId) && group.enabled !== false);
+}
+
+function toggleParamGroupInDoorGroup(paramGroupId) {
+  const draft = doorPartGroupEditorDraft.value;
+  if (!draft) return;
+  const existing = draft.param_groups.find((group) => Number(group.param_group_id) === Number(paramGroupId));
+  if (existing) {
+    draft.param_groups = draft.param_groups.filter((group) => Number(group.param_group_id) !== Number(paramGroupId));
+  } else {
+    const option = constructionDoorParamGroupOptions.value.find((item) => Number(item.id) === Number(paramGroupId));
+    draft.param_groups = [
+      ...draft.param_groups,
+      {
+        param_group_id: Number(paramGroupId),
+        param_group_code: String(option?.code || "").trim(),
+        param_group_title: String(option?.title || "").trim(),
+        param_group_icon_path: normalizeIconFileName(option?.iconPath) || "",
+        enabled: true,
+        ui_order: draft.param_groups.length || Number(option?.uiOrder) || 0,
+      },
+    ];
+  }
+  ensureDoorPartGroupControllerConfig(draft);
+}
+
+function openDoorPartGroupParamGroupsEditor(item = null) {
+  if (item && !doorPartGroupEditorOpen.value) {
+    openDoorPartGroupEditor(item);
+  }
+  if (!doorPartGroupEditorDraft.value) return;
+  doorPartGroupParamGroupsOpen.value = true;
+}
+
+function openDoorPartGroupControllerEditor(item = null) {
+  if (item && !doorPartGroupEditorOpen.value) {
+    openDoorPartGroupEditor(item);
+  }
+  if (!doorPartGroupEditorDraft.value) return;
+  ensureDoorPartGroupControllerConfig(doorPartGroupEditorDraft.value);
+  doorPartGroupControllerEditorOpen.value = true;
+}
+
+function closeDoorPartGroupControllerEditor() {
+  doorPartGroupControllerEditorOpen.value = false;
+}
+
+function updateDoorPartGroupControllerType(value) {
+  if (!doorPartGroupEditorDraft.value) return;
+  doorPartGroupEditorDraft.value.controller_type = normalizeDoorPartGroupControllerType(value);
+  ensureDoorPartGroupControllerConfig(doorPartGroupEditorDraft.value);
+}
+
+function toggleDoorPartGroupControllerSelection(rect) {
+  const draft = doorPartGroupEditorDraft.value;
+  if (!draft || !rect?.axis || !Number(rect?.part_formula_id)) return;
+  const axis = rect.axis;
+  const formulaId = Number(rect.part_formula_id);
+  const next = normalizeDoorPartGroupControllerSelection(draft.controller_type, draft.controller_selection);
+  const existingIndex = next.findIndex((item) => item.axis === axis && Number(item.part_formula_id) === formulaId);
+  if (existingIndex === -1) {
+    next.push({ axis, part_formula_id: formulaId });
+  } else {
+    next.splice(existingIndex, 1);
+  }
+  draft.controller_selection = next;
+  ensureDoorPartGroupControllerConfig(draft);
 }
 
 function openInternalPartGroupDefaultsEditor(item) {
@@ -6552,6 +7358,19 @@ function syncInteriorInstanceInDraft(instance) {
   draft.interior_instances = (draft.interior_instances || []).map((row, index) => index === existingIndex ? normalized : row);
 }
 
+function syncDoorInstanceInDraft(instance) {
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft) return;
+  const normalized = normalizeDoorInstanceRecord(instance);
+  if (!normalized) return;
+  const existingIndex = (draft.door_instances || []).findIndex((row) => String(row.id) === String(normalized.id));
+  if (existingIndex === -1) {
+    draft.door_instances = [...(draft.door_instances || []), normalized];
+    return;
+  }
+  draft.door_instances = (draft.door_instances || []).map((row, index) => index === existingIndex ? normalized : row);
+}
+
 function syncOpenSubCategoryDesignDraftToCollection() {
   const draft = subCategoryDesignEditorDraft.value;
   if (!draft?.id) return;
@@ -6560,6 +7379,7 @@ function syncOpenSubCategoryDesignDraftToCollection() {
       ? {
           ...item,
           interior_instances: (draft.interior_instances || []).map((row) => normalizeInteriorInstanceRecord(row)).filter(Boolean),
+          door_instances: (draft.door_instances || []).map((row) => normalizeDoorInstanceRecord(row)).filter(Boolean),
         }
       : item
   );
@@ -6623,15 +7443,7 @@ async function loadConstructionDoorPartGroups() {
     const url = `/api/door-part-groups?admin_id=${encodeURIComponent(currentAdminId.value)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error("load-failed");
-    editableDoorPartGroups.value = (await res.json()).map((item) => withConstructionDraftState({
-      ...item,
-      parts: Array.isArray(item.parts) ? item.parts.map((part) => ({
-        ...part,
-        part_formula_id: Number(part.part_formula_id),
-        enabled: part.enabled !== false,
-        ui_order: Number(part.ui_order) || 0,
-      })) : [],
-    }));
+    editableDoorPartGroups.value = (await res.json()).map(normalizeEditableDoorPartGroupRecord);
   } catch (_) {
     showAlert("خواندن جدول گروه قطعات درب از دیتابیس انجام نشد.", { title: "خطا" });
   }
@@ -6750,6 +7562,42 @@ async function addInteriorGroupToDesign(group) {
     showAlert(error?.message || "افزودن گروه داخلی به طرح ثبت‌شده انجام نشد.", { title: "خطا" });
   } finally {
     interiorLibraryAddingGroupKey.value = "";
+  }
+}
+
+async function addDoorGroupToDesign(group) {
+  if (isAddingDoorGroup(group)) return;
+  const loadingKey = getDoorLibraryAddingGroupKey(group);
+  if (!subCategoryDesignEditorOpen.value) {
+    showAlert("افزودن نمونه درب فعلا فقط در ویرایش طرح‌های ساب‌کت فعال است.", { title: "قطعات درب" });
+    return;
+  }
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft?.id) {
+    showAlert("ابتدا خود طرح ساب‌کت را ذخیره کنید، سپس گروه درب را به آن اضافه کنید.", { title: "قطعات درب" });
+    return;
+  }
+  doorLibraryAddingGroupKey.value = loadingKey;
+  try {
+    const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        door_part_group_id: group.id,
+        line_color: normalizeHexColor(group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+        structural_part_formula_ids: [],
+        dependent_interior_instance_ids: [],
+        param_values: {},
+      }),
+    });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه درب به طرح انجام نشد."));
+    syncDoorInstanceInDraft(await res.json());
+    syncOpenSubCategoryDesignDraftToCollection();
+    await refreshSubCategoryDesignPreview();
+  } catch (error) {
+    showAlert(error?.message || "افزودن گروه درب به طرح انجام نشد.", { title: "خطا" });
+  } finally {
+    doorLibraryAddingGroupKey.value = "";
   }
 }
 
@@ -7033,6 +7881,41 @@ async function saveConstructionInternalPartGroupLineColor(item) {
     showAlert(error?.message || "ذخیره رنگ پیش‌فرض گروه داخلی انجام نشد.", { title: "خطا" });
   } finally {
     constructionSavingIds.value = constructionSavingIds.value.filter((value) => value !== saveKey);
+  }
+}
+
+function previewConstructionDoorPartGroupLineColor(item, lineColor) {
+  if (!item) return;
+  const normalizedColor = normalizeHexColor(lineColor, DEFAULT_INTERIOR_LINE_COLOR);
+  item.line_color = normalizedColor;
+  if (doorPartGroupEditorDraft.value && String(doorPartGroupEditorDraft.value.id || "") === String(item.id || "")) {
+    doorPartGroupEditorDraft.value.line_color = normalizedColor;
+  }
+}
+
+async function saveConstructionDoorPartGroupLineColor(item) {
+  if (!item?.id) return;
+  const payload = normalizeDoorPartGroupPayload(item);
+  const saveKey = String(item.id);
+  constructionSavingIds.value = [...new Set([...constructionSavingIds.value, saveKey])];
+  try {
+    const res = await fetch(`/api/door-part-groups/${encodeURIComponent(saveKey)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ پیش‌فرض گروه درب انجام نشد."));
+    const saved = await res.json();
+    editableDoorPartGroups.value = editableDoorPartGroups.value.map((row) =>
+      String(row.id) === saveKey ? normalizeEditableDoorPartGroupRecord(saved) : row
+    );
+    if (doorPartGroupEditorDraft.value && String(doorPartGroupEditorDraft.value.id || "") === saveKey) {
+      Object.assign(doorPartGroupEditorDraft.value, normalizeEditableDoorPartGroupRecord(saved));
+    }
+  } catch (error) {
+    showAlert(error?.message || "ذخیره رنگ پیش‌فرض گروه درب انجام نشد.", { title: "خطا" });
+  } finally {
+    constructionSavingIds.value = constructionSavingIds.value.filter((id) => id !== saveKey);
   }
 }
 
@@ -7749,6 +8632,22 @@ function getInternalPartGroupSelectedParamColumns(item) {
     .filter((item) => item.key);
 }
 
+function getDoorPartGroupSelectedParamColumns(item) {
+  const selectedParamGroupIds = new Set(
+    (Array.isArray(item?.param_groups) ? item.param_groups : [])
+      .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
+      .map((group) => Number(group.param_group_id))
+  );
+  if (!selectedParamGroupIds.size) return [];
+  return constructionParams.value
+    .filter((param) => selectedParamGroupIds.has(Number(param?.param_group_id)))
+    .map((param) => ({
+      key: String(param.param_code || "").trim(),
+      label: String(param.param_title_fa || param.title || param.param_code || "").trim(),
+    }))
+    .filter((row) => row.key);
+}
+
 function ensureInternalPartGroupParamDefaults(item) {
   if (!item) return item;
   if (!item.param_defaults || typeof item.param_defaults !== "object") {
@@ -7853,9 +8752,90 @@ function ensureInternalPartGroupParamDefaults(item) {
   return item;
 }
 
+function ensureDoorPartGroupParamDefaults(item) {
+  if (!item) return item;
+  if (!item.param_defaults || typeof item.param_defaults !== "object") {
+    item.param_defaults = {};
+  }
+  const selectedColumns = getDoorPartGroupSelectedParamColumns(item);
+  const seededByCode = new Map();
+  for (const subCategory of constructionSubCategories.value) {
+    ensureSubCategoryParamDefaults(subCategory);
+    for (const column of selectedColumns) {
+      if (seededByCode.has(column.key)) continue;
+      const baseLabel = constructionSubCategoryParamMetaByCode.value[column.key]?.label || column.key;
+      const seededOverride = normalizeInternalPartGroupParamOverride(subCategory.param_overrides?.[column.key], baseLabel);
+      seededByCode.set(column.key, {
+        value: String(subCategory.param_defaults?.[column.key] ?? "").trim(),
+        presentation: seededOverride,
+      });
+    }
+    if (seededByCode.size >= selectedColumns.length) break;
+  }
+  for (const column of selectedColumns) {
+    if (!(column.key in item.param_defaults)) {
+      item.param_defaults[column.key] = seededByCode.get(column.key)?.value || "";
+    }
+    const seeded = seededByCode.get(column.key);
+    if (!String(item.param_defaults?.[column.key] ?? "").trim() && seeded?.value) {
+      item.param_defaults[column.key] = seeded.value;
+    }
+    if ((seeded?.presentation?.input_mode || "value") === "binary") {
+      item.param_defaults[column.key] = String(item.param_defaults?.[column.key] ?? "").trim() === "1" ? "1" : "0";
+    }
+  }
+  for (const key of Object.keys(item.param_defaults || {})) {
+    if (!selectedColumns.some((column) => column.key === key)) {
+      delete item.param_defaults[key];
+    }
+  }
+  return item;
+}
+
+function buildDoorPartGroupDefaultsGroups(row) {
+  if (!row) return [];
+  ensureDoorPartGroupParamDefaults(row);
+  const selectedCodes = new Set(getDoorPartGroupSelectedParamColumns(row).map((column) => column.key));
+  if (!selectedCodes.size) return [];
+  const seededByCode = new Map();
+  for (const subCategory of constructionSubCategories.value) {
+    ensureSubCategoryParamDefaults(subCategory);
+    for (const code of selectedCodes) {
+      if (seededByCode.has(code)) continue;
+      const baseLabel = constructionSubCategoryParamMetaByCode.value[code]?.label || code;
+      seededByCode.set(code, normalizeInternalPartGroupParamOverride(subCategory.param_overrides?.[code], baseLabel));
+    }
+    if (seededByCode.size >= selectedCodes.size) break;
+  }
+  return constructionSubCategoryParamTree.value
+    .map((group) => ({
+      ...group,
+      items: group.items
+        .filter((column) => selectedCodes.has(column.key))
+        .map((column) => {
+          const baseLabel = column.label || column.key;
+          const presentation = seededByCode.get(column.key) || normalizeInternalPartGroupParamOverride({}, baseLabel);
+          return {
+            ...column,
+            displayTitle: String(presentation.display_title || baseLabel).trim() || column.key,
+            descriptionText: String(presentation.description_text || "").trim(),
+            inputMode: presentation.input_mode === "binary" ? "binary" : "value",
+            iconUrl: getSubCategoryDefaultIconUrl(presentation.icon_path),
+            binaryOffLabel: String(presentation.binary_off_label || "").trim() || "0",
+            binaryOnLabel: String(presentation.binary_on_label || "").trim() || "1",
+            binaryOffIconUrl: getSubCategoryDefaultIconUrl(presentation.binary_off_icon_path),
+            binaryOnIconUrl: getSubCategoryDefaultIconUrl(presentation.binary_on_icon_path),
+            value: String(row.param_defaults?.[column.key] ?? "").trim(),
+          };
+        }),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
 async function saveDoorPartGroupEditor() {
   const draft = doorPartGroupEditorDraft.value;
   if (!draft) return;
+  ensureDoorPartGroupControllerConfig(draft);
   const groupId = Number(draft.group_id);
   const title = String(draft.group_title || "").trim();
   const code = String(draft.code || "").trim();
@@ -7877,19 +8857,13 @@ async function saveDoorPartGroupEditor() {
     showAlert("این کد گروه درب قبلا استفاده شده است.", { title: "اعتبارسنجی" });
     return;
   }
-  const payload = {
-    admin_id: draft.admin_id,
+  const payload = normalizeDoorPartGroupPayload({
+    ...draft,
     group_id: groupId,
     group_title: title,
     code,
     sort_order: Number(draft.sort_order) || groupId,
-    is_system: !!draft.is_system,
-    parts: (Array.isArray(draft.parts) ? draft.parts : []).map((part, index) => ({
-      part_formula_id: Number(part.part_formula_id),
-      enabled: part.enabled !== false,
-      ui_order: Number(part.ui_order) || index,
-    })),
-  };
+  });
   try {
     const res = await fetch(
       draft.id ? `/api/door-part-groups/${encodeURIComponent(String(draft.id))}` : "/api/door-part-groups",
@@ -7930,6 +8904,69 @@ async function deleteConstructionDoorPartGroup(id) {
 function normalizeInternalPartGroupControllerType(value) {
   const normalized = String(value || "").trim();
   return INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS.some((item) => item.value === normalized) ? normalized : "";
+}
+
+function normalizeDoorPartGroupControllerType(value) {
+  const normalized = String(value || "").trim();
+  return DOOR_GROUP_CONTROLLER_TYPE_OPTIONS.some((item) => item.value === normalized) ? normalized : "";
+}
+
+function buildDoorPartGroupControllerBindingsByType(controllerType) {
+  const normalizedType = normalizeDoorPartGroupControllerType(controllerType);
+  if (!normalizedType) return {};
+  return Object.fromEntries(
+    DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS.map((definition) => [definition.key, { param_code: null }])
+  );
+}
+
+function normalizeDoorPartGroupControllerBindings(controllerType, bindings, allowedCodes = null) {
+  const normalizedType = normalizeDoorPartGroupControllerType(controllerType);
+  if (!normalizedType) return {};
+  const allowed = allowedCodes instanceof Set ? allowedCodes : null;
+  return Object.fromEntries(
+    DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS.map((definition) => {
+      const rawParamCode = String(bindings?.[definition.key]?.param_code || "").trim();
+      const normalizedParamCode = rawParamCode && (!allowed || allowed.has(rawParamCode)) ? rawParamCode : null;
+      return [definition.key, { param_code: normalizedParamCode }];
+    })
+  );
+}
+
+function normalizeDoorPartGroupControllerSelection(controllerType, selection, allowedPartIds = null) {
+  const normalizedType = normalizeDoorPartGroupControllerType(controllerType);
+  if (!normalizedType) return [];
+  const allowed = allowedPartIds instanceof Set ? allowedPartIds : null;
+  const seen = new Set();
+  return (Array.isArray(selection) ? selection : [])
+    .map((item) => ({
+      axis: String(item?.axis || "").trim(),
+      part_formula_id: Number(item?.part_formula_id) || 0,
+    }))
+    .filter((item) => ["vertical", "horizontal"].includes(item.axis) && item.part_formula_id > 0)
+    .filter((item) => !allowed || allowed.has(item.part_formula_id))
+    .filter((item) => {
+      const key = `${item.axis}:${item.part_formula_id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function ensureDoorPartGroupControllerConfig(item) {
+  if (!item) return item;
+  const allowedCodes = new Set(getDoorPartGroupSelectedParamColumns(item).map((column) => column.key));
+  const allowedPartIds = new Set((Array.isArray(item.parts) ? item.parts : []).map((part) => Number(part.part_formula_id) || 0).filter(Boolean));
+  item.line_color = normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR);
+  ensureDoorPartGroupParamDefaults(item);
+  item.controller_type = normalizeDoorPartGroupControllerType(item.controller_type);
+  item.controller_selection = normalizeDoorPartGroupControllerSelection(item.controller_type, item.controller_selection, allowedPartIds);
+  item.controller_bindings = normalizeDoorPartGroupControllerBindings(item.controller_type, item.controller_bindings, allowedCodes);
+  return item;
+}
+
+function getDoorPartGroupControllerTypeLabel(value) {
+  const normalized = normalizeDoorPartGroupControllerType(value);
+  return DOOR_GROUP_CONTROLLER_TYPE_OPTIONS.find((item) => item.value === normalized)?.label || "";
 }
 
 function buildInternalPartGroupControllerBindingsByType(controllerType) {
@@ -7999,6 +9036,30 @@ function getInternalPartGroupControllerSummary(item) {
   };
 }
 
+function normalizeDoorInstanceRecord(item) {
+  if (!item || !item.id) return null;
+  return {
+    ...item,
+    id: String(item.id),
+    door_part_group_id: String(item.door_part_group_id || ""),
+    instance_code: String(item.instance_code || "").trim(),
+    line_color: item.line_color ? normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR) : "",
+    ui_order: Number(item.ui_order) || 0,
+    structural_part_formula_ids: (Array.isArray(item.structural_part_formula_ids) ? item.structural_part_formula_ids : []).map((row) => Number(row) || 0).filter(Boolean),
+    dependent_interior_instance_ids: (Array.isArray(item.dependent_interior_instance_ids) ? item.dependent_interior_instance_ids : []).map((row) => String(row || "").trim()).filter(Boolean),
+    controller_box_snapshot: { ...(item.controller_box_snapshot || {}) },
+    param_values: Object.fromEntries(
+      Object.entries(item.param_values || {}).map(([key, value]) => [key, value == null ? "" : String(value)])
+    ),
+    param_meta: Object.fromEntries(
+      Object.entries(item.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])
+    ),
+    part_snapshots: Array.isArray(item.part_snapshots) ? item.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
+    viewer_boxes: Array.isArray(item.viewer_boxes) ? item.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
+    status: String(item.status || "draft").trim() || "draft",
+  };
+}
+
 function buildInternalPartGroupDefaultsGroups(row) {
   if (!row) return [];
   const selectedParamGroupIds = new Set(
@@ -8055,6 +9116,141 @@ function getInternalPartGroupDefaultsSummary(item) {
     filled,
     total,
     text: total ? `${toPersianDigits(filled)} / ${toPersianDigits(total)}` : "بدون پارامتر",
+  };
+}
+
+function getDoorPartGroupParamSummary(item) {
+  const total = Array.isArray(item?.param_groups) ? item.param_groups.filter((group) => group?.enabled !== false).length : 0;
+  return {
+    total,
+    text: total ? `${toPersianDigits(total)} گروه` : "بدون گروه",
+  };
+}
+
+function getDoorPartGroupDefaultsSummary(item) {
+  const columns = getDoorPartGroupSelectedParamColumns(item);
+  const total = columns.length;
+  const filled = columns.filter((column) => String(item?.param_defaults?.[column.key] ?? "").trim()).length;
+  return {
+    filled,
+    total,
+    text: total ? `${toPersianDigits(filled)} / ${toPersianDigits(total)}` : "بدون پارامتر",
+  };
+}
+
+function setDoorPartGroupBinaryDefault(paramCode, value) {
+  const key = String(paramCode || "").trim();
+  if (!key) return;
+  doorPartGroupDefaultsValues.value = {
+    ...doorPartGroupDefaultsValues.value,
+    [key]: String(value) === "1" ? "1" : "0",
+  };
+}
+
+function getDoorPartGroupControllerSummary(item) {
+  const controllerType = normalizeDoorPartGroupControllerType(item?.controller_type);
+  if (!controllerType) {
+    return { text: "بدون کنترلر", detail: "", connected: 0, total: 2 };
+  }
+  const allowedCodes = new Set(getDoorPartGroupSelectedParamColumns(item).map((column) => column.key));
+  const bindings = normalizeDoorPartGroupControllerBindings(controllerType, item?.controller_bindings, allowedCodes);
+  const connected = DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS.filter((definition) => String(bindings?.[definition.key]?.param_code || "").trim()).length;
+  return {
+    text: `${toPersianDigits(connected)} / ${toPersianDigits(DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS.length)} متصل`,
+    detail: getDoorPartGroupControllerTypeLabel(controllerType),
+    connected,
+    total: DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS.length,
+  };
+}
+
+function getDoorPartGroupControllerParamOptions(row) {
+  return getDoorPartGroupSelectedParamColumns(row).map((column) => ({
+    value: column.key,
+    label: column.label || column.key,
+  }));
+}
+
+function inferDoorControllerAxis(option) {
+  const code = String(option?.code || "").toLowerCase();
+  const title = String(option?.title || "").toLowerCase();
+  if (/(left|right|side|partition|vertical|vert|چپ|راست|عمودی|بدنه)/.test(code) || /(چپ|راست|عمودی|بدنه)/.test(title)) {
+    return "vertical";
+  }
+  if (/(top|bottom|front|back|shelf|roof|floor|horizontal|h_)/.test(code) || /(افقی|بالا|پایین|جلو|عقب|کف|طاق|طبقه)/.test(title)) {
+    return "horizontal";
+  }
+  return null;
+}
+
+function buildDoorPartGroupPreviewRects(item) {
+  const optionsById = new Map(constructionDoorPartFormulaOptions.value.map((option) => [Number(option.id), option]));
+  const selected = (Array.isArray(item?.parts) ? item.parts : [])
+    .filter((part) => part?.enabled !== false && Number(part?.part_formula_id) > 0)
+    .map((part, index) => ({
+      part_formula_id: Number(part.part_formula_id),
+      ui_order: Number(part.ui_order) || index,
+      option: optionsById.get(Number(part.part_formula_id)) || null,
+    }))
+    .sort((a, b) => a.ui_order - b.ui_order || a.part_formula_id - b.part_formula_id);
+  const vertical = [];
+  const horizontal = [];
+  for (const row of selected) {
+    const axis = inferDoorControllerAxis(row.option) || ((vertical.length <= horizontal.length) ? "vertical" : "horizontal");
+    const target = axis === "vertical" ? vertical : horizontal;
+    target.push(row);
+  }
+  const rects = [];
+  vertical.forEach((row, index) => {
+    const x = 120 + (index * 150);
+    rects.push({
+      part_formula_id: row.part_formula_id,
+      axis: "vertical",
+      x,
+      y: 110,
+      width: 86,
+      height: 380,
+      title: row.option?.title || String(row.part_formula_id),
+      code: row.option?.code || "",
+    });
+  });
+  horizontal.forEach((row, index) => {
+    const y = 140 + (index * 140);
+    rects.push({
+      part_formula_id: row.part_formula_id,
+      axis: "horizontal",
+      x: 340,
+      y,
+      width: 360,
+      height: 82,
+      title: row.option?.title || String(row.part_formula_id),
+      code: row.option?.code || "",
+    });
+  });
+  return rects;
+}
+
+function buildDoorPartGroupSelectionPreview(item) {
+  const selection = normalizeDoorPartGroupControllerSelection(
+    item?.controller_type,
+    item?.controller_selection,
+    new Set((Array.isArray(item?.parts) ? item.parts : []).map((part) => Number(part.part_formula_id) || 0).filter(Boolean)),
+  );
+  const selectedKeys = new Set(selection.map((row) => `${row.axis}:${row.part_formula_id}`));
+  const rects = buildDoorPartGroupPreviewRects(item);
+  const selectedVertical = rects.filter((rect) => rect.axis === "vertical" && selectedKeys.has(`vertical:${rect.part_formula_id}`));
+  const selectedHorizontal = rects.filter((rect) => rect.axis === "horizontal" && selectedKeys.has(`horizontal:${rect.part_formula_id}`));
+  const widthBackToBack = selectedVertical.length
+    ? Math.max(...selectedVertical.map((rect) => rect.x + rect.width)) - Math.min(...selectedVertical.map((rect) => rect.x))
+    : 0;
+  const heightBackToBack = selectedHorizontal.length
+    ? Math.max(...selectedHorizontal.map((rect) => rect.y + rect.height)) - Math.min(...selectedHorizontal.map((rect) => rect.y))
+    : 0;
+  return {
+    rects,
+    widthBackToBack: Math.round(widthBackToBack),
+    heightBackToBack: Math.round(heightBackToBack),
+    hasVertical: selectedVertical.length > 0,
+    hasHorizontal: selectedHorizontal.length > 0,
   };
 }
 
@@ -8299,6 +9495,111 @@ function setInternalPartGroupBinaryDefault(paramCode, value) {
     ...internalPartGroupDefaultsValues.value,
     [key]: String(value) === "1" ? "1" : "0",
   };
+}
+
+function selectDoorPartGroupDefaultsGroup(groupId) {
+  doorPartGroupDefaultsActiveGroupId.value = String(groupId || "");
+}
+
+async function persistDoorPartGroupRow(row) {
+  if (!row?.id) throw new Error("Door part group row is missing.");
+  const payload = normalizeDoorPartGroupPayload(row);
+  const res = await fetch(`/api/door-part-groups/${encodeURIComponent(String(row.id))}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(await readApiErrorMessage(res, "ذخیره پیش‌فرض‌های گروه قطعات درب انجام نشد."));
+  }
+  const savedRow = normalizeEditableDoorPartGroupRecord(await res.json());
+  editableDoorPartGroups.value = editableDoorPartGroups.value.map((item) =>
+    String(item.id) === String(savedRow.id) ? savedRow : item
+  );
+  return savedRow;
+}
+
+function hasDoorPartGroupDefaultsChanges() {
+  const row = activeDoorPartGroupDefaultsRow.value;
+  if (!row) return false;
+  const allColumns = buildDoorPartGroupDefaultsGroups(row).flatMap((group) => group.items || []);
+  return allColumns.some((column) => {
+    const nextValue = String(doorPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
+    const prevValue = String(row.param_defaults?.[column.key] ?? "").trim();
+    if (column.inputMode === "binary") {
+      return (nextValue === "1" ? "1" : "0") !== (prevValue === "1" ? "1" : "0");
+    }
+    return nextValue !== prevValue;
+  });
+}
+
+function resetDoorPartGroupDefaultsEditorState() {
+  doorPartGroupDefaultsEditorOpen.value = false;
+  doorPartGroupDefaultsEditorRowId.value = null;
+  doorPartGroupDefaultsEditorGroups.value = [];
+  doorPartGroupDefaultsValues.value = {};
+  doorPartGroupDefaultsActiveGroupId.value = "";
+  doorPartGroupDefaultsApplying.value = false;
+}
+
+async function closeDoorPartGroupDefaultsEditor() {
+  if (doorPartGroupDefaultsApplying.value) return;
+  if (hasDoorPartGroupDefaultsChanges()) {
+    const ok = await showConfirm("تغییرات پیش‌فرض‌های گروه درب اعمال نشده‌اند. پنجره بسته شود؟", {
+      title: "بستن پیش‌فرض‌ها",
+      confirmText: "بستن",
+      cancelText: "بازگشت",
+    });
+    if (!ok) return;
+  }
+  resetDoorPartGroupDefaultsEditorState();
+}
+
+function openDoorPartGroupDefaultsEditor(item) {
+  const row = editableDoorPartGroups.value.find((entry) => String(entry.id) === String(item?.id || ""));
+  if (!row?.id) return;
+  ensureDoorPartGroupParamDefaults(row);
+  const selectedColumns = getDoorPartGroupSelectedParamColumns(row);
+  if (!selectedColumns.length) {
+    showAlert("برای این گروه درب هنوز گروه پارامتری انتخاب نشده است.", { title: "پیش‌فرض گروه درب" });
+    return;
+  }
+  doorPartGroupDefaultsEditorRowId.value = row.id;
+  doorPartGroupDefaultsEditorGroups.value = buildDoorPartGroupDefaultsGroups(row);
+  const allColumns = doorPartGroupDefaultsEditorGroups.value.flatMap((group) => group.items || []);
+  doorPartGroupDefaultsValues.value = Object.fromEntries(
+    allColumns.map((column) => {
+      const rawValue = String(row.param_defaults?.[column.key] ?? "").trim();
+      return [column.key, column.inputMode === "binary" ? (rawValue === "1" ? "1" : "0") : rawValue];
+    })
+  );
+  doorPartGroupDefaultsActiveGroupId.value = String(row.param_groups?.find((group) => group?.enabled !== false)?.param_group_id || "");
+  if (!doorPartGroupDefaultsActiveGroupId.value) {
+    doorPartGroupDefaultsActiveGroupId.value = doorPartGroupDefaultsEditorGroups.value[0]?.id || "";
+  }
+  doorPartGroupDefaultsEditorOpen.value = true;
+}
+
+async function applyDoorPartGroupDefaultsEditor() {
+  const row = activeDoorPartGroupDefaultsRow.value;
+  if (!row || doorPartGroupDefaultsApplying.value) return;
+  doorPartGroupDefaultsApplying.value = true;
+  ensureDoorPartGroupParamDefaults(row);
+  const allColumns = buildDoorPartGroupDefaultsGroups(row).flatMap((group) => group.items || []);
+  for (const column of allColumns) {
+    const nextValue = String(doorPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
+    row.param_defaults[column.key] = column.inputMode === "binary"
+      ? (nextValue === "1" ? "1" : "0")
+      : nextValue;
+  }
+  try {
+    await persistDoorPartGroupRow(row);
+  } catch (error) {
+    showAlert(error?.message || "ذخیره پیش‌فرض‌های گروه قطعات درب انجام نشد.", { title: "خطا" });
+    doorPartGroupDefaultsApplying.value = false;
+    return;
+  }
+  resetDoorPartGroupDefaultsEditorState();
 }
 
 async function persistInternalPartGroupRow(row) {
@@ -12486,6 +13787,8 @@ async function openDoorLibrary(targetOrderDesignId = "") {
     return;
   }
   doorLibraryOpen.value = true;
+  doorLibraryPreviewOpacity.value = 100;
+  resetDoorLibraryPreviewView();
   activeMenu.value = null;
   openMenuPanel.value = null;
   activeSubRail.value = null;
@@ -12498,6 +13801,11 @@ async function openDoorLibrary(targetOrderDesignId = "") {
   if (!subCategoryDesignEditorOpen.value && activeOrder.value?.id) {
     await loadOrderDesignCatalog(true);
   }
+  if (subCategoryDesignEditorOpen.value && !subCategoryDesignPreviewLoading.value) {
+    await refreshSubCategoryDesignPreview();
+  }
+  doorLibraryPreviewMode.value = "front2d";
+  resetDoorLibraryAnnotations();
   scheduleSubRailPosition();
 }
 
@@ -12536,6 +13844,12 @@ function closeInteriorLibrary() {
 function closeDoorLibrary() {
   doorLibraryOpen.value = false;
   doorLibraryForcedOrderDesignId.value = "";
+  resetDoorLibraryAnnotations();
+  clearDoorLibraryCursorPoint();
+  clearDoorLibraryViewerCursorPoint();
+  doorLibraryPreviewMode.value = "front2d";
+  doorLibraryPreviewOpacity.value = 100;
+  resetDoorLibraryPreviewView();
 }
 
 
@@ -13232,6 +14546,18 @@ onMounted(() => {
       e.stopPropagation();
       return;
     }
+    if (doorLibraryOpen.value && doorLibraryPreviewMode.value === "front2d"
+      && (doorLibraryAnnotationDraft.value || doorLibraryAnnotationTool.value)) {
+      doorLibraryAnnotationDraft.value = null;
+      doorLibraryAnnotationTool.value = null;
+      doorLibrarySelectedAnnotation.value = null;
+      doorLibraryCurrentSnapPoint.value = null;
+      doorLibraryHoverMode.value = null;
+      clearDoorLibraryCursorPoint();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     // If we were drawing, the first Esc ends drawing (engine handles it) and re-opens Design menu.
     // The next Esc (when not drawing) closes all menus and clears selection.
     if (drawUiLock.value) {
@@ -13268,10 +14594,16 @@ onMounted(() => {
 
   const onInteriorLibraryDelete = (e) => {
     if (String(e.key || "") !== "Delete") return;
-    if (!interiorLibraryOpen.value || interiorLibraryPreviewMode.value !== "front2d") return;
     const t = e.target;
     const tag = (t?.tagName || "").toUpperCase();
     if (t?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (doorLibraryOpen.value && doorLibraryPreviewMode.value === "front2d" && doorLibrarySelectedAnnotation.value) {
+      removeSelectedDoorLibraryAnnotation();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (!interiorLibraryOpen.value || interiorLibraryPreviewMode.value !== "front2d") return;
     if (interiorLibrarySelectedAnnotation.value) {
       removeSelectedInteriorLibraryAnnotation();
       e.preventDefault();
@@ -15439,6 +16771,9 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--code">کد گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--outlineColor">رنگ خطوط</th>
+                    <th class="constructionDialog__col constructionDialog__col--defaults">پیش‌فرض‌ها</th>
+                    <th class="constructionDialog__col constructionDialog__col--defaults">کنترلر گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--id">تعداد قطعات</th>
                     <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
                   </tr>
@@ -15456,6 +16791,43 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.group_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--code">{{ item.code }}</td>
                     <td class="constructionDialog__col constructionDialog__col--title">{{ item.group_title }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--outlineColor">
+                      <div class="constructionDialog__colorEditor">
+                        <input
+                          v-model="item.line_color"
+                          class="constructionDialog__colorInput"
+                          type="color"
+                          @input="previewConstructionDoorPartGroupLineColor(item, item.line_color)"
+                          @change="saveConstructionDoorPartGroupLineColor(item)"
+                        />
+                        <input
+                          v-model="item.line_color"
+                          class="constructionDialog__input constructionDialog__input--mono constructionDialog__colorHex"
+                          type="text"
+                          dir="ltr"
+                          maxlength="7"
+                          :placeholder="DEFAULT_INTERIOR_LINE_COLOR"
+                          @input="previewConstructionDoorPartGroupLineColor(item, item.line_color)"
+                          @change="saveConstructionDoorPartGroupLineColor(item)"
+                        />
+                      </div>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--defaults">
+                      <div class="constructionDialog__defaultsActions">
+                        <button type="button" class="constructionDialog__defaultsBtn" title="پیش‌فرض پارامترهای گروه درب" @click="openDoorPartGroupDefaultsEditor(item)">
+                          <span class="constructionDialog__defaultsBtnValue">{{ getDoorPartGroupDefaultsSummary(item).text }}</span>
+                          <span class="constructionDialog__defaultsBtnLabel">مقادیر</span>
+                        </button>
+                      </div>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--defaults">
+                      <div class="constructionDialog__defaultsActions">
+                        <button type="button" class="constructionDialog__defaultsBtn" title="تنظیم کنترلر گروه درب" @click="openDoorPartGroupControllerEditor(item)">
+                          <span class="constructionDialog__defaultsBtnValue">{{ getDoorPartGroupControllerSummary(item).text }}</span>
+                          <span class="constructionDialog__defaultsBtnLabel">{{ getDoorPartGroupControllerSummary(item).detail || "کنترلر" }}</span>
+                        </button>
+                      </div>
+                    </td>
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.parts?.length || 0) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--actions">
                       <div class="constructionDialog__actionsCell">
@@ -15465,13 +16837,13 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionDoorPartGroups.length">
-                    <td class="constructionDialog__col constructionDialog__col--title" colspan="6">هنوز گروهی برای قطعات درب ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="9">هنوز گروهی برای قطعات درب ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
             </div>
             <div class="constructionDialog__sheetHint">
-              در این فاز فقط CRUD پایه‌ی گروه‌های درب فعال است و کنترلرها بعداً به آن اضافه می‌شوند.
+                برای گروه‌های درب می‌توانید رنگ خطوط، پیش‌فرض پارامترها و کنترلر دو درب لولایی را مشابه مسیر داخلی تنظیم کنید.
             </div>
           </template>
 
@@ -16175,15 +17547,133 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
+  <div v-if="doorPartGroupDefaultsEditorOpen" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeDoorPartGroupDefaultsEditor"></div>
+    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
+      <div class="subCategoryPreview__header">
+        <div>
+          <div class="subCategoryPreview__title">پیش‌فرض‌های گروه درب</div>
+          <div class="subCategoryPreview__caption">
+            {{ activeDoorPartGroupDefaultsRow?.group_title || "گروه درب" }}
+            <span v-if="activeDoorPartGroupDefaultsRow">
+              {{ toPersianDigits(activeDoorPartGroupDefaultsRow.group_id) }}
+            </span>
+          </div>
+        </div>
+        <button type="button" class="constructionDialog__textBtn" @click="closeDoorPartGroupDefaultsEditor">بستن</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        در این بخش فقط مقدار پیش‌فرض پارامترهای همان گروه درب ثبت می‌شود و تنظیمات نمایشی از پیش‌فرض‌های ساب‌کت خوانده می‌شود.
+      </div>
+      <div class="subCategoryPreview__body">
+        <div class="subCategoryPreview__tree">
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--groups">
+            <div class="subCategoryPreview__selectorList">
+              <button
+                v-for="group in activeDoorPartGroupDefaultsGroups"
+                :key="group.id"
+                type="button"
+                class="subCategoryPreview__groupHead"
+                :class="{ 'is-active': String(activeDoorPartGroupDefaultsGroup?.id || '') === String(group.id) }"
+                @click="selectDoorPartGroupDefaultsGroup(group.id)"
+              >
+                <div class="subCategoryPreview__groupMeta">
+                  <div class="subCategoryPreview__groupTitle">{{ group.title }}</div>
+                  <div class="subCategoryPreview__groupCaption">{{ toPersianDigits(group.items.length) }} پارامتر</div>
+                </div>
+                <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !group.iconUrl }">
+                  <img
+                    v-if="group.iconUrl"
+                    :key="group.iconUrl"
+                    :src="group.iconUrl"
+                    :alt="group.title"
+                    class="subCategoryPreview__groupIcon"
+                    @error="handleSubCategoryDefaultIconError"
+                  />
+                  <span v-else class="subCategoryPreview__groupFallback">{{ toPersianDigits(group.items.length) }}</span>
+                </div>
+                <span class="subCategoryPreview__groupChevron" aria-hidden="true">‹</span>
+              </button>
+            </div>
+          </div>
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
+            <div v-if="activeDoorPartGroupDefaultsGroup" class="subCategoryPreview__panelHead">
+              <div class="subCategoryPreview__panelTitle">{{ activeDoorPartGroupDefaultsGroup.title }}</div>
+              <div class="subCategoryPreview__panelCaption">{{ toPersianDigits(activeDoorPartGroupDefaultsGroup.items.length) }} پارامتر در این گروه</div>
+            </div>
+            <div v-if="activeDoorPartGroupDefaultsGroup" class="subCategoryPreview__params">
+              <article v-for="column in activeDoorPartGroupDefaultsGroup.items" :key="column.key" class="subCategoryPreview__paramCard">
+                <template v-if="column.inputMode === 'binary'">
+                  <div class="subCategoryPreview__paramMeta">
+                    <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                    <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                  </div>
+                  <div class="subCategoryPreview__binaryChoices">
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': String(doorPartGroupDefaultsValues[column.key] ?? '0') !== '1' }"
+                      @click="setDoorPartGroupBinaryDefault(column.key, '0')"
+                    >
+                      <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOffLabel }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': String(doorPartGroupDefaultsValues[column.key] ?? '0') === '1' }"
+                      @click="setDoorPartGroupBinaryDefault(column.key, '1')"
+                    >
+                      <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOnLabel }}</span>
+                    </button>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="subCategoryPreview__valueHead">
+                    <div class="subCategoryPreview__valueIconBox">
+                      <img :src="column.iconUrl || DEFAULT_SUB_CATEGORY_PARAM_ICON" :alt="column.displayTitle" class="subCategoryPreview__valueIcon" @error="handleSubCategoryDefaultIconError" />
+                    </div>
+                    <div class="subCategoryPreview__paramMeta">
+                      <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                      <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                    </div>
+                  </div>
+                  <input
+                    v-model="doorPartGroupDefaultsValues[column.key]"
+                    class="constructionDialog__input subCategoryPreview__valueInput"
+                    type="number"
+                    inputmode="numeric"
+                    min="0"
+                    :placeholder="column.displayTitle"
+                  />
+                  <div class="subCategoryPreview__valueUnit">میلی‌متر</div>
+                </template>
+              </article>
+            </div>
+            <div v-else class="designMenu__cabinetState">برای این گروه درب هنوز پارامتری قابل نمایش نیست.</div>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" :disabled="doorPartGroupDefaultsApplying" @click="closeDoorPartGroupDefaultsEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" :disabled="doorPartGroupDefaultsApplying" @click="applyDoorPartGroupDefaultsEditor">
+          <span v-if="doorPartGroupDefaultsApplying" class="constructionDialog__spinner"></span>
+          <span>{{ doorPartGroupDefaultsApplying ? "در حال اعمال..." : "اعمال" }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div v-if="doorPartGroupEditorOpen" class="appDialog" role="dialog" aria-modal="true">
-    <div class="appDialog__backdrop" @click="doorPartGroupEditorOpen = false"></div>
+    <div class="appDialog__backdrop" @click="closeDoorPartGroupEditor"></div>
     <div class="appDialog__card appDialog__card--subDesign" dir="rtl">
       <div class="formulaBuilder__head">
         <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش گروه قطعات درب</div>
-        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="doorPartGroupEditorOpen = false">×</button>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeDoorPartGroupEditor">×</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        در این پنجره از بین قطعات درب سمت راست، گروه موردنظر را می‌سازید. کنترلرها و رفتارهای تخصصی درب در مرحله بعد اضافه می‌شوند.
+        در این پنجره فقط گروه قطعات درب، گروه‌های پارامتر، رنگ کنترلر و خود کنترلر تعریف می‌شود. انتخاب قطعات وابسته از نمای روبرو در فاز طرح انجام خواهد شد.
       </div>
 
       <div v-if="doorPartGroupEditorDraft" class="subCategoryDesignEditor">
@@ -16200,6 +17690,41 @@ onBeforeUnmount(() => {
             <span>کد گروه</span>
             <input v-model="doorPartGroupEditorDraft.code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
           </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>رنگ پیش‌فرض خطوط</span>
+            <div class="constructionDialog__colorEditor">
+              <input
+                v-model="doorPartGroupEditorDraft.line_color"
+                class="constructionDialog__colorInput"
+                type="color"
+                @input="doorPartGroupEditorDraft.line_color = normalizeHexColor(doorPartGroupEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+              />
+              <input
+                v-model="doorPartGroupEditorDraft.line_color"
+                class="constructionDialog__input constructionDialog__input--mono constructionDialog__colorHex"
+                type="text"
+                dir="ltr"
+                maxlength="7"
+                :placeholder="DEFAULT_INTERIOR_LINE_COLOR"
+                @change="doorPartGroupEditorDraft.line_color = normalizeHexColor(doorPartGroupEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+              />
+            </div>
+          </label>
+          <div class="subCategoryDesignEditor__metaActions">
+            <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': doorPartGroupParamGroupsOpen }" title="گروه پارامترها" @click="toggleDoorPartGroupParamGroupsPanel">
+              <svg viewBox="0 0 24 24" class="subCategoryDesignEditor__metaIcon subCategoryDesignEditor__metaIcon--glyph" aria-hidden="true">
+                <rect x="3" y="4" width="8" height="6" rx="2" fill="currentColor" opacity="0.9" />
+                <rect x="13" y="4" width="8" height="6" rx="2" fill="currentColor" opacity="0.7" />
+                <rect x="3" y="14" width="8" height="6" rx="2" fill="currentColor" opacity="0.7" />
+                <rect x="13" y="14" width="8" height="6" rx="2" fill="currentColor" opacity="0.9" />
+              </svg>
+              <span>گروه پارامترها</span>
+            </button>
+            <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': doorPartGroupControllerEditorOpen }" title="کنترلر گروه" @click="openDoorPartGroupControllerEditor()">
+              <img src="/icons/turn_dim.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+              <span>کنترلر گروه</span>
+            </button>
+          </div>
         </div>
 
         <div class="subCategoryDesignEditor__layout">
@@ -16227,6 +17752,14 @@ onBeforeUnmount(() => {
                 <span class="constructionDialog__summaryValue">{{ toPersianDigits(doorPartGroupEditorDraft.parts?.length || 0) }}</span>
                 <span class="constructionDialog__summaryLabel">قطعه انتخاب‌شده</span>
               </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ getDoorPartGroupParamSummary(doorPartGroupEditorDraft).text }}</span>
+                <span class="constructionDialog__summaryLabel">گروه پارامتر</span>
+              </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ getDoorPartGroupControllerSummary(doorPartGroupEditorDraft).text }}</span>
+                <span class="constructionDialog__summaryLabel">پارامتر اتصالی کنترلر</span>
+              </div>
             </div>
             <div class="subCategoryDesignEditor__partList">
               <div v-for="part in doorPartGroupEditorDraft.parts" :key="part.part_formula_id" class="subCategoryDesignEditor__partItem is-static">
@@ -16246,8 +17779,122 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="appDialog__actions">
-        <button type="button" class="constructionDialog__textBtn" @click="doorPartGroupEditorOpen = false">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn" @click="closeDoorPartGroupEditor">انصراف</button>
         <button type="button" class="constructionDialog__textBtn is-primary" @click="saveDoorPartGroupEditor">ذخیره گروه</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="doorPartGroupEditorOpen && doorPartGroupParamGroupsOpen && doorPartGroupEditorDraft" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="toggleDoorPartGroupParamGroupsPanel"></div>
+    <div class="appDialog__card appDialog__card--paramGroups" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">انتخاب گروه‌های پارامتر درب</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="toggleDoorPartGroupParamGroupsPanel">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        از این پنجره یک یا چند گروه پارامتر را برای گروه قطعات درب انتخاب کنید.
+      </div>
+      <div class="constructionDialog__summary">
+        <div class="constructionDialog__summaryItem">
+          <span class="constructionDialog__summaryValue">{{ toPersianDigits(doorPartGroupEditorDraft.param_groups?.length || 0) }}</span>
+          <span class="constructionDialog__summaryLabel">گروه انتخاب‌شده</span>
+        </div>
+      </div>
+      <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__modalPanel">
+        <div class="subCategoryDesignEditor__panelTitle">گروه‌های پارامتر قابل انتخاب</div>
+        <div class="subCategoryDesignEditor__partList">
+          <label v-for="item in constructionDoorParamGroupOptions" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--paramGroup">
+            <span class="subCategoryDesignEditor__partMeta">
+              <img v-if="item.iconPath" :src="getParamGroupOptionIconUrl(item.iconPath)" alt="" class="subCategoryDesignEditor__partIcon" />
+              <span class="subCategoryDesignEditor__partText">
+                <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
+                <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+              </span>
+            </span>
+            <input :checked="isParamGroupSelectedInDoorGroup(item.id)" type="checkbox" @change="toggleParamGroupInDoorGroup(item.id)" />
+          </label>
+          <div v-if="!constructionDoorParamGroupOptions.length" class="designMenu__cabinetState">هنوز گروه پارامتری برای انتخاب ثبت نشده است.</div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="toggleDoorPartGroupParamGroupsPanel">بستن</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="doorPartGroupControllerEditorOpen && doorPartGroupEditorDraft" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeDoorPartGroupControllerEditor"></div>
+    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
+      <div class="subCategoryPreview__header">
+        <div>
+          <div class="subCategoryPreview__title">کنترلر گروه قطعات درب</div>
+          <div class="subCategoryPreview__caption">
+            {{ doorPartGroupEditorDraft.group_title || "گروه درب" }}
+            <span>{{ toPersianDigits(doorPartGroupEditorDraft.group_id || 0) }}</span>
+          </div>
+        </div>
+        <button type="button" class="constructionDialog__textBtn" @click="closeDoorPartGroupControllerEditor">بستن</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        نوع کنترلر را انتخاب کنید و دو پارامتر اتصالی آن را به پارامترهای همین گروه درب متصل کنید. انتخاب قطعات وابسته و محاسبه ابعاد در فاز طرح انجام می‌شود.
+      </div>
+      <div class="subCategoryPreview__body">
+        <div class="subCategoryPreview__tree">
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
+            <div class="subCategoryPreview__panelHead">
+              <div class="subCategoryPreview__panelTitle">نوع کنترلر و اتصال پارامترها</div>
+              <div class="subCategoryPreview__panelCaption">در این فاز فقط کنترلر دو درب لولایی فعال است.</div>
+            </div>
+            <div class="constructionDialog__controllerForm">
+              <label class="constructionDialog__field">
+                <span class="constructionDialog__fieldLabel">نوع کنترلر گروه</span>
+                <select
+                  :value="doorPartGroupEditorDraft.controller_type"
+                  class="constructionDialog__input"
+                  @change="updateDoorPartGroupControllerType($event.target.value)"
+                >
+                  <option value="">بدون کنترلر</option>
+                  <option v-for="option in DOOR_GROUP_CONTROLLER_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+                </select>
+              </label>
+              <div v-if="doorPartGroupEditorDraft.controller_type" class="constructionDialog__controllerCards">
+                <div v-for="definition in DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS" :key="definition.key" class="constructionDialog__controllerCard">
+                  <div class="constructionDialog__controllerCardMeta">
+                    <div class="constructionDialog__controllerCardTitle">{{ definition.label }}</div>
+                    <div class="constructionDialog__controllerCardCaption">{{ definition.key }}</div>
+                  </div>
+                  <select
+                    v-model="doorPartGroupEditorDraft.controller_bindings[definition.key].param_code"
+                    class="constructionDialog__input"
+                    :disabled="!getDoorPartGroupControllerParamOptions(doorPartGroupEditorDraft).length"
+                  >
+                    <option :value="null">بدون اتصال</option>
+                    <option v-for="option in getDoorPartGroupControllerParamOptions(doorPartGroupEditorDraft)" :key="option.value" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </div>
+              </div>
+              <div v-if="doorPartGroupEditorDraft.controller_type && !getDoorPartGroupControllerParamOptions(doorPartGroupEditorDraft).length" class="designMenu__cabinetState">
+                برای این گروه درب هنوز گروه پارامتری انتخاب نشده است. ابتدا گروه‌های پارامتری همین گروه درب را تنظیم کنید.
+              </div>
+              <div v-if="doorPartGroupEditorDraft.controller_type" class="constructionDialog__summary">
+                <div class="constructionDialog__summaryItem">
+                  <span class="constructionDialog__summaryValue">دو درب لولایی</span>
+                  <span class="constructionDialog__summaryLabel">نوع کنترلر</span>
+                </div>
+                <div class="constructionDialog__summaryItem">
+                  <span class="constructionDialog__summaryValue">{{ getDoorPartGroupControllerSummary(doorPartGroupEditorDraft).text }}</span>
+                  <span class="constructionDialog__summaryLabel">اتصالات پارامتر</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closeDoorPartGroupControllerEditor">بستن</button>
       </div>
     </div>
   </div>
@@ -17903,15 +19550,283 @@ onBeforeUnmount(() => {
       </div>
       <div class="subCategoryDesignEditor__layout subCategoryDesignEditor__layout--interiorLibrary">
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview subCategoryDesignEditor__panel--interiorPreview">
-          <div class="subCategoryDesignEditor__panelTitle">نمای قطعات درب</div>
+          <div class="subCategoryDesignEditor__panelHead subCategoryDesignEditor__panelHead--interiorPreview">
+            <div class="subCategoryDesignEditor__panelTitle">نمای روبه‌رو طرح</div>
+            <div class="subCategoryDesignEditor__previewActions">
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': doorLibraryPreviewMode === 'front2d' }"
+                title="نمای روبروی درب"
+                @click="setDoorLibraryPreviewMode('front2d')"
+              >
+                <img src="/icons/door.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': doorLibraryPreviewMode === 'model3d' }"
+                title="نمای سه بعدی طرح"
+                @click="setDoorLibraryPreviewMode('model3d')"
+              >
+                <img src="/icons/3d_viewer.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': doorLibraryAnnotationTool === 'dimension' }"
+                title="اندازه گذاری"
+                aria-label="اندازه گذاری"
+                @click="doorLibraryAnnotationTool = doorLibraryAnnotationTool === 'dimension' ? null : 'dimension'; doorLibraryAnnotationDraft = null; doorLibrarySelectedAnnotation = null;"
+              >
+                <img src="/icons/turn_dim.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                title="بزرگنمایی نمای قطعات درب"
+                @click="doorLibraryPreviewMode === 'model3d' ? doorLibraryPreview3dRef?.zoomIn?.() : zoomDoorLibraryFrontIn()"
+              >
+                <img src="/icons/zoom-in.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                title="کوچکنمایی نمای قطعات درب"
+                @click="doorLibraryPreviewMode === 'model3d' ? doorLibraryPreview3dRef?.zoomOut?.() : zoomDoorLibraryFrontOut()"
+              >
+                <img src="/icons/zoom-out.png" alt="" />
+              </button>
+              <div v-if="doorLibraryPreviewMode === 'model3d'" class="subCategoryDesignEditor__previewOpacity">
+                <span class="subCategoryDesignEditor__previewOpacityValue">0</span>
+                <input
+                  :value="doorLibraryPreviewOpacity"
+                  class="subCategoryDesignEditor__previewOpacitySlider"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  @input="setDoorLibraryPreviewOpacity($event.target.value)"
+                />
+                <span class="subCategoryDesignEditor__previewOpacityValue">100</span>
+              </div>
+            </div>
+          </div>
           <div class="designMenu__cabinetState">
             {{ subCategoryDesignEditorOpen ? "برای ساب‌کت فعال" : (activeDoorLibraryOrderDesign?.design_title || "برای طرح سفارش فعال") }}
+          </div>
+          <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
+            <div
+              ref="doorLibraryViewerWrapEl"
+              class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior"
+              :class="[
+                doorLibraryFrontCursorClass,
+                {
+                  'is-panning': doorLibraryFrontPanning && doorLibraryPreviewMode === 'front2d',
+                  'is-front2d-mode': doorLibraryPreviewMode === 'front2d',
+                }
+              ]"
+              @wheel.prevent="handleDoorLibraryPreviewWheel"
+              @pointermove="onDoorLibraryViewerPointerMove"
+              @pointerleave="onDoorLibraryViewerPointerLeave"
+              @pointerdown="onDoorLibraryViewerPointerDown"
+              @dblclick.prevent="doorLibraryPreviewMode === 'model3d' ? (doorLibraryPreview3dRef?.fitCameraToAll?.(), doorLibraryPreview3dRef?.zoomByFactor?.(INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR)) : resetDoorLibraryPreviewView(true)"
+            >
+              <div v-if="doorLibraryPreviewMode === 'front2d'" class="subCategoryDesignEditor__annotationTools">
+                <button
+                  type="button"
+                  class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn subCategoryDesignEditor__annotationToolBtn"
+                  :class="{ 'is-active': doorLibraryAnnotationTool === 'dimension' }"
+                  title="رسم اندازه گذاری"
+                  @click.stop="doorLibraryAnnotationTool = doorLibraryAnnotationTool === 'dimension' ? null : 'dimension'; doorLibraryAnnotationDraft = null; doorLibrarySelectedAnnotation = null;"
+                >
+                  <img src="/icons/drawing_dimension.png" alt="" />
+                </button>
+              </div>
+              <GlbViewerWidget
+                v-if="doorLibraryPreviewMode === 'model3d' && activeDoorLibraryViewerBoxes.length"
+                ref="doorLibraryPreview3dRef"
+                src="/models/1_z1.glb"
+                :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                :placeholder-outline-color="'#7B858C'"
+                :placeholder-boxes="activeDoorLibraryViewerBoxes"
+                :display-unit="currentEditorDisplayUnit"
+                :show-attrs-panel="false"
+                :embedded="true"
+                :preview-only="true"
+                :preview-active="doorLibraryOpen"
+              />
+              <svg
+                v-else-if="doorLibraryPreviewMode === 'front2d' && doorLibraryFrontView.inner.length"
+                ref="doorLibraryFrontSvgEl"
+                :viewBox="doorLibraryFrontSvgViewBox"
+                class="subCategoryDesignEditor__frontSvg"
+                :class="doorLibraryFrontCursorClass"
+                @pointerdown="onDoorLibraryFrontSvgPointerDown"
+                @pointermove="onDoorLibraryFrontSvgPointerMove"
+                @pointerleave="onDoorLibraryFrontSvgPointerLeave"
+              >
+                <defs>
+                  <pattern id="door-front-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(90,60,66,0.08)" stroke-width="1" />
+                  </pattern>
+                </defs>
+                <rect
+                  :x="doorLibraryFrontSvgViewBoxRect.x"
+                  :y="doorLibraryFrontSvgViewBoxRect.y"
+                  :width="doorLibraryFrontSvgViewBoxRect.width"
+                  :height="doorLibraryFrontSvgViewBoxRect.height"
+                  fill="url(#door-front-grid)"
+                />
+                <circle
+                  v-if="doorLibraryShouldShowSnapMarkers"
+                  v-for="(point, index) in doorLibraryFrontSnapPoints"
+                  :key="`door-snap-${index}`"
+                  :cx="point.x"
+                  :cy="point.y"
+                  class="subCategoryDesignEditor__snapPoint"
+                  r="3.6"
+                />
+                <circle
+                  v-if="doorLibraryShouldShowSnapMarkers && doorLibraryCurrentSnapPoint"
+                  :cx="doorLibraryCurrentSnapPoint.x"
+                  :cy="doorLibraryCurrentSnapPoint.y"
+                  class="subCategoryDesignEditor__snapPoint subCategoryDesignEditor__snapPoint--active"
+                  :r="doorLibraryCurrentSnapPoint.kind === 'edge' ? 4.4 : 5.2"
+                />
+                <g
+                  v-if="doorLibraryCursorPoint && doorLibraryAnnotationTool === 'dimension'"
+                  class="subCategoryDesignEditor__drawCursor"
+                >
+                  <circle
+                    :cx="doorLibraryCursorPoint.x"
+                    :cy="doorLibraryCursorPoint.y"
+                    :r="6.5 * doorLibraryCursorVisualScale"
+                    class="subCategoryDesignEditor__drawCursorRing"
+                  />
+                  <line
+                    :x1="doorLibraryCursorPoint.x - (7 * doorLibraryCursorVisualScale)"
+                    :y1="doorLibraryCursorPoint.y"
+                    :x2="doorLibraryCursorPoint.x + (7 * doorLibraryCursorVisualScale)"
+                    :y2="doorLibraryCursorPoint.y"
+                    class="subCategoryDesignEditor__drawCursorLine"
+                  />
+                  <line
+                    :x1="doorLibraryCursorPoint.x"
+                    :y1="doorLibraryCursorPoint.y - (7 * doorLibraryCursorVisualScale)"
+                    :x2="doorLibraryCursorPoint.x"
+                    :y2="doorLibraryCursorPoint.y + (7 * doorLibraryCursorVisualScale)"
+                    class="subCategoryDesignEditor__drawCursorLine"
+                  />
+                </g>
+                <g
+                  v-else-if="doorLibraryFrontShowPanCursor"
+                  class="subCategoryDesignEditor__drawCursor"
+                >
+                  <circle
+                    :cx="doorLibraryCursorPoint.x"
+                    :cy="doorLibraryCursorPoint.y"
+                    :r="6 * doorLibraryCursorVisualScale"
+                    class="subCategoryDesignEditor__floatingCursorCenter"
+                  />
+                  <line :x1="doorLibraryCursorPoint.x" :y1="doorLibraryCursorPoint.y - (20 * doorLibraryCursorVisualScale)" :x2="doorLibraryCursorPoint.x" :y2="doorLibraryCursorPoint.y - (7 * doorLibraryCursorVisualScale)" class="subCategoryDesignEditor__floatingCursorLine" />
+                  <line :x1="doorLibraryCursorPoint.x" :y1="doorLibraryCursorPoint.y + (7 * doorLibraryCursorVisualScale)" :x2="doorLibraryCursorPoint.x" :y2="doorLibraryCursorPoint.y + (20 * doorLibraryCursorVisualScale)" class="subCategoryDesignEditor__floatingCursorLine" />
+                  <line :x1="doorLibraryCursorPoint.x - (20 * doorLibraryCursorVisualScale)" :y1="doorLibraryCursorPoint.y" :x2="doorLibraryCursorPoint.x - (7 * doorLibraryCursorVisualScale)" :y2="doorLibraryCursorPoint.y" class="subCategoryDesignEditor__floatingCursorLine" />
+                  <line :x1="doorLibraryCursorPoint.x + (7 * doorLibraryCursorVisualScale)" :y1="doorLibraryCursorPoint.y" :x2="doorLibraryCursorPoint.x + (20 * doorLibraryCursorVisualScale)" :y2="doorLibraryCursorPoint.y" class="subCategoryDesignEditor__floatingCursorLine" />
+                  <path :d="`M ${doorLibraryCursorPoint.x} ${doorLibraryCursorPoint.y - (22 * doorLibraryCursorVisualScale)} L ${doorLibraryCursorPoint.x - (4 * doorLibraryCursorVisualScale)} ${doorLibraryCursorPoint.y - (15 * doorLibraryCursorVisualScale)} L ${doorLibraryCursorPoint.x + (4 * doorLibraryCursorVisualScale)} ${doorLibraryCursorPoint.y - (15 * doorLibraryCursorVisualScale)} Z`" class="subCategoryDesignEditor__floatingCursorArrow" />
+                  <path :d="`M ${doorLibraryCursorPoint.x} ${doorLibraryCursorPoint.y + (22 * doorLibraryCursorVisualScale)} L ${doorLibraryCursorPoint.x - (4 * doorLibraryCursorVisualScale)} ${doorLibraryCursorPoint.y + (15 * doorLibraryCursorVisualScale)} L ${doorLibraryCursorPoint.x + (4 * doorLibraryCursorVisualScale)} ${doorLibraryCursorPoint.y + (15 * doorLibraryCursorVisualScale)} Z`" class="subCategoryDesignEditor__floatingCursorArrow" />
+                  <path :d="`M ${doorLibraryCursorPoint.x - (22 * doorLibraryCursorVisualScale)} ${doorLibraryCursorPoint.y} L ${doorLibraryCursorPoint.x - (15 * doorLibraryCursorVisualScale)} ${doorLibraryCursorPoint.y - (4 * doorLibraryCursorVisualScale)} L ${doorLibraryCursorPoint.x - (15 * doorLibraryCursorVisualScale)} ${doorLibraryCursorPoint.y + (4 * doorLibraryCursorVisualScale)} Z`" class="subCategoryDesignEditor__floatingCursorArrow" />
+                  <path :d="`M ${doorLibraryCursorPoint.x + (22 * doorLibraryCursorVisualScale)} ${doorLibraryCursorPoint.y} L ${doorLibraryCursorPoint.x + (15 * doorLibraryCursorVisualScale)} ${doorLibraryCursorPoint.y - (4 * doorLibraryCursorVisualScale)} L ${doorLibraryCursorPoint.x + (15 * doorLibraryCursorVisualScale)} ${doorLibraryCursorPoint.y + (4 * doorLibraryCursorVisualScale)} Z`" class="subCategoryDesignEditor__floatingCursorArrow" />
+                </g>
+                <image
+                  v-else-if="doorLibraryCursorPoint && doorLibraryOverlayCursorIcon"
+                  :href="doorLibraryOverlayCursorIcon"
+                  :x="doorLibraryCursorPoint.x - doorLibraryOverlayCursorOffset.x"
+                  :y="doorLibraryCursorPoint.y - doorLibraryOverlayCursorOffset.y"
+                  :width="doorLibraryOverlayCursorOffset.size"
+                  :height="doorLibraryOverlayCursorOffset.size"
+                  class="subCategoryDesignEditor__overlayCursorImage"
+                  preserveAspectRatio="xMidYMid meet"
+                />
+                <line
+                  v-for="(line, index) in doorLibraryFrontView.inner"
+                  :key="`door-inner-${index}`"
+                  :x1="line.ax"
+                  :y1="-line.az"
+                  :x2="line.bx"
+                  :y2="-line.bz"
+                  stroke="#7B858C"
+                  stroke-width="5.6"
+                  stroke-linecap="round"
+                />
+                <template v-if="doorLibraryRenderedAnnotations.dimensions.length">
+                  <g v-for="dimension in doorLibraryRenderedAnnotations.dimensions" :key="dimension.id">
+                    <line :x1="dimension.extensionA.x1" :y1="dimension.extensionA.y1" :x2="dimension.extensionA.x2" :y2="dimension.extensionA.y2" :stroke="dimension.selected ? doorLibraryAnnotationColors.selected : doorLibraryAnnotationColors.dimension" :stroke-width="dimension.selected ? 2.4 : 1.6" stroke-linecap="round" />
+                    <line :x1="dimension.extensionB.x1" :y1="dimension.extensionB.y1" :x2="dimension.extensionB.x2" :y2="dimension.extensionB.y2" :stroke="dimension.selected ? doorLibraryAnnotationColors.selected : doorLibraryAnnotationColors.dimension" :stroke-width="dimension.selected ? 2.4 : 1.6" stroke-linecap="round" />
+                    <line :x1="dimension.tickA.x1" :y1="dimension.tickA.y1" :x2="dimension.tickA.x2" :y2="dimension.tickA.y2" :stroke="dimension.selected ? doorLibraryAnnotationColors.selected : doorLibraryAnnotationColors.dimension" :stroke-width="dimension.selected ? 2.4 : 1.6" stroke-linecap="round" />
+                    <line :x1="dimension.tickB.x1" :y1="dimension.tickB.y1" :x2="dimension.tickB.x2" :y2="dimension.tickB.y2" :stroke="dimension.selected ? doorLibraryAnnotationColors.selected : doorLibraryAnnotationColors.dimension" :stroke-width="dimension.selected ? 2.4 : 1.6" stroke-linecap="round" />
+                    <line :x1="dimension.screenStart.x" :y1="dimension.screenStart.y" :x2="dimension.screenEnd.x" :y2="dimension.screenEnd.y" :stroke="dimension.selected ? doorLibraryAnnotationColors.selected : doorLibraryAnnotationColors.dimension" :stroke-width="dimension.selected ? 2.4 : 1.6" stroke-linecap="round" />
+                    <text :x="dimension.textX" :y="dimension.textY" :fill="dimension.selected ? doorLibraryAnnotationColors.selected : doorLibraryAnnotationColors.dimension" text-anchor="middle" dominant-baseline="central" class="subCategoryDesignEditor__dimensionText">{{ dimension.text }}</text>
+                  </g>
+                </template>
+                <g v-if="doorLibraryRenderedAnnotations.draftDimension">
+                  <line :x1="doorLibraryRenderedAnnotations.draftDimension.extensionA.x1" :y1="doorLibraryRenderedAnnotations.draftDimension.extensionA.y1" :x2="doorLibraryRenderedAnnotations.draftDimension.extensionA.x2" :y2="doorLibraryRenderedAnnotations.draftDimension.extensionA.y2" :stroke="doorLibraryAnnotationColors.dimension" stroke-width="1.6" stroke-linecap="round" />
+                  <line :x1="doorLibraryRenderedAnnotations.draftDimension.extensionB.x1" :y1="doorLibraryRenderedAnnotations.draftDimension.extensionB.y1" :x2="doorLibraryRenderedAnnotations.draftDimension.extensionB.x2" :y2="doorLibraryRenderedAnnotations.draftDimension.extensionB.y2" :stroke="doorLibraryAnnotationColors.dimension" stroke-width="1.6" stroke-linecap="round" />
+                  <line :x1="doorLibraryRenderedAnnotations.draftDimension.tickA.x1" :y1="doorLibraryRenderedAnnotations.draftDimension.tickA.y1" :x2="doorLibraryRenderedAnnotations.draftDimension.tickA.x2" :y2="doorLibraryRenderedAnnotations.draftDimension.tickA.y2" :stroke="doorLibraryAnnotationColors.dimension" stroke-width="1.6" stroke-linecap="round" />
+                  <line :x1="doorLibraryRenderedAnnotations.draftDimension.tickB.x1" :y1="doorLibraryRenderedAnnotations.draftDimension.tickB.y1" :x2="doorLibraryRenderedAnnotations.draftDimension.tickB.x2" :y2="doorLibraryRenderedAnnotations.draftDimension.tickB.y2" :stroke="doorLibraryAnnotationColors.dimension" stroke-width="1.6" stroke-linecap="round" />
+                  <line :x1="doorLibraryRenderedAnnotations.draftDimension.screenStart.x" :y1="doorLibraryRenderedAnnotations.draftDimension.screenStart.y" :x2="doorLibraryRenderedAnnotations.draftDimension.screenEnd.x" :y2="doorLibraryRenderedAnnotations.draftDimension.screenEnd.y" :stroke="doorLibraryAnnotationColors.dimension" stroke-width="1.6" stroke-linecap="round" />
+                  <text :x="doorLibraryRenderedAnnotations.draftDimension.textX" :y="doorLibraryRenderedAnnotations.draftDimension.textY" :fill="doorLibraryAnnotationColors.dimension" text-anchor="middle" dominant-baseline="central" class="subCategoryDesignEditor__dimensionText">{{ doorLibraryRenderedAnnotations.draftDimension.text }}</text>
+                </g>
+              </svg>
+              <div
+                v-if="doorLibraryPreviewMode === 'model3d' && doorLibraryModelCursorStyle"
+                class="subCategoryDesignEditor__floatingCursor"
+                :class="{ 'is-panning': doorLibraryModelPanning }"
+                :style="doorLibraryModelCursorStyle"
+                aria-hidden="true"
+              >
+                <svg viewBox="0 0 48 48" class="subCategoryDesignEditor__floatingCursorSvg">
+                  <circle cx="24" cy="24" r="6" class="subCategoryDesignEditor__floatingCursorCenter" />
+                  <line x1="24" y1="4" x2="24" y2="18" class="subCategoryDesignEditor__floatingCursorLine" />
+                  <line x1="24" y1="30" x2="24" y2="44" class="subCategoryDesignEditor__floatingCursorLine" />
+                  <line x1="4" y1="24" x2="18" y2="24" class="subCategoryDesignEditor__floatingCursorLine" />
+                  <line x1="30" y1="24" x2="44" y2="24" class="subCategoryDesignEditor__floatingCursorLine" />
+                  <path d="M24 2 L20 9 H28 Z" class="subCategoryDesignEditor__floatingCursorArrow" />
+                  <path d="M24 46 L20 39 H28 Z" class="subCategoryDesignEditor__floatingCursorArrow" />
+                  <path d="M2 24 L9 20 V28 Z" class="subCategoryDesignEditor__floatingCursorArrow" />
+                  <path d="M46 24 L39 20 V28 Z" class="subCategoryDesignEditor__floatingCursorArrow" />
+                </svg>
+              </div>
+              <div
+                v-if="doorLibraryPreviewMode === 'front2d' ? !doorLibraryFrontView.inner.length : !activeDoorLibraryViewerBoxes.length"
+                class="designMenu__cabinetState doorLibrary__emptyState"
+              >
+                {{ doorLibraryPreviewMode === 'model3d'
+                  ? 'برای این طرح هنوز قطعه‌ای با وابستگی درب = بله برای نمایش سه بعدی پیدا نشد.'
+                  : 'برای این طرح هنوز قطعه‌ای با وابستگی درب = بله برای نمایش در نمای روبرو پیدا نشد.' }}
+              </div>
+            </div>
           </div>
         </div>
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
           <div class="subCategoryDesignEditor__panelTitle">نمونه‌های درب این طرح</div>
-          <div class="designMenu__cabinetState">
-            نمونه‌های درب در این فاز هنوز فعال نشده‌اند.
+          <div v-if="!activeInteriorLibraryTargetId" class="designMenu__cabinetState">برای افزودن نمونه درب، ابتدا یک طرح معتبر را باز یا انتخاب کنید.</div>
+          <div v-else-if="!doorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز هیچ گروه دربی به این طرح اضافه نشده است.</div>
+          <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
+            <div
+              v-for="item in doorLibraryInstanceCards"
+              :key="item.id"
+              class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard"
+            >
+              <div class="subCategoryDesignEditor__interiorGroupHead">
+                <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                  <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
+                  <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
+                </span>
+                <span class="subCategoryDesignEditor__colorSwatch" :style="{ backgroundColor: item.lineColor || DEFAULT_INTERIOR_LINE_COLOR }"></span>
+              </div>
+              <span class="constructionDialog__summaryLabel">{{ toPersianDigits(item.partsCount || 0) }} قطعه</span>
+            </div>
           </div>
         </div>
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
@@ -17923,11 +19838,26 @@ onBeforeUnmount(() => {
           <div v-if="!doorLibraryGroupCards.length" class="designMenu__cabinetState">هنوز گروه قطعات درب برای استفاده ثبت نشده است.</div>
           <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
             <div v-for="item in doorLibraryGroupCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
-              <span class="subCategoryDesignEditor__partMeta">
-                <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
-                <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
-              </span>
-              <span class="constructionDialog__summaryLabel">{{ toPersianDigits(item.partsCount || 0) }} قطعه</span>
+              <div class="subCategoryDesignEditor__interiorGroupHead">
+                <span class="subCategoryDesignEditor__partMeta">
+                  <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
+                  <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+                </span>
+                <button
+                  type="button"
+                  class="constructionDialog__textBtn constructionDialog__textBtn--compact"
+                  title="افزودن به طرح"
+                  :disabled="isAddingDoorGroup(item)"
+                  @click="addDoorGroupToDesign(item)"
+                >
+                  <span v-if="isAddingDoorGroup(item)" class="constructionDialog__spinner"></span>
+                  <span>{{ isAddingDoorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
+                </button>
+              </div>
+              <div class="subCategoryDesignEditor__interiorGroupHead">
+                <span class="constructionDialog__summaryLabel">{{ toPersianDigits(item.partsCount || 0) }} قطعه</span>
+                <span class="subCategoryDesignEditor__colorSwatch" :style="{ backgroundColor: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR) }"></span>
+              </div>
             </div>
           </div>
         </div>
