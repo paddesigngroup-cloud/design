@@ -26,7 +26,7 @@ router = APIRouter(prefix="/admin-storage", tags=["admin_storage"])
 
 
 def _part_kind_headers() -> list[str]:
-    return ["part_kind_id", "part_kind_code", "org_part_kind_title", "is_internal", "admin_mode"]
+    return ["part_kind_id", "part_kind_code", "org_part_kind_title", "part_scope", "admin_mode"]
 
 
 def _param_group_headers() -> list[str]:
@@ -78,6 +78,7 @@ def _part_formula_headers() -> list[str]:
         "formula_cx",
         "formula_cy",
         "formula_cz",
+        "door_dependent",
         "admin_mode",
     ]
 
@@ -138,7 +139,7 @@ async def _part_kind_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[li
             row.part_kind_id,
             row.part_kind_code,
             row.org_part_kind_title,
-            1 if row.is_internal else 0,
+            row.part_scope,
             "system" if row.admin_id is None else "admin",
         ]
         for row in rows
@@ -232,6 +233,7 @@ async def _part_formula_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
             row.formula_cx,
             row.formula_cy,
             row.formula_cz,
+            1 if row.door_dependent else 0,
             "system" if row.admin_id is None else "admin",
         ]
         for row in rows

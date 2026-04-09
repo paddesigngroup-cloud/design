@@ -35,7 +35,7 @@ class FakeSession:
         return None
 
 
-def test_create_part_kind_accepts_is_internal(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_part_kind_accepts_part_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_require_admin_if_present(session, admin_id):
         return None
 
@@ -44,22 +44,22 @@ def test_create_part_kind_accepts_is_internal(monkeypatch: pytest.MonkeyPatch) -
     payload = PartKindCreate(
         admin_id=None,
         part_kind_id=10,
-        part_kind_code="drawer",
-        org_part_kind_title="کشو",
+        part_kind_code="door",
+        org_part_kind_title="درب",
         sort_order=10,
-        is_internal=True,
+        part_scope="door",
         is_system=True,
     )
 
     result = asyncio.run(create_part_kind(payload, session))
 
     assert result.part_kind_id == 10
-    assert result.is_internal is True
+    assert result.part_scope == "door"
     assert session.added is not None
-    assert session.added.is_internal is True
+    assert session.added.part_scope == "door"
 
 
-def test_update_part_kind_persists_is_internal(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_part_kind_persists_part_scope(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_require_admin_if_present(session, admin_id):
         return None
 
@@ -73,7 +73,7 @@ def test_update_part_kind_persists_is_internal(monkeypatch: pytest.MonkeyPatch) 
         code="drawer",
         title="کشو",
         sort_order=4,
-        is_internal=False,
+        part_scope="internal",
         is_system=True,
     )
     payload = PartKindUpdate(
@@ -82,11 +82,11 @@ def test_update_part_kind_persists_is_internal(monkeypatch: pytest.MonkeyPatch) 
         part_kind_code="drawer",
         org_part_kind_title="کشو",
         sort_order=4,
-        is_internal=True,
+        part_scope="structural",
         is_system=True,
     )
 
     result = asyncio.run(update_part_kind(existing.id, payload, FakeSession(item=existing)))
 
-    assert result.is_internal is True
-    assert existing.is_internal is True
+    assert result.part_scope == "structural"
+    assert existing.part_scope == "structural"

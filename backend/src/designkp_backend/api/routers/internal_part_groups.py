@@ -329,7 +329,7 @@ async def _require_accessible_internal_part_formulas(
         select(PartFormula)
         .join(PartKind, PartKind.part_kind_id == PartFormula.part_kind_id)
         .where(PartFormula.part_formula_id.in_(part_formula_ids))
-        .where(PartKind.is_internal.is_(True))
+        .where(PartKind.part_scope == "internal")
     )
     if admin_id is not None:
         stmt = stmt.where(or_(PartFormula.admin_id.is_(None), PartFormula.admin_id == admin_id))

@@ -264,6 +264,30 @@ const snapMenuItems = [
 const currentAdminId = ref(CURRENT_ADMIN_ID);
 const currentBootstrapUserId = ref(CURRENT_BOOTSTRAP_USER_ID);
 const currentBootstrapUserName = ref(CURRENT_BOOTSTRAP_USER_NAME);
+
+function normalizePartScope(value, fallback = "structural") {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["structural", "internal", "door"].includes(normalized) ? normalized : fallback;
+}
+
+function getPartKindScope(item, fallback = "structural") {
+  return normalizePartScope(item?.part_scope, fallback);
+}
+
+function isInternalPartKind(item) {
+  return getPartKindScope(item) === "internal";
+}
+
+function isDoorPartKind(item) {
+  return getPartKindScope(item) === "door";
+}
+
+function getPartScopeLabel(scope) {
+  const normalized = normalizePartScope(scope);
+  if (normalized === "internal") return "داخلی";
+  if (normalized === "door") return "درب";
+  return "سازه";
+}
 const activeOrder = ref(null);
 const ordersCatalog = ref([]);
 const ordersLoading = ref(false);
@@ -284,8 +308,11 @@ const orderDesignCatalogLoadedForOrderId = ref("");
 let orderDesignCatalogLoadRequestSeq = 0;
 let orderDesignCatalogReloadQueued = false;
 const interiorLibraryOpen = ref(false);
+const doorLibraryOpen = ref(false);
 const interiorLibraryForcedOrderDesignId = ref("");
+const doorLibraryForcedOrderDesignId = ref("");
 const interiorLibraryPartKindFilter = ref("");
+const doorLibraryPartKindFilter = ref("");
 const interiorInstanceEditorOpen = ref(false);
 const interiorInstanceEditorDraft = ref(null);
 const interiorInstanceEditorActiveGroupId = ref("");
@@ -503,6 +530,7 @@ const editableParams = ref([]);
 const editableSubCategories = ref([]);
 const editableSubCategoryDesigns = ref([]);
 const editableInternalPartGroups = ref([]);
+const editableDoorPartGroups = ref([]);
 const editableBaseFormulas = ref([]);
 const editablePartFormulas = ref([]);
 const subCategoryDefaultsEditorOpen = ref(false);
@@ -528,6 +556,8 @@ const subCategoryDesignPreviewRequestSeq = ref(0);
 const subCategoryDesignEditorSaving = ref(false);
 const internalPartGroupEditorOpen = ref(false);
 const internalPartGroupEditorDraft = ref(null);
+const doorPartGroupEditorOpen = ref(false);
+const doorPartGroupEditorDraft = ref(null);
 const internalPartGroupParamGroupsOpen = ref(false);
 const internalPartGroupDefaultsEditorOpen = ref(false);
 const internalPartGroupDefaultsEditorRowId = ref(null);
@@ -1777,6 +1807,7 @@ const constructionTables = [
   { id: "sub_categories", title: "ساب‌کت‌ها", status: "active" },
   { id: "sub_category_designs", title: "طرح‌های ساب‌کت", status: "active" },
   { id: "internal_part_groups", title: "گروه قطعات داخلی", status: "active" },
+  { id: "door_part_groups", title: "گروه قطعات درب", status: "active" },
   { id: "base_formulas", title: "فرمول های پایه", status: "active" },
   { id: "part_formulas", title: "فرمول های قطعات", status: "active" },
 ];
@@ -1856,6 +1887,17 @@ const constructionInternalPartGroups = computed(() =>
       return (Number(a.group_id) || 0) - (Number(b.group_id) || 0);
     })
 );
+const constructionDoorPartGroups = computed(() =>
+  editableDoorPartGroups.value
+    .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
+    .slice()
+    .sort((a, b) => {
+      if (!!a.is_system !== !!b.is_system) return a.is_system ? -1 : 1;
+      const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return (Number(a.group_id) || 0) - (Number(b.group_id) || 0);
+    })
+);
 const constructionPartKindsById = computed(() =>
   new Map(constructionPartKinds.value.map((item) => [Number(item.part_kind_id) || 0, item]))
 );
@@ -1867,7 +1909,15 @@ const constructionPartKindOptions = computed(() =>
 );
 const constructionInternalPartKindOptions = computed(() =>
   constructionPartKinds.value
-    .filter((item) => normalizeBooleanFlag(item.is_internal, false))
+    .filter((item) => isInternalPartKind(item))
+    .map((item) => ({
+      value: Number(item.part_kind_id) || 0,
+      label: String(item.org_part_kind_title || item.title || "").trim(),
+    }))
+);
+const constructionDoorPartKindOptions = computed(() =>
+  constructionPartKinds.value
+    .filter((item) => isDoorPartKind(item))
     .map((item) => ({
       value: Number(item.part_kind_id) || 0,
       label: String(item.org_part_kind_title || item.title || "").trim(),
@@ -1875,7 +1925,7 @@ const constructionInternalPartKindOptions = computed(() =>
 );
 const systemPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => item.admin_id === null).length);
 const adminPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => item.admin_id === currentAdminId.value).length);
-const internalPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => normalizeBooleanFlag(item.is_internal, false)).length);
+const internalPartKindsCount = computed(() => constructionPartKinds.value.filter((item) => isInternalPartKind(item)).length);
 const constructionPartKindDuplicateState = computed(() => buildDuplicateState(editablePartKinds.value, ["part_kind_id", "part_kind_code"]));
 const constructionHasPendingChanges = computed(
   () =>
@@ -2085,7 +2135,7 @@ const constructionSubCategoryDesignPartFormulaOptions = computed(() =>
   constructionPartFormulas.value
     .filter((item) => {
       const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
-      return !normalizeBooleanFlag(partKind?.is_internal, false);
+      return getPartKindScope(partKind) === "structural";
     })
     .map((item) => ({
       id: Number(item.part_formula_id),
@@ -2099,7 +2149,7 @@ const constructionInteriorPartFormulaOptions = computed(() =>
   constructionPartFormulas.value
     .filter((item) => {
       const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
-      return normalizeBooleanFlag(partKind?.is_internal, false);
+      return isInternalPartKind(partKind);
     })
     .map((item) => {
       const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
@@ -2130,6 +2180,13 @@ const constructionInternalPartGroupsById = computed(() =>
       .filter(([id]) => id)
   )
 );
+const constructionDoorPartGroupsById = computed(() =>
+  new Map(
+    constructionDoorPartGroups.value
+      .map((item) => [String(item.id), item])
+      .filter(([id]) => id)
+  )
+);
 const activeInteriorLibrarySubCategory = computed(() => {
   const subCategoryId = subCategoryDesignEditorOpen.value
     ? String(subCategoryDesignEditorDraft.value?.sub_category_id || "").trim()
@@ -2149,6 +2206,30 @@ const activeInteriorLibraryOrderDesign = computed(() => {
   if (!targetId) return null;
   return orderDesignCatalog.value.find((item) => String(item.id) === targetId) || null;
 });
+const activeDoorLibraryOrderDesignId = computed(() => {
+  if (subCategoryDesignEditorOpen.value) return "";
+  const forcedId = String(doorLibraryForcedOrderDesignId.value || "").trim();
+  if (forcedId) return forcedId;
+  return String(activeCabinetDesignId.value || "").trim();
+});
+const activeDoorLibraryOrderDesign = computed(() => {
+  if (subCategoryDesignEditorOpen.value) return null;
+  const targetId = activeDoorLibraryOrderDesignId.value;
+  if (!targetId) return null;
+  return orderDesignCatalog.value.find((item) => String(item.id) === targetId) || null;
+});
+const doorLibraryGroupCards = computed(() =>
+  constructionDoorPartGroups.value
+    .filter((group) => {
+      const filter = String(doorLibraryPartKindFilter.value || "").trim();
+      if (!filter) return true;
+      return (group.parts || []).some((part) => String(part.part_kind_id) === filter);
+    })
+    .map((group) => ({
+      ...group,
+      partsCount: Array.isArray(group.parts) ? group.parts.length : 0,
+    }))
+);
 const activeInteriorLibrarySourceDesign = computed(() => {
   if (subCategoryDesignEditorOpen.value) return null;
   const sourceId = String(activeInteriorLibraryOrderDesign.value?.sub_category_design_id || "").trim();
@@ -3399,6 +3480,22 @@ const interiorLibraryInstanceCards = computed(() =>
       return matchesInteriorLibraryPartKindFilter(group);
     })
 );
+const constructionDoorPartFormulaOptions = computed(() =>
+  constructionPartFormulas.value
+    .filter((item) => {
+      const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
+      return isDoorPartKind(partKind);
+    })
+    .map((item) => {
+      const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
+      return {
+        id: Number(item.part_formula_id),
+        title: String(item.part_title || item.title || item.part_code || "").trim(),
+        code: String(item.part_code || "").trim(),
+        partKindTitle: String(partKind?.org_part_kind_title || partKind?.title || "").trim(),
+      };
+    })
+);
 const activeInteriorLibraryOutlineColor = computed(() => {
   if (subCategoryDesignEditorOpen.value) {
     return normalizeHexColor(subCategoryDesignEditorPreview.value?.design_outline_color);
@@ -3428,7 +3525,7 @@ function getSelectedOrderDesignSourceLocal() {
 
 function getConstructionPartKindInternalLabel(partKindId) {
   const partKind = constructionPartKindsById.value.get(Number(partKindId) || 0);
-  return normalizeBooleanFlag(partKind?.is_internal, false) ? "داخلی" : "سازه";
+  return getPartScopeLabel(partKind?.part_scope);
 }
 const activeSubCategoryUserPreviewRow = computed(() =>
   editableSubCategories.value.find((item) => String(item.id) === String(subCategoryUserPreviewRowId.value)) || null
@@ -3565,6 +3662,7 @@ function openConstructionWizard() {
   loadConstructionSubCategories();
   loadConstructionSubCategoryDesigns();
   loadConstructionInternalPartGroups();
+  loadConstructionDoorPartGroups();
   loadConstructionBaseFormulas();
   loadConstructionPartFormulas();
   constructionDeletedTemplateIds.value = [];
@@ -3603,6 +3701,7 @@ async function closeConstructionWizard() {
     await loadConstructionSubCategories();
     await loadConstructionSubCategoryDesigns();
     await loadConstructionInternalPartGroups();
+    await loadConstructionDoorPartGroups();
     await loadConstructionBaseFormulas();
     await loadConstructionPartFormulas();
   }
@@ -3699,7 +3798,7 @@ function normalizePartKindPayload(item) {
     part_kind_code: String(item.part_kind_code || "").trim(),
     org_part_kind_title: String(item.org_part_kind_title || "").trim(),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.part_kind_id),
-    is_internal: normalizeBooleanFlag(item.is_internal, false),
+    part_scope: normalizePartScope(item.part_scope),
     is_system: !!item.is_system,
   };
 }
@@ -4221,6 +4320,7 @@ function buildNewPartFormulaDraft() {
     part_sub_kind_id: nextId,
     part_code: `part_${nextId}`,
     part_title: `قطعه ${toPersianDigits(nextId)}`,
+    door_dependent: false,
     code: `part_${nextId}`,
     title: `قطعه ${toPersianDigits(nextId)}`,
     sort_order: nextId,
@@ -4644,6 +4744,20 @@ function buildNewInternalPartGroupDraft() {
     controller_type: "",
     controller_bindings: {},
   });
+}
+
+function buildNewDoorPartGroupDraft() {
+  const nextId = editableDoorPartGroups.value.reduce((max, item) => Math.max(max, Number(item.group_id) || 0), 0) + 1;
+  return {
+    id: null,
+    admin_id: null,
+    group_id: nextId,
+    group_title: `گروه درب ${toPersianDigits(nextId)}`,
+    code: `door_part_group_${nextId}`,
+    sort_order: nextId,
+    is_system: true,
+    parts: [],
+  };
 }
 
 function resetSubCategoryDesignEditorState() {
@@ -6351,6 +6465,39 @@ function openInternalPartGroupEditor(item = null) {
   internalPartGroupEditorOpen.value = true;
 }
 
+function openDoorPartGroupEditor(item = null) {
+  doorPartGroupEditorDraft.value = item
+    ? {
+        id: item.id,
+        admin_id: item.admin_id,
+        group_id: item.group_id,
+        group_title: item.group_title,
+        code: item.code,
+        sort_order: item.sort_order,
+        is_system: item.is_system,
+        parts: Array.isArray(item.parts) ? item.parts.map((part) => ({
+          part_formula_id: Number(part.part_formula_id),
+          enabled: part.enabled !== false,
+          ui_order: Number(part.ui_order) || 0,
+        })) : [],
+      }
+    : buildNewDoorPartGroupDraft();
+  doorPartGroupEditorOpen.value = true;
+}
+
+function togglePartFormulaInDoorGroup(partFormulaId) {
+  if (!doorPartGroupEditorDraft.value) return;
+  const formulaId = Number(partFormulaId) || 0;
+  const nextParts = Array.isArray(doorPartGroupEditorDraft.value.parts) ? [...doorPartGroupEditorDraft.value.parts] : [];
+  const existingIndex = nextParts.findIndex((part) => Number(part.part_formula_id) === formulaId);
+  if (existingIndex === -1) {
+    nextParts.push({ part_formula_id: formulaId, enabled: true, ui_order: nextParts.length });
+  } else {
+    nextParts.splice(existingIndex, 1);
+  }
+  doorPartGroupEditorDraft.value.parts = nextParts;
+}
+
 function openInternalPartGroupDefaultsEditor(item) {
   const row = findEditableInternalPartGroupById(item?.id);
   if (!row?.id) return;
@@ -6468,6 +6615,25 @@ async function ensureOrderDesignInteriorParamMetaLoaded(orderDesignId) {
     await refreshOrderDesignGeometryFromServer(key, { updateStage: false });
   } catch (_) {
     // Silent: failing to refresh should not block opening the library.
+  }
+}
+
+async function loadConstructionDoorPartGroups() {
+  try {
+    const url = `/api/door-part-groups?admin_id=${encodeURIComponent(currentAdminId.value)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("load-failed");
+    editableDoorPartGroups.value = (await res.json()).map((item) => withConstructionDraftState({
+      ...item,
+      parts: Array.isArray(item.parts) ? item.parts.map((part) => ({
+        ...part,
+        part_formula_id: Number(part.part_formula_id),
+        enabled: part.enabled !== false,
+        ui_order: Number(part.ui_order) || 0,
+      })) : [],
+    }));
+  } catch (_) {
+    showAlert("خواندن جدول گروه قطعات درب از دیتابیس انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -7153,9 +7319,10 @@ function toggleConstructionPartKindScope(item) {
 async function toggleConstructionPartKindInternalById(partKindId) {
   const target = editablePartKinds.value.find((item) => Number(item.part_kind_id) === Number(partKindId));
   if (!target) return;
-  const nextValue = !normalizeBooleanFlag(target.is_internal, false);
+  const currentScope = normalizePartScope(target.part_scope);
+  const nextValue = currentScope === "structural" ? "internal" : currentScope === "internal" ? "door" : "structural";
   if (target.__isNew) {
-    target.is_internal = nextValue;
+    target.part_scope = nextValue;
     return;
   }
 
@@ -7167,16 +7334,16 @@ async function toggleConstructionPartKindInternalById(partKindId) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(normalizePartKindPayload({
         ...target,
-        is_internal: nextValue,
+        part_scope: nextValue,
       })),
     });
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره وضعیت داخلی قطعه انجام نشد."));
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره نوع قطعه انجام نشد."));
     const saved = withConstructionDraftState(await res.json());
     editablePartKinds.value = editablePartKinds.value.map((item) =>
-      String(item.id) === saveKey ? { ...saved, is_internal: normalizeBooleanFlag(saved.is_internal, false) } : item
+      String(item.id) === saveKey ? { ...saved, part_scope: normalizePartScope(saved.part_scope) } : item
     );
   } catch (error) {
-    showAlert(error?.message || "ذخیره وضعیت داخلی قطعه انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || "ذخیره نوع قطعه انجام نشد.", { title: "خطا" });
   } finally {
     constructionSavingIds.value = constructionSavingIds.value.filter((value) => value !== saveKey);
   }
@@ -7334,6 +7501,7 @@ function normalizePartFormulaPayload(item) {
     part_sub_kind_id: Number(item.part_sub_kind_id),
     part_code: String(item.part_code || "").trim(),
     part_title: String(item.part_title || "").trim(),
+    door_dependent: normalizeBooleanFlag(item.door_dependent, false),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.part_formula_id),
     is_system: !!item.is_system,
   };
@@ -7683,6 +7851,80 @@ function ensureInternalPartGroupParamDefaults(item) {
     }
   }
   return item;
+}
+
+async function saveDoorPartGroupEditor() {
+  const draft = doorPartGroupEditorDraft.value;
+  if (!draft) return;
+  const groupId = Number(draft.group_id);
+  const title = String(draft.group_title || "").trim();
+  const code = String(draft.code || "").trim();
+  if (!Number.isInteger(groupId) || groupId < 1) {
+    showAlert("شناسه گروه درب باید معتبر و بزرگ‌تر از صفر باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!title || !code) {
+    showAlert("عنوان و کد گروه درب اجباری است.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const duplicate = editableDoorPartGroups.value.some((item) => Number(item.group_id) === groupId && String(item.id) !== String(draft.id || ""));
+  if (duplicate) {
+    showAlert("این شناسه گروه درب قبلا استفاده شده است.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const duplicateCode = editableDoorPartGroups.value.some((item) => String(item.code || "").trim() === code && String(item.id) !== String(draft.id || ""));
+  if (duplicateCode) {
+    showAlert("این کد گروه درب قبلا استفاده شده است.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const payload = {
+    admin_id: draft.admin_id,
+    group_id: groupId,
+    group_title: title,
+    code,
+    sort_order: Number(draft.sort_order) || groupId,
+    is_system: !!draft.is_system,
+    parts: (Array.isArray(draft.parts) ? draft.parts : []).map((part, index) => ({
+      part_formula_id: Number(part.part_formula_id),
+      enabled: part.enabled !== false,
+      ui_order: Number(part.ui_order) || index,
+    })),
+  };
+  try {
+    const res = await fetch(
+      draft.id ? `/api/door-part-groups/${encodeURIComponent(String(draft.id))}` : "/api/door-part-groups",
+      {
+        method: draft.id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره گروه قطعات درب انجام نشد."));
+    await loadConstructionDoorPartGroups();
+    doorPartGroupEditorOpen.value = false;
+    doorPartGroupEditorDraft.value = null;
+    showAlert("گروه قطعات درب با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره گروه قطعات درب انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function deleteConstructionDoorPartGroup(id) {
+  const item = editableDoorPartGroups.value.find((row) => String(row.id) === String(id));
+  if (!item?.id) return;
+  const ok = await showConfirm("این گروه قطعات درب حذف شود؟", {
+    title: "حذف گروه قطعات درب",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  try {
+    const res = await fetch(`/api/door-part-groups/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف گروه قطعات درب انجام نشد."));
+    await loadConstructionDoorPartGroups();
+  } catch (error) {
+    showAlert(error?.message || "حذف گروه قطعات درب انجام نشد.", { title: "خطا" });
+  }
 }
 
 function normalizeInternalPartGroupControllerType(value) {
@@ -8311,7 +8553,7 @@ function getConstructionCsvHeaders() {
     ];
   }
   if (constructionStep.value === "part_formulas") {
-    return ["part_formula_id", "part_kind_id", "part_sub_kind_id", "part_code", "part_title", ...PART_FORMULA_FIELDS.map((item) => item.key), "admin_mode"];
+    return ["part_formula_id", "part_kind_id", "part_sub_kind_id", "part_code", "part_title", ...PART_FORMULA_FIELDS.map((item) => item.key), "door_dependent", "admin_mode"];
   }
   if (constructionStep.value === "base_formulas") {
     return ["fo_id", "param_formula", "formula", "admin_mode"];
@@ -8322,7 +8564,7 @@ function getConstructionCsvHeaders() {
   if (constructionStep.value === "param_groups") {
     return ["param_group_id", "param_group_code", "org_param_group_title", "param_group_icon_path", "ui_order", "show_in_order_attrs", "admin_mode"];
   }
-  return ["part_kind_id", "part_kind_code", "org_part_kind_title", "is_internal", "admin_mode"];
+  return ["part_kind_id", "part_kind_code", "org_part_kind_title", "part_scope", "admin_mode"];
 }
 
 function getConstructionCsvRows(items = null) {
@@ -8377,6 +8619,7 @@ function getConstructionCsvRows(items = null) {
       String(item.part_code || "").trim(),
       String(item.part_title || "").trim(),
       ...PART_FORMULA_FIELDS.map((field) => String(item[field.key] || "").trim()),
+      normalizeBooleanFlag(item.door_dependent, false) ? 1 : 0,
       item.admin_id === null ? "system" : "admin",
     ]);
   }
@@ -8419,7 +8662,7 @@ function getConstructionCsvRows(items = null) {
     Number(item.part_kind_id) || "",
     String(item.part_kind_code || "").trim(),
     String(item.org_part_kind_title || "").trim(),
-    normalizeBooleanFlag(item.is_internal, false) ? 1 : 0,
+    normalizePartScope(item.part_scope),
     item.admin_id === null ? "system" : "admin",
   ]);
 }
@@ -8646,7 +8889,7 @@ async function onConstructionImportFileChange(event) {
         };
       });
     } else if (constructionStep.value === "part_formulas") {
-      const adminModeIndex = 5 + PART_FORMULA_FIELDS.length;
+      const adminModeIndex = 6 + PART_FORMULA_FIELDS.length;
       previewRows = rows.slice(1).map((row, index) => {
         const adminMode = String(row[adminModeIndex] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         return {
@@ -8664,6 +8907,7 @@ async function onConstructionImportFileChange(event) {
           formula_cx: String(row[10] || "").trim(),
           formula_cy: String(row[11] || "").trim(),
           formula_cz: String(row[12] || "").trim(),
+          door_dependent: normalizeBooleanFlag(row[13], false),
           admin_mode: adminMode,
         };
       });
@@ -8744,14 +8988,14 @@ async function onConstructionImportFileChange(event) {
         const partKindId = Number(row[0]);
         const partKindCode = String(row[1] || "").trim();
         const orgPartKindTitle = String(row[2] || "").trim();
-        const isInternal = normalizeBooleanFlag(row[3], false);
+        const partScope = normalizePartScope(row[3]);
         const adminMode = String(row[4] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         return {
           lineNo: index + 2,
           part_kind_id: partKindId,
           part_kind_code: partKindCode,
           org_part_kind_title: orgPartKindTitle,
-          is_internal: isInternal,
+          part_scope: partScope,
           admin_mode: adminMode,
         };
       });
@@ -8795,7 +9039,8 @@ async function onConstructionImportFileChange(event) {
             row.part_sub_kind_id < 1 ||
             !row.part_code ||
             !row.part_title ||
-            PART_FORMULA_FIELDS.some((field) => !String(row[field.key] || "").trim())
+            PART_FORMULA_FIELDS.some((field) => !String(row[field.key] || "").trim()) ||
+            typeof row.door_dependent !== "boolean"
         )
       : constructionStep.value === "base_formulas"
       ? previewRows.find(
@@ -8835,7 +9080,7 @@ async function onConstructionImportFileChange(event) {
             row.part_kind_id < 1 ||
             !row.part_kind_code ||
             !row.org_part_kind_title ||
-            typeof row.is_internal !== "boolean"
+            !["structural", "internal", "door"].includes(normalizePartScope(row.part_scope))
         );
     if (invalidRow) {
       throw new Error(`invalid-row-${invalidRow.lineNo}`);
@@ -8862,7 +9107,7 @@ function buildImportedConstructionDrafts(rows) {
       code: String(row.part_kind_code || "").trim(),
       title: String(row.org_part_kind_title || "").trim(),
       sort_order: index + 1,
-      is_internal: normalizeBooleanFlag(row.is_internal, false),
+      part_scope: normalizePartScope(row.part_scope),
       is_system: adminId === null,
     };
     if (!existing) {
@@ -8878,7 +9123,7 @@ function buildImportedConstructionDrafts(rows) {
       String(existing.part_kind_code || "").trim() !== nextPayload.part_kind_code ||
       String(existing.org_part_kind_title || "").trim() !== nextPayload.org_part_kind_title ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
-      normalizeBooleanFlag(existing.is_internal, false) !== nextPayload.is_internal ||
+      normalizePartScope(existing.part_scope) !== nextPayload.part_scope ||
       !!existing.is_system !== nextPayload.is_system;
     return buildPartKindDraft(existing, {
       ...nextPayload,
@@ -9090,6 +9335,7 @@ function buildImportedConstructionPartFormulaDrafts(rows) {
       part_sub_kind_id: Number(row.part_sub_kind_id),
       part_code: String(row.part_code || "").trim(),
       part_title: String(row.part_title || "").trim(),
+      door_dependent: normalizeBooleanFlag(row.door_dependent, false),
       code: String(row.part_code || "").trim(),
       title: String(row.part_title || "").trim(),
       sort_order: index + 1,
@@ -9112,6 +9358,7 @@ function buildImportedConstructionPartFormulaDrafts(rows) {
       Number(existing.part_sub_kind_id) !== nextPayload.part_sub_kind_id ||
       String(existing.part_code || "").trim() !== nextPayload.part_code ||
       String(existing.part_title || "").trim() !== nextPayload.part_title ||
+      normalizeBooleanFlag(existing.door_dependent, false) !== nextPayload.door_dependent ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system ||
       PART_FORMULA_FIELDS.some((field) => String(existing[field.key] || "").trim() !== nextPayload[field.key])
@@ -9272,7 +9519,7 @@ async function loadConstructionPartKinds() {
     if (!res.ok) throw new Error("load-failed");
     editablePartKinds.value = (await res.json()).map((item) => withConstructionDraftState({
       ...item,
-      is_internal: normalizeBooleanFlag(item.is_internal, false),
+      part_scope: normalizePartScope(item.part_scope),
     }));
     constructionDeletedPartKindIds.value = [];
   } catch (_) {
@@ -9346,7 +9593,10 @@ async function loadConstructionPartFormulas() {
     const url = `/api/part-formulas?admin_id=${encodeURIComponent(currentAdminId.value)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error("load-failed");
-    editablePartFormulas.value = (await res.json()).map(withConstructionDraftState);
+    editablePartFormulas.value = (await res.json()).map((item) => withConstructionDraftState({
+      ...item,
+      door_dependent: normalizeBooleanFlag(item.door_dependent, false),
+    }));
     constructionDeletedPartFormulaIds.value = [];
   } catch (_) {
     showAlert("خواندن جدول فرمول‌های قطعات از دیتابیس انجام نشد.", { title: "خطا" });
@@ -9433,7 +9683,7 @@ async function createConstructionPartKind() {
       code: `custom_part_${nextId}`,
       title: `نوع قطعه ${nextId}`,
       sort_order: nextId,
-      is_internal: false,
+      part_scope: "structural",
       is_system: false,
       __isNew: true,
       __dirty: false,
@@ -12134,6 +12384,7 @@ function setMenu(menuId) {
   activeMenu.value = menuId;
   openMenuPanel.value = menuId;
   closeInteriorLibrary();
+  closeDoorLibrary();
 }
 
 function closeMenuPanel() {
@@ -12146,6 +12397,7 @@ function closeMenuPanel() {
   activeMenu.value = null;
   activeSubRail.value = null;
   closeInteriorLibrary();
+  closeDoorLibrary();
   openMode.value = "menu";
   editorRef.value?.setInputEnabled?.(true);
   scheduleSubRailPosition();
@@ -12211,6 +12463,48 @@ function openInteriorLibraryForDesign(orderDesignId) {
   return openInteriorLibrary(orderDesignId);
 }
 
+async function openDoorLibrary(targetOrderDesignId = "") {
+  const nextTargetOrderDesignId = String(targetOrderDesignId || "").trim();
+  const currentTargetOrderDesignId = String(activeDoorLibraryOrderDesignId.value || "").trim();
+  if (doorLibraryOpen.value && (!nextTargetOrderDesignId || nextTargetOrderDesignId === currentTargetOrderDesignId)) {
+    closeDoorLibrary();
+    return;
+  }
+  if (!subCategoryDesignEditorOpen.value) {
+    const fallbackTargetId = String(getSelectedOrderDesignSourceLocal()?.id || "").trim();
+    const resolvedTargetId = nextTargetOrderDesignId || fallbackTargetId;
+    if (!resolvedTargetId) {
+      showAlert("ابتدا یک طرح ثبت‌شده را انتخاب کنید.", { title: "قطعات درب" });
+      return;
+    }
+    doorLibraryForcedOrderDesignId.value = resolvedTargetId;
+  } else {
+    doorLibraryForcedOrderDesignId.value = "";
+  }
+  if (!subCategoryDesignEditorOpen.value && !activeDoorLibraryOrderDesign.value?.id) {
+    showAlert("ابتدا یک طرح ثبت‌شده را انتخاب کنید.", { title: "قطعات درب" });
+    return;
+  }
+  doorLibraryOpen.value = true;
+  activeMenu.value = null;
+  openMenuPanel.value = null;
+  activeSubRail.value = null;
+  openMode.value = "menu";
+  await Promise.allSettled([
+    loadConstructionDoorPartGroups(),
+    loadConstructionPartKinds(),
+    loadConstructionPartFormulas(),
+  ]);
+  if (!subCategoryDesignEditorOpen.value && activeOrder.value?.id) {
+    await loadOrderDesignCatalog(true);
+  }
+  scheduleSubRailPosition();
+}
+
+function openDoorLibraryForDesign(orderDesignId) {
+  return openDoorLibrary(orderDesignId);
+}
+
 function closeInteriorLibrary() {
   interiorLibraryOpen.value = false;
   closeInteriorInstanceContextMenu();
@@ -12237,6 +12531,11 @@ function closeInteriorLibrary() {
   interiorLibraryFrontPan.value = { x: 0, y: 0 };
   stopInteriorLibraryFrontPan();
   closeInteriorInstanceEditor();
+}
+
+function closeDoorLibrary() {
+  doorLibraryOpen.value = false;
+  doorLibraryForcedOrderDesignId.value = "";
 }
 
 
@@ -13471,7 +13770,7 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="constructionMenu__metaRow">
                       <span class="constructionMenu__metaLabel">جایگاه</span>
-                      <span class="constructionMenu__metaValue">{{ normalizeBooleanFlag(item.is_internal, false) ? "داخلی" : "سازه اصلی" }}</span>
+                      <span class="constructionMenu__metaValue">{{ getPartScopeLabel(item.part_scope) }}</span>
                     </div>
                     <div class="constructionMenu__metaRow">
                       <span class="constructionMenu__metaLabel">کد اصلی</span>
@@ -14266,7 +14565,7 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                       <th class="constructionDialog__col constructionDialog__col--code">کد</th>
                       <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
-                      <th class="constructionDialog__col constructionDialog__col--scope">داخلی</th>
+                      <th class="constructionDialog__col constructionDialog__col--scope">نوع قطعه</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
                   </thead>
@@ -14275,7 +14574,7 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.part_kind_id }}</td>
                       <td class="constructionDialog__col constructionDialog__col--code">{{ row.part_kind_code }}</td>
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.org_part_kind_title }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--scope">{{ row.is_internal ? "داخلی" : "سازه" }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ getPartScopeLabel(row.part_scope) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
                     </tr>
                   </tbody>
@@ -14309,7 +14608,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                     <th class="constructionDialog__col constructionDialog__col--code">کد</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان</th>
-                    <th class="constructionDialog__col constructionDialog__col--scope">داخلی</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope">نوع قطعه</th>
                     <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
                     <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
                     <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
@@ -14351,10 +14650,10 @@ onBeforeUnmount(() => {
                       <button
                         type="button"
                         class="constructionDialog__scopeBtn"
-                        :class="normalizeBooleanFlag(item.is_internal, false) ? 'is-admin' : 'is-system'"
-                        @click="item.is_internal = !normalizeBooleanFlag(item.is_internal, false); markConstructionPartKindDirty(item)"
+                        :class="getPartKindScope(item) === 'internal' ? 'is-admin' : (getPartKindScope(item) === 'door' ? 'is-warning' : 'is-system')"
+                        @click="item.part_scope = getPartKindScope(item) === 'structural' ? 'internal' : (getPartKindScope(item) === 'internal' ? 'door' : 'structural'); markConstructionPartKindDirty(item)"
                       >
-                        {{ normalizeBooleanFlag(item.is_internal, false) ? "داخلی" : "سازه" }}
+                        {{ getPartScopeLabel(item.part_scope) }}
                       </button>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--owner">
@@ -15112,6 +15411,70 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
+          <template v-else-if="constructionStep === 'door_part_groups'">
+            <div class="constructionDialog__toolbar">
+              <div class="constructionDialog__toolbarMain">
+                <div class="constructionDialog__sectionTitle">جدول گروه قطعات درب</div>
+                <div class="constructionDialog__sectionHint">
+                  در این جدول از بین قطعات درب گروه می‌سازید تا بعداً در پنجره قطعات درب به‌صورت یک مجموعه قابل استفاده باشند.
+                </div>
+              </div>
+              <div class="constructionDialog__toolbarActions">
+                <button type="button" class="constructionDialog__textBtn" @click="openDoorPartGroupEditor()">افزودن گروه درب</button>
+              </div>
+            </div>
+
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionDoorPartGroups.length) }}</span>
+                <span class="constructionDialog__summaryLabel">کل گروه‌ها</span>
+              </div>
+            </div>
+
+            <div class="constructionDialog__tableWrap">
+              <table class="constructionDialog__table">
+                <thead>
+                  <tr>
+                    <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">شناسه گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--code">کد گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--title">عنوان گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">تعداد قطعات</th>
+                    <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in constructionDoorPartGroups" :key="item.id">
+                    <td class="constructionDialog__col constructionDialog__col--owner">
+                      <span
+                        class="constructionDialog__pill constructionDialog__ownerBadge"
+                        :class="getConstructionOwnerBadge(item).tone === 'system' ? 'constructionDialog__ownerBadge--system' : 'constructionDialog__ownerBadge--admin'"
+                      >
+                        {{ getConstructionOwnerBadge(item).text }}
+                      </span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.group_id) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--code">{{ item.code }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--title">{{ item.group_title }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.parts?.length || 0) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--actions">
+                      <div class="constructionDialog__actionsCell">
+                        <button type="button" class="constructionDialog__textBtn" @click="openDoorPartGroupEditor(item)">ویرایش گروه</button>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionDoorPartGroup(item.id)">×</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="!constructionDoorPartGroups.length">
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="6">هنوز گروهی برای قطعات درب ثبت نشده است.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="constructionDialog__sheetHint">
+              در این فاز فقط CRUD پایه‌ی گروه‌های درب فعال است و کنترلرها بعداً به آن اضافه می‌شوند.
+            </div>
+          </template>
+
           <template v-else-if="constructionStep === 'base_formulas'">
             <input
               ref="constructionImportInputEl"
@@ -15318,6 +15681,7 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--code">{{ row.part_code }}</td>
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.part_title }}</td>
                       <td v-for="field in PART_FORMULA_FIELDS" :key="field.key" class="constructionDialog__col constructionDialog__col--formulaExpr">{{ row[field.key] }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ row.door_dependent ? "بله" : "خیر" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "پیش‌فرض" : "اختصاصی ادمین" }}</td>
                     </tr>
                   </tbody>
@@ -15346,11 +15710,12 @@ onBeforeUnmount(() => {
                   <tr>
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                     <th class="constructionDialog__col constructionDialog__col--id">نوع قطعه</th>
-                    <th class="constructionDialog__col constructionDialog__col--scope">داخلی</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope">نوع قطعه</th>
                     <th class="constructionDialog__col constructionDialog__col--id">زیرنوع</th>
                     <th class="constructionDialog__col constructionDialog__col--code">کد قطعه</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان قطعه</th>
                     <th v-for="field in PART_FORMULA_FIELDS" :key="field.key" class="constructionDialog__col constructionDialog__col--formulaExpr">{{ field.label }}</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope">وابستگی درب</th>
                     <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
                     <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
                     <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
@@ -15370,7 +15735,7 @@ onBeforeUnmount(() => {
                       <button
                         type="button"
                         class="constructionDialog__scopeBtn"
-                        :class="getConstructionPartKindInternalLabel(item.part_kind_id) === 'داخلی' ? 'is-admin' : 'is-system'"
+                        :class="getConstructionPartKindInternalLabel(item.part_kind_id) === 'داخلی' ? 'is-admin' : (getConstructionPartKindInternalLabel(item.part_kind_id) === 'درب' ? 'is-warning' : 'is-system')"
                         @click="toggleConstructionPartKindInternalById(item.part_kind_id)"
                       >
                         {{ getConstructionPartKindInternalLabel(item.part_kind_id) }}
@@ -15398,6 +15763,16 @@ onBeforeUnmount(() => {
                       <button type="button" class="constructionDialog__formulaBtn" @click="openBaseFormulaBuilder(item, 'edit', { entity: 'part_formulas', field: field.key })">
                         <span class="constructionDialog__formulaBtnText">{{ item[field.key] }}</span>
                         <span class="constructionDialog__formulaBtnAction">ویرایش {{ field.label }}</span>
+                      </button>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--scope">
+                      <button
+                        type="button"
+                        class="constructionDialog__scopeBtn"
+                        :class="normalizeBooleanFlag(item.door_dependent, false) ? 'is-admin' : 'is-system'"
+                        @click="item.door_dependent = !normalizeBooleanFlag(item.door_dependent, false); markConstructionPartFormulaDirty(item)"
+                      >
+                        {{ normalizeBooleanFlag(item.door_dependent, false) ? "بله" : "خیر" }}
                       </button>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--owner">
@@ -15480,6 +15855,10 @@ onBeforeUnmount(() => {
             <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': interiorLibraryOpen }" title="قطعات داخلی" @click="openInteriorLibrary">
               <img src="/icons/enternal.png" alt="" class="subCategoryDesignEditor__metaIcon" />
               <span>داخلی</span>
+            </button>
+            <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': doorLibraryOpen }" title="قطعات درب" @click="openDoorLibrary">
+              <img src="/icons/door.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+              <span>درب</span>
             </button>
             <button type="button" class="subCategoryDesignEditor__settingsBtn" title="پیش‌فرض ادمین" @click="openSubCategoryAdminDefaultsFromDesignEditor">
               <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
@@ -15792,6 +16171,83 @@ onBeforeUnmount(() => {
           <span v-if="internalPartGroupDefaultsApplying" class="constructionDialog__spinner"></span>
           <span>{{ internalPartGroupDefaultsApplying ? "در حال اعمال..." : "اعمال" }}</span>
         </button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="doorPartGroupEditorOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="doorPartGroupEditorOpen = false"></div>
+    <div class="appDialog__card appDialog__card--subDesign" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش گروه قطعات درب</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="doorPartGroupEditorOpen = false">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        در این پنجره از بین قطعات درب سمت راست، گروه موردنظر را می‌سازید. کنترلرها و رفتارهای تخصصی درب در مرحله بعد اضافه می‌شوند.
+      </div>
+
+      <div v-if="doorPartGroupEditorDraft" class="subCategoryDesignEditor">
+        <div class="subCategoryDesignEditor__meta">
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>شناسه گروه</span>
+            <input v-model.number="doorPartGroupEditorDraft.group_id" class="constructionDialog__input" type="number" min="1" step="1" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>عنوان گروه</span>
+            <input v-model="doorPartGroupEditorDraft.group_title" class="constructionDialog__input" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>کد گروه</span>
+            <input v-model="doorPartGroupEditorDraft.code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+          </label>
+        </div>
+
+        <div class="subCategoryDesignEditor__layout">
+          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
+            <div class="subCategoryDesignEditor__panelTitle">قطعات درب قابل انتخاب</div>
+            <div class="subCategoryDesignEditor__partList">
+              <label v-for="item in constructionDoorPartFormulaOptions" :key="item.id" class="subCategoryDesignEditor__partItem">
+                <input
+                  :checked="(doorPartGroupEditorDraft.parts || []).some((part) => Number(part.part_formula_id) === Number(item.id))"
+                  type="checkbox"
+                  @change="togglePartFormulaInDoorGroup(item.id)"
+                />
+                <span class="subCategoryDesignEditor__partMeta">
+                  <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
+                  <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
+            <div class="subCategoryDesignEditor__panelTitle">خلاصه گروه</div>
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(doorPartGroupEditorDraft.parts?.length || 0) }}</span>
+                <span class="constructionDialog__summaryLabel">قطعه انتخاب‌شده</span>
+              </div>
+            </div>
+            <div class="subCategoryDesignEditor__partList">
+              <div v-for="part in doorPartGroupEditorDraft.parts" :key="part.part_formula_id" class="subCategoryDesignEditor__partItem is-static">
+                <span class="subCategoryDesignEditor__partMeta">
+                  <span class="subCategoryDesignEditor__partTitle">
+                    {{ constructionDoorPartFormulaOptions.find((item) => Number(item.id) === Number(part.part_formula_id))?.title || part.part_formula_id }}
+                  </span>
+                  <span class="subCategoryDesignEditor__partCode">
+                    {{ constructionDoorPartFormulaOptions.find((item) => Number(item.id) === Number(part.part_formula_id))?.code || "" }}
+                  </span>
+                </span>
+              </div>
+              <div v-if="!(doorPartGroupEditorDraft.parts?.length)" class="designMenu__cabinetState">هنوز قطعه درب انتخاب نشده است.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="doorPartGroupEditorOpen = false">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="saveDoorPartGroupEditor">ذخیره گروه</button>
       </div>
     </div>
   </div>
@@ -16815,11 +17271,11 @@ onBeforeUnmount(() => {
             </select>
           </label>
           <label class="formulaBuilder__field">
-            <span>داخلی</span>
+            <span>نوع قطعه</span>
             <button
               type="button"
               class="constructionDialog__scopeBtn"
-              :class="getConstructionPartKindInternalLabel(baseFormulaBuilderDraft.part_kind_id) === 'داخلی' ? 'is-admin' : 'is-system'"
+              :class="getConstructionPartKindInternalLabel(baseFormulaBuilderDraft.part_kind_id) === 'داخلی' ? 'is-admin' : (getConstructionPartKindInternalLabel(baseFormulaBuilderDraft.part_kind_id) === 'درب' ? 'is-warning' : 'is-system')"
               @click="toggleConstructionPartKindInternalById(baseFormulaBuilderDraft.part_kind_id)"
             >
               {{ getConstructionPartKindInternalLabel(baseFormulaBuilderDraft.part_kind_id) }}
@@ -17435,6 +17891,53 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
+  <div v-if="doorLibraryOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeDoorLibrary"></div>
+    <div class="appDialog__card appDialog__card--subDesign" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">قطعات درب</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeDoorLibrary">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        در این مرحله، کتابخانه گروه‌های قطعات درب برای طرح فعال نمایش داده می‌شود. کنترلرها و نمونه‌های اختصاصی درب در فاز بعدی تکمیل می‌شوند.
+      </div>
+      <div class="subCategoryDesignEditor__layout subCategoryDesignEditor__layout--interiorLibrary">
+        <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview subCategoryDesignEditor__panel--interiorPreview">
+          <div class="subCategoryDesignEditor__panelTitle">نمای قطعات درب</div>
+          <div class="designMenu__cabinetState">
+            {{ subCategoryDesignEditorOpen ? "برای ساب‌کت فعال" : (activeDoorLibraryOrderDesign?.design_title || "برای طرح سفارش فعال") }}
+          </div>
+        </div>
+        <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
+          <div class="subCategoryDesignEditor__panelTitle">نمونه‌های درب این طرح</div>
+          <div class="designMenu__cabinetState">
+            نمونه‌های درب در این فاز هنوز فعال نشده‌اند.
+          </div>
+        </div>
+        <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
+          <div class="subCategoryDesignEditor__panelTitle">گروه‌های قطعات درب</div>
+          <select v-model="doorLibraryPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+            <option value="">همه انواع قطعات درب</option>
+            <option v-for="option in constructionDoorPartKindOptions" :key="option.value" :value="String(option.value)">{{ option.label }}</option>
+          </select>
+          <div v-if="!doorLibraryGroupCards.length" class="designMenu__cabinetState">هنوز گروه قطعات درب برای استفاده ثبت نشده است.</div>
+          <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
+            <div v-for="item in doorLibraryGroupCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+              <span class="subCategoryDesignEditor__partMeta">
+                <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
+                <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+              </span>
+              <span class="constructionDialog__summaryLabel">{{ toPersianDigits(item.partsCount || 0) }} قطعه</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closeDoorLibrary">بستن</button>
+      </div>
+    </div>
+  </div>
+
   <div v-if="orderDesignEditorOpen" class="appDialog" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeOrderDesignEditor"></div>
     <div class="appDialog__card appDialog__card--order" dir="rtl">
@@ -17456,6 +17959,12 @@ onBeforeUnmount(() => {
             <span>کد طرح منبع</span>
             <input :value="orderDesignEditorDraft.design_code" class="constructionDialog__input constructionDialog__input--mono" type="text" readonly />
           </label>
+        </div>
+        <div class="subCategoryDesignEditor__metaActions" style="margin-top: 12px;">
+          <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': doorLibraryOpen }" title="قطعات درب" @click="openDoorLibraryForDesign(orderDesignEditorDraft.id)">
+            <img src="/icons/door.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+            <span>درب</span>
+          </button>
         </div>
         <div class="constructionDialog__tableWrap" style="margin-top: 16px;">
           <table class="constructionDialog__table orderEntry__table">

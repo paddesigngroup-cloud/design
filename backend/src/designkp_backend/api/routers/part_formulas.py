@@ -42,6 +42,7 @@ class PartFormulaItem(BaseModel):
     formula_cx: str
     formula_cy: str
     formula_cz: str
+    door_dependent: bool
     code: str
     title: str
     sort_order: int
@@ -65,6 +66,7 @@ class PartFormulaCreate(BaseModel):
     formula_cx: str = Field(min_length=1, max_length=2048)
     formula_cy: str = Field(min_length=1, max_length=2048)
     formula_cz: str = Field(min_length=1, max_length=2048)
+    door_dependent: bool = False
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
 
@@ -84,6 +86,7 @@ class PartFormulaUpdate(BaseModel):
     formula_cx: str = Field(min_length=1, max_length=2048)
     formula_cy: str = Field(min_length=1, max_length=2048)
     formula_cz: str = Field(min_length=1, max_length=2048)
+    door_dependent: bool = False
     sort_order: int = Field(ge=0)
     is_system: bool
 
@@ -149,6 +152,7 @@ async def create_part_formula(payload: PartFormulaCreate, session: AsyncSession 
         formula_cx=payload.formula_cx.strip(),
         formula_cy=payload.formula_cy.strip(),
         formula_cz=payload.formula_cz.strip(),
+        door_dependent=payload.door_dependent,
         code=payload.part_code.strip(),
         title=payload.part_title.strip(),
         sort_order=sort_order,
@@ -186,6 +190,7 @@ async def update_part_formula(
     item.formula_cx = payload.formula_cx.strip()
     item.formula_cy = payload.formula_cy.strip()
     item.formula_cz = payload.formula_cz.strip()
+    item.door_dependent = payload.door_dependent
     item.code = payload.part_code.strip()
     item.title = payload.part_title.strip()
     item.sort_order = payload.sort_order

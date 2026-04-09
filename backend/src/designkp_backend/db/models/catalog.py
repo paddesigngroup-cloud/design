@@ -29,7 +29,7 @@ class PartKind(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixi
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    is_internal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    part_scope: Mapped[str] = mapped_column(String(16), nullable=False, default="structural", server_default="structural")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     admin: Mapped["Admin | None"] = relationship(back_populates="part_kinds")
@@ -132,6 +132,7 @@ class PartFormula(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionM
     formula_cx: Mapped[str] = mapped_column(String(2048), nullable=False)
     formula_cy: Mapped[str] = mapped_column(String(2048), nullable=False)
     formula_cz: Mapped[str] = mapped_column(String(2048), nullable=False)
+    door_dependent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
@@ -453,6 +454,57 @@ class InternalPartGroupParamDefault(UUIDPrimaryKeyMixin, TimestampMixin, SoftDel
 
     internal_part_group: Mapped["InternalPartGroup"] = relationship(back_populates="param_defaults")
     param: Mapped["Param"] = relationship(back_populates="internal_part_group_defaults")
+
+
+class DoorPartGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "door_part_groups"
+
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    group_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    group_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    admin: Mapped["Admin | None"] = relationship()
+    parts: Mapped[list["DoorPartGroupItem"]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )
+
+
+class DoorPartGroupItem(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "door_part_group_items"
+
+    group_ref_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("door_part_groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_formula_id: Mapped[int] = mapped_column(
+        ForeignKey("part_formulas.part_formula_id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_kind_id: Mapped[int] = mapped_column(
+        ForeignKey("part_kinds.part_kind_id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    part_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+    group: Mapped["DoorPartGroup"] = relationship(back_populates="parts")
+    part_formula: Mapped["PartFormula"] = relationship()
 
 
 class SubCategoryDesignInteriorInstance(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
