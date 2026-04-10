@@ -41,6 +41,8 @@ const showOffsetWalls = ref(true);
 const showObjectAxes = ref(false);
 const currentEditorDisplayUnitState = ref("cm");
 const orderDesignGeometryCache = new Map();
+const frontViewGeometryCache = new Map();
+const interiorInstanceFrontGeometryCache = new Map();
 const walls3dSnapshot = ref({
   nodes: [],
   walls: [],
@@ -326,6 +328,13 @@ const doorLibraryCursorPoint = ref(null);
 const doorLibraryHoverMode = ref(null);
 const doorLibraryViewerCursorPoint = ref(null);
 const doorLibraryModelPanning = ref(false);
+const doorLibraryPendingPointerPoint = ref(null);
+const doorLibraryLastProcessedPointerPoint = ref(null);
+const doorLibraryAnnotationHitCache = ref({
+  token: "",
+  point: null,
+  result: null,
+});
 const interiorInstanceEditorOpen = ref(false);
 const interiorInstanceEditorDraft = ref(null);
 const interiorInstanceEditorActiveGroupId = ref("");
@@ -384,6 +393,11 @@ const interiorLibraryModelPanning = ref(false);
 const interiorLibraryPendingPointerPoint = ref(null);
 const interiorLibraryLastProcessedPointerPoint = ref(null);
 const interiorLibraryInstanceHitCache = ref([]);
+const interiorLibraryAnnotationHitCache = ref({
+  token: "",
+  point: null,
+  result: null,
+});
 const interiorLibraryControllerVisualsToken = ref(0);
 const interiorLibraryControllerHitCache = ref({
   token: 0,
@@ -393,6 +407,9 @@ const interiorLibraryControllerHitCache = ref({
 let interiorLibraryFrontPanSession = null;
 let interiorLibraryFrontLastMiddleClickMs = 0;
 let interiorLibraryHoverRafId = 0;
+let doorLibraryFrontPanSession = null;
+let doorLibraryFrontLastMiddleClickMs = 0;
+let doorLibraryHoverRafId = 0;
 const orderDesignEditorOpen = ref(false);
 const orderDesignEditorDraft = ref(null);
 const orderDesignSavingIds = ref([]);
@@ -631,8 +648,6 @@ const doorLibraryViewerWrapEl = ref(null);
 const doorLibraryFrontZoom = ref(1);
 const doorLibraryFrontPan = ref({ x: 0, y: 0 });
 const doorLibraryFrontPanning = ref(false);
-let doorLibraryFrontPanSession = null;
-let doorLibraryFrontLastMiddleClickMs = 0;
 function isOrderDesignSaving(designId) {
   const key = String(designId || "").trim();
   return !!key && orderDesignSavingIds.value.includes(key);
@@ -876,6 +891,12 @@ function resetDoorLibraryAnnotations() {
   doorLibraryAnnotationTool.value = null;
   doorLibraryCurrentSnapPoint.value = null;
   doorLibraryHoverMode.value = null;
+  stopDoorLibraryPointerProcessing();
+  doorLibraryAnnotationHitCache.value = {
+    token: "",
+    point: null,
+    result: null,
+  };
 }
 function stopDoorLibraryModelPanCursor() {
   doorLibraryModelPanning.value = false;
@@ -1323,6 +1344,28 @@ function isInteriorPointerDeltaSignificant(nextPoint, prevPoint) {
   const dy = (Number(nextPoint.y) || 0) - (Number(prevPoint.y) || 0);
   return (dx * dx + dy * dy) >= (INTERIOR_LIBRARY_POINTER_EPS * INTERIOR_LIBRARY_POINTER_EPS);
 }
+function buildAnnotationCacheToken(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => String(item?.id || "").trim())
+    .join("|");
+}
+function hitTestCachedAnnotationList(cacheRef, items, point, tolerance = 10) {
+  const target = point ? { x: Number(point.x) || 0, y: Number(point.y) || 0 } : null;
+  const token = buildAnnotationCacheToken(items);
+  const cache = cacheRef?.value;
+  if (cache?.token === token && cache.point && target && !isInteriorPointerDeltaSignificant(target, cache.point)) {
+    return cache.result;
+  }
+  const result = target ? hitTestInteriorAnnotationList(items, target, tolerance) : null;
+  if (cacheRef) {
+    cacheRef.value = {
+      token,
+      point: target,
+      result,
+    };
+  }
+  return result;
+}
 function normalizeInteriorRect(rect) {
   if (!rect) return null;
   return {
@@ -1428,7 +1471,7 @@ function updateInteriorLibraryHoverState(point) {
   if (!point) return;
   const rendered = interiorLibraryRenderedAnnotations.value;
   const hitDimension = interiorLibraryShowDimensions.value
-    ? hitTestInteriorAnnotationList(rendered.dimensions, point, 12)
+    ? hitTestCachedAnnotationList(interiorLibraryAnnotationHitCache, rendered.dimensions, point, 12)
     : null;
   const hitGuide = !hitDimension && interiorLibraryShowGuideAnnotations.value
     ? hitTestInteriorAnnotationList(rendered.guides, point, 10)
@@ -1448,19 +1491,9 @@ function updateInteriorLibraryHoverState(point) {
 function hitTestInteriorLibraryController(point) {
   if (!point) return null;
   const target = { x: Number(point.x) || 0, y: Number(point.y) || 0 };
-  const cache = interiorLibraryControllerHitCache.value;
-  if (cache?.token === interiorLibraryControllerVisualsToken.value
-    && cache.point
-    && !isInteriorPointerDeltaSignificant(target, cache.point)) {
-    return cache.result;
-  }
   let result = null;
   for (let index = interiorLibraryControllerVisuals.value.length - 1; index >= 0; index -= 1) {
     const item = interiorLibraryControllerVisuals.value[index];
-    if (pointInInteriorControllerBody(target, item)) {
-      result = { ...item, activeHotspot: null };
-      break;
-    }
     const hotspot = getInteriorControllerMatchingHotspot(target, item);
     if (hotspot) {
       result = { ...item, activeHotspot: hotspot };
@@ -1803,9 +1836,21 @@ function stopInteriorLibraryPointerProcessing() {
   interiorLibraryPendingPointerPoint.value = null;
   interiorLibraryLastProcessedPointerPoint.value = null;
 }
+function stopDoorLibraryPointerProcessing() {
+  if (doorLibraryHoverRafId) {
+    cancelAnimationFrame(doorLibraryHoverRafId);
+    doorLibraryHoverRafId = 0;
+  }
+  doorLibraryPendingPointerPoint.value = null;
+  doorLibraryLastProcessedPointerPoint.value = null;
+}
 function scheduleInteriorLibraryPointerProcessing() {
   if (interiorLibraryHoverRafId) return;
   interiorLibraryHoverRafId = requestAnimationFrame(processInteriorLibraryPointerFrame);
+}
+function scheduleDoorLibraryPointerProcessing() {
+  if (doorLibraryHoverRafId) return;
+  doorLibraryHoverRafId = requestAnimationFrame(processDoorLibraryPointerFrame);
 }
 function processInteriorLibraryPointerFrame() {
   interiorLibraryHoverRafId = 0;
@@ -1873,6 +1918,51 @@ function processInteriorLibraryPointerFrame() {
     scheduleInteriorLibraryPointerProcessing();
   }
 }
+function processDoorLibraryPointerFrame() {
+  doorLibraryHoverRafId = 0;
+  const rawPoint = doorLibraryPendingPointerPoint.value;
+  if (!rawPoint) return;
+  if (doorLibraryPreviewMode.value !== "front2d") return;
+  doorLibraryPendingPointerPoint.value = null;
+  if (!isInteriorPointerDeltaSignificant(rawPoint, doorLibraryLastProcessedPointerPoint.value)) {
+    if (doorLibraryPendingPointerPoint.value) {
+      scheduleDoorLibraryPointerProcessing();
+    }
+    return;
+  }
+  doorLibraryLastProcessedPointerPoint.value = rawPoint;
+  if (doorLibraryAnnotationTool.value === "dimension") {
+    const snappedPoint = getDoorLibrarySnappedFrontPoint(rawPoint);
+    syncDoorLibraryCursorPoint(rawPoint, snappedPoint);
+    if (snappedPoint && doorLibraryAnnotationDraft.value) {
+      updateDoorLibraryAnnotationDraft(snappedPoint);
+    }
+    if (doorLibraryHoverMode.value !== null) {
+      doorLibraryHoverMode.value = null;
+    }
+    if (doorLibraryPendingPointerPoint.value) {
+      scheduleDoorLibraryPointerProcessing();
+    }
+    return;
+  }
+  if (doorLibraryCurrentSnapPoint.value) {
+    doorLibraryCurrentSnapPoint.value = null;
+  }
+  syncDoorLibraryCursorPoint(rawPoint, null);
+  const hitDimension = hitTestCachedAnnotationList(
+    doorLibraryAnnotationHitCache,
+    doorLibraryRenderedAnnotations.value.dimensions,
+    rawPoint,
+    12
+  );
+  const nextHoverMode = hitDimension ? "clicker" : null;
+  if (doorLibraryHoverMode.value !== nextHoverMode) {
+    doorLibraryHoverMode.value = nextHoverMode;
+  }
+  if (doorLibraryPendingPointerPoint.value) {
+    scheduleDoorLibraryPointerProcessing();
+  }
+}
 function onInteriorLibraryFrontSvgPointerDown(event) {
   if (interiorLibraryPreviewMode.value !== "front2d" || Number(event?.button) !== 0) return;
   if (interiorLibraryControllerState.value.enabled) {
@@ -1889,7 +1979,7 @@ function onInteriorLibraryFrontSvgPointerDown(event) {
   syncInteriorLibraryCursorPoint(rawPoint, interiorLibraryCurrentSnapPoint.value);
   const rendered = interiorLibraryRenderedAnnotations.value;
   const hitDimension = interiorLibraryShowDimensions.value
-    ? hitTestInteriorAnnotationList(rendered.dimensions, rawPoint, 12)
+    ? hitTestCachedAnnotationList(interiorLibraryAnnotationHitCache, rendered.dimensions, rawPoint, 12)
     : null;
   const hitGuide = !hitDimension && interiorLibraryShowGuideAnnotations.value
     ? hitTestInteriorAnnotationList(rendered.guides, rawPoint, 10)
@@ -1960,7 +2050,7 @@ function onInteriorLibraryFrontSvgContextMenu(event) {
   if (!rawPoint) return;
   const rendered = interiorLibraryRenderedAnnotations.value;
   const hitDimension = interiorLibraryShowDimensions.value
-    ? hitTestInteriorAnnotationList(rendered.dimensions, rawPoint, 12)
+    ? hitTestCachedAnnotationList(interiorLibraryAnnotationHitCache, rendered.dimensions, rawPoint, 12)
     : null;
   const hitGuide = !hitDimension && interiorLibraryShowGuideAnnotations.value
     ? hitTestInteriorAnnotationList(rendered.guides, rawPoint, 10)
@@ -2059,7 +2149,12 @@ function onDoorLibraryFrontSvgPointerDown(event) {
   const rawPoint = getDoorLibraryFrontSvgPoint(event);
   if (!rawPoint) return;
   syncDoorLibraryCursorPoint(rawPoint, doorLibraryCurrentSnapPoint.value);
-  const hitDimension = hitTestInteriorAnnotationList(doorLibraryRenderedAnnotations.value.dimensions, rawPoint, 12);
+  const hitDimension = hitTestCachedAnnotationList(
+    doorLibraryAnnotationHitCache,
+    doorLibraryRenderedAnnotations.value.dimensions,
+    rawPoint,
+    12
+  );
   if (hitDimension) {
     doorLibrarySelectedAnnotation.value = {
       type: "dimension",
@@ -2090,24 +2185,14 @@ function onDoorLibraryFrontSvgPointerDown(event) {
 function onDoorLibraryFrontSvgPointerMove(event) {
   const rawPoint = getDoorLibraryFrontSvgPoint(event);
   if (!rawPoint) return;
-  syncDoorLibraryCursorPoint(rawPoint, null);
-  if (doorLibraryAnnotationTool.value === "dimension") {
-    const snappedPoint = getDoorLibrarySnappedFrontPoint(rawPoint);
-    syncDoorLibraryCursorPoint(rawPoint, snappedPoint);
-    if (snappedPoint && doorLibraryAnnotationDraft.value) {
-      updateDoorLibraryAnnotationDraft(snappedPoint);
-    }
-    doorLibraryHoverMode.value = null;
-    return;
-  }
-  doorLibraryCurrentSnapPoint.value = null;
-  const hitDimension = hitTestInteriorAnnotationList(doorLibraryRenderedAnnotations.value.dimensions, rawPoint, 12);
-  doorLibraryHoverMode.value = hitDimension ? "clicker" : null;
+  doorLibraryPendingPointerPoint.value = rawPoint;
+  scheduleDoorLibraryPointerProcessing();
 }
 function onDoorLibraryFrontSvgPointerLeave() {
   doorLibraryCurrentSnapPoint.value = null;
   clearDoorLibraryCursorPoint();
   doorLibraryHoverMode.value = null;
+  stopDoorLibraryPointerProcessing();
 }
 function onDoorLibraryViewerPointerMove(event) {
   if (doorLibraryPreviewMode.value === "model3d") {
@@ -2123,6 +2208,10 @@ function onDoorLibraryViewerPointerLeave() {
   clearDoorLibraryViewerCursorPoint();
   if (doorLibraryPreviewMode.value === "model3d") {
     stopDoorLibraryModelPanCursor();
+    return;
+  }
+  if (doorLibraryPreviewMode.value === "front2d") {
+    stopDoorLibraryPointerProcessing();
   }
 }
 function onDoorLibraryViewerPointerDown(event) {
@@ -2768,7 +2857,56 @@ function getViewerBoxesFromInteriorInstance(instance) {
   return [];
 }
 
-function buildFrontViewLinesFromBoxes(boxes) {
+function buildFrontViewBoxFingerprint(boxes) {
+  return (Array.isArray(boxes) ? boxes : [])
+    .map((box) => normalizeCabinetBox(box))
+    .filter(Boolean)
+    .map((box) => [
+      Number(box?.cx || 0).toFixed(3),
+      Number(box?.cy || 0).toFixed(3),
+      Number(box?.cz || 0).toFixed(3),
+      Number(box?.width || 0).toFixed(3),
+      Number(box?.depth || 0).toFixed(3),
+      Number(box?.height || 0).toFixed(3),
+      String(box?.lineColor || ""),
+    ].join("|"))
+    .join(";");
+}
+
+function getCachedFrontViewLines(cacheKey, boxes) {
+  const fingerprint = buildFrontViewBoxFingerprint(boxes);
+  const existing = frontViewGeometryCache.get(cacheKey);
+  if (existing?.fingerprint === fingerprint) {
+    return existing.value;
+  }
+  const value = buildFrontViewLinesFromBoxesUncached(boxes);
+  frontViewGeometryCache.set(cacheKey, { fingerprint, value });
+  return value;
+}
+
+function getInteriorInstanceFrontGeometryCacheKey(instance) {
+  const id = String(instance?.id || instance?.instance_code || "").trim() || "instance";
+  const checksum = String(instance?.snapshot_checksum || instance?.row_version || "").trim();
+  const viewerCount = Array.isArray(instance?.viewer_boxes) ? instance.viewer_boxes.length : 0;
+  const partCount = Array.isArray(instance?.part_snapshots) ? instance.part_snapshots.length : 0;
+  const boxSeed = instance?.interior_box_snapshot ? 1 : 0;
+  return `${id}::${checksum}::${viewerCount}::${partCount}::${boxSeed}`;
+}
+
+function getCachedInteriorInstanceFrontGeometry(instance) {
+  const cacheKey = getInteriorInstanceFrontGeometryCacheKey(instance);
+  const boxes = getViewerBoxesFromInteriorInstance(instance);
+  const fingerprint = buildFrontViewBoxFingerprint(boxes);
+  const existing = interiorInstanceFrontGeometryCache.get(cacheKey);
+  if (existing?.fingerprint === fingerprint) {
+    return existing.value;
+  }
+  const value = buildFrontViewLinesFromBoxesUncached(boxes);
+  interiorInstanceFrontGeometryCache.set(cacheKey, { fingerprint, value });
+  return value;
+}
+
+function buildFrontViewLinesFromBoxesUncached(boxes) {
   const normalized = Array.isArray(boxes) ? boxes.map(normalizeCabinetBox) : [];
   if (!normalized.length) {
     return { outer: [], inner: [], bounds: null };
@@ -2804,6 +2942,14 @@ function buildFrontViewLinesFromBoxes(boxes) {
     { ax: minX, az: maxZ, bx: minX, bz: minZ },
   ];
   return { outer, inner, bounds };
+}
+
+function buildFrontViewLinesFromBoxes(boxes, cacheKey = "") {
+  const normalizedKey = String(cacheKey || "").trim();
+  if (!normalizedKey) {
+    return buildFrontViewLinesFromBoxesUncached(boxes);
+  }
+  return getCachedFrontViewLines(normalizedKey, boxes);
 }
 
 const activeInteriorLibraryViewerBoxes = computed(() => {
@@ -2856,10 +3002,20 @@ const activeDoorLibraryViewerBoxes = computed(() => {
   return [];
 });
 const interiorLibraryFrontView = computed(() =>
-  buildFrontViewLinesFromBoxes(activeInteriorLibraryStructureViewerBoxes.value || [])
+  buildFrontViewLinesFromBoxes(
+    activeInteriorLibraryStructureViewerBoxes.value || [],
+    subCategoryDesignEditorOpen.value
+      ? `interior-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
+      : `interior-structure:order:${String(activeInteriorLibraryOrderDesign.value?.id || activeInteriorLibrarySourceDesign.value?.id || "none").trim()}`
+  )
 );
 const doorLibraryFrontView = computed(() =>
-  buildFrontViewLinesFromBoxes(activeDoorLibraryViewerBoxes.value || [])
+  buildFrontViewLinesFromBoxes(
+    activeDoorLibraryViewerBoxes.value || [],
+    subCategoryDesignEditorOpen.value
+      ? `door-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
+      : `door-structure:order:${String(activeDoorLibraryOrderDesign.value?.id || activeDoorLibrarySourceDesign.value?.id || "none").trim()}`
+  )
 );
 const doorLibraryFrontBaseViewBox = computed(() => {
   const bounds = doorLibraryFrontView.value?.bounds;
@@ -3041,55 +3197,63 @@ function resolveInteriorInstanceLineColor(instance) {
     DEFAULT_INTERIOR_LINE_COLOR
   );
 }
-const interiorLibraryPreviewInstanceSvgLines = computed(() => {
-  const projection = interiorLibraryPreviewProjection.value;
-  if (!projection) return [];
-  return activeInteriorLibraryInstances.value
-    .slice()
-    .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
-    .flatMap((instance) => {
-      const lineColor = resolveInteriorInstanceLineColor(instance);
-      return buildFrontViewLinesFromBoxes(getViewerBoxesFromInteriorInstance(instance)).inner.map((line, index) => ({
-        ...projection.project(line, 1.15, true),
-        color: lineColor,
-        key: `${String(instance?.id || instance?.instance_code || "instance")}-${index}`,
-      }));
-    });
-});
-const interiorLibraryPreviewInstances2d = computed(() => {
-  const projection = interiorLibraryPreviewProjection.value;
-  if (!projection) return [];
-  return activeInteriorLibraryInstances.value
+const interiorLibraryPreviewInstanceGeometry = computed(() =>
+  activeInteriorLibraryInstances.value
     .slice()
     .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
     .map((instance, index) => {
-      const data = buildFrontViewLinesFromBoxes(getViewerBoxesFromInteriorInstance(instance));
+      const data = getCachedInteriorInstanceFrontGeometry(instance);
       if (!data?.bounds) return null;
       const group = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || ""));
-      const lineColor = resolveInteriorInstanceLineColor(instance);
-      const outerLines = (data.outer || []).map((line) => projection.project(line, 1.8, false));
-      const innerLines = (data.inner || []).map((line) => projection.project(line, 1.15, true));
-      const x1 = projection.project({ ax: data.bounds.minX, az: data.bounds.minZ, bx: data.bounds.minX, bz: data.bounds.minZ }, 1, false).x1;
-      const y1 = projection.project({ ax: data.bounds.minX, az: data.bounds.maxZ, bx: data.bounds.minX, bz: data.bounds.maxZ }, 1, false).y1;
-      const x2 = projection.project({ ax: data.bounds.maxX, az: data.bounds.minZ, bx: data.bounds.maxX, bz: data.bounds.minZ }, 1, false).x1;
-      const y2 = projection.project({ ax: data.bounds.minX, az: data.bounds.minZ, bx: data.bounds.minX, bz: data.bounds.minZ }, 1, false).y1;
       return {
         id: String(instance?.id || "").trim(),
         instanceCode: String(instance?.instance_code || "").trim(),
         groupTitle: String(group?.group_title || group?.title || instance?.instance_code || "قطعه داخلی").trim(),
-        lineColor,
+        lineColor: resolveInteriorInstanceLineColor(instance),
         visualOrder: index,
-        outerLines,
-        innerLines,
-        boundsRect: {
-          x: Math.min(x1, x2),
-          y: Math.min(y1, y2),
-          w: Math.abs(x2 - x1),
-          h: Math.abs(y2 - y1),
-        },
+        geometry: data,
       };
     })
-    .filter(Boolean);
+    .filter(Boolean)
+);
+const interiorLibraryPreviewInstanceSvgLines = computed(() => {
+  const projection = interiorLibraryPreviewProjection.value;
+  if (!projection) return [];
+  return interiorLibraryPreviewInstanceGeometry.value.flatMap((instance) =>
+    (instance.geometry?.inner || []).map((line, index) => ({
+      ...projection.project(line, 1.15, true),
+      color: instance.lineColor,
+      key: `${String(instance.id || instance.instanceCode || "instance")}-${index}`,
+    }))
+  );
+});
+const interiorLibraryPreviewInstances2d = computed(() => {
+  const projection = interiorLibraryPreviewProjection.value;
+  if (!projection) return [];
+  return interiorLibraryPreviewInstanceGeometry.value.map((instance) => {
+    const data = instance.geometry;
+    const outerLines = (data.outer || []).map((line) => projection.project(line, 1.8, false));
+    const innerLines = (data.inner || []).map((line) => projection.project(line, 1.15, true));
+    const x1 = projection.project({ ax: data.bounds.minX, az: data.bounds.minZ, bx: data.bounds.minX, bz: data.bounds.minZ }, 1, false).x1;
+    const y1 = projection.project({ ax: data.bounds.minX, az: data.bounds.maxZ, bx: data.bounds.minX, bz: data.bounds.maxZ }, 1, false).y1;
+    const x2 = projection.project({ ax: data.bounds.maxX, az: data.bounds.minZ, bx: data.bounds.maxX, bz: data.bounds.minZ }, 1, false).x1;
+    const y2 = projection.project({ ax: data.bounds.minX, az: data.bounds.minZ, bx: data.bounds.minX, bz: data.bounds.minZ }, 1, false).y1;
+    return {
+      id: instance.id,
+      instanceCode: instance.instanceCode,
+      groupTitle: instance.groupTitle,
+      lineColor: instance.lineColor,
+      visualOrder: instance.visualOrder,
+      outerLines,
+      innerLines,
+      boundsRect: {
+        x: Math.min(x1, x2),
+        y: Math.min(y1, y2),
+        w: Math.abs(x2 - x1),
+        h: Math.abs(y2 - y1),
+      },
+    };
+  });
 });
 watch(interiorLibraryPreviewInstances2d, (next) => {
   interiorLibraryInstanceHitCache.value = buildInteriorLibraryInstanceHitCache(next || []);
@@ -3433,6 +3597,11 @@ watch(interiorLibraryAnnotationTool, (tool) => {
   }
   interiorLibraryAnnotationDraft.value = null;
   interiorLibraryCurrentSnapPoint.value = null;
+  interiorLibraryAnnotationHitCache.value = {
+    token: "",
+    point: null,
+    result: null,
+  };
 });
 watch(interiorLibraryPreviewMode, () => {
   hideInteriorLibraryOverlapPicker();
@@ -3458,14 +3627,23 @@ watch(doorLibraryAnnotationTool, (tool) => {
   if (tool === "dimension") return;
   doorLibraryAnnotationDraft.value = null;
   doorLibraryCurrentSnapPoint.value = null;
+  doorLibraryAnnotationHitCache.value = {
+    token: "",
+    point: null,
+    result: null,
+  };
 });
 watch(doorLibraryPreviewMode, () => {
   stopDoorLibraryModelPanCursor();
   clearDoorLibraryViewerCursorPoint();
+  if (doorLibraryPreviewMode.value !== "front2d") {
+    stopDoorLibraryPointerProcessing();
+  }
 });
 watch(doorLibraryOpen, (open) => {
   if (!open) {
     stopDoorLibraryModelPanCursor();
+    stopDoorLibraryPointerProcessing();
   }
 });
 watch(interiorLibraryViewerWrapEl, (el) => {
@@ -13958,6 +14136,7 @@ function closeInteriorLibrary() {
 function closeDoorLibrary() {
   doorLibraryOpen.value = false;
   doorLibraryForcedOrderDesignId.value = "";
+  stopDoorLibraryPointerProcessing();
   resetDoorLibraryAnnotations();
   clearDoorLibraryCursorPoint();
   clearDoorLibraryViewerCursorPoint();

@@ -95,10 +95,18 @@ export function hitTestInteriorAnnotationList(items, point, tolerance = 10) {
     x: Number(point?.x) || 0,
     y: Number(point?.y) || 0,
   };
+  const safeTolerance = Math.max(1, Number(tolerance) || 0);
   for (let index = (Array.isArray(items) ? items.length : 0) - 1; index >= 0; index -= 1) {
     const item = items[index];
+    const minX = Math.min(Number(item?.screenStart?.x) || 0, Number(item?.screenEnd?.x) || 0) - safeTolerance;
+    const maxX = Math.max(Number(item?.screenStart?.x) || 0, Number(item?.screenEnd?.x) || 0) + safeTolerance;
+    const minY = Math.min(Number(item?.screenStart?.y) || 0, Number(item?.screenEnd?.y) || 0) - safeTolerance;
+    const maxY = Math.max(Number(item?.screenStart?.y) || 0, Number(item?.screenEnd?.y) || 0) + safeTolerance;
+    if (targetPoint.x < minX || targetPoint.x > maxX || targetPoint.y < minY || targetPoint.y > maxY) {
+      continue;
+    }
     const hitDistance = distancePointToSegment(targetPoint, item?.screenStart, item?.screenEnd);
-    if (hitDistance <= tolerance) {
+    if (hitDistance <= safeTolerance) {
       return item;
     }
   }
