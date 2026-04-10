@@ -6691,6 +6691,7 @@ async function refreshSubCategoryDesignPreview() {
     const payload = await res.json();
     if (seq !== subCategoryDesignPreviewRequestSeq.value) return;
     subCategoryDesignEditorPreview.value = payload;
+    syncInteriorPreviewInstancesIntoDraft(payload?.interior_instances || []);
     syncDoorPreviewInstancesIntoDraft(payload?.door_instances || []);
   } catch (error) {
     if (seq !== subCategoryDesignPreviewRequestSeq.value) return;
@@ -8359,6 +8360,30 @@ function syncDoorInstanceInDraft(instance) {
     return;
   }
   draft.door_instances = (draft.door_instances || []).map((row, index) => index === existingIndex ? normalized : row);
+}
+function syncInteriorPreviewInstancesIntoDraft(instances) {
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft) return;
+  const previewById = new Map(
+    (Array.isArray(instances) ? instances : [])
+      .map((item) => normalizeInteriorInstanceRecord(item))
+      .filter(Boolean)
+      .map((item) => [String(item.id), item])
+  );
+  if (!previewById.size) return;
+  draft.interior_instances = (draft.interior_instances || []).map((row) => {
+    const preview = previewById.get(String(row?.id || ""));
+    if (!preview) return row;
+    return {
+      ...row,
+      interior_box_snapshot: { ...(preview.interior_box_snapshot || {}) },
+      param_values: { ...(preview.param_values || {}) },
+      param_meta: { ...(preview.param_meta || {}) },
+      part_snapshots: Array.isArray(preview.part_snapshots) ? preview.part_snapshots.map((item) => ({ ...(item || {}) })) : [],
+      viewer_boxes: Array.isArray(preview.viewer_boxes) ? preview.viewer_boxes.map((item) => ({ ...(item || {}) })) : [],
+      status: preview.status || row.status,
+    };
+  });
 }
 function syncDoorPreviewInstancesIntoDraft(instances) {
   const draft = subCategoryDesignEditorDraft.value;
