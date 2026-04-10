@@ -651,6 +651,7 @@ const doorLibraryViewerWrapEl = ref(null);
 const doorLibraryFrontZoom = ref(1);
 const doorLibraryFrontPan = ref({ x: 0, y: 0 });
 const doorLibraryFrontPanning = ref(false);
+const DOOR_LIBRARY_CONTROLLER_STATE_STORAGE_KEY = "designkp_door_controller_state_v1";
 function isOrderDesignSaving(designId) {
   const key = String(designId || "").trim();
   return !!key && orderDesignSavingIds.value.includes(key);
@@ -886,6 +887,77 @@ function resetDoorLibraryPreviewView(zoomIn = false) {
   doorLibraryFrontZoom.value = zoomIn ? INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR : 1;
   doorLibraryFrontPan.value = { x: 0, y: 0 };
   stopDoorLibraryFrontPan();
+}
+function getDoorLibraryControllerStateTargetKey() {
+  const scope = subCategoryDesignEditorOpen.value ? "subcat" : "order";
+  const targetId = String(activeDoorLibraryTargetId.value || "").trim();
+  return targetId ? `${scope}:${targetId}` : "";
+}
+function readDoorLibraryControllerStateMap() {
+  if (typeof window === "undefined" || !window.localStorage) return {};
+  try {
+    const raw = window.localStorage.getItem(DOOR_LIBRARY_CONTROLLER_STATE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+function writeDoorLibraryControllerStateMap(map) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(DOOR_LIBRARY_CONTROLLER_STATE_STORAGE_KEY, JSON.stringify(map || {}));
+  } catch (_) {
+    // ignore storage failures
+  }
+}
+function clearPersistedDoorLibraryControllerState() {
+  const targetKey = getDoorLibraryControllerStateTargetKey();
+  if (!targetKey) return;
+  const stateMap = readDoorLibraryControllerStateMap();
+  if (Object.prototype.hasOwnProperty.call(stateMap, targetKey)) {
+    delete stateMap[targetKey];
+    writeDoorLibraryControllerStateMap(stateMap);
+  }
+}
+function persistDoorLibraryControllerState() {
+  const targetKey = getDoorLibraryControllerStateTargetKey();
+  if (!targetKey) return;
+  const stateMap = readDoorLibraryControllerStateMap();
+  const selectedIds = (Array.isArray(doorLibrarySelectedInstanceIds.value) ? doorLibrarySelectedInstanceIds.value : [])
+    .map((id) => String(id || "").trim())
+    .filter(Boolean);
+  if (!selectedIds.length) {
+    return;
+  }
+  stateMap[targetKey] = {
+    selected_part_ids: selectedIds,
+    controller_box_snapshot: doorLibraryControllerRect.value
+      ? {
+          x: Number(doorLibraryControllerRect.value.x) || 0,
+          y: Number(doorLibraryControllerRect.value.y) || 0,
+          w: Number(doorLibraryControllerRect.value.w) || 0,
+          h: Number(doorLibraryControllerRect.value.h) || 0,
+        }
+      : null,
+    saved_at: Date.now(),
+  };
+  writeDoorLibraryControllerStateMap(stateMap);
+}
+function restoreDoorLibraryControllerState() {
+  const targetKey = getDoorLibraryControllerStateTargetKey();
+  if (!targetKey) return;
+  const stateMap = readDoorLibraryControllerStateMap();
+  const saved = stateMap?.[targetKey];
+  const validIds = new Set(
+    (Array.isArray(activeDoorLibrarySelectableParts.value) ? activeDoorLibrarySelectableParts.value : [])
+      .map((item) => String(item?.id || "").trim())
+      .filter(Boolean)
+  );
+  const restoredIds = (Array.isArray(saved?.selected_part_ids) ? saved.selected_part_ids : [])
+    .map((id) => String(id || "").trim())
+    .filter((id) => id && validIds.has(id));
+  doorLibrarySelectedInstanceIds.value = restoredIds;
 }
 function resetDoorLibraryAnnotations() {
   doorLibraryAnnotations.value = createEmptyInteriorLibraryAnnotations();
@@ -2862,6 +2934,11 @@ const activeInteriorLibraryTargetId = computed(() =>
     ? String(subCategoryDesignEditorDraft.value?.id || "").trim()
     : String(activeInteriorLibraryOrderDesign.value?.id || "").trim()
 );
+const activeDoorLibraryTargetId = computed(() =>
+  subCategoryDesignEditorOpen.value
+    ? String(subCategoryDesignEditorDraft.value?.id || "").trim()
+    : String(activeDoorLibraryOrderDesign.value?.id || "").trim()
+);
 const activeInteriorLibraryInstances = computed(() =>
   subCategoryDesignEditorOpen.value
     ? (subCategoryDesignEditorDraft.value?.interior_instances || [])
@@ -3465,6 +3542,95 @@ const doorLibraryControllerRect = computed(() => {
     h: height,
   };
 });
+const doorLibraryControllerFrameRect = computed(() => {
+  const bounds = doorLibraryFrontView.value?.bounds;
+  if (!bounds) return null;
+  const left = Number(bounds.minX) || 0;
+  const right = Number(bounds.maxX) || 0;
+  const top = -(Number(bounds.maxZ) || 0);
+  const bottom = -(Number(bounds.minZ) || 0);
+  return {
+    x: left,
+    y: top,
+    w: Math.max(0, right - left),
+    h: Math.max(0, bottom - top),
+  };
+});
+const doorLibraryControllerParamValues = computed(() => {
+  const rect = doorLibraryControllerRect.value;
+  const frame = doorLibraryControllerFrameRect.value;
+  if (!rect || !frame) return null;
+  return {
+    left: Math.max(0, Number(rect.x) - Number(frame.x)),
+    top: Math.max(0, Number(rect.y) - Number(frame.y)),
+    right: Math.max(0, (Number(frame.x) + Number(frame.w)) - (Number(rect.x) + Number(rect.w))),
+    bottom_offset: Math.max(0, (Number(frame.y) + Number(frame.h)) - (Number(rect.y) + Number(rect.h))),
+  };
+});
+const doorLibraryControllerVisualScale = computed(() => {
+  const zoom = Math.min(
+    INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
+    Math.max(INTERIOR_LIBRARY_FRONT_ZOOM_MIN, Number(doorLibraryFrontZoom.value) || 1)
+  );
+  return 1 / zoom;
+});
+const doorLibraryControllerVisuals = computed(() => {
+  const rect = doorLibraryControllerRect.value;
+  if (!rect || doorLibraryPreviewMode.value !== "front2d") return [];
+  const scale = doorLibraryControllerVisualScale.value;
+  const gap = Math.max(4 * scale, 3);
+  const handleSize = Math.max(31.92 * scale, 24);
+  const inputW = Math.max(62.5 * scale, 52);
+  const inputH = Math.max(22.5 * scale, 20);
+  const horizontal = { w: handleSize, h: handleSize, inputW, inputH };
+  const vertical = { w: handleSize, h: handleSize, inputW, inputH };
+  return [
+    {
+      id: "left",
+      kind: "horizontal",
+      direction: "left",
+      anchor: { x: rect.x, y: rect.y + (rect.h * 0.5) },
+      x: rect.x - horizontal.w,
+      y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
+      fieldX: rect.x - horizontal.w - gap - horizontal.inputW,
+      fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
+      ...horizontal,
+    },
+    {
+      id: "top",
+      kind: "vertical",
+      direction: "up",
+      anchor: { x: rect.x + (rect.w * 0.5), y: rect.y },
+      x: rect.x + (rect.w * 0.5) - (vertical.w * 0.5),
+      y: rect.y - vertical.h,
+      fieldX: rect.x + (rect.w * 0.5) - (vertical.inputW * 0.5),
+      fieldY: rect.y - vertical.h - gap - vertical.inputH,
+      ...vertical,
+    },
+    {
+      id: "right",
+      kind: "horizontal",
+      direction: "right",
+      anchor: { x: rect.x + rect.w, y: rect.y + (rect.h * 0.5) },
+      x: rect.x + rect.w,
+      y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
+      fieldX: rect.x + rect.w + horizontal.w + gap,
+      fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
+      ...horizontal,
+    },
+    {
+      id: "bottom_offset",
+      kind: "vertical",
+      direction: "down",
+      anchor: { x: rect.x + (rect.w * 0.5), y: rect.y + rect.h },
+      x: rect.x + (rect.w * 0.5) - (vertical.w * 0.5),
+      y: rect.y + rect.h,
+      fieldX: rect.x + (rect.w * 0.5) - (vertical.inputW * 0.5),
+      fieldY: rect.y + rect.h + vertical.h + gap,
+      ...vertical,
+    },
+  ];
+});
 const interiorLibraryControllerVisualScale = computed(() => {
   const zoom = Math.min(
     INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
@@ -3898,6 +4064,20 @@ watch(activeDoorLibrarySelectableParts, (items) => {
     doorLibraryHoveredInstanceId.value = "";
   }
 }, { immediate: true });
+watch(
+  [activeDoorLibraryTargetId, activeDoorLibrarySelectableParts],
+  () => {
+    restoreDoorLibraryControllerState();
+  },
+  { immediate: true }
+);
+watch(
+  [doorLibrarySelectedInstanceIds, doorLibraryControllerRect],
+  () => {
+    persistDoorLibraryControllerState();
+  },
+  { deep: true }
+);
 watch(activeInteriorLibraryTargetId, () => {
   closeInteriorInstanceContextMenu();
 });
@@ -15068,6 +15248,7 @@ onMounted(() => {
       return;
     }
     if (doorLibraryOpen.value && doorLibrarySelectedInstanceIds.value.length) {
+      clearPersistedDoorLibraryControllerState();
       clearDoorLibraryInstanceSelection();
       doorLibraryHoveredInstanceId.value = "";
       e.preventDefault();
@@ -20406,6 +20587,30 @@ onBeforeUnmount(() => {
                     :style="{ '--controller-line-color': '#2f7fd3' }"
                     class="subCategoryDesignEditor__controllerRect"
                   />
+                  <g
+                    v-for="controller in doorLibraryControllerVisuals"
+                    :key="`door-controller-${controller.id}`"
+                    class="subCategoryDesignEditor__controllerHandle"
+                  >
+                    <path
+                      :d="controller.kind === 'horizontal'
+                        ? buildInteriorControllerHorizontalArrowPath(controller.direction, controller.x, controller.y, controller.w, controller.h)
+                        : buildInteriorControllerVerticalArrowPath(controller.direction, controller.x, controller.y, controller.w, controller.h)"
+                      class="subCategoryDesignEditor__controllerBody"
+                    />
+                    <foreignObject
+                      :x="controller.fieldX"
+                      :y="controller.fieldY"
+                      :width="controller.inputW"
+                      :height="controller.inputH"
+                    >
+                      <div class="subCategoryDesignEditor__controllerValueShell" xmlns="http://www.w3.org/1999/xhtml">
+                        <div class="subCategoryDesignEditor__controllerValueButton">
+                          {{ formatInteriorControllerDisplayValue(doorLibraryControllerParamValues?.[controller.id]) }}
+                        </div>
+                      </div>
+                    </foreignObject>
+                  </g>
                 </g>
                 <template
                   v-if="doorLibraryRenderedAnnotations.dimensions.length"
