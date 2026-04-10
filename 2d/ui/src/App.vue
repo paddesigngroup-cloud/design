@@ -18470,7 +18470,10 @@ onBeforeUnmount(() => {
                   class="subCategoryDesignEditor__overlayCursorImage"
                   preserveAspectRatio="xMidYMid meet"
                 />
-                <template v-if="interiorLibraryShowGuideAnnotations">
+                <template
+                  v-if="interiorLibraryShowGuideAnnotations"
+                  v-memo="[interiorLibraryShowGuideAnnotations, interiorLibraryRenderedAnnotations.guides, interiorLibraryRenderedAnnotations.draftGuide]"
+                >
                   <line
                     v-for="guide in interiorLibraryRenderedAnnotations.guides"
                     :key="guide.id"
@@ -18496,32 +18499,34 @@ onBeforeUnmount(() => {
                     opacity="0.75"
                   />
                 </template>
-                <line
-                  v-for="(line, index) in interiorLibraryPreviewSvgLines.outer"
-                  :key="`interior-outer-${index}`"
-                  :x1="line.x1"
-                  :y1="line.y1"
-                  :x2="line.x2"
-                  :y2="line.y2"
-                  :stroke-width="line.sw"
-                  stroke="#4f4144"
-                  stroke-linecap="round"
-                />
-                <template v-if="interiorLibraryShowInnerLines">
+                <g v-memo="[interiorLibraryPreviewSvgLines.outer, interiorLibraryPreviewSvgLines.inner, interiorLibraryShowInnerLines]">
                   <line
-                    v-for="(line, index) in interiorLibraryPreviewSvgLines.inner"
-                    :key="`interior-design-inner-${index}`"
+                    v-for="(line, index) in interiorLibraryPreviewSvgLines.outer"
+                    :key="`interior-outer-${index}`"
                     :x1="line.x1"
                     :y1="line.y1"
                     :x2="line.x2"
                     :y2="line.y2"
                     :stroke-width="line.sw"
-                    stroke="#b9c3cd"
+                    stroke="#4f4144"
                     stroke-linecap="round"
-                    stroke-dasharray="6 8"
-                    opacity="0.82"
                   />
-                </template>
+                  <template v-if="interiorLibraryShowInnerLines">
+                    <line
+                      v-for="(line, index) in interiorLibraryPreviewSvgLines.inner"
+                      :key="`interior-design-inner-${index}`"
+                      :x1="line.x1"
+                      :y1="line.y1"
+                      :x2="line.x2"
+                      :y2="line.y2"
+                      :stroke-width="line.sw"
+                      stroke="#b9c3cd"
+                      stroke-linecap="round"
+                      stroke-dasharray="6 8"
+                      opacity="0.82"
+                    />
+                  </template>
+                </g>
                 <g
                   v-for="instance in interiorLibraryPreviewInstances2d"
                   :key="`interior-instance-${instance.id}`"
@@ -18652,7 +18657,10 @@ onBeforeUnmount(() => {
                     </foreignObject>
                   </g>
                 </g>
-                <template v-if="interiorLibraryShowDimensions">
+                <template
+                  v-if="interiorLibraryShowDimensions"
+                  v-memo="[interiorLibraryShowDimensions, interiorLibraryRenderedAnnotations.dimensions, interiorLibraryRenderedAnnotations.draftDimension]"
+                >
                   <g
                     v-for="dimension in interiorLibraryRenderedAnnotations.dimensions"
                     :key="dimension.id"
@@ -20102,18 +20110,23 @@ onBeforeUnmount(() => {
                   class="subCategoryDesignEditor__overlayCursorImage"
                   preserveAspectRatio="xMidYMid meet"
                 />
-                <line
-                  v-for="(line, index) in doorLibraryFrontView.inner"
-                  :key="`door-inner-${index}`"
-                  :x1="line.ax"
-                  :y1="-line.az"
-                  :x2="line.bx"
-                  :y2="-line.bz"
-                  :stroke="line.lineColor || '#7B858C'"
-                  stroke-width="5.6"
-                  stroke-linecap="round"
-                />
-                <template v-if="doorLibraryRenderedAnnotations.dimensions.length">
+                <g v-memo="[doorLibraryFrontView.inner]">
+                  <line
+                    v-for="(line, index) in doorLibraryFrontView.inner"
+                    :key="`door-inner-${index}`"
+                    :x1="line.ax"
+                    :y1="-line.az"
+                    :x2="line.bx"
+                    :y2="-line.bz"
+                    :stroke="line.lineColor || '#7B858C'"
+                    stroke-width="5.6"
+                    stroke-linecap="round"
+                  />
+                </g>
+                <template
+                  v-if="doorLibraryRenderedAnnotations.dimensions.length"
+                  v-memo="[doorLibraryRenderedAnnotations.dimensions]"
+                >
                   <g v-for="dimension in doorLibraryRenderedAnnotations.dimensions" :key="dimension.id">
                     <line :x1="dimension.extensionA.x1" :y1="dimension.extensionA.y1" :x2="dimension.extensionA.x2" :y2="dimension.extensionA.y2" :stroke="dimension.selected ? doorLibraryAnnotationColors.selected : doorLibraryAnnotationColors.dimension" :stroke-width="dimension.selected ? 2.4 : 1.6" stroke-linecap="round" />
                     <line :x1="dimension.extensionB.x1" :y1="dimension.extensionB.y1" :x2="dimension.extensionB.x2" :y2="dimension.extensionB.y2" :stroke="dimension.selected ? doorLibraryAnnotationColors.selected : doorLibraryAnnotationColors.dimension" :stroke-width="dimension.selected ? 2.4 : 1.6" stroke-linecap="round" />
@@ -20123,7 +20136,10 @@ onBeforeUnmount(() => {
                     <text :x="dimension.textX" :y="dimension.textY" :fill="dimension.selected ? doorLibraryAnnotationColors.selected : doorLibraryAnnotationColors.dimension" text-anchor="middle" dominant-baseline="central" class="subCategoryDesignEditor__dimensionText">{{ dimension.text }}</text>
                   </g>
                 </template>
-                <g v-if="doorLibraryRenderedAnnotations.draftDimension">
+                <g
+                  v-if="doorLibraryRenderedAnnotations.draftDimension"
+                  v-memo="[doorLibraryRenderedAnnotations.draftDimension]"
+                >
                   <line :x1="doorLibraryRenderedAnnotations.draftDimension.extensionA.x1" :y1="doorLibraryRenderedAnnotations.draftDimension.extensionA.y1" :x2="doorLibraryRenderedAnnotations.draftDimension.extensionA.x2" :y2="doorLibraryRenderedAnnotations.draftDimension.extensionA.y2" :stroke="doorLibraryAnnotationColors.dimension" stroke-width="1.6" stroke-linecap="round" />
                   <line :x1="doorLibraryRenderedAnnotations.draftDimension.extensionB.x1" :y1="doorLibraryRenderedAnnotations.draftDimension.extensionB.y1" :x2="doorLibraryRenderedAnnotations.draftDimension.extensionB.x2" :y2="doorLibraryRenderedAnnotations.draftDimension.extensionB.y2" :stroke="doorLibraryAnnotationColors.dimension" stroke-width="1.6" stroke-linecap="round" />
                   <line :x1="doorLibraryRenderedAnnotations.draftDimension.tickA.x1" :y1="doorLibraryRenderedAnnotations.draftDimension.tickA.y1" :x2="doorLibraryRenderedAnnotations.draftDimension.tickA.x2" :y2="doorLibraryRenderedAnnotations.draftDimension.tickA.y2" :stroke="doorLibraryAnnotationColors.dimension" stroke-width="1.6" stroke-linecap="round" />
