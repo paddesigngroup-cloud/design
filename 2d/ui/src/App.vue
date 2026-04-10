@@ -19393,19 +19393,6 @@ onBeforeUnmount(() => {
               >
                 <img src="/icons/zoom-out.png" alt="" />
               </button>
-              <div v-if="interiorLibraryPreviewMode === 'model3d'" class="subCategoryDesignEditor__previewOpacity">
-                <span class="subCategoryDesignEditor__previewOpacityValue">0</span>
-                <input
-                  :value="interiorLibraryPreviewOpacity"
-                  class="subCategoryDesignEditor__previewOpacitySlider"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  @input="setInteriorLibraryPreviewOpacity($event.target.value)"
-                />
-                <span class="subCategoryDesignEditor__previewOpacityValue">100</span>
-              </div>
             </div>
           </div>
           <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
@@ -19425,6 +19412,19 @@ onBeforeUnmount(() => {
               @pointerdown="onInteriorLibraryViewerPointerDown"
               @dblclick.prevent="focusInteriorLibraryPreviewCloser"
             >
+              <div v-if="interiorLibraryPreviewMode === 'model3d'" class="subCategoryDesignEditor__previewOpacity subCategoryDesignEditor__previewOpacity--overlay">
+                <span class="subCategoryDesignEditor__previewOpacityValue">0</span>
+                <input
+                  :value="interiorLibraryPreviewOpacity"
+                  class="subCategoryDesignEditor__previewOpacitySlider"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  @input="setInteriorLibraryPreviewOpacity($event.target.value)"
+                />
+                <span class="subCategoryDesignEditor__previewOpacityValue">100</span>
+              </div>
               <div v-if="interiorLibraryPreviewMode === 'front2d'" class="subCategoryDesignEditor__annotationTools">
                 <button
                   type="button"
@@ -21079,19 +21079,6 @@ onBeforeUnmount(() => {
               >
                 <img src="/icons/zoom-out.png" alt="" />
               </button>
-              <div v-if="doorLibraryPreviewMode === 'model3d'" class="subCategoryDesignEditor__previewOpacity">
-                <span class="subCategoryDesignEditor__previewOpacityValue">0</span>
-                <input
-                  :value="doorLibraryPreviewOpacity"
-                  class="subCategoryDesignEditor__previewOpacitySlider"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  @input="setDoorLibraryPreviewOpacity($event.target.value)"
-                />
-                <span class="subCategoryDesignEditor__previewOpacityValue">100</span>
-              </div>
             </div>
           </div>
           <div class="designMenu__cabinetState">
@@ -21121,6 +21108,19 @@ onBeforeUnmount(() => {
               @pointerdown="onDoorLibraryViewerPointerDown"
               @dblclick.prevent="handleDoorLibraryPreviewDoubleClick"
             >
+              <div v-if="doorLibraryPreviewMode === 'model3d'" class="subCategoryDesignEditor__previewOpacity subCategoryDesignEditor__previewOpacity--overlay">
+                <span class="subCategoryDesignEditor__previewOpacityValue">0</span>
+                <input
+                  :value="doorLibraryPreviewOpacity"
+                  class="subCategoryDesignEditor__previewOpacitySlider"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  @input="setDoorLibraryPreviewOpacity($event.target.value)"
+                />
+                <span class="subCategoryDesignEditor__previewOpacityValue">100</span>
+              </div>
               <div v-if="doorLibraryPreviewMode === 'front2d'" class="subCategoryDesignEditor__annotationTools">
                 <button
                   type="button"

@@ -3910,6 +3910,19 @@ option {
   gap: 8px;
   padding-inline-start: 4px;
 }
+.subCategoryDesignEditor__previewOpacity--overlay {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  z-index: 4;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(11, 34, 48, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 24px rgba(70, 24, 42, 0.08);
+  direction: ltr;
+}
 .subCategoryDesignEditor__previewOpacityValue {
   color: #7a5d67;
   font-size: 12px;
