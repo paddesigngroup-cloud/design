@@ -152,6 +152,8 @@ class SubCategoryDesignCreate(BaseModel):
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
     parts: list[SubCategoryDesignPartSelectionPayload] = Field(default_factory=list)
+    interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
+    door_instances: list["SubCategoryDesignDoorInstanceDraftPayload"] = Field(default_factory=list)
 
 
 class SubCategoryDesignUpdate(BaseModel):
@@ -163,6 +165,8 @@ class SubCategoryDesignUpdate(BaseModel):
     sort_order: int = Field(ge=0)
     is_system: bool
     parts: list[SubCategoryDesignPartSelectionPayload] = Field(default_factory=list)
+    interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
+    door_instances: list["SubCategoryDesignDoorInstanceDraftPayload"] = Field(default_factory=list)
 
 
 class SubCategoryDesignPreviewDraftRequest(BaseModel):
@@ -243,6 +247,7 @@ class SubCategoryDesignDoorInstanceCreate(BaseModel):
     line_color: str | None = Field(default=None, min_length=7, max_length=7)
     structural_part_formula_ids: list[int] = Field(default_factory=list)
     dependent_interior_instance_ids: list[uuid.UUID | str] = Field(default_factory=list)
+    controller_box_snapshot: dict[str, object] = Field(default_factory=dict)
     param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
@@ -611,6 +616,10 @@ async def create_sub_category_design(payload: SubCategoryDesignCreate, session: 
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Design ID or code is already used.") from exc
     await _replace_parts(session, design=item, sub_category=sub_category, parts=payload.parts)
+    item = await _load_design(session, item.id)
+    await _replace_interior_instances(session, design=item, payloads=list(payload.interior_instances or []))
+    item = await _load_design(session, item.id)
+    await _replace_door_instances(session, design=item, payloads=list(payload.door_instances or []))
     await session.flush()
     item = await _load_design(session, item.id)
     await rebuild_design_snapshots(session, item)
@@ -650,6 +659,10 @@ async def update_sub_category_design(
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     await _replace_parts(session, design=item, sub_category=sub_category, parts=payload.parts)
+    item = await _load_design(session, item.id)
+    await _replace_interior_instances(session, design=item, payloads=list(payload.interior_instances or []))
+    item = await _load_design(session, item.id)
+    await _replace_door_instances(session, design=item, payloads=list(payload.door_instances or []))
     try:
         await session.flush()
     except IntegrityError as exc:
@@ -754,90 +767,30 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
     sub_category = await session.get(SubCategory, item.sub_category_id)
     if not sub_category or sub_category.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found for this design.")
-    raw_params = {}
-    resolved_base_formulas = {}
-    parts: list[SubCategoryDesignPartPreviewItem] = []
-    viewer_boxes: list[dict[str, object]] = []
-    for part in sorted(item.parts, key=lambda row: (int(row.ui_order), int(row.part_formula_id))):
-        snapshot = next((snap for snap in part.snapshots), None)
-        if not snapshot:
-            continue
-        raw_params = snapshot.resolved_params or raw_params
-        resolved_base_formulas = snapshot.resolved_base_formulas or resolved_base_formulas
-        viewer_payload = snapshot.viewer_payload or {}
-        viewer_box = viewer_payload.get("box") if isinstance(viewer_payload, dict) else None
-        if isinstance(viewer_box, dict):
-            viewer_boxes.append(viewer_box)
-        parts.append(
-            SubCategoryDesignPartPreviewItem(
-                id=part.id,
-                part_formula_id=int(part.part_formula_id),
-                part_kind_id=int(part.part_kind_id),
-                part_code=part.part_code,
-                part_title=part.part_title,
-                enabled=part.enabled,
-                ui_order=int(part.ui_order),
-                resolved_part_formulas=snapshot.resolved_part_formulas or {},
-                viewer_payload=viewer_payload if isinstance(viewer_payload, dict) else {},
-            )
-        )
-    loaded_door_instances = list(getattr(item, "__dict__", {}).get("door_instances") or [])
-    return SubCategoryDesignPreviewResponse(
+    raw_params, resolved_base_formulas, snapshots, interior_instances, door_instances = await compose_sub_category_design_preview(
+        session,
+        admin_id=item.admin_id,
+        sub_category=sub_category,
+        part_selections=[
+            {
+                "part_formula_id": int(part.part_formula_id or 0),
+                "enabled": bool(part.enabled),
+                "ui_order": int(part.ui_order or 0),
+            }
+            for part in list(item.parts or [])
+        ],
+        interior_instances=list(item.interior_instances or []) if include_interior else [],
+        door_instances=list(getattr(item, "__dict__", {}).get("door_instances") or []) if include_doors else [],
+    )
+    return _serialize_preview(
         design_id=item.id,
         sub_category_id=sub_category.id,
         design_outline_color=await _category_outline_color(session, sub_category.cat_id),
-        resolved_params=raw_params,
+        raw_params=raw_params,
         resolved_base_formulas=resolved_base_formulas,
-        viewer_boxes=viewer_boxes + ([
-            dict(box or {})
-            for instance in sorted(item.interior_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
-            for box in list(instance.viewer_boxes or [])
-        ] if include_interior else []) + ([
-            dict(box or {})
-            for instance in sorted(loaded_door_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
-            for box in list(instance.viewer_boxes or [])
-        ] if include_doors else []),
-        parts=parts,
-        interior_instances=[
-            SubCategoryDesignInteriorInstancePreviewItem(
-                id=instance.id,
-                internal_part_group_id=instance.internal_part_group_id,
-                internal_part_group_code="",
-                internal_part_group_title="",
-                controller_type=None,
-                controller_bindings={},
-                instance_code=str(instance.instance_code or ""),
-                ui_order=int(instance.ui_order or 0),
-                placement_z=float(instance.placement_z or 0),
-                interior_box_snapshot=dict(instance.interior_box_snapshot or {}),
-                param_values={str(key): (None if value is None else str(value)) for key, value in dict(instance.param_values or {}).items()},
-                param_meta={str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()},
-                auto_params={},
-                part_snapshots=[dict(row or {}) for row in list(instance.part_snapshots or [])],
-                viewer_boxes=[dict(row or {}) for row in list(instance.viewer_boxes or [])],
-            )
-            for instance in sorted(item.interior_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
-        ] if include_interior else [],
-        door_instances=[
-            {
-                "id": instance.id,
-                "door_part_group_id": instance.door_part_group_id,
-                "controller_type": None,
-                "controller_bindings": {},
-                "instance_code": str(instance.instance_code or ""),
-                "line_color": str(getattr(instance, "line_color", "") or "").strip() or None,
-                "ui_order": int(instance.ui_order or 0),
-                "structural_part_formula_ids": [int(row) for row in list(instance.structural_part_formula_ids or []) if int(row) > 0],
-                "dependent_interior_instance_ids": [str(row).strip() for row in list(instance.dependent_interior_instance_ids or []) if str(row).strip()],
-                "controller_box_snapshot": dict(instance.controller_box_snapshot or {}),
-                "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(instance.param_values or {}).items()},
-                "param_meta": {str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()},
-                "part_snapshots": [dict(row or {}) for row in list(instance.part_snapshots or [])],
-                "viewer_boxes": [dict(row or {}) for row in list(instance.viewer_boxes or [])],
-                "status": str(instance.status or "draft").strip() or "draft",
-            }
-            for instance in sorted(loaded_door_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
-        ] if include_doors else [],
+        snapshots=snapshots,
+        interior_instances=interior_instances,
+        door_instances=door_instances,
     )
 
 
@@ -989,6 +942,24 @@ async def _refresh_design_door_instance(
         for snapshot in list(part.snapshots or [])[:1]
         if bool(part.enabled) and isinstance(snapshot.viewer_payload, dict) and isinstance(snapshot.viewer_payload.get("box"), dict)
     }
+    allowed_dependent_ids = {
+        str(item.id)
+        for item in list(getattr(design, "interior_instances", []) or [])
+        if getattr(item, "id", None) is not None
+    }
+    normalized_dependent_ids = [
+        str(row).strip()
+        for row in list(instance.dependent_interior_instance_ids or [])
+        if str(row).strip() and str(row).strip() in allowed_dependent_ids
+    ]
+    for interior in list(getattr(design, "interior_instances", []) or []):
+        if str(getattr(interior, "id", "") or "") not in normalized_dependent_ids:
+            continue
+        for row in list(getattr(interior, "part_snapshots", []) or []):
+            box = dict((row or {}).get("viewer_payload", {}) or {}).get("box")
+            part_formula_id = int((row or {}).get("part_formula_id") or 0)
+            if part_formula_id > 0 and isinstance(box, dict):
+                part_boxes[part_formula_id] = dict(box)
     resolved = await resolve_door_instance_preview(
         session,
         admin_id=design.admin_id,
@@ -999,7 +970,7 @@ async def _refresh_design_door_instance(
         line_color=str(getattr(instance, "line_color", "") or "").strip() or None,
         ui_order=int(instance.ui_order or 0),
         structural_part_formula_ids=list(instance.structural_part_formula_ids or []),
-        dependent_interior_instance_ids=[str(row).strip() for row in list(instance.dependent_interior_instance_ids or []) if str(row).strip()],
+        dependent_interior_instance_ids=normalized_dependent_ids,
         controller_box_snapshot=dict(instance.controller_box_snapshot or {}),
         param_values=dict(instance.param_values or {}),
         param_meta=dict(instance.param_meta or {}),
@@ -1021,6 +992,7 @@ async def _next_door_instance_state(
     instance_code: str | None,
     structural_part_formula_ids: list[int],
     dependent_interior_instance_ids: list[uuid.UUID | str],
+    controller_box_snapshot: dict[str, object],
     param_values: dict[str, str | int | float | bool | None],
 ) -> tuple[str, int, dict[str, object], dict[str, str | None], dict[str, dict[str, object]]]:
     sub_category = await require_accessible_sub_category(session, admin_id=design.admin_id, sub_category_id=design.sub_category_id)
@@ -1039,6 +1011,20 @@ async def _next_door_instance_state(
         if bool(part.enabled) and isinstance(snapshot.viewer_payload, dict) and isinstance(snapshot.viewer_payload.get("box"), dict)
     }
     normalized_dependent_ids = [str(row).strip() for row in list(dependent_interior_instance_ids or []) if str(row).strip()]
+    allowed_dependent_ids = {
+        str(item.id)
+        for item in list(getattr(design, "interior_instances", []) or [])
+        if getattr(item, "id", None) is not None
+    }
+    normalized_dependent_ids = [row for row in normalized_dependent_ids if row in allowed_dependent_ids]
+    for interior in list(getattr(design, "interior_instances", []) or []):
+        if str(getattr(interior, "id", "") or "") not in normalized_dependent_ids:
+            continue
+        for row in list(getattr(interior, "part_snapshots", []) or []):
+            box = dict((row or {}).get("viewer_payload", {}) or {}).get("box")
+            part_formula_id = int((row or {}).get("part_formula_id") or 0)
+            if part_formula_id > 0 and isinstance(box, dict):
+                part_boxes[part_formula_id] = dict(box)
     resolved = await resolve_door_instance_preview(
         session,
         admin_id=design.admin_id,
@@ -1050,11 +1036,130 @@ async def _next_door_instance_state(
         ui_order=next_order,
         structural_part_formula_ids=structural_part_formula_ids,
         dependent_interior_instance_ids=normalized_dependent_ids,
+        controller_box_snapshot=dict(controller_box_snapshot or {}),
         param_values=_normalize_door_param_values(param_values),
         param_meta={},
         source_boxes_by_formula_id=part_boxes,
     )
     return next_code, next_order, resolved.controller_box_snapshot, resolved.param_values, resolved.param_meta
+
+
+async def _replace_interior_instances(
+    session: AsyncSession,
+    *,
+    design: SubCategoryDesign,
+    payloads: list[SubCategoryDesignInteriorInstanceDraftPayload],
+) -> None:
+    if not await interior_instance_tables_ready(session):
+        return
+    existing = {item.id: item for item in list(getattr(design, "interior_instances", []) or []) if getattr(item, "id", None) is not None}
+    keep_ids = {item.id for item in list(payloads or []) if item.id is not None}
+    for instance in list(getattr(design, "interior_instances", []) or []):
+        if instance.id not in keep_ids:
+            await session.delete(instance)
+    await session.flush()
+    design = await _load_design(session, design.id)
+    for payload in sorted(list(payloads or []), key=lambda row: (int(row.ui_order or 0), str(row.instance_code or ""))):
+        target = existing.get(payload.id) if payload.id is not None else None
+        if target is None:
+            next_code, next_order, interior_box_snapshot, param_values, param_meta = await _next_interior_instance_state(
+                session,
+                design=design,
+                group_id=payload.internal_part_group_id,
+                placement_z=float(payload.placement_z or 0),
+                ui_order=int(payload.ui_order or 0),
+                instance_code=str(payload.instance_code or "").strip() or None,
+                param_values=dict(payload.param_values or {}),
+            )
+            target = SubCategoryDesignInteriorInstance(
+                design=design,
+                internal_part_group_id=payload.internal_part_group_id,
+                instance_code=next_code,
+                line_color=_normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else None,
+                ui_order=next_order,
+                placement_z=float(payload.placement_z or 0),
+                interior_box_snapshot=interior_box_snapshot,
+                param_values=param_values,
+                param_meta=param_meta,
+                status="draft",
+            )
+            session.add(target)
+            await session.flush()
+        else:
+            target.internal_part_group_id = payload.internal_part_group_id
+            target.instance_code = str(payload.instance_code or "").strip()
+            target.line_color = _normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else None
+            target.ui_order = int(payload.ui_order or 0)
+            target.placement_z = float(payload.placement_z or 0)
+            target.param_values = _normalize_interior_param_values(payload.param_values)
+            target.param_meta = {str(key): dict(value or {}) for key, value in dict(payload.param_meta or {}).items()}
+            await session.flush()
+        design = await _load_design(session, design.id)
+        target = next(instance for instance in design.interior_instances if instance.id == target.id)
+        await _refresh_design_interior_instance(session, design=design, instance=target)
+        await session.flush()
+        design = await _load_design(session, design.id)
+
+
+async def _replace_door_instances(
+    session: AsyncSession,
+    *,
+    design: SubCategoryDesign,
+    payloads: list[SubCategoryDesignDoorInstanceDraftPayload],
+) -> None:
+    if not await door_instance_tables_ready(session):
+        return
+    existing = {item.id: item for item in list(getattr(design, "door_instances", []) or []) if getattr(item, "id", None) is not None}
+    keep_ids = {item.id for item in list(payloads or []) if item.id is not None}
+    for instance in list(getattr(design, "door_instances", []) or []):
+        if instance.id not in keep_ids:
+            await session.delete(instance)
+    await session.flush()
+    design = await _load_design(session, design.id)
+    for payload in sorted(list(payloads or []), key=lambda row: (int(row.ui_order or 0), str(row.instance_code or ""))):
+        target = existing.get(payload.id) if payload.id is not None else None
+        if target is None:
+            next_code, next_order, controller_box_snapshot, param_values, param_meta = await _next_door_instance_state(
+                session,
+                design=design,
+                group_id=payload.door_part_group_id,
+                ui_order=int(payload.ui_order or 0),
+                instance_code=str(payload.instance_code or "").strip() or None,
+                structural_part_formula_ids=list(payload.structural_part_formula_ids or []),
+                dependent_interior_instance_ids=list(payload.dependent_interior_instance_ids or []),
+                controller_box_snapshot=dict(payload.controller_box_snapshot or {}),
+                param_values=dict(payload.param_values or {}),
+            )
+            target = SubCategoryDesignDoorInstance(
+                design=design,
+                door_part_group_id=payload.door_part_group_id,
+                instance_code=next_code,
+                line_color=_normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else None,
+                ui_order=next_order,
+                structural_part_formula_ids=[int(row) for row in list(payload.structural_part_formula_ids or []) if int(row) > 0],
+                dependent_interior_instance_ids=[str(row).strip() for row in list(payload.dependent_interior_instance_ids or []) if str(row).strip()],
+                controller_box_snapshot=controller_box_snapshot,
+                param_values=param_values,
+                param_meta=param_meta,
+                status="draft",
+            )
+            session.add(target)
+            await session.flush()
+        else:
+            target.door_part_group_id = payload.door_part_group_id
+            target.instance_code = str(payload.instance_code or "").strip()
+            target.line_color = _normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else None
+            target.ui_order = int(payload.ui_order or 0)
+            target.structural_part_formula_ids = [int(row) for row in list(payload.structural_part_formula_ids or []) if int(row) > 0]
+            target.dependent_interior_instance_ids = [str(row).strip() for row in list(payload.dependent_interior_instance_ids or []) if str(row).strip()]
+            target.param_values = _normalize_door_param_values(payload.param_values)
+            target.param_meta = {str(key): dict(value or {}) for key, value in dict(payload.param_meta or {}).items()}
+            await session.flush()
+        design = await _load_design(session, design.id)
+        target = next(instance for instance in design.door_instances if instance.id == target.id)
+        await _refresh_design_door_instance(session, design=design, instance=target)
+        await session.flush()
+        design = await _load_design(session, design.id)
 
 
 @router.post("/{design_uuid}/interior-instances", response_model=SubCategoryDesignInteriorInstanceItem, status_code=status.HTTP_201_CREATED)
@@ -1208,14 +1313,18 @@ async def create_sub_category_design_door_instance(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Door-instance tables are not available yet. Run database migrations first.")
     design = await _load_design(session, design_uuid)
     group = await require_accessible_door_part_group(session, admin_id=design.admin_id, group_id=payload.door_part_group_id)
+    structural_part_formula_ids = [int(row) for row in list(payload.structural_part_formula_ids or []) if int(row) > 0]
+    if str(getattr(group, "controller_type", "") or "").strip() == "double_equal_hinged_doors" and len(set(structural_part_formula_ids)) != 4:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Double-equal hinged door controller requires exactly 4 structural parts.")
     next_code, next_order, controller_box_snapshot, param_values, param_meta = await _next_door_instance_state(
         session,
         design=design,
         group_id=payload.door_part_group_id,
         ui_order=payload.ui_order,
         instance_code=payload.instance_code,
-        structural_part_formula_ids=[int(row) for row in list(payload.structural_part_formula_ids or []) if int(row) > 0],
+        structural_part_formula_ids=structural_part_formula_ids,
         dependent_interior_instance_ids=list(payload.dependent_interior_instance_ids or []),
+        controller_box_snapshot=dict(payload.controller_box_snapshot or {}),
         param_values=payload.param_values,
     )
     item = SubCategoryDesignDoorInstance(
@@ -1224,7 +1333,7 @@ async def create_sub_category_design_door_instance(
         instance_code=next_code,
         line_color=_normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else _normalize_hex_color(getattr(group, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR),
         ui_order=next_order,
-        structural_part_formula_ids=[int(row) for row in list(payload.structural_part_formula_ids or []) if int(row) > 0],
+        structural_part_formula_ids=structural_part_formula_ids,
         dependent_interior_instance_ids=[str(row).strip() for row in list(payload.dependent_interior_instance_ids or []) if str(row).strip()],
         controller_box_snapshot=controller_box_snapshot,
         param_values=param_values,
@@ -1325,6 +1434,7 @@ async def duplicate_sub_category_design_door_instance(
         instance_code=None,
         structural_part_formula_ids=list(source.structural_part_formula_ids or []),
         dependent_interior_instance_ids=list(source.dependent_interior_instance_ids or []),
+        controller_box_snapshot=dict(source.controller_box_snapshot or {}),
         param_values=dict(source.param_values or {}),
     )
     item = SubCategoryDesignDoorInstance(

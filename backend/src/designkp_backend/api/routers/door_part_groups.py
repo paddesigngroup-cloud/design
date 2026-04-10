@@ -18,9 +18,23 @@ router = APIRouter(prefix="/door-part-groups", tags=["door_part_groups"])
 
 DEFAULT_DOOR_LINE_COLOR = "#8A98A3"
 DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING = "back_to_back_opening"
-DOOR_PART_GROUP_CONTROLLER_TYPES: set[str] = set()
+DOOR_PART_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED = "double_equal_hinged_doors"
+DOOR_PART_GROUP_CONTROLLER_TYPES: set[str] = {
+    DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING,
+    DOOR_PART_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED,
+}
 DOOR_PART_GROUP_CONTROLLER_AXES = ("vertical", "horizontal")
-DOOR_PART_GROUP_CONTROLLER_BINDING_KEYS = ("width_back_to_back", "height_back_to_back")
+DOOR_PART_GROUP_CONTROLLER_BINDING_KEYS_BY_TYPE: dict[str, tuple[str, ...]] = {
+    DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING: ("width_back_to_back", "height_back_to_back"),
+    DOOR_PART_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED: (
+        "door_width",
+        "door_height",
+        "left",
+        "right",
+        "top",
+        "bottom_offset",
+    ),
+}
 
 
 def _normalize_hex_color(value: str | None, fallback: str = DEFAULT_DOOR_LINE_COLOR) -> str:
@@ -176,7 +190,12 @@ async def _load_group(session: AsyncSession, group_uuid: uuid.UUID) -> DoorPartG
 
 
 def _normalize_controller_type(value: str | None) -> str | None:
-    return None
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    if normalized not in DOOR_PART_GROUP_CONTROLLER_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported door part group controller type: {normalized}")
+    return normalized
 
 
 def _normalize_optional_string(value: object) -> str | None:
@@ -188,7 +207,23 @@ def _normalize_controller_selection_payload(
     controller_type: str | None,
     selection: list[DoorPartGroupControllerSelectionPayload] | list[dict[str, object]] | None,
 ) -> list[dict[str, object]]:
-    return []
+    normalized_type = _normalize_controller_type(controller_type)
+    if not normalized_type:
+        return []
+    normalized: list[dict[str, object]] = []
+    for item in list(selection or []):
+        if isinstance(item, DoorPartGroupControllerSelectionPayload):
+            axis = str(item.axis or "").strip()
+            part_formula_id = int(item.part_formula_id)
+        elif isinstance(item, dict):
+            axis = str(item.get("axis") or "").strip()
+            part_formula_id = int(item.get("part_formula_id") or 0)
+        else:
+            continue
+        if axis not in DOOR_PART_GROUP_CONTROLLER_AXES or part_formula_id <= 0:
+            continue
+        normalized.append({"axis": axis, "part_formula_id": part_formula_id})
+    return normalized
 
 
 def _normalize_controller_bindings_payload(
@@ -196,7 +231,32 @@ def _normalize_controller_bindings_payload(
     bindings: dict[str, DoorPartGroupControllerBindingPayload] | dict[str, object] | None,
     allowed_codes: set[str] | None = None,
 ) -> dict[str, dict[str, str | None]]:
-    return {}
+    normalized_type = _normalize_controller_type(controller_type)
+    if not normalized_type:
+        return {}
+    allowed_slots = DOOR_PART_GROUP_CONTROLLER_BINDING_KEYS_BY_TYPE.get(normalized_type)
+    if not allowed_slots:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported door part group controller type: {normalized_type}")
+    raw_bindings = dict(bindings or {})
+    invalid_slots = sorted(str(key or "").strip() for key in raw_bindings if str(key or "").strip() not in allowed_slots)
+    if invalid_slots:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported controller bindings for {normalized_type}: {', '.join(invalid_slots)}",
+        )
+    normalized: dict[str, dict[str, str | None]] = {}
+    for slot in allowed_slots:
+        raw_value = raw_bindings.get(slot)
+        if isinstance(raw_value, DoorPartGroupControllerBindingPayload):
+            param_code = _normalize_optional_string(raw_value.param_code)
+        elif isinstance(raw_value, dict):
+            param_code = _normalize_optional_string(raw_value.get("param_code"))
+        else:
+            param_code = None
+        if allowed_codes is not None and param_code not in allowed_codes:
+            param_code = None
+        normalized[slot] = {"param_code": param_code}
+    return normalized
 
 
 def _serialize_group(item: DoorPartGroup, *, include_param_groups: bool = True) -> DoorPartGroupItemResponse:

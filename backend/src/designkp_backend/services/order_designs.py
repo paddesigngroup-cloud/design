@@ -740,6 +740,11 @@ async def build_order_design_snapshot(
         )
         viewer_boxes.extend([dict(box or {}) for box in resolved.viewer_boxes])
         part_snapshots.extend([dict(row or {}) for row in resolved.part_snapshots])
+        for row in list(resolved.part_snapshots or []):
+            box = dict((row or {}).get("viewer_payload", {}) or {}).get("box")
+            part_formula_id = int((row or {}).get("part_formula_id") or 0)
+            if part_formula_id > 0 and isinstance(box, dict):
+                source_boxes_by_formula_id[part_formula_id] = dict(box)
     resolved_door_instances: list[dict[str, object]] = []
     door_groups_by_id = await _load_accessible_door_groups(
         session,

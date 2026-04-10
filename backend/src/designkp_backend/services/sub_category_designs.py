@@ -42,6 +42,19 @@ PART_FORMULA_FIELDS = (
     "formula_cy",
     "formula_cz",
 )
+DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING = "back_to_back_opening"
+DOOR_PART_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED = "double_equal_hinged_doors"
+DOOR_CONTROLLER_BINDING_KEYS_BY_TYPE: dict[str, tuple[str, ...]] = {
+    DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING: ("width_back_to_back", "height_back_to_back"),
+    DOOR_PART_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED: (
+        "door_width",
+        "door_height",
+        "left",
+        "right",
+        "top",
+        "bottom_offset",
+    ),
+}
 
 
 @dataclass(slots=True)
@@ -1361,10 +1374,20 @@ async def resolve_internal_instance_preview(
 
 
 def _normalize_door_controller_bindings(raw_bindings: dict[str, object] | None) -> dict[str, dict[str, str | None]]:
+    raw = dict(raw_bindings or {})
+    normalized_type = str(raw.get("__controller_type__") or "").strip() or None
+    allowed_slots = DOOR_CONTROLLER_BINDING_KEYS_BY_TYPE.get(normalized_type) if normalized_type else None
     normalized: dict[str, dict[str, str | None]] = {}
-    for key, value in dict(raw_bindings or {}).items():
+    for key, value in raw.items():
+        if key == "__controller_type__":
+            continue
         binding = dict(value or {}) if isinstance(value, dict) else {}
-        normalized[str(key)] = {"param_code": (str(binding.get("param_code") or "").strip() or None)}
+        slot = str(key).strip()
+        if not slot:
+            continue
+        if allowed_slots is not None and slot not in allowed_slots:
+            continue
+        normalized[slot] = {"param_code": (str(binding.get("param_code") or "").strip() or None)}
     return normalized
 
 
@@ -1422,12 +1445,23 @@ def _compute_door_controller_box_snapshot(
     horizontal.sort(key=lambda item: (-float(item["extents"]["max_z"]), int(item["part_formula_id"])))
     left, right = vertical
     top, bottom = horizontal
-    width_back_to_back = _round_number(float(right["extents"]["max_x"]) - float(left["extents"]["min_x"]))
-    height_back_to_back = _round_number(float(top["extents"]["max_z"]) - float(bottom["extents"]["min_z"]))
-    min_x = min(float(item["extents"]["min_x"]) for item in selected)
-    max_x = max(float(item["extents"]["max_x"]) for item in selected)
-    min_z = min(float(item["extents"]["min_z"]) for item in selected)
-    max_z = max(float(item["extents"]["max_z"]) for item in selected)
+    all_extents = [
+        _box_front_extents(box)
+        for box in dict(source_boxes_by_formula_id or {}).values()
+        if isinstance(box, dict)
+    ]
+    if not all_extents:
+        all_extents = [item["extents"] for item in selected]
+    frame_min_x = min(float(item["min_x"]) for item in all_extents)
+    frame_max_x = max(float(item["max_x"]) for item in all_extents)
+    frame_min_z = min(float(item["min_z"]) for item in all_extents)
+    frame_max_z = max(float(item["max_z"]) for item in all_extents)
+    min_x = float(left["extents"]["min_x"])
+    max_x = float(right["extents"]["max_x"])
+    min_z = float(bottom["extents"]["min_z"])
+    max_z = float(top["extents"]["max_z"])
+    width_back_to_back = _round_number(max_x - min_x)
+    height_back_to_back = _round_number(max_z - min_z)
     snapshot = {
         "min_x": _round_number(min_x),
         "max_x": _round_number(max_x),
@@ -1442,6 +1476,12 @@ def _compute_door_controller_box_snapshot(
     computed = {
         "width_back_to_back": width_back_to_back,
         "height_back_to_back": height_back_to_back,
+        "door_width": width_back_to_back,
+        "door_height": height_back_to_back,
+        "left": _round_number(float(min_x) - float(frame_min_x)),
+        "right": _round_number(float(frame_max_x) - float(max_x)),
+        "top": _round_number(float(frame_max_z) - float(max_z)),
+        "bottom_offset": _round_number(float(min_z) - float(frame_min_z)),
     }
     return snapshot, computed
 
@@ -1473,7 +1513,7 @@ async def resolve_door_instance_preview(
         part_formula_ids=set(),
         include_sub_category_display=True,
     )
-    controller_type = None
+    controller_type = str(getattr(door_part_group, "controller_type", "") or "").strip() or None
     next_box_snapshot: dict[str, object] = {}
     computed_params: dict[str, float] = {}
     selected_param_codes = await collect_door_group_selected_param_codes(
@@ -1503,8 +1543,22 @@ async def resolve_door_instance_preview(
         codes=selected_param_codes,
         admin_id=admin_id,
     )
-    bindings: dict[str, dict[str, str | None]] = {}
+    bindings = _normalize_door_controller_bindings({
+        "__controller_type__": controller_type,
+        **dict(getattr(door_part_group, "controller_bindings", {}) or {}),
+    })
     persisted_values = _merge_param_value_layers(copied_meta_values, meta_values, persisted_values)
+    if controller_type in DOOR_CONTROLLER_BINDING_KEYS_BY_TYPE and source_boxes_by_formula_id:
+        try:
+            next_box_snapshot, computed_params = _compute_door_controller_box_snapshot(
+                structural_part_formula_ids=structural_part_formula_ids,
+                source_boxes_by_formula_id={int(key): dict(value) for key, value in dict(source_boxes_by_formula_id or {}).items()},
+            )
+        except HTTPException:
+            if instance_id is None:
+                raise
+            next_box_snapshot = dict(controller_box_snapshot or {})
+            computed_params = {}
     for binding_key, computed_value in computed_params.items():
         bound_code = str((bindings.get(binding_key) or {}).get("param_code") or "").strip()
         if bound_code and bound_code in selected_param_codes:
@@ -1653,6 +1707,12 @@ async def compose_sub_category_design_preview(
                 context=context,
             )
         )
+    for interior in resolved_interior:
+        for row in list(getattr(interior, "part_snapshots", []) or []):
+            box = dict((row or {}).get("viewer_payload", {}) or {}).get("box")
+            part_formula_id = int((row or {}).get("part_formula_id") or 0)
+            if part_formula_id > 0 and isinstance(box, dict):
+                source_boxes_by_formula_id[part_formula_id] = dict(box)
     resolved_doors: list[ResolvedDoorInstanceSnapshot] = []
     for instance in sorted(list(door_instances or []), key=lambda item: (int(item.ui_order or 0), str(item.instance_code or ""))):
         door_group = await require_accessible_door_part_group(

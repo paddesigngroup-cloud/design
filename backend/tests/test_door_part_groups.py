@@ -9,6 +9,7 @@ import pytest
 from designkp_backend.api.routers import door_part_groups as router
 from designkp_backend.api.routers.door_part_groups import (
     DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING,
+    DOOR_PART_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED,
     DoorPartGroupControllerBindingPayload,
     DoorPartGroupControllerSelectionPayload,
     DoorPartGroupCreate,
@@ -123,14 +124,18 @@ def test_create_door_part_group_uses_payload(monkeypatch: pytest.MonkeyPatch) ->
         is_system=True,
         parts=[DoorPartGroupPartSelectionPayload(part_formula_id=12, enabled=True, ui_order=0)],
         param_groups=[DoorPartGroupParamGroupSelectionPayload(param_group_id=9, enabled=True, ui_order=0)],
-        controller_type=DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING,
+        controller_type=DOOR_PART_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED,
         controller_selection=[
             DoorPartGroupControllerSelectionPayload(axis="vertical", part_formula_id=12),
             DoorPartGroupControllerSelectionPayload(axis="horizontal", part_formula_id=13),
         ],
         controller_bindings={
-            "width_back_to_back": DoorPartGroupControllerBindingPayload(param_code="door_width"),
-            "height_back_to_back": DoorPartGroupControllerBindingPayload(param_code="door_height"),
+            "door_width": DoorPartGroupControllerBindingPayload(param_code="door_width"),
+            "door_height": DoorPartGroupControllerBindingPayload(param_code="door_height"),
+            "left": DoorPartGroupControllerBindingPayload(param_code="left_gap"),
+            "right": DoorPartGroupControllerBindingPayload(param_code="right_gap"),
+            "top": DoorPartGroupControllerBindingPayload(param_code="top_gap"),
+            "bottom_offset": DoorPartGroupControllerBindingPayload(param_code="bottom_gap"),
         },
     )
 
@@ -140,9 +145,14 @@ def test_create_door_part_group_uses_payload(monkeypatch: pytest.MonkeyPatch) ->
     assert result.line_color == "#8A98A3"
     assert result.parts[0].part_formula_id == 12
     assert result.param_groups[0].param_group_id == 9
-    assert result.controller_type is None
-    assert result.controller_selection == []
-    assert result.controller_bindings == {}
+    assert result.controller_type == DOOR_PART_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED
+    assert len(result.controller_selection) == 2
+    assert result.controller_bindings["door_width"].param_code == "door_width"
+    assert result.controller_bindings["door_height"].param_code == "door_height"
+    assert result.controller_bindings["left"].param_code == "left_gap"
+    assert result.controller_bindings["right"].param_code == "right_gap"
+    assert result.controller_bindings["top"].param_code == "top_gap"
+    assert result.controller_bindings["bottom_offset"].param_code == "bottom_gap"
 
 
 def test_update_door_part_group_updates_basic_fields(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -203,14 +213,18 @@ def test_update_door_part_group_updates_basic_fields(monkeypatch: pytest.MonkeyP
         is_system=False,
         parts=[],
         param_groups=[],
-        controller_type=DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING,
+        controller_type=DOOR_PART_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED,
         controller_selection=[
             DoorPartGroupControllerSelectionPayload(axis="vertical", part_formula_id=21),
             DoorPartGroupControllerSelectionPayload(axis="horizontal", part_formula_id=22),
         ],
         controller_bindings={
-            "width_back_to_back": DoorPartGroupControllerBindingPayload(param_code="door_width"),
-            "height_back_to_back": DoorPartGroupControllerBindingPayload(param_code="door_height"),
+            "door_width": DoorPartGroupControllerBindingPayload(param_code="door_width"),
+            "door_height": DoorPartGroupControllerBindingPayload(param_code="door_height"),
+            "left": DoorPartGroupControllerBindingPayload(param_code="left_gap"),
+            "right": DoorPartGroupControllerBindingPayload(param_code="right_gap"),
+            "top": DoorPartGroupControllerBindingPayload(param_code="top_gap"),
+            "bottom_offset": DoorPartGroupControllerBindingPayload(param_code="bottom_gap"),
         },
     )
 
@@ -220,6 +234,7 @@ def test_update_door_part_group_updates_basic_fields(monkeypatch: pytest.MonkeyP
     assert existing.code == "new_code"
     assert existing.line_color == "#0091FF"
     assert existing.sort_order == 7
-    assert result.controller_type is None
-    assert result.controller_selection == []
-    assert result.controller_bindings == {}
+    assert result.controller_type == DOOR_PART_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED
+    assert len(result.controller_selection) == 2
+    assert result.controller_bindings["door_width"].param_code == "door_width"
+    assert result.controller_bindings["door_height"].param_code == "door_height"

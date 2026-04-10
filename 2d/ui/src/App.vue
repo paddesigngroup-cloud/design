@@ -326,6 +326,14 @@ const doorLibrarySelectedAnnotation = ref(null);
 const doorLibraryCurrentSnapPoint = ref(null);
 const doorLibraryCursorPoint = ref(null);
 const doorLibrarySelectedInstanceIds = ref([]);
+const doorLibraryPendingControllerState = ref({
+  pending_group_id: "",
+  selected_part_ids: [],
+  preview_rect: null,
+  preview_param_values: null,
+  pending_color: "",
+  pending_controller_type: "",
+});
 const doorLibraryHoveredInstanceId = ref("");
 const doorLibraryHoverMode = ref(null);
 const doorLibraryViewerCursorPoint = ref(null);
@@ -452,6 +460,7 @@ const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_RIGHT = "width_controller_inte
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_LEFT = "width_controller_internal_group_part_left";
 const INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT = "height_controller_internal_group_part";
 const INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT = "height_controller_internal_group_part_left";
+const DOOR_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED = "double_equal_hinged_doors";
 const INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS = [
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH, label: "قطعات عرضی وسط" },
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT, label: "قطعات عرضی راست" },
@@ -461,6 +470,9 @@ const INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS = [
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_LEFT, label: "قطعه عرضی چپ" },
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT, label: "کنترلر ارتفاعی راست" },
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT, label: "کنترلر ارتفاعی چپ" },
+];
+const DOOR_GROUP_CONTROLLER_TYPE_OPTIONS = [
+  { value: DOOR_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED, label: "دو درب برابر لولایی" },
 ];
 const INTERNAL_GROUP_CONTROLLER_DEFINITIONS = {
   [INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH]: [
@@ -510,6 +522,16 @@ const INTERNAL_GROUP_CONTROLLER_DEFINITIONS = {
     { key: "top", label: "کنترلر ضلع بالا" },
     { key: "right", label: "کنترلر ضلع راست", hidden: true },
     { key: "bottom_offset", label: "کنترلر ضلع پایین" },
+  ],
+};
+const DOOR_GROUP_CONTROLLER_DEFINITIONS = {
+  [DOOR_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED]: [
+    { key: "door_width", label: "عرض درب (ها)" },
+    { key: "door_height", label: "ارتفاع درب (ها)" },
+    { key: "left", label: "فاصله چپ" },
+    { key: "right", label: "فاصله راست" },
+    { key: "top", label: "فاصله بالا" },
+    { key: "bottom_offset", label: "فاصله پایین" },
   ],
 };
 function isHeightInternalGroupControllerType(controllerType) {
@@ -921,6 +943,7 @@ function clearPersistedDoorLibraryControllerState() {
   }
 }
 function persistDoorLibraryControllerState() {
+  if (isDoorLibraryPendingControllerActive.value) return;
   const targetKey = getDoorLibraryControllerStateTargetKey();
   if (!targetKey) return;
   const stateMap = readDoorLibraryControllerStateMap();
@@ -945,6 +968,7 @@ function persistDoorLibraryControllerState() {
   writeDoorLibraryControllerStateMap(stateMap);
 }
 function restoreDoorLibraryControllerState() {
+  if (isDoorLibraryPendingControllerActive.value) return;
   const targetKey = getDoorLibraryControllerStateTargetKey();
   if (!targetKey) return;
   const stateMap = readDoorLibraryControllerStateMap();
@@ -965,7 +989,7 @@ function resetDoorLibraryAnnotations() {
   doorLibrarySelectedAnnotation.value = null;
   doorLibraryAnnotationTool.value = null;
   doorLibraryCurrentSnapPoint.value = null;
-  doorLibrarySelectedInstanceIds.value = [];
+  resetDoorLibraryPendingControllerState();
   doorLibraryHoveredInstanceId.value = "";
   doorLibraryHoverMode.value = null;
   stopDoorLibraryPointerProcessing();
@@ -1278,6 +1302,43 @@ function clearDoorLibraryAnnotationSelection() {
 function clearDoorLibraryInstanceSelection() {
   doorLibrarySelectedInstanceIds.value = [];
 }
+function resetDoorLibraryPendingControllerState(options = {}) {
+  const keepSelection = options?.keepSelection === true;
+  doorLibraryPendingControllerState.value = {
+    pending_group_id: "",
+    selected_part_ids: [],
+    preview_rect: null,
+    preview_param_values: null,
+    pending_color: "",
+    pending_controller_type: "",
+  };
+  if (!keepSelection) {
+    clearDoorLibraryInstanceSelection();
+  }
+}
+function beginDoorLibraryPendingController(group) {
+  const normalizedGroupId = String(group?.id || "").trim();
+  const controllerType = normalizeDoorPartGroupControllerType(group?.controller_type);
+  if (!normalizedGroupId || !controllerType) return;
+  clearPersistedDoorLibraryControllerState();
+  resetDoorLibraryPendingControllerState({ keepSelection: true });
+  doorLibrarySelectedInstanceIds.value = [];
+  doorLibraryHoveredInstanceId.value = "";
+  doorLibraryPendingControllerState.value = {
+    pending_group_id: normalizedGroupId,
+    selected_part_ids: [],
+    preview_rect: null,
+    preview_param_values: null,
+    pending_color: normalizeHexColor(group?.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+    pending_controller_type: controllerType,
+  };
+}
+const isDoorLibraryPendingControllerActive = computed(() =>
+  !!String(doorLibraryPendingControllerState.value?.pending_group_id || "").trim()
+);
+const activeDoorLibraryPendingGroup = computed(() =>
+  constructionDoorPartGroupsById.value.get(String(doorLibraryPendingControllerState.value?.pending_group_id || "").trim()) || null
+);
 function clearInteriorLibraryInstanceSelection() {
   interiorLibrarySelectedInstanceId.value = "";
   closeInteriorInstanceContextMenu();
@@ -1396,6 +1457,16 @@ function selectDoorLibraryInstance(instanceId) {
   if (!normalizedId) return;
   const current = Array.isArray(doorLibrarySelectedInstanceIds.value) ? doorLibrarySelectedInstanceIds.value.slice() : [];
   if (!current.includes(normalizedId)) current.push(normalizedId);
+  doorLibrarySelectedInstanceIds.value = current;
+  doorLibrarySelectedAnnotation.value = null;
+}
+function toggleDoorLibraryInstanceSelection(instanceId) {
+  const normalizedId = String(instanceId || "").trim();
+  if (!normalizedId) return;
+  const current = Array.isArray(doorLibrarySelectedInstanceIds.value) ? doorLibrarySelectedInstanceIds.value.slice() : [];
+  const existingIndex = current.indexOf(normalizedId);
+  if (existingIndex >= 0) current.splice(existingIndex, 1);
+  else current.push(normalizedId);
   doorLibrarySelectedInstanceIds.value = current;
   doorLibrarySelectedAnnotation.value = null;
 }
@@ -2288,7 +2359,8 @@ function onDoorLibraryFrontSvgPointerDown(event) {
   if (doorLibraryAnnotationTool.value !== "dimension") {
     const instanceHits = collectDoorLibraryInstanceHits(rawPoint);
     if (instanceHits.length) {
-      selectDoorLibraryInstance(instanceHits[0].id);
+      if (isDoorLibraryPendingControllerActive.value) toggleDoorLibraryInstanceSelection(instanceHits[0].id);
+      else selectDoorLibraryInstance(instanceHits[0].id);
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -2307,6 +2379,18 @@ function onDoorLibraryFrontSvgPointerDown(event) {
   }
   event.preventDefault();
   event.stopPropagation();
+}
+async function handleDoorLibraryPreviewDoubleClick() {
+  if (doorLibraryPreviewMode.value === "model3d") {
+    doorLibraryPreview3dRef.value?.fitCameraToAll?.();
+    doorLibraryPreview3dRef.value?.zoomByFactor?.(INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR);
+    return;
+  }
+  if (isDoorLibraryPendingControllerActive.value && doorLibraryControllerSelectionSummary.value?.eligible) {
+    await finalizePendingDoorController();
+    return;
+  }
+  resetDoorLibraryPreviewView(true);
 }
 function onDoorLibraryFrontSvgPointerMove(event) {
   const rawPoint = getDoorLibraryFrontSvgPoint(event);
@@ -2900,6 +2984,264 @@ function getViewerBoxesFromDoorInstances(instances) {
     .filter((box) => box && typeof box === "object")
     .map((box) => ({ ...(box || {}) }));
 }
+function getDoorLibraryBoxFrontExtents(box) {
+  const width = Number(box?.width) || 0;
+  const height = Number(box?.height) || 0;
+  const cx = Number(box?.cx) || 0;
+  const cz = Number(box?.cz) || 0;
+  return {
+    width,
+    height,
+    minX: cx - (width * 0.5),
+    maxX: cx + (width * 0.5),
+    minZ: cz - (height * 0.5),
+    maxZ: cz + (height * 0.5),
+  };
+}
+function computeDoorLibraryControllerPreviewGeometry(parts, frameBounds = null) {
+  const normalized = (Array.isArray(parts) ? parts : [])
+    .map((item) => ({
+      ...item,
+      partFormulaId: Number(item?.partFormulaId) || 0,
+      sourceType: String(item?.sourceType || "").trim() || "structural",
+      sourceId: String(item?.sourceId || "").trim(),
+      extents: getDoorLibraryBoxFrontExtents(item?.box || {}),
+    }))
+    .filter((item) => item.partFormulaId > 0);
+  const uniqueParts = [];
+  const seenFormulaIds = new Set();
+  for (const item of normalized) {
+    if (seenFormulaIds.has(item.partFormulaId)) continue;
+    seenFormulaIds.add(item.partFormulaId);
+    uniqueParts.push(item);
+  }
+  const vertical = uniqueParts.filter((item) => item.extents.height >= item.extents.width);
+  const horizontal = uniqueParts.filter((item) => item.extents.width > item.extents.height);
+  const eligible = uniqueParts.length === 4 && uniqueParts.length === normalized.length && vertical.length === 2 && horizontal.length === 2;
+  if (!eligible) {
+    return {
+      selected: uniqueParts,
+      vertical,
+      horizontal,
+      eligible: false,
+      structural_part_formula_ids: uniqueParts.map((item) => item.partFormulaId),
+      dependent_interior_instance_ids: Array.from(new Set(
+        uniqueParts
+          .filter((item) => item.sourceType === "internal" && item.sourceId)
+          .map((item) => item.sourceId)
+      )),
+      preview_rect: null,
+      controller_box_snapshot: null,
+      preview_param_values: null,
+    };
+  }
+  const orderedVertical = vertical.slice().sort((a, b) => a.extents.minX - b.extents.minX || a.partFormulaId - b.partFormulaId);
+  const orderedHorizontal = horizontal.slice().sort((a, b) => b.extents.maxZ - a.extents.maxZ || a.partFormulaId - b.partFormulaId);
+  const leftPart = orderedVertical[0];
+  const rightPart = orderedVertical[1];
+  const topPart = orderedHorizontal[0];
+  const bottomPart = orderedHorizontal[1];
+  const minX = leftPart.extents.minX;
+  const maxX = rightPart.extents.maxX;
+  const minZ = bottomPart.extents.minZ;
+  const maxZ = topPart.extents.maxZ;
+  const frameMinX = Number(frameBounds?.minX);
+  const frameMaxX = Number(frameBounds?.maxX);
+  const frameMinZ = Number(frameBounds?.minZ);
+  const frameMaxZ = Number(frameBounds?.maxZ);
+  const resolvedFrameMinX = Number.isFinite(frameMinX) ? frameMinX : minX;
+  const resolvedFrameMaxX = Number.isFinite(frameMaxX) ? frameMaxX : maxX;
+  const resolvedFrameMinZ = Number.isFinite(frameMinZ) ? frameMinZ : minZ;
+  const resolvedFrameMaxZ = Number.isFinite(frameMaxZ) ? frameMaxZ : maxZ;
+  const widthBackToBack = Math.max(0, maxX - minX);
+  const heightBackToBack = Math.max(0, maxZ - minZ);
+  return {
+    selected: uniqueParts,
+    vertical: orderedVertical,
+    horizontal: orderedHorizontal,
+    eligible: true,
+    structural_part_formula_ids: uniqueParts.map((item) => item.partFormulaId),
+    dependent_interior_instance_ids: Array.from(new Set(
+      uniqueParts
+        .filter((item) => item.sourceType === "internal" && item.sourceId)
+        .map((item) => item.sourceId)
+    )),
+    preview_rect: {
+      x: minX,
+      y: -maxZ,
+      w: widthBackToBack,
+      h: heightBackToBack,
+    },
+    controller_box_snapshot: {
+      min_x: minX,
+      max_x: maxX,
+      min_z: minZ,
+      max_z: maxZ,
+      width: widthBackToBack,
+      height: heightBackToBack,
+      cx: (minX + maxX) * 0.5,
+      cz: (minZ + maxZ) * 0.5,
+      structural_part_formula_ids: uniqueParts.map((item) => item.partFormulaId),
+    },
+    preview_param_values: {
+      door_width: widthBackToBack,
+      door_height: heightBackToBack,
+      left: Math.max(0, minX - resolvedFrameMinX),
+      right: Math.max(0, resolvedFrameMaxX - maxX),
+      top: Math.max(0, resolvedFrameMaxZ - maxZ),
+      bottom_offset: Math.max(0, minZ - resolvedFrameMinZ),
+    },
+  };
+}
+function normalizeDoorControllerSnapshotRect(snapshot) {
+  const minX = Number(snapshot?.min_x);
+  const maxX = Number(snapshot?.max_x);
+  const minZ = Number(snapshot?.min_z);
+  const maxZ = Number(snapshot?.max_z);
+  if (![minX, maxX, minZ, maxZ].every(Number.isFinite)) return null;
+  const width = Math.max(0, maxX - minX);
+  const height = Math.max(0, maxZ - minZ);
+  if (width <= 0 || height <= 0) return null;
+  return {
+    x: minX,
+    y: -maxZ,
+    w: width,
+    h: height,
+  };
+}
+function buildDoorLibraryControllerRectFromFrameValues(frame, values) {
+  if (!frame) return null;
+  const left = Number(values?.left);
+  const right = Number(values?.right);
+  const top = Number(values?.top);
+  const bottomOffset = Number(values?.bottom_offset);
+  const doorWidth = Number(values?.door_width);
+  const doorHeight = Number(values?.door_height);
+  if (![left, right, top, bottomOffset].every(Number.isFinite)) return null;
+  const frameWidth = Math.max(0, (Number(frame.maxX) || 0) - (Number(frame.minX) || 0));
+  const frameHeight = Math.max(0, (Number(frame.maxZ) || 0) - (Number(frame.minZ) || 0));
+  const widthMm = Number.isFinite(doorWidth) ? Math.max(0, doorWidth) : Math.max(0, frameWidth - left - right);
+  const heightMm = Number.isFinite(doorHeight) ? Math.max(0, doorHeight) : Math.max(0, frameHeight - top - bottomOffset);
+  const minX = (Number(frame.minX) || 0) + Math.max(0, left);
+  const maxZ = (Number(frame.maxZ) || 0) - Math.max(0, top);
+  return {
+    x: minX,
+    y: -(maxZ),
+    w: widthMm,
+    h: heightMm,
+  };
+}
+function buildDoorLibraryControllerVisuals(rect) {
+  if (!rect || doorLibraryPreviewMode.value !== "front2d") return [];
+  const scale = doorLibraryControllerVisualScale.value;
+  const gap = Math.max(4 * scale, 3);
+  const handleSize = Math.max(31.92 * scale, 24);
+  const inputW = Math.max(62.5 * scale, 52);
+  const inputH = Math.max(22.5 * scale, 20);
+  const horizontal = { w: handleSize, h: handleSize, inputW, inputH };
+  const vertical = { w: handleSize, h: handleSize, inputW, inputH };
+  return [
+    {
+      id: "left",
+      kind: "horizontal",
+      direction: "left",
+      x: rect.x - horizontal.w,
+      y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
+      fieldX: rect.x - horizontal.w - gap - horizontal.inputW,
+      fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
+      ...horizontal,
+    },
+    {
+      id: "top",
+      kind: "vertical",
+      direction: "up",
+      x: rect.x + (rect.w * 0.5) - (vertical.w * 0.5),
+      y: rect.y - vertical.h,
+      fieldX: rect.x + (rect.w * 0.5) - (vertical.inputW * 0.5),
+      fieldY: rect.y - vertical.h - gap - vertical.inputH,
+      ...vertical,
+    },
+    {
+      id: "right",
+      kind: "horizontal",
+      direction: "right",
+      x: rect.x + rect.w,
+      y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
+      fieldX: rect.x + rect.w + horizontal.w + gap,
+      fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
+      ...horizontal,
+    },
+    {
+      id: "bottom_offset",
+      kind: "vertical",
+      direction: "down",
+      x: rect.x + (rect.w * 0.5) - (vertical.w * 0.5),
+      y: rect.y + rect.h,
+      fieldX: rect.x + (rect.w * 0.5) - (vertical.inputW * 0.5),
+      fieldY: rect.y + rect.h + vertical.h + gap,
+      ...vertical,
+    },
+  ];
+}
+function buildDoorLibraryControllerMetricVisuals(rect) {
+  if (!rect || doorLibraryPreviewMode.value !== "front2d") return [];
+  const scale = doorLibraryControllerVisualScale.value;
+  const inputW = Math.max(72 * scale, 58);
+  const inputH = Math.max(22.5 * scale, 20);
+  return [
+    {
+      id: "door_width",
+      fieldX: rect.x + (rect.w * 0.5) - (inputW * 0.5),
+      fieldY: rect.y + (rect.h * 0.5) - inputH - (6 * scale),
+      inputW,
+      inputH,
+    },
+    {
+      id: "door_height",
+      fieldX: rect.x + (rect.w * 0.5) - (inputW * 0.5),
+      fieldY: rect.y + (rect.h * 0.5) + (6 * scale),
+      inputW,
+      inputH,
+    },
+  ];
+}
+function getDoorLibraryControllerBindingsForGroup(group) {
+  if (!group) return {};
+  const allowedCodes = new Set(getDoorPartGroupSelectedParamColumns(group).map((column) => column.key));
+  return normalizeDoorPartGroupControllerBindings(group.controller_type, group.controller_bindings, allowedCodes);
+}
+function getDoorLibraryControllerValuesForInstance(instance, group) {
+  const controllerType = normalizeDoorPartGroupControllerType(group?.controller_type || instance?.controller_type);
+  if (!controllerType) return {};
+  const bindings = getDoorLibraryControllerBindingsForGroup(group);
+  const paramValues = instance?.param_values || {};
+  const computedValues = instance?.computed_params || {};
+  return Object.fromEntries(
+    getDoorPartGroupControllerDefinitions(controllerType).map((definition) => {
+      const boundCode = String(bindings?.[definition.key]?.param_code || "").trim();
+      const boundValue = boundCode ? paramValues?.[boundCode] : null;
+      const fallbackValue = computedValues?.[definition.key];
+      const rawValue = boundValue ?? paramValues?.[definition.key] ?? fallbackValue ?? null;
+      return [definition.key, rawValue == null || rawValue === "" ? null : Number(rawValue)];
+    })
+  );
+}
+function buildDoorLibraryControllerOverlayForInstance(instance) {
+  const group = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
+  const controllerType = normalizeDoorPartGroupControllerType(group?.controller_type || instance?.controller_type);
+  const values = getDoorLibraryControllerValuesForInstance(instance, group);
+  const rect = buildDoorLibraryControllerRectFromFrameValues(doorLibraryControllerFrameRect.value, values)
+    || normalizeDoorControllerSnapshotRect(instance?.controller_box_snapshot || {});
+  if (!group || !controllerType || !rect) return null;
+  return {
+    id: String(instance?.id || "").trim(),
+    rect,
+    values,
+    lineColor: resolveDoorInstanceLineColor(instance),
+    visuals: buildDoorLibraryControllerVisuals(rect),
+    metrics: buildDoorLibraryControllerMetricVisuals(rect),
+  };
+}
 const doorLibraryGroupCards = computed(() =>
   constructionDoorPartGroups.value
     .filter((group) => {
@@ -3182,12 +3524,16 @@ const activeDoorLibrarySelectableParts = computed(() => {
   if (sourceParts.length) return sourceParts;
   return [];
 });
-const activeDoorLibraryViewerBoxes = computed(() =>
+const activeDoorLibraryStructureViewerBoxes = computed(() =>
   activeDoorLibrarySelectableParts.value.map((item) => ({
     ...(item?.box || {}),
     lineColor: item?.lineColor || DEFAULT_INTERIOR_LINE_COLOR,
   }))
 );
+const activeDoorLibraryViewerBoxes = computed(() => [
+  ...activeDoorLibraryStructureViewerBoxes.value,
+  ...getViewerBoxesFromDoorInstances(activeDoorLibraryInstances.value),
+]);
 const interiorLibraryFrontView = computed(() =>
   buildFrontViewLinesFromBoxes(
     activeInteriorLibraryStructureViewerBoxes.value || [],
@@ -3512,60 +3858,45 @@ const doorLibrarySelectedParts2d = computed(() => {
   );
   return doorLibraryPreviewInstances2d.value.filter((item) => selectedIds.has(String(item?.id || "").trim()));
 });
+const doorLibrarySelectedSelectableParts = computed(() => {
+  const selectedIds = new Set(
+    (Array.isArray(doorLibrarySelectedInstanceIds.value) ? doorLibrarySelectedInstanceIds.value : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean)
+  );
+  return activeDoorLibrarySelectableParts.value.filter((item) => selectedIds.has(String(item?.id || "").trim()));
+});
 const doorLibraryControllerSelectionSummary = computed(() => {
-  const selected = doorLibrarySelectedParts2d.value;
-  const vertical = selected.filter((item) => Number(item?.boundsRect?.h) >= Number(item?.boundsRect?.w));
-  const horizontal = selected.filter((item) => Number(item?.boundsRect?.w) > Number(item?.boundsRect?.h));
-  return {
-    selected,
-    vertical,
-    horizontal,
-    eligible: vertical.length >= 2 && horizontal.length >= 2,
-  };
+  return computeDoorLibraryControllerPreviewGeometry(
+    doorLibrarySelectedSelectableParts.value,
+    doorLibraryFrontView.value?.bounds || null,
+  );
 });
 const doorLibraryControllerRect = computed(() => {
-  const summary = doorLibraryControllerSelectionSummary.value;
-  if (!summary.eligible) return null;
-  const vertical = summary.vertical;
-  const horizontal = summary.horizontal;
-  const left = Math.min(...vertical.map((item) => Number(item?.boundsRect?.x) || 0));
-  const right = Math.max(...vertical.map((item) => (Number(item?.boundsRect?.x) || 0) + (Number(item?.boundsRect?.w) || 0)));
-  const top = Math.min(...horizontal.map((item) => Number(item?.boundsRect?.y) || 0));
-  const bottom = Math.max(...horizontal.map((item) => (Number(item?.boundsRect?.y) || 0) + (Number(item?.boundsRect?.h) || 0)));
-  const width = Math.max(0, right - left);
-  const height = Math.max(0, bottom - top);
-  if (width <= 0 || height <= 0) return null;
-  return {
-    x: left,
-    y: top,
-    w: width,
-    h: height,
-  };
+  return doorLibraryControllerSelectionSummary.value.preview_rect || null;
 });
 const doorLibraryControllerFrameRect = computed(() => {
   const bounds = doorLibraryFrontView.value?.bounds;
   if (!bounds) return null;
-  const left = Number(bounds.minX) || 0;
-  const right = Number(bounds.maxX) || 0;
-  const top = -(Number(bounds.maxZ) || 0);
-  const bottom = -(Number(bounds.minZ) || 0);
+  const minX = Number(bounds.minX) || 0;
+  const maxX = Number(bounds.maxX) || 0;
+  const minZ = Number(bounds.minZ) || 0;
+  const maxZ = Number(bounds.maxZ) || 0;
+  const top = -maxZ;
+  const bottom = -minZ;
   return {
-    x: left,
+    x: minX,
     y: top,
-    w: Math.max(0, right - left),
+    w: Math.max(0, maxX - minX),
     h: Math.max(0, bottom - top),
+    minX,
+    maxX,
+    minZ,
+    maxZ,
   };
 });
 const doorLibraryControllerParamValues = computed(() => {
-  const rect = doorLibraryControllerRect.value;
-  const frame = doorLibraryControllerFrameRect.value;
-  if (!rect || !frame) return null;
-  return {
-    left: Math.max(0, Number(rect.x) - Number(frame.x)),
-    top: Math.max(0, Number(rect.y) - Number(frame.y)),
-    right: Math.max(0, (Number(frame.x) + Number(frame.w)) - (Number(rect.x) + Number(rect.w))),
-    bottom_offset: Math.max(0, (Number(frame.y) + Number(frame.h)) - (Number(rect.y) + Number(rect.h))),
-  };
+  return doorLibraryControllerSelectionSummary.value.preview_param_values || null;
 });
 const doorLibraryControllerVisualScale = computed(() => {
   const zoom = Math.min(
@@ -3574,63 +3905,13 @@ const doorLibraryControllerVisualScale = computed(() => {
   );
   return 1 / zoom;
 });
-const doorLibraryControllerVisuals = computed(() => {
-  const rect = doorLibraryControllerRect.value;
-  if (!rect || doorLibraryPreviewMode.value !== "front2d") return [];
-  const scale = doorLibraryControllerVisualScale.value;
-  const gap = Math.max(4 * scale, 3);
-  const handleSize = Math.max(31.92 * scale, 24);
-  const inputW = Math.max(62.5 * scale, 52);
-  const inputH = Math.max(22.5 * scale, 20);
-  const horizontal = { w: handleSize, h: handleSize, inputW, inputH };
-  const vertical = { w: handleSize, h: handleSize, inputW, inputH };
-  return [
-    {
-      id: "left",
-      kind: "horizontal",
-      direction: "left",
-      anchor: { x: rect.x, y: rect.y + (rect.h * 0.5) },
-      x: rect.x - horizontal.w,
-      y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
-      fieldX: rect.x - horizontal.w - gap - horizontal.inputW,
-      fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
-      ...horizontal,
-    },
-    {
-      id: "top",
-      kind: "vertical",
-      direction: "up",
-      anchor: { x: rect.x + (rect.w * 0.5), y: rect.y },
-      x: rect.x + (rect.w * 0.5) - (vertical.w * 0.5),
-      y: rect.y - vertical.h,
-      fieldX: rect.x + (rect.w * 0.5) - (vertical.inputW * 0.5),
-      fieldY: rect.y - vertical.h - gap - vertical.inputH,
-      ...vertical,
-    },
-    {
-      id: "right",
-      kind: "horizontal",
-      direction: "right",
-      anchor: { x: rect.x + rect.w, y: rect.y + (rect.h * 0.5) },
-      x: rect.x + rect.w,
-      y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
-      fieldX: rect.x + rect.w + horizontal.w + gap,
-      fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
-      ...horizontal,
-    },
-    {
-      id: "bottom_offset",
-      kind: "vertical",
-      direction: "down",
-      anchor: { x: rect.x + (rect.w * 0.5), y: rect.y + rect.h },
-      x: rect.x + (rect.w * 0.5) - (vertical.w * 0.5),
-      y: rect.y + rect.h,
-      fieldX: rect.x + (rect.w * 0.5) - (vertical.inputW * 0.5),
-      fieldY: rect.y + rect.h + vertical.h + gap,
-      ...vertical,
-    },
-  ];
-});
+const doorLibraryControllerVisuals = computed(() => buildDoorLibraryControllerVisuals(doorLibraryControllerRect.value));
+const doorLibraryControllerMetricVisuals = computed(() => buildDoorLibraryControllerMetricVisuals(doorLibraryControllerRect.value));
+const doorLibraryPersistedControllerOverlays = computed(() =>
+  activeDoorLibraryInstances.value
+    .map((instance) => buildDoorLibraryControllerOverlayForInstance(instance))
+    .filter(Boolean)
+);
 const interiorLibraryControllerVisualScale = computed(() => {
   const zoom = Math.min(
     INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
@@ -4064,6 +4345,21 @@ watch(activeDoorLibrarySelectableParts, (items) => {
     doorLibraryHoveredInstanceId.value = "";
   }
 }, { immediate: true });
+watch(
+  [isDoorLibraryPendingControllerActive, doorLibrarySelectedInstanceIds, doorLibraryControllerSelectionSummary],
+  () => {
+    if (!isDoorLibraryPendingControllerActive.value) return;
+    doorLibraryPendingControllerState.value = {
+      ...doorLibraryPendingControllerState.value,
+      selected_part_ids: (Array.isArray(doorLibrarySelectedInstanceIds.value) ? doorLibrarySelectedInstanceIds.value : [])
+        .map((id) => String(id || "").trim())
+        .filter(Boolean),
+      preview_rect: doorLibraryControllerSelectionSummary.value.preview_rect || null,
+      preview_param_values: doorLibraryControllerSelectionSummary.value.preview_param_values || null,
+    };
+  },
+  { deep: true, immediate: true }
+);
 watch(
   [activeDoorLibraryTargetId, activeDoorLibrarySelectableParts],
   () => {
@@ -5079,6 +5375,43 @@ function normalizeSubCategoryDesignPayload(item) {
         part_formula_id: Number(part.part_formula_id),
         enabled: part.enabled !== false,
         ui_order: Number.isFinite(Number(part.ui_order)) ? Number(part.ui_order) : index,
+      })),
+    interior_instances: (Array.isArray(item.interior_instances) ? item.interior_instances : [])
+      .map((instance) => normalizeInteriorInstanceRecord(instance))
+      .filter(Boolean)
+      .map((instance) => ({
+        id: instance.id || null,
+        internal_part_group_id: instance.internal_part_group_id,
+        instance_code: String(instance.instance_code || "").trim() || "interior",
+        line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+        ui_order: Number(instance.ui_order) || 0,
+        placement_z: Number(instance.placement_z) || 0,
+        interior_box_snapshot: { ...(instance.interior_box_snapshot || {}) },
+        param_values: Object.fromEntries(
+          Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+        ),
+        param_meta: Object.fromEntries(
+          Object.entries(instance.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])
+        ),
+      })),
+    door_instances: (Array.isArray(item.door_instances) ? item.door_instances : [])
+      .map((instance) => normalizeDoorInstanceRecord(instance))
+      .filter(Boolean)
+      .map((instance) => ({
+        id: instance.id || null,
+        door_part_group_id: instance.door_part_group_id,
+        instance_code: String(instance.instance_code || "").trim() || "door",
+        line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+        ui_order: Number(instance.ui_order) || 0,
+        structural_part_formula_ids: (Array.isArray(instance.structural_part_formula_ids) ? instance.structural_part_formula_ids : []).map((row) => Number(row) || 0).filter(Boolean),
+        dependent_interior_instance_ids: (Array.isArray(instance.dependent_interior_instance_ids) ? instance.dependent_interior_instance_ids : []).map((row) => String(row || "").trim()).filter(Boolean),
+        controller_box_snapshot: { ...(instance.controller_box_snapshot || {}) },
+        param_values: Object.fromEntries(
+          Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+        ),
+        param_meta: Object.fromEntries(
+          Object.entries(instance.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])
+        ),
       })),
   };
 }
@@ -6358,6 +6691,7 @@ async function refreshSubCategoryDesignPreview() {
     const payload = await res.json();
     if (seq !== subCategoryDesignPreviewRequestSeq.value) return;
     subCategoryDesignEditorPreview.value = payload;
+    syncDoorPreviewInstancesIntoDraft(payload?.door_instances || []);
   } catch (error) {
     if (seq !== subCategoryDesignPreviewRequestSeq.value) return;
     subCategoryDesignEditorPreview.value = null;
@@ -7811,6 +8145,7 @@ async function openSubCategoryDesignEditor(item = null) {
           ui_order: Number(part.ui_order) || 0,
         })) : [],
         interior_instances: Array.isArray(item.interior_instances) ? item.interior_instances.map(normalizeInteriorInstanceRecord).filter(Boolean) : [],
+        door_instances: Array.isArray(item.door_instances) ? item.door_instances.map(normalizeDoorInstanceRecord).filter(Boolean) : [],
       })
     : buildNewSubCategoryDesignDraft();
   subCategoryDesignEditorDraft.value = draft;
@@ -8025,6 +8360,33 @@ function syncDoorInstanceInDraft(instance) {
   }
   draft.door_instances = (draft.door_instances || []).map((row, index) => index === existingIndex ? normalized : row);
 }
+function syncDoorPreviewInstancesIntoDraft(instances) {
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft) return;
+  const previewById = new Map(
+    (Array.isArray(instances) ? instances : [])
+      .map((item) => normalizeDoorInstanceRecord(item))
+      .filter(Boolean)
+      .map((item) => [String(item.id), item])
+  );
+  if (!previewById.size) return;
+  draft.door_instances = (draft.door_instances || []).map((row) => {
+    const preview = previewById.get(String(row?.id || ""));
+    if (!preview) return row;
+    return {
+      ...row,
+      controller_type: preview.controller_type,
+      controller_bindings: preview.controller_bindings,
+      controller_box_snapshot: { ...(preview.controller_box_snapshot || {}) },
+      param_values: { ...(preview.param_values || {}) },
+      param_meta: { ...(preview.param_meta || {}) },
+      part_snapshots: Array.isArray(preview.part_snapshots) ? preview.part_snapshots.map((item) => ({ ...(item || {}) })) : [],
+      viewer_boxes: Array.isArray(preview.viewer_boxes) ? preview.viewer_boxes.map((item) => ({ ...(item || {}) })) : [],
+      computed_params: { ...(preview.computed_params || {}) },
+      status: preview.status || row.status,
+    };
+  });
+}
 
 function syncOpenSubCategoryDesignDraftToCollection() {
   const draft = subCategoryDesignEditorDraft.value;
@@ -8232,6 +8594,10 @@ async function addDoorGroupToDesign(group) {
     showAlert("ابتدا خود طرح ساب‌کت را ذخیره کنید، سپس گروه درب را به آن اضافه کنید.", { title: "قطعات درب" });
     return;
   }
+  if (normalizeDoorPartGroupControllerType(group?.controller_type) === DOOR_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED) {
+    beginDoorLibraryPendingController(group);
+    return;
+  }
   doorLibraryAddingGroupKey.value = loadingKey;
   try {
     const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances`, {
@@ -8251,6 +8617,45 @@ async function addDoorGroupToDesign(group) {
     await refreshSubCategoryDesignPreview();
   } catch (error) {
     showAlert(error?.message || "افزودن گروه درب به طرح انجام نشد.", { title: "خطا" });
+  } finally {
+    doorLibraryAddingGroupKey.value = "";
+  }
+}
+async function finalizePendingDoorController() {
+  if (!isDoorLibraryPendingControllerActive.value || doorLibraryAddingGroupKey.value) return false;
+  if (!subCategoryDesignEditorOpen.value) return false;
+  const draft = subCategoryDesignEditorDraft.value;
+  const group = activeDoorLibraryPendingGroup.value;
+  const summary = doorLibraryControllerSelectionSummary.value;
+  if (!draft?.id || !group?.id || !summary?.eligible) return false;
+  const loadingKey = getDoorLibraryAddingGroupKey(group);
+  doorLibraryAddingGroupKey.value = loadingKey;
+  try {
+    const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        door_part_group_id: group.id,
+        line_color: normalizeHexColor(doorLibraryPendingControllerState.value.pending_color || group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+        structural_part_formula_ids: summary.structural_part_formula_ids || [],
+        dependent_interior_instance_ids: summary.dependent_interior_instance_ids || [],
+        controller_box_snapshot: summary.controller_box_snapshot || {},
+        param_values: Object.fromEntries(
+          Object.entries(summary.preview_param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+        ),
+      }),
+    });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه درب به طرح انجام نشد."));
+    const created = await res.json();
+    syncDoorInstanceInDraft(created);
+    syncOpenSubCategoryDesignDraftToCollection();
+    resetDoorLibraryPendingControllerState();
+    doorLibraryHoveredInstanceId.value = "";
+    await refreshSubCategoryDesignPreview();
+    return true;
+  } catch (error) {
+    showAlert(error?.message || "افزودن گروه درب به طرح انجام نشد.", { title: "خطا" });
+    return false;
   } finally {
     doorLibraryAddingGroupKey.value = "";
   }
@@ -9729,19 +10134,46 @@ function normalizeInternalPartGroupControllerType(value) {
 }
 
 function normalizeDoorPartGroupControllerType(value) {
-  return "";
+  const normalized = String(value || "").trim();
+  return DOOR_GROUP_CONTROLLER_TYPE_OPTIONS.some((item) => item.value === normalized) ? normalized : "";
 }
 
 function buildDoorPartGroupControllerBindingsByType(controllerType) {
-  return {};
+  const normalizedType = normalizeDoorPartGroupControllerType(controllerType);
+  const definitions = DOOR_GROUP_CONTROLLER_DEFINITIONS[normalizedType] || [];
+  return Object.fromEntries(
+    definitions.map((definition) => [definition.key, { param_code: null }])
+  );
 }
 
 function normalizeDoorPartGroupControllerBindings(controllerType, bindings, allowedCodes = null) {
-  return {};
+  const normalizedType = normalizeDoorPartGroupControllerType(controllerType);
+  if (!normalizedType) return {};
+  const definitions = DOOR_GROUP_CONTROLLER_DEFINITIONS[normalizedType] || [];
+  const allowed = allowedCodes instanceof Set ? allowedCodes : null;
+  return Object.fromEntries(
+    definitions.map((definition) => {
+      const rawParamCode = String(bindings?.[definition.key]?.param_code || "").trim();
+      const normalizedParamCode = rawParamCode && (!allowed || allowed.has(rawParamCode)) ? rawParamCode : null;
+      return [definition.key, { param_code: normalizedParamCode }];
+    })
+  );
 }
 
 function normalizeDoorPartGroupControllerSelection(controllerType, selection, allowedPartIds = null) {
-  return [];
+  const normalizedType = normalizeDoorPartGroupControllerType(controllerType);
+  if (!normalizedType) return [];
+  const allowed = allowedPartIds instanceof Set ? allowedPartIds : null;
+  return (Array.isArray(selection) ? selection : [])
+    .map((item) => ({
+      axis: String(item?.axis || "").trim(),
+      part_formula_id: Number(item?.part_formula_id) || 0,
+    }))
+    .filter((item) =>
+      (item.axis === "horizontal" || item.axis === "vertical")
+      && item.part_formula_id > 0
+      && (!allowed || allowed.has(item.part_formula_id))
+    );
 }
 
 function ensureDoorPartGroupControllerConfig(item) {
@@ -9756,8 +10188,26 @@ function ensureDoorPartGroupControllerConfig(item) {
   return item;
 }
 
+function updateDoorPartGroupEditorControllerType(value) {
+  if (!doorPartGroupEditorDraft.value) return;
+  doorPartGroupEditorDraft.value.controller_type = normalizeDoorPartGroupControllerType(value);
+  ensureDoorPartGroupControllerConfig(doorPartGroupEditorDraft.value);
+}
+
 function getDoorPartGroupControllerTypeLabel(value) {
-  return "";
+  const normalized = normalizeDoorPartGroupControllerType(value);
+  return DOOR_GROUP_CONTROLLER_TYPE_OPTIONS.find((item) => item.value === normalized)?.label || "";
+}
+
+function getDoorPartGroupControllerDefinitions(controllerType) {
+  return (DOOR_GROUP_CONTROLLER_DEFINITIONS[normalizeDoorPartGroupControllerType(controllerType)] || []).map((item) => ({ ...item }));
+}
+
+function getDoorPartGroupControllerParamOptions(row) {
+  return getDoorPartGroupSelectedParamColumns(row).map((column) => ({
+    value: column.key,
+    label: column.label || column.key,
+  }));
 }
 
 function buildInternalPartGroupControllerBindingsByType(controllerType) {
@@ -9829,24 +10279,39 @@ function getInternalPartGroupControllerSummary(item) {
 
 function normalizeDoorInstanceRecord(item) {
   if (!item || !item.id) return null;
+  const controllerType = normalizeDoorPartGroupControllerType(item.controller_type);
+  const controllerBindings = normalizeDoorPartGroupControllerBindings(controllerType, item.controller_bindings);
+  const paramValues = Object.fromEntries(
+    Object.entries(item.param_values || {}).map(([key, value]) => [key, value == null ? "" : String(value)])
+  );
+  const computedParams = Object.fromEntries(
+    Object.entries(item.computed_params || {}).map(([key, value]) => [key, value == null || value === "" ? null : Number(value)])
+  );
+  for (const definition of getDoorPartGroupControllerDefinitions(controllerType)) {
+    const boundCode = String(controllerBindings?.[definition.key]?.param_code || "").trim();
+    const computedValue = computedParams?.[definition.key];
+    if (!boundCode || computedValue == null || !Number.isFinite(Number(computedValue))) continue;
+    paramValues[boundCode] = String(Number(computedValue));
+  }
   return {
     ...item,
     id: String(item.id),
     door_part_group_id: String(item.door_part_group_id || ""),
+    controller_type: controllerType,
+    controller_bindings: controllerBindings,
     instance_code: String(item.instance_code || "").trim(),
     line_color: item.line_color ? normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR) : "",
     ui_order: Number(item.ui_order) || 0,
     structural_part_formula_ids: (Array.isArray(item.structural_part_formula_ids) ? item.structural_part_formula_ids : []).map((row) => Number(row) || 0).filter(Boolean),
     dependent_interior_instance_ids: (Array.isArray(item.dependent_interior_instance_ids) ? item.dependent_interior_instance_ids : []).map((row) => String(row || "").trim()).filter(Boolean),
     controller_box_snapshot: { ...(item.controller_box_snapshot || {}) },
-    param_values: Object.fromEntries(
-      Object.entries(item.param_values || {}).map(([key, value]) => [key, value == null ? "" : String(value)])
-    ),
+    param_values: paramValues,
     param_meta: Object.fromEntries(
       Object.entries(item.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])
     ),
     part_snapshots: Array.isArray(item.part_snapshots) ? item.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
     viewer_boxes: Array.isArray(item.viewer_boxes) ? item.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
+    computed_params: computedParams,
     status: String(item.status || "draft").trim() || "draft",
   };
 }
@@ -9939,7 +10404,20 @@ function setDoorPartGroupBinaryDefault(paramCode, value) {
 }
 
 function getDoorPartGroupControllerSummary(item) {
-  return { text: "بدون کنترلر", detail: "", connected: 0, total: 0 };
+  const controllerType = normalizeDoorPartGroupControllerType(item?.controller_type);
+  if (!controllerType) {
+    return { text: "بدون کنترلر", detail: "", connected: 0, total: 0 };
+  }
+  const definitions = getDoorPartGroupControllerDefinitions(controllerType);
+  const allowedCodes = new Set(getDoorPartGroupSelectedParamColumns(item).map((column) => column.key));
+  const bindings = normalizeDoorPartGroupControllerBindings(controllerType, item?.controller_bindings, allowedCodes);
+  const connected = definitions.filter((definition) => String(bindings?.[definition.key]?.param_code || "").trim()).length;
+  return {
+    text: `${toPersianDigits(connected)} / ${toPersianDigits(definitions.length)} متصل`,
+    detail: getDoorPartGroupControllerTypeLabel(controllerType),
+    connected,
+    total: definitions.length,
+  };
 }
 
 function getSubCategoryDefaultsSummary(item) {
@@ -15207,6 +15685,13 @@ onMounted(() => {
 
   const onEsc = (e) => {
     if (String(e.key || "") !== "Escape") return;
+    if (isDoorLibraryPendingControllerActive.value) {
+      resetDoorLibraryPendingControllerState();
+      doorLibraryHoveredInstanceId.value = "";
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (interiorLibraryInstanceContextMenu.value.visible) {
       closeInteriorInstanceContextMenu();
       e.preventDefault();
@@ -15288,6 +15773,21 @@ onMounted(() => {
   window.addEventListener("keydown", onEsc, true);
   // store for cleanup
   window.__designkpOnEsc = onEsc;
+
+  const onDoorLibraryPendingFinalizeKey = (e) => {
+    if (!isDoorLibraryPendingControllerActive.value || !doorLibraryControllerSelectionSummary.value?.eligible) return;
+    const t = e.target;
+    const tag = (t?.tagName || "").toUpperCase();
+    if (t?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    const key = String(e.key || "");
+    const code = String(e.code || "");
+    if (key !== "Enter" && key !== " " && code !== "Space") return;
+    e.preventDefault();
+    e.stopPropagation();
+    void finalizePendingDoorController();
+  };
+  window.addEventListener("keydown", onDoorLibraryPendingFinalizeKey, true);
+  window.__designkpOnDoorLibraryPendingFinalizeKey = onDoorLibraryPendingFinalizeKey;
 
   const onInteriorLibraryDelete = (e) => {
     if (String(e.key || "") !== "Delete") return;
@@ -15441,6 +15941,10 @@ onBeforeUnmount(() => {
   if (window.__designkpOnEsc) {
     window.removeEventListener("keydown", window.__designkpOnEsc, true);
     delete window.__designkpOnEsc;
+  }
+  if (window.__designkpOnDoorLibraryPendingFinalizeKey) {
+    window.removeEventListener("keydown", window.__designkpOnDoorLibraryPendingFinalizeKey, true);
+    delete window.__designkpOnDoorLibraryPendingFinalizeKey;
   }
   if (window.__designkpOnInteriorLibraryDelete) {
     window.removeEventListener("keydown", window.__designkpOnInteriorLibraryDelete, true);
@@ -18407,6 +18911,17 @@ onBeforeUnmount(() => {
               />
             </div>
           </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>نوع کنترلر گروه درب</span>
+            <select
+              :value="doorPartGroupEditorDraft.controller_type"
+              class="constructionDialog__input"
+              @change="updateDoorPartGroupEditorControllerType($event.target.value)"
+            >
+              <option value="">بدون کنترلر</option>
+              <option v-for="option in DOOR_GROUP_CONTROLLER_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
           <div class="subCategoryDesignEditor__metaActions">
             <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': doorPartGroupParamGroupsOpen }" title="گروه پارامترها" @click="toggleDoorPartGroupParamGroupsPanel">
               <svg viewBox="0 0 24 24" class="subCategoryDesignEditor__metaIcon subCategoryDesignEditor__metaIcon--glyph" aria-hidden="true">
@@ -18449,6 +18964,42 @@ onBeforeUnmount(() => {
                 <span class="constructionDialog__summaryValue">{{ getDoorPartGroupParamSummary(doorPartGroupEditorDraft).text }}</span>
                 <span class="constructionDialog__summaryLabel">گروه پارامتر</span>
               </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ getDoorPartGroupControllerSummary(doorPartGroupEditorDraft).text }}</span>
+                <span class="constructionDialog__summaryLabel">{{ getDoorPartGroupControllerSummary(doorPartGroupEditorDraft).detail || "کنترلر" }}</span>
+              </div>
+            </div>
+            <div v-if="doorPartGroupEditorDraft.controller_type" class="constructionDialog__controllerCards">
+              <div
+                v-for="definition in getDoorPartGroupControllerDefinitions(doorPartGroupEditorDraft.controller_type)"
+                :key="definition.key"
+                class="constructionDialog__controllerCard"
+              >
+                <div class="constructionDialog__controllerCardMeta">
+                  <div class="constructionDialog__controllerCardTitle">{{ definition.label }}</div>
+                  <div class="constructionDialog__controllerCardCaption">{{ definition.key }}</div>
+                </div>
+                <select
+                  v-model="doorPartGroupEditorDraft.controller_bindings[definition.key].param_code"
+                  class="constructionDialog__input"
+                  :disabled="!getDoorPartGroupControllerParamOptions(doorPartGroupEditorDraft).length"
+                >
+                  <option :value="null">بدون اتصال</option>
+                  <option
+                    v-for="option in getDoorPartGroupControllerParamOptions(doorPartGroupEditorDraft)"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </div>
+            </div>
+            <div
+              v-if="doorPartGroupEditorDraft.controller_type && !getDoorPartGroupControllerParamOptions(doorPartGroupEditorDraft).length"
+              class="designMenu__cabinetState"
+            >
+              کنترلر ساخته شد، اما هنوز پارامتر قابل اتصال برای این گروه انتخاب نشده است.
             </div>
             <div class="subCategoryDesignEditor__partList">
               <div v-for="part in doorPartGroupEditorDraft.parts" :key="part.part_formula_id" class="subCategoryDesignEditor__partItem is-static">
@@ -20381,11 +20932,11 @@ onBeforeUnmount(() => {
           <div class="designMenu__cabinetState">
             {{ subCategoryDesignEditorOpen ? "برای ساب‌کت فعال" : (activeDoorLibraryOrderDesign?.design_title || "برای طرح سفارش فعال") }}
           </div>
-          <div v-if="doorLibrarySelectedInstanceIds.length" class="designMenu__cabinetState">
+          <div v-if="isDoorLibraryPendingControllerActive || doorLibrarySelectedInstanceIds.length" class="designMenu__cabinetState">
             {{ `انتخاب شده: ${toPersianDigits(doorLibrarySelectedInstanceIds.length)} قطعه` }}
-            <span v-if="doorLibraryControllerSelectionSummary.eligible"> | مستطیل کنترلر آماده نمایش است.</span>
+            <span v-if="isDoorLibraryPendingControllerActive && doorLibraryControllerSelectionSummary.eligible"> | مستطیل کنترلر آماده تایید است.</span>
             <span v-else>
-              {{ ` | برای کنترلر حداقل ${toPersianDigits(2)} قطعه عمودی و ${toPersianDigits(2)} قطعه افقی انتخاب کنید.` }}
+              {{ ` | برای کنترلر باید دقیقاً ${toPersianDigits(2)} قطعه عمودی و ${toPersianDigits(2)} قطعه افقی از سازه یا قطعات داخلی انتخاب کنید.` }}
             </span>
           </div>
           <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
@@ -20403,7 +20954,7 @@ onBeforeUnmount(() => {
               @pointermove="onDoorLibraryViewerPointerMove"
               @pointerleave="onDoorLibraryViewerPointerLeave"
               @pointerdown="onDoorLibraryViewerPointerDown"
-              @dblclick.prevent="doorLibraryPreviewMode === 'model3d' ? (doorLibraryPreview3dRef?.fitCameraToAll?.(), doorLibraryPreview3dRef?.zoomByFactor?.(INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR)) : resetDoorLibraryPreviewView(true)"
+              @dblclick.prevent="handleDoorLibraryPreviewDoubleClick"
             >
               <div v-if="doorLibraryPreviewMode === 'front2d'" class="subCategoryDesignEditor__annotationTools">
                 <button
@@ -20576,7 +21127,63 @@ onBeforeUnmount(() => {
                   />
                 </g>
                 <g
-                  v-if="doorLibraryControllerRect"
+                  v-for="overlay in doorLibraryPersistedControllerOverlays"
+                  :key="`door-persisted-controller-${overlay.id}`"
+                  class="subCategoryDesignEditor__controllerOverlay"
+                >
+                  <rect
+                    :x="overlay.rect.x"
+                    :y="overlay.rect.y"
+                    :width="overlay.rect.w"
+                    :height="overlay.rect.h"
+                    :style="{ '--controller-line-color': overlay.lineColor }"
+                    class="subCategoryDesignEditor__controllerRect"
+                  />
+                  <g
+                    v-for="controller in overlay.visuals"
+                    :key="`door-controller-${overlay.id}-${controller.id}`"
+                    class="subCategoryDesignEditor__controllerHandle"
+                  >
+                    <path
+                      :d="controller.kind === 'horizontal'
+                        ? buildInteriorControllerHorizontalArrowPath(controller.direction, controller.x, controller.y, controller.w, controller.h)
+                        : buildInteriorControllerVerticalArrowPath(controller.direction, controller.x, controller.y, controller.w, controller.h)"
+                      class="subCategoryDesignEditor__controllerBody"
+                    />
+                    <foreignObject
+                      :x="controller.fieldX"
+                      :y="controller.fieldY"
+                      :width="controller.inputW"
+                        :height="controller.inputH"
+                    >
+                      <div class="subCategoryDesignEditor__controllerValueShell" xmlns="http://www.w3.org/1999/xhtml">
+                        <div class="subCategoryDesignEditor__controllerValueButton">
+                          {{ formatInteriorControllerDisplayValue(overlay.values?.[controller.id]) }}
+                        </div>
+                      </div>
+                    </foreignObject>
+                  </g>
+                  <g
+                    v-for="metric in overlay.metrics"
+                    :key="`door-controller-metric-${overlay.id}-${metric.id}`"
+                    class="subCategoryDesignEditor__controllerHandle"
+                  >
+                    <foreignObject
+                      :x="metric.fieldX"
+                      :y="metric.fieldY"
+                      :width="metric.inputW"
+                      :height="metric.inputH"
+                    >
+                      <div class="subCategoryDesignEditor__controllerValueShell" xmlns="http://www.w3.org/1999/xhtml">
+                        <div class="subCategoryDesignEditor__controllerValueButton">
+                          {{ formatInteriorControllerDisplayValue(overlay.values?.[metric.id]) }}
+                        </div>
+                      </div>
+                    </foreignObject>
+                  </g>
+                </g>
+                <g
+                  v-if="isDoorLibraryPendingControllerActive && doorLibraryControllerRect"
                   class="subCategoryDesignEditor__controllerOverlay is-selected"
                 >
                   <rect
@@ -20584,12 +21191,12 @@ onBeforeUnmount(() => {
                     :y="doorLibraryControllerRect.y"
                     :width="doorLibraryControllerRect.w"
                     :height="doorLibraryControllerRect.h"
-                    :style="{ '--controller-line-color': '#2f7fd3' }"
+                    :style="{ '--controller-line-color': doorLibraryPendingControllerState.pending_color || '#2f7fd3' }"
                     class="subCategoryDesignEditor__controllerRect"
                   />
                   <g
                     v-for="controller in doorLibraryControllerVisuals"
-                    :key="`door-controller-${controller.id}`"
+                    :key="`door-controller-pending-${controller.id}`"
                     class="subCategoryDesignEditor__controllerHandle"
                   >
                     <path
@@ -20607,6 +21214,24 @@ onBeforeUnmount(() => {
                       <div class="subCategoryDesignEditor__controllerValueShell" xmlns="http://www.w3.org/1999/xhtml">
                         <div class="subCategoryDesignEditor__controllerValueButton">
                           {{ formatInteriorControllerDisplayValue(doorLibraryControllerParamValues?.[controller.id]) }}
+                        </div>
+                      </div>
+                    </foreignObject>
+                  </g>
+                  <g
+                    v-for="metric in doorLibraryControllerMetricVisuals"
+                    :key="`door-controller-pending-metric-${metric.id}`"
+                    class="subCategoryDesignEditor__controllerHandle"
+                  >
+                    <foreignObject
+                      :x="metric.fieldX"
+                      :y="metric.fieldY"
+                      :width="metric.inputW"
+                      :height="metric.inputH"
+                    >
+                      <div class="subCategoryDesignEditor__controllerValueShell" xmlns="http://www.w3.org/1999/xhtml">
+                        <div class="subCategoryDesignEditor__controllerValueButton">
+                          {{ formatInteriorControllerDisplayValue(doorLibraryControllerParamValues?.[metric.id]) }}
                         </div>
                       </div>
                     </foreignObject>
