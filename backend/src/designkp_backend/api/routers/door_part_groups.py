@@ -18,7 +18,7 @@ router = APIRouter(prefix="/door-part-groups", tags=["door_part_groups"])
 
 DEFAULT_DOOR_LINE_COLOR = "#8A98A3"
 DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING = "back_to_back_opening"
-DOOR_PART_GROUP_CONTROLLER_TYPES = {DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING}
+DOOR_PART_GROUP_CONTROLLER_TYPES: set[str] = set()
 DOOR_PART_GROUP_CONTROLLER_AXES = ("vertical", "horizontal")
 DOOR_PART_GROUP_CONTROLLER_BINDING_KEYS = ("width_back_to_back", "height_back_to_back")
 
@@ -176,12 +176,7 @@ async def _load_group(session: AsyncSession, group_uuid: uuid.UUID) -> DoorPartG
 
 
 def _normalize_controller_type(value: str | None) -> str | None:
-    normalized = str(value or "").strip()
-    if not normalized:
-        return None
-    if normalized not in DOOR_PART_GROUP_CONTROLLER_TYPES:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported door group controller type: {normalized}")
-    return normalized
+    return None
 
 
 def _normalize_optional_string(value: object) -> str | None:
@@ -193,37 +188,7 @@ def _normalize_controller_selection_payload(
     controller_type: str | None,
     selection: list[DoorPartGroupControllerSelectionPayload] | list[dict[str, object]] | None,
 ) -> list[dict[str, object]]:
-    normalized_type = _normalize_controller_type(controller_type)
-    if not normalized_type:
-        return []
-    items = list(selection or [])
-    if not items:
-        return []
-    normalized: list[dict[str, object]] = []
-    seen_pairs: set[tuple[str, int]] = set()
-    seen_axes: set[str] = set()
-    for raw_item in items:
-        payload = raw_item if isinstance(raw_item, DoorPartGroupControllerSelectionPayload) else DoorPartGroupControllerSelectionPayload.model_validate(raw_item)
-        axis = str(payload.axis or "").strip()
-        if axis not in DOOR_PART_GROUP_CONTROLLER_AXES:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported door group controller axis: {axis}")
-        formula_id = int(payload.part_formula_id)
-        pair = (axis, formula_id)
-        if pair in seen_pairs:
-            continue
-        seen_pairs.add(pair)
-        seen_axes.add(axis)
-        normalized.append({
-            "axis": axis,
-            "part_formula_id": formula_id,
-        })
-    missing_axes = [axis for axis in DOOR_PART_GROUP_CONTROLLER_AXES if axis not in seen_axes]
-    if normalized and missing_axes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Incomplete door group controller selection. Missing axes: {', '.join(missing_axes)}",
-        )
-    return normalized
+    return []
 
 
 def _normalize_controller_bindings_payload(
@@ -231,29 +196,7 @@ def _normalize_controller_bindings_payload(
     bindings: dict[str, DoorPartGroupControllerBindingPayload] | dict[str, object] | None,
     allowed_codes: set[str] | None = None,
 ) -> dict[str, dict[str, str | None]]:
-    normalized_type = _normalize_controller_type(controller_type)
-    if not normalized_type:
-        return {}
-    raw_bindings = dict(bindings or {})
-    invalid_keys = sorted(str(key or "").strip() for key in raw_bindings if str(key or "").strip() not in DOOR_PART_GROUP_CONTROLLER_BINDING_KEYS)
-    if invalid_keys:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported door group controller bindings: {', '.join(invalid_keys)}",
-        )
-    normalized: dict[str, dict[str, str | None]] = {}
-    for key in DOOR_PART_GROUP_CONTROLLER_BINDING_KEYS:
-        raw_value = raw_bindings.get(key)
-        if isinstance(raw_value, DoorPartGroupControllerBindingPayload):
-            param_code = _normalize_optional_string(raw_value.param_code)
-        elif isinstance(raw_value, dict):
-            param_code = _normalize_optional_string(raw_value.get("param_code"))
-        else:
-            param_code = None
-        if param_code and allowed_codes is not None and param_code not in allowed_codes:
-            param_code = None
-        normalized[key] = {"param_code": param_code}
-    return normalized
+    return {}
 
 
 def _serialize_group(item: DoorPartGroup, *, include_param_groups: bool = True) -> DoorPartGroupItemResponse:

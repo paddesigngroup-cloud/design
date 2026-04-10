@@ -432,7 +432,6 @@ const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_RIGHT = "width_controller_inte
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_LEFT = "width_controller_internal_group_part_left";
 const INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT = "height_controller_internal_group_part";
 const INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT = "height_controller_internal_group_part_left";
-const DOOR_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING = "back_to_back_opening";
 const INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS = [
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH, label: "قطعات عرضی وسط" },
   { value: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT, label: "قطعات عرضی راست" },
@@ -493,14 +492,6 @@ const INTERNAL_GROUP_CONTROLLER_DEFINITIONS = {
     { key: "bottom_offset", label: "کنترلر ضلع پایین" },
   ],
 };
-const DOOR_GROUP_CONTROLLER_TYPE_OPTIONS = [
-  { value: DOOR_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING, label: "دو درب لولایی" },
-];
-const DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS = [
-  { key: "width_back_to_back", label: "عرض پشت تا پشت" },
-  { key: "height_back_to_back", label: "ارتفاع پشت تا پشت" },
-];
-
 function isHeightInternalGroupControllerType(controllerType) {
   const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
   return normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT
@@ -583,7 +574,6 @@ const internalPartGroupEditorDraft = ref(null);
 const doorPartGroupEditorOpen = ref(false);
 const doorPartGroupEditorDraft = ref(null);
 const doorPartGroupParamGroupsOpen = ref(false);
-const doorPartGroupControllerEditorOpen = ref(false);
 const doorPartGroupDefaultsEditorOpen = ref(false);
 const doorPartGroupDefaultsEditorRowId = ref(null);
 const doorPartGroupDefaultsEditorGroups = ref([]);
@@ -5585,7 +5575,6 @@ function closeDoorPartGroupEditor() {
   doorPartGroupEditorOpen.value = false;
   doorPartGroupEditorDraft.value = null;
   doorPartGroupParamGroupsOpen.value = false;
-  doorPartGroupControllerEditorOpen.value = false;
 }
 
 function hasInternalPartGroupDefaultsChanges() {
@@ -7323,7 +7312,6 @@ function openDoorPartGroupEditor(item = null) {
       })
     : buildNewDoorPartGroupDraft();
   doorPartGroupParamGroupsOpen.value = false;
-  doorPartGroupControllerEditorOpen.value = false;
   doorPartGroupEditorOpen.value = true;
 }
 
@@ -7379,41 +7367,6 @@ function openDoorPartGroupParamGroupsEditor(item = null) {
   }
   if (!doorPartGroupEditorDraft.value) return;
   doorPartGroupParamGroupsOpen.value = true;
-}
-
-function openDoorPartGroupControllerEditor(item = null) {
-  if (item && !doorPartGroupEditorOpen.value) {
-    openDoorPartGroupEditor(item);
-  }
-  if (!doorPartGroupEditorDraft.value) return;
-  ensureDoorPartGroupControllerConfig(doorPartGroupEditorDraft.value);
-  doorPartGroupControllerEditorOpen.value = true;
-}
-
-function closeDoorPartGroupControllerEditor() {
-  doorPartGroupControllerEditorOpen.value = false;
-}
-
-function updateDoorPartGroupControllerType(value) {
-  if (!doorPartGroupEditorDraft.value) return;
-  doorPartGroupEditorDraft.value.controller_type = normalizeDoorPartGroupControllerType(value);
-  ensureDoorPartGroupControllerConfig(doorPartGroupEditorDraft.value);
-}
-
-function toggleDoorPartGroupControllerSelection(rect) {
-  const draft = doorPartGroupEditorDraft.value;
-  if (!draft || !rect?.axis || !Number(rect?.part_formula_id)) return;
-  const axis = rect.axis;
-  const formulaId = Number(rect.part_formula_id);
-  const next = normalizeDoorPartGroupControllerSelection(draft.controller_type, draft.controller_selection);
-  const existingIndex = next.findIndex((item) => item.axis === axis && Number(item.part_formula_id) === formulaId);
-  if (existingIndex === -1) {
-    next.push({ axis, part_formula_id: formulaId });
-  } else {
-    next.splice(existingIndex, 1);
-  }
-  draft.controller_selection = next;
-  ensureDoorPartGroupControllerConfig(draft);
 }
 
 function openInternalPartGroupDefaultsEditor(item) {
@@ -9186,49 +9139,19 @@ function normalizeInternalPartGroupControllerType(value) {
 }
 
 function normalizeDoorPartGroupControllerType(value) {
-  const normalized = String(value || "").trim();
-  return DOOR_GROUP_CONTROLLER_TYPE_OPTIONS.some((item) => item.value === normalized) ? normalized : "";
+  return "";
 }
 
 function buildDoorPartGroupControllerBindingsByType(controllerType) {
-  const normalizedType = normalizeDoorPartGroupControllerType(controllerType);
-  if (!normalizedType) return {};
-  return Object.fromEntries(
-    DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS.map((definition) => [definition.key, { param_code: null }])
-  );
+  return {};
 }
 
 function normalizeDoorPartGroupControllerBindings(controllerType, bindings, allowedCodes = null) {
-  const normalizedType = normalizeDoorPartGroupControllerType(controllerType);
-  if (!normalizedType) return {};
-  const allowed = allowedCodes instanceof Set ? allowedCodes : null;
-  return Object.fromEntries(
-    DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS.map((definition) => {
-      const rawParamCode = String(bindings?.[definition.key]?.param_code || "").trim();
-      const normalizedParamCode = rawParamCode && (!allowed || allowed.has(rawParamCode)) ? rawParamCode : null;
-      return [definition.key, { param_code: normalizedParamCode }];
-    })
-  );
+  return {};
 }
 
 function normalizeDoorPartGroupControllerSelection(controllerType, selection, allowedPartIds = null) {
-  const normalizedType = normalizeDoorPartGroupControllerType(controllerType);
-  if (!normalizedType) return [];
-  const allowed = allowedPartIds instanceof Set ? allowedPartIds : null;
-  const seen = new Set();
-  return (Array.isArray(selection) ? selection : [])
-    .map((item) => ({
-      axis: String(item?.axis || "").trim(),
-      part_formula_id: Number(item?.part_formula_id) || 0,
-    }))
-    .filter((item) => ["vertical", "horizontal"].includes(item.axis) && item.part_formula_id > 0)
-    .filter((item) => !allowed || allowed.has(item.part_formula_id))
-    .filter((item) => {
-      const key = `${item.axis}:${item.part_formula_id}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+  return [];
 }
 
 function ensureDoorPartGroupControllerConfig(item) {
@@ -9244,8 +9167,7 @@ function ensureDoorPartGroupControllerConfig(item) {
 }
 
 function getDoorPartGroupControllerTypeLabel(value) {
-  const normalized = normalizeDoorPartGroupControllerType(value);
-  return DOOR_GROUP_CONTROLLER_TYPE_OPTIONS.find((item) => item.value === normalized)?.label || "";
+  return "";
 }
 
 function buildInternalPartGroupControllerBindingsByType(controllerType) {
@@ -9427,110 +9349,7 @@ function setDoorPartGroupBinaryDefault(paramCode, value) {
 }
 
 function getDoorPartGroupControllerSummary(item) {
-  const controllerType = normalizeDoorPartGroupControllerType(item?.controller_type);
-  if (!controllerType) {
-    return { text: "بدون کنترلر", detail: "", connected: 0, total: 2 };
-  }
-  const allowedCodes = new Set(getDoorPartGroupSelectedParamColumns(item).map((column) => column.key));
-  const bindings = normalizeDoorPartGroupControllerBindings(controllerType, item?.controller_bindings, allowedCodes);
-  const connected = DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS.filter((definition) => String(bindings?.[definition.key]?.param_code || "").trim()).length;
-  return {
-    text: `${toPersianDigits(connected)} / ${toPersianDigits(DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS.length)} متصل`,
-    detail: getDoorPartGroupControllerTypeLabel(controllerType),
-    connected,
-    total: DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS.length,
-  };
-}
-
-function getDoorPartGroupControllerParamOptions(row) {
-  return getDoorPartGroupSelectedParamColumns(row).map((column) => ({
-    value: column.key,
-    label: column.label || column.key,
-  }));
-}
-
-function inferDoorControllerAxis(option) {
-  const code = String(option?.code || "").toLowerCase();
-  const title = String(option?.title || "").toLowerCase();
-  if (/(left|right|side|partition|vertical|vert|چپ|راست|عمودی|بدنه)/.test(code) || /(چپ|راست|عمودی|بدنه)/.test(title)) {
-    return "vertical";
-  }
-  if (/(top|bottom|front|back|shelf|roof|floor|horizontal|h_)/.test(code) || /(افقی|بالا|پایین|جلو|عقب|کف|طاق|طبقه)/.test(title)) {
-    return "horizontal";
-  }
-  return null;
-}
-
-function buildDoorPartGroupPreviewRects(item) {
-  const optionsById = new Map(constructionDoorPartFormulaOptions.value.map((option) => [Number(option.id), option]));
-  const selected = (Array.isArray(item?.parts) ? item.parts : [])
-    .filter((part) => part?.enabled !== false && Number(part?.part_formula_id) > 0)
-    .map((part, index) => ({
-      part_formula_id: Number(part.part_formula_id),
-      ui_order: Number(part.ui_order) || index,
-      option: optionsById.get(Number(part.part_formula_id)) || null,
-    }))
-    .sort((a, b) => a.ui_order - b.ui_order || a.part_formula_id - b.part_formula_id);
-  const vertical = [];
-  const horizontal = [];
-  for (const row of selected) {
-    const axis = inferDoorControllerAxis(row.option) || ((vertical.length <= horizontal.length) ? "vertical" : "horizontal");
-    const target = axis === "vertical" ? vertical : horizontal;
-    target.push(row);
-  }
-  const rects = [];
-  vertical.forEach((row, index) => {
-    const x = 120 + (index * 150);
-    rects.push({
-      part_formula_id: row.part_formula_id,
-      axis: "vertical",
-      x,
-      y: 110,
-      width: 86,
-      height: 380,
-      title: row.option?.title || String(row.part_formula_id),
-      code: row.option?.code || "",
-    });
-  });
-  horizontal.forEach((row, index) => {
-    const y = 140 + (index * 140);
-    rects.push({
-      part_formula_id: row.part_formula_id,
-      axis: "horizontal",
-      x: 340,
-      y,
-      width: 360,
-      height: 82,
-      title: row.option?.title || String(row.part_formula_id),
-      code: row.option?.code || "",
-    });
-  });
-  return rects;
-}
-
-function buildDoorPartGroupSelectionPreview(item) {
-  const selection = normalizeDoorPartGroupControllerSelection(
-    item?.controller_type,
-    item?.controller_selection,
-    new Set((Array.isArray(item?.parts) ? item.parts : []).map((part) => Number(part.part_formula_id) || 0).filter(Boolean)),
-  );
-  const selectedKeys = new Set(selection.map((row) => `${row.axis}:${row.part_formula_id}`));
-  const rects = buildDoorPartGroupPreviewRects(item);
-  const selectedVertical = rects.filter((rect) => rect.axis === "vertical" && selectedKeys.has(`vertical:${rect.part_formula_id}`));
-  const selectedHorizontal = rects.filter((rect) => rect.axis === "horizontal" && selectedKeys.has(`horizontal:${rect.part_formula_id}`));
-  const widthBackToBack = selectedVertical.length
-    ? Math.max(...selectedVertical.map((rect) => rect.x + rect.width)) - Math.min(...selectedVertical.map((rect) => rect.x))
-    : 0;
-  const heightBackToBack = selectedHorizontal.length
-    ? Math.max(...selectedHorizontal.map((rect) => rect.y + rect.height)) - Math.min(...selectedHorizontal.map((rect) => rect.y))
-    : 0;
-  return {
-    rects,
-    widthBackToBack: Math.round(widthBackToBack),
-    heightBackToBack: Math.round(heightBackToBack),
-    hasVertical: selectedVertical.length > 0,
-    hasHorizontal: selectedHorizontal.length > 0,
-  };
+  return { text: "بدون کنترلر", detail: "", connected: 0, total: 0 };
 }
 
 function getSubCategoryDefaultsSummary(item) {
@@ -17101,10 +16920,10 @@ onBeforeUnmount(() => {
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--defaults">
                       <div class="constructionDialog__defaultsActions">
-                        <button type="button" class="constructionDialog__defaultsBtn" title="تنظیم کنترلر گروه درب" @click="openDoorPartGroupControllerEditor(item)">
+                        <div class="constructionDialog__defaultsBtn" title="وضعیت کنترلر گروه درب">
                           <span class="constructionDialog__defaultsBtnValue">{{ getDoorPartGroupControllerSummary(item).text }}</span>
                           <span class="constructionDialog__defaultsBtnLabel">{{ getDoorPartGroupControllerSummary(item).detail || "کنترلر" }}</span>
-                        </button>
+                        </div>
                       </div>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.parts?.length || 0) }}</td>
@@ -17122,7 +16941,7 @@ onBeforeUnmount(() => {
               </table>
             </div>
             <div class="constructionDialog__sheetHint">
-                برای گروه‌های درب می‌توانید رنگ خطوط، پیش‌فرض پارامترها و کنترلر دو درب لولایی را مشابه مسیر داخلی تنظیم کنید.
+                برای گروه‌های درب می‌توانید رنگ خطوط و پیش‌فرض پارامترها را تنظیم کنید و ستون کنترلر فقط برای نمایش وضعیت نگه داشته شده است.
             </div>
           </template>
 
@@ -17952,7 +17771,7 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeDoorPartGroupEditor">×</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        در این پنجره فقط گروه قطعات درب، گروه‌های پارامتر، رنگ کنترلر و خود کنترلر تعریف می‌شود. انتخاب قطعات وابسته از نمای روبرو در فاز طرح انجام خواهد شد.
+        در این پنجره فقط گروه قطعات درب، گروه‌های پارامتر و رنگ پیش‌فرض خطوط تعریف می‌شود.
       </div>
 
       <div v-if="doorPartGroupEditorDraft" class="subCategoryDesignEditor">
@@ -17999,10 +17818,6 @@ onBeforeUnmount(() => {
               </svg>
               <span>گروه پارامترها</span>
             </button>
-            <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': doorPartGroupControllerEditorOpen }" title="کنترلر گروه" @click="openDoorPartGroupControllerEditor()">
-              <img src="/icons/turn_dim.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-              <span>کنترلر گروه</span>
-            </button>
           </div>
         </div>
 
@@ -18034,10 +17849,6 @@ onBeforeUnmount(() => {
               <div class="constructionDialog__summaryItem">
                 <span class="constructionDialog__summaryValue">{{ getDoorPartGroupParamSummary(doorPartGroupEditorDraft).text }}</span>
                 <span class="constructionDialog__summaryLabel">گروه پارامتر</span>
-              </div>
-              <div class="constructionDialog__summaryItem">
-                <span class="constructionDialog__summaryValue">{{ getDoorPartGroupControllerSummary(doorPartGroupEditorDraft).text }}</span>
-                <span class="constructionDialog__summaryLabel">پارامتر اتصالی کنترلر</span>
               </div>
             </div>
             <div class="subCategoryDesignEditor__partList">
@@ -18098,82 +17909,6 @@ onBeforeUnmount(() => {
       </div>
       <div class="appDialog__actions">
         <button type="button" class="constructionDialog__textBtn" @click="toggleDoorPartGroupParamGroupsPanel">بستن</button>
-      </div>
-    </div>
-  </div>
-
-  <div v-if="doorPartGroupControllerEditorOpen && doorPartGroupEditorDraft" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
-    <div class="appDialog__backdrop" @click="closeDoorPartGroupControllerEditor"></div>
-    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
-      <div class="subCategoryPreview__header">
-        <div>
-          <div class="subCategoryPreview__title">کنترلر گروه قطعات درب</div>
-          <div class="subCategoryPreview__caption">
-            {{ doorPartGroupEditorDraft.group_title || "گروه درب" }}
-            <span>{{ toPersianDigits(doorPartGroupEditorDraft.group_id || 0) }}</span>
-          </div>
-        </div>
-        <button type="button" class="constructionDialog__textBtn" @click="closeDoorPartGroupControllerEditor">بستن</button>
-      </div>
-      <div class="constructionDialog__sectionHint">
-        نوع کنترلر را انتخاب کنید و دو پارامتر اتصالی آن را به پارامترهای همین گروه درب متصل کنید. انتخاب قطعات وابسته و محاسبه ابعاد در فاز طرح انجام می‌شود.
-      </div>
-      <div class="subCategoryPreview__body">
-        <div class="subCategoryPreview__tree">
-          <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
-            <div class="subCategoryPreview__panelHead">
-              <div class="subCategoryPreview__panelTitle">نوع کنترلر و اتصال پارامترها</div>
-              <div class="subCategoryPreview__panelCaption">در این فاز فقط کنترلر دو درب لولایی فعال است.</div>
-            </div>
-            <div class="constructionDialog__controllerForm">
-              <label class="constructionDialog__field">
-                <span class="constructionDialog__fieldLabel">نوع کنترلر گروه</span>
-                <select
-                  :value="doorPartGroupEditorDraft.controller_type"
-                  class="constructionDialog__input"
-                  @change="updateDoorPartGroupControllerType($event.target.value)"
-                >
-                  <option value="">بدون کنترلر</option>
-                  <option v-for="option in DOOR_GROUP_CONTROLLER_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
-                </select>
-              </label>
-              <div v-if="doorPartGroupEditorDraft.controller_type" class="constructionDialog__controllerCards">
-                <div v-for="definition in DOOR_GROUP_CONTROLLER_BINDING_DEFINITIONS" :key="definition.key" class="constructionDialog__controllerCard">
-                  <div class="constructionDialog__controllerCardMeta">
-                    <div class="constructionDialog__controllerCardTitle">{{ definition.label }}</div>
-                    <div class="constructionDialog__controllerCardCaption">{{ definition.key }}</div>
-                  </div>
-                  <select
-                    v-model="doorPartGroupEditorDraft.controller_bindings[definition.key].param_code"
-                    class="constructionDialog__input"
-                    :disabled="!getDoorPartGroupControllerParamOptions(doorPartGroupEditorDraft).length"
-                  >
-                    <option :value="null">بدون اتصال</option>
-                    <option v-for="option in getDoorPartGroupControllerParamOptions(doorPartGroupEditorDraft)" :key="option.value" :value="option.value">
-                      {{ option.label }}
-                    </option>
-                  </select>
-                </div>
-              </div>
-              <div v-if="doorPartGroupEditorDraft.controller_type && !getDoorPartGroupControllerParamOptions(doorPartGroupEditorDraft).length" class="designMenu__cabinetState">
-                برای این گروه درب هنوز گروه پارامتری انتخاب نشده است. ابتدا گروه‌های پارامتری همین گروه درب را تنظیم کنید.
-              </div>
-              <div v-if="doorPartGroupEditorDraft.controller_type" class="constructionDialog__summary">
-                <div class="constructionDialog__summaryItem">
-                  <span class="constructionDialog__summaryValue">دو درب لولایی</span>
-                  <span class="constructionDialog__summaryLabel">نوع کنترلر</span>
-                </div>
-                <div class="constructionDialog__summaryItem">
-                  <span class="constructionDialog__summaryValue">{{ getDoorPartGroupControllerSummary(doorPartGroupEditorDraft).text }}</span>
-                  <span class="constructionDialog__summaryLabel">اتصالات پارامتر</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="appDialog__actions">
-        <button type="button" class="constructionDialog__textBtn" @click="closeDoorPartGroupControllerEditor">بستن</button>
       </div>
     </div>
   </div>

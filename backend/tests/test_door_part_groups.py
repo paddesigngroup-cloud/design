@@ -140,9 +140,9 @@ def test_create_door_part_group_uses_payload(monkeypatch: pytest.MonkeyPatch) ->
     assert result.line_color == "#8A98A3"
     assert result.parts[0].part_formula_id == 12
     assert result.param_groups[0].param_group_id == 9
-    assert result.controller_type == DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING
-    assert [item.axis for item in result.controller_selection] == ["vertical", "horizontal"]
-    assert result.controller_bindings["width_back_to_back"].param_code == "door_width"
+    assert result.controller_type is None
+    assert result.controller_selection == []
+    assert result.controller_bindings == {}
 
 
 def test_update_door_part_group_updates_basic_fields(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -220,5 +220,6 @@ def test_update_door_part_group_updates_basic_fields(monkeypatch: pytest.MonkeyP
     assert existing.code == "new_code"
     assert existing.line_color == "#0091FF"
     assert existing.sort_order == 7
-    assert result.controller_type == DOOR_PART_GROUP_CONTROLLER_TYPE_BACK_TO_BACK_OPENING
-    assert existing.controller_selection[0]["axis"] == "vertical"
+    assert result.controller_type is None
+    assert result.controller_selection == []
+    assert result.controller_bindings == {}

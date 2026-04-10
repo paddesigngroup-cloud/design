@@ -1473,15 +1473,9 @@ async def resolve_door_instance_preview(
         part_formula_ids=set(),
         include_sub_category_display=True,
     )
-    normalized_source_boxes = {
-        int(key): dict(value or {})
-        for key, value in dict(source_boxes_by_formula_id or {}).items()
-        if int(key) > 0 and isinstance(value, dict)
-    }
-    next_box_snapshot, computed_params = _compute_door_controller_box_snapshot(
-        structural_part_formula_ids=list(structural_part_formula_ids or []),
-        source_boxes_by_formula_id=normalized_source_boxes,
-    )
+    controller_type = None
+    next_box_snapshot: dict[str, object] = {}
+    computed_params: dict[str, float] = {}
     selected_param_codes = await collect_door_group_selected_param_codes(
         session,
         admin_id=admin_id,
@@ -1509,7 +1503,7 @@ async def resolve_door_instance_preview(
         codes=selected_param_codes,
         admin_id=admin_id,
     )
-    bindings = _normalize_door_controller_bindings(getattr(door_part_group, "controller_bindings", None))
+    bindings: dict[str, dict[str, str | None]] = {}
     persisted_values = _merge_param_value_layers(copied_meta_values, meta_values, persisted_values)
     for binding_key, computed_value in computed_params.items():
         bound_code = str((bindings.get(binding_key) or {}).get("param_code") or "").strip()
@@ -1566,14 +1560,14 @@ async def resolve_door_instance_preview(
         door_part_group_id=door_part_group.id,
         door_part_group_code=str(door_part_group.code or "").strip(),
         door_part_group_title=str(door_part_group.group_title or door_part_group.title or "").strip(),
-        controller_type=str(getattr(door_part_group, "controller_type", "") or "").strip() or None,
+        controller_type=controller_type,
         controller_bindings=bindings,
         instance_code=str(instance_code or "").strip(),
         line_color=str(line_color or getattr(door_part_group, "line_color", "") or "").strip() or None,
         ui_order=int(ui_order),
         structural_part_formula_ids=[int(item) for item in structural_part_formula_ids if int(item) > 0],
         dependent_interior_instance_ids=[str(item).strip() for item in list(dependent_interior_instance_ids or []) if str(item).strip()],
-        controller_box_snapshot=dict(controller_box_snapshot or {}) if dict(controller_box_snapshot or {}) else next_box_snapshot,
+        controller_box_snapshot=dict(controller_box_snapshot or {}) if controller_type and dict(controller_box_snapshot or {}) else next_box_snapshot,
         param_values={str(key): (None if value is None else str(value)) for key, value in persisted_values.items()},
         param_meta={str(key): dict(value or {}) for key, value in merged_meta.items()},
         computed_params=computed_params,
