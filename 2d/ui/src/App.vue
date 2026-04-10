@@ -1825,7 +1825,8 @@ function updateDoorLibraryHoverState(point) {
     point,
     12
   );
-  const instanceHits = !hitDimension ? collectDoorLibraryInstanceHits(point) : [];
+  const canSelectDependentParts = isDoorLibraryPendingControllerActive.value;
+  const instanceHits = (!hitDimension && canSelectDependentParts) ? collectDoorLibraryInstanceHits(point) : [];
   const nextHoveredInstanceId = instanceHits[0]?.id || "";
   const nextHoverMode = (hitDimension || instanceHits.length) ? "clicker" : null;
   if (doorLibraryHoveredInstanceId.value !== nextHoveredInstanceId) {
@@ -2553,7 +2554,9 @@ function onDoorLibraryFrontSvgPointerDown(event) {
         return;
       }
     }
-    const instanceHits = collectDoorLibraryInstanceHits(rawPoint);
+    const instanceHits = isDoorLibraryPendingControllerActive.value
+      ? collectDoorLibraryInstanceHits(rawPoint)
+      : [];
     if (instanceHits.length) {
       if (isDoorLibraryPendingControllerActive.value) toggleDoorLibraryInstanceSelection(instanceHits[0].id);
       else selectDoorLibraryInstance(instanceHits[0].id);
@@ -9557,33 +9560,6 @@ async function deleteInteriorInstanceFromContextMenu() {
   if (!target) return;
   closeInteriorInstanceContextMenu();
   await deleteInteriorInstanceFromDesign(target);
-}
-async function duplicateDoorInstanceInDesign(instance) {
-  const normalized = normalizeDoorInstanceRecord(instance);
-  if (!normalized?.id || !subCategoryDesignEditorOpen.value) return null;
-  const draft = subCategoryDesignEditorDraft.value;
-  if (!draft?.id) return null;
-  const res = await fetch(
-    `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances/${encodeURIComponent(String(normalized.id))}/duplicate`,
-    { method: "POST" }
-  );
-  if (!res.ok) throw new Error(await readApiErrorMessage(res, "کپی نمونه درب انجام نشد."));
-  const duplicated = await res.json();
-  syncDoorInstanceInDraft(duplicated);
-  syncOpenSubCategoryDesignDraftToCollection();
-  selectDoorLibraryPlacedInstance(duplicated.id);
-  await refreshSubCategoryDesignPreview();
-  closeDoorInstanceContextMenu();
-  return duplicated;
-}
-async function duplicateDoorInstanceFromContextMenu() {
-  const target = activeDoorLibraryContextMenuInstance.value;
-  if (!target) return;
-  try {
-    await duplicateDoorInstanceInDesign(target);
-  } catch (error) {
-    showAlert(error?.message || "کپی نمونه درب انجام نشد.", { title: "خطا" });
-  }
 }
 async function deleteDoorInstanceFromContextMenu() {
   const target = activeDoorLibraryContextMenuInstance.value;
@@ -20277,7 +20253,6 @@ onBeforeUnmount(() => {
     :style="doorLibraryInstanceContextMenuStyle"
     @pointerdown.stop
   >
-    <button type="button" class="menuItem menuItem--grow" @click="duplicateDoorInstanceFromContextMenu">کپی</button>
     <button type="button" class="menuItem menuItem--grow menuItem--danger" @click="deleteDoorInstanceFromContextMenu">حذف</button>
   </div>
 
@@ -21291,15 +21266,18 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <div class="designMenu__cabinetState">
-            {{ subCategoryDesignEditorOpen ? "برای ساب‌کت فعال" : (activeDoorLibraryOrderDesign?.design_title || "برای طرح سفارش فعال") }}
-          </div>
-          <div v-if="isDoorLibraryPendingControllerActive || doorLibrarySelectedInstanceIds.length" class="designMenu__cabinetState">
-            {{ `انتخاب شده: ${toPersianDigits(doorLibrarySelectedInstanceIds.length)} قطعه` }}
-            <span v-if="isDoorLibraryPendingControllerActive && doorLibraryControllerSelectionSummary.eligible"> | مستطیل کنترلر آماده تایید است.</span>
-            <span v-else>
-              {{ ` | برای کنترلر باید دقیقاً ${toPersianDigits(2)} قطعه عمودی و ${toPersianDigits(2)} قطعه افقی از سازه یا قطعات داخلی انتخاب کنید.` }}
-            </span>
+          <div v-if="isDoorLibraryPendingControllerActive" class="doorLibrary__pendingHint" role="status" aria-live="polite">
+            <img :src="DEFAULT_SUB_CATEGORY_PARAM_ICON" alt="" class="doorLibrary__pendingHintIcon" />
+            <div class="doorLibrary__pendingHintText">
+              <span class="doorLibrary__pendingHintMessage">
+                {{ doorLibraryControllerSelectionSummary.eligible
+                  ? "مستطیل کنترلر آماده تایید است."
+                  : `برای کنترلر باید دقیقاً ${toPersianDigits(2)} قطعه عمودی و ${toPersianDigits(2)} قطعه افقی از سازه یا قطعات داخلی انتخاب کنید.` }}
+              </span>
+              <span class="doorLibrary__pendingHintCount">
+                {{ `انتخاب شده: ${toPersianDigits(doorLibrarySelectedInstanceIds.length)} قطعه` }}
+              </span>
+            </div>
           </div>
           <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
             <div
