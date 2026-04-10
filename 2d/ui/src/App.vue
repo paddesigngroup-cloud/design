@@ -319,6 +319,7 @@ const doorLibraryPartKindFilter = ref("");
 const doorLibraryPreviewMode = ref("front2d");
 const doorLibraryPreview3dRef = ref(null);
 const doorLibraryPreviewOpacity = ref(100);
+const doorLibraryShowDimensions = ref(true);
 const doorLibraryAnnotationTool = ref(null);
 const doorLibraryAnnotations = ref(createEmptyInteriorLibraryAnnotations());
 const doorLibraryAnnotationDraft = ref(null);
@@ -374,7 +375,6 @@ const interiorLibraryPreview3dRef = ref(null);
 const interiorLibraryPreviewOpacity = ref(100);
 const interiorLibraryShowInnerLines = ref(true);
 const interiorLibraryShowDimensions = ref(true);
-const interiorLibraryShowGuideAnnotations = ref(true);
 const interiorLibraryAnnotationTool = ref(null);
 const interiorLibraryAnnotations = ref(createEmptyInteriorLibraryAnnotations());
 const interiorLibraryAnnotationDraft = ref(null);
@@ -1017,16 +1017,11 @@ function stopDoorLibraryModelPanCursor() {
 function toggleInteriorLibraryDimensionsVisibility() {
   interiorLibraryShowDimensions.value = !interiorLibraryShowDimensions.value;
 }
-function toggleInteriorLibraryGuideAnnotationsVisibility() {
-  interiorLibraryShowGuideAnnotations.value = !interiorLibraryShowGuideAnnotations.value;
+function toggleDoorLibraryDimensionsVisibility() {
+  doorLibraryShowDimensions.value = !doorLibraryShowDimensions.value;
 }
 function toggleInteriorLibraryDimensionTool() {
   interiorLibraryAnnotationTool.value = interiorLibraryAnnotationTool.value === "dimension" ? null : "dimension";
-  interiorLibrarySelectedAnnotation.value = null;
-  interiorLibraryAnnotationDraft.value = null;
-}
-function toggleInteriorLibraryGuideAnnotationTool() {
-  interiorLibraryAnnotationTool.value = interiorLibraryAnnotationTool.value === "guide" ? null : "guide";
   interiorLibrarySelectedAnnotation.value = null;
   interiorLibraryAnnotationDraft.value = null;
 }
@@ -1036,7 +1031,6 @@ function resetInteriorLibraryAnnotations() {
   interiorLibrarySelectedAnnotation.value = null;
   interiorLibraryAnnotationTool.value = null;
   interiorLibraryShowDimensions.value = true;
-  interiorLibraryShowGuideAnnotations.value = true;
   interiorLibraryCurrentSnapPoint.value = null;
   interiorLibrarySelectedInstanceId.value = "";
   interiorLibraryHoveredInstanceId.value = "";
@@ -1217,7 +1211,7 @@ function clearDoorLibraryViewerCursorPoint() {
 }
 function createInteriorLibraryAnnotationDraft(type, point) {
   return {
-    type: type === "guide" ? "guide" : "dimension",
+    type: "dimension",
     startPoint: { x: Number(point?.x) || 0, y: Number(point?.y) || 0 },
     currentPoint: { x: Number(point?.x) || 0, y: Number(point?.y) || 0 },
   };
@@ -1274,15 +1268,10 @@ function commitInteriorLibraryAnnotationDraft() {
     interiorLibraryAnnotationDraft.value = null;
     return;
   }
-  interiorLibraryAnnotations.value = nextRecord.type === "guide"
-    ? {
-        ...interiorLibraryAnnotations.value,
-        guides: [...(interiorLibraryAnnotations.value.guides || []), nextRecord],
-      }
-    : {
-        ...interiorLibraryAnnotations.value,
-        dimensions: [...(interiorLibraryAnnotations.value.dimensions || []), nextRecord],
-      };
+  interiorLibraryAnnotations.value = {
+    ...interiorLibraryAnnotations.value,
+    dimensions: [...(interiorLibraryAnnotations.value.dimensions || []), nextRecord],
+  };
   interiorLibrarySelectedAnnotation.value = { type: nextRecord.type, id: nextRecord.id };
   interiorLibraryAnnotationDraft.value = null;
   interiorLibraryCurrentSnapPoint.value = null;
@@ -1803,13 +1792,10 @@ function updateInteriorLibraryHoverState(point) {
   const hitDimension = interiorLibraryShowDimensions.value
     ? hitTestCachedAnnotationList(interiorLibraryAnnotationHitCache, rendered.dimensions, point, 12)
     : null;
-  const hitGuide = !hitDimension && interiorLibraryShowGuideAnnotations.value
-    ? hitTestInteriorAnnotationList(rendered.guides, point, 10)
-    : null;
-  const instanceHits = !hitDimension && !hitGuide ? collectInteriorInstanceHits(point) : [];
+  const instanceHits = !hitDimension ? collectInteriorInstanceHits(point) : [];
   const previewId = String(interiorLibraryPickerPreviewInstanceId.value || "").trim();
   const nextHoveredInstanceId = previewId || instanceHits[0]?.id || "";
-  const nextHoverMode = (hitDimension || hitGuide || instanceHits.length) ? "clicker" : null;
+  const nextHoverMode = (hitDimension || instanceHits.length) ? "clicker" : null;
   if (interiorLibraryHoveredInstanceId.value !== nextHoveredInstanceId) {
     interiorLibraryHoveredInstanceId.value = nextHoveredInstanceId;
   }
@@ -1821,7 +1807,7 @@ function updateDoorLibraryHoverState(point) {
   if (!point) return;
   const hitDimension = hitTestCachedAnnotationList(
     doorLibraryAnnotationHitCache,
-    doorLibraryRenderedAnnotations.value.dimensions,
+    doorLibraryShowDimensions.value ? doorLibraryRenderedAnnotations.value.dimensions : [],
     point,
     12
   );
@@ -2324,13 +2310,10 @@ function onInteriorLibraryFrontSvgPointerDown(event) {
   const hitDimension = interiorLibraryShowDimensions.value
     ? hitTestCachedAnnotationList(interiorLibraryAnnotationHitCache, rendered.dimensions, rawPoint, 12)
     : null;
-  const hitGuide = !hitDimension && interiorLibraryShowGuideAnnotations.value
-    ? hitTestInteriorAnnotationList(rendered.guides, rawPoint, 10)
-    : null;
-  if (hitDimension || hitGuide) {
+  if (hitDimension) {
     interiorLibrarySelectedAnnotation.value = {
-      type: hitDimension ? "dimension" : "guide",
-      id: String((hitDimension || hitGuide)?.id || ""),
+      type: "dimension",
+      id: String(hitDimension?.id || ""),
     };
     clearInteriorLibraryInstanceSelection();
     interiorLibraryAnnotationDraft.value = null;
@@ -2407,10 +2390,7 @@ function onInteriorLibraryFrontSvgContextMenu(event) {
   const hitDimension = interiorLibraryShowDimensions.value
     ? hitTestCachedAnnotationList(interiorLibraryAnnotationHitCache, rendered.dimensions, rawPoint, 12)
     : null;
-  const hitGuide = !hitDimension && interiorLibraryShowGuideAnnotations.value
-    ? hitTestInteriorAnnotationList(rendered.guides, rawPoint, 10)
-    : null;
-  if (hitDimension || hitGuide) return;
+  if (hitDimension) return;
   const selectedRect = interiorLibraryControllerRect.value;
   const selectedInstanceId = String(interiorLibrarySelectedInstanceId.value || "").trim();
   const selectedHit = selectedRect && selectedInstanceId && pointInInteriorRect(rawPoint, selectedRect, 0)
@@ -2433,7 +2413,7 @@ function onDoorLibraryFrontSvgContextMenu(event) {
   if (!rawPoint) return;
   const hitDimension = hitTestCachedAnnotationList(
     doorLibraryAnnotationHitCache,
-    doorLibraryRenderedAnnotations.value.dimensions,
+    doorLibraryShowDimensions.value ? doorLibraryRenderedAnnotations.value.dimensions : [],
     rawPoint,
     12
   );
@@ -4432,9 +4412,7 @@ function buildRenderedInteriorAnnotation(item, type) {
 }
 const interiorLibraryRenderedAnnotations = computed(() => {
   const dimensions = (interiorLibraryAnnotations.value?.dimensions || []).map((item) => buildRenderedInteriorAnnotation(item, "dimension"));
-  const guides = (interiorLibraryAnnotations.value?.guides || []).map((item) => buildRenderedInteriorAnnotation(item, "guide"));
   let draftDimension = null;
-  let draftGuide = null;
   if (interiorLibraryAnnotationDraft.value?.type && interiorLibraryAnnotationDraft.value?.startPoint && interiorLibraryAnnotationDraft.value?.currentPoint) {
     const draftRecord = buildInteriorLibraryAnnotationRecord(
       interiorLibraryAnnotationDraft.value.type,
@@ -4444,10 +4422,9 @@ const interiorLibraryRenderedAnnotations = computed(() => {
     if (isInteriorAnnotationMeaningful(draftRecord)) {
       const renderedDraft = buildRenderedInteriorAnnotation(draftRecord, draftRecord.type);
       if (draftRecord.type === "dimension") draftDimension = renderedDraft;
-      else draftGuide = renderedDraft;
     }
   }
-  return { dimensions, guides, draftDimension, draftGuide };
+  return { dimensions, draftDimension };
 });
 const interiorLibraryFrontCursorClass = computed(() => {
   if (interiorLibraryControllerPointerState.value.mode === "controller") {
@@ -4460,7 +4437,6 @@ const interiorLibraryFrontCursorClass = computed(() => {
   if (interiorLibraryHoveredControllerId.value === "left" || interiorLibraryHoveredControllerId.value === "right") return "is-resize-horizontal";
   if (interiorLibraryHoveredControllerId.value === "top" || interiorLibraryHoveredControllerId.value === "bottom_offset") return "is-resize-vertical";
   if (interiorLibraryAnnotationTool.value === "dimension") return "is-drawing-dimension";
-  if (interiorLibraryAnnotationTool.value === "guide") return "is-drawing-guide";
   if (interiorLibraryHoverMode.value === "clicker") return "is-clickable";
   return "is-idle";
 });
@@ -4478,7 +4454,7 @@ const interiorLibraryCursorVisualScale = computed(() => {
 });
 const interiorLibraryOverlayCursorIcon = computed(() => {
   if (interiorLibraryFrontPanning.value || !interiorLibraryCursorPoint.value) return "";
-  if (interiorLibraryAnnotationTool.value === "dimension" || interiorLibraryAnnotationTool.value === "guide") return "";
+  if (interiorLibraryAnnotationTool.value === "dimension") return "";
   if (interiorLibraryHoverMode.value === "clicker") return "/icons/clicker_32.png";
   return "/icons/cursor_32.png";
 });
@@ -4500,10 +4476,10 @@ const interiorLibraryModelCursorStyle = computed(() => {
   };
 });
 const interiorLibraryShouldShowSnapMarkers = computed(() =>
-  (interiorLibraryAnnotationTool.value === "dimension" || interiorLibraryAnnotationTool.value === "guide")
+  interiorLibraryAnnotationTool.value === "dimension"
 );
 watch(interiorLibraryAnnotationTool, (tool) => {
-  if (tool === "dimension" || tool === "guide") {
+  if (tool === "dimension") {
     hideInteriorLibraryOverlapPicker();
     return;
   }
@@ -19536,12 +19512,12 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
-                :class="{ 'is-active': interiorLibraryShowGuideAnnotations }"
-                title="نمایش خطوط راهنما"
-                aria-label="نمایش خطوط راهنما"
-                @click="toggleInteriorLibraryGuideAnnotationsVisibility"
+                :class="{ 'is-active': interiorLibraryAnnotationTool === 'dimension' }"
+                title="رسم اندازه گذاری"
+                aria-label="رسم اندازه گذاری"
+                @click="toggleInteriorLibraryDimensionTool"
               >
-                <img src="/icons/turn_offset.png" alt="" />
+                <img src="/icons/drawing_dimension.png" alt="" />
               </button>
               <button
                 type="button"
@@ -19601,26 +19577,6 @@ onBeforeUnmount(() => {
                 />
                 <span class="subCategoryDesignEditor__previewOpacityValue">100</span>
               </div>
-              <div v-if="interiorLibraryPreviewMode === 'front2d'" class="subCategoryDesignEditor__annotationTools">
-                <button
-                  type="button"
-                  class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn subCategoryDesignEditor__annotationToolBtn"
-                  :class="{ 'is-active': interiorLibraryAnnotationTool === 'dimension' }"
-                  title="رسم اندازه گذاری"
-                  @click.stop="toggleInteriorLibraryDimensionTool"
-                >
-                  <img src="/icons/drawing_dimension.png" alt="" />
-                </button>
-                <button
-                  type="button"
-                  class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn subCategoryDesignEditor__annotationToolBtn"
-                  :class="{ 'is-active': interiorLibraryAnnotationTool === 'guide' }"
-                  title="رسم خط راهنما"
-                  @click.stop="toggleInteriorLibraryGuideAnnotationTool"
-                >
-                  <img src="/icons/drawing_hidden_wall.png" alt="" />
-                </button>
-              </div>
               <GlbViewerWidget
                 v-if="interiorLibraryPreviewMode === 'model3d' && activeInteriorLibraryViewerBoxes.length"
                 ref="interiorLibraryPreview3dRef"
@@ -19676,7 +19632,7 @@ onBeforeUnmount(() => {
                   :r="interiorLibraryCurrentSnapPoint.kind === 'edge' ? 4.4 : 5.2"
                 />
                 <g
-                  v-if="interiorLibraryCursorPoint && (interiorLibraryAnnotationTool === 'dimension' || interiorLibraryAnnotationTool === 'guide')"
+                  v-if="interiorLibraryCursorPoint && interiorLibraryAnnotationTool === 'dimension'"
                   class="subCategoryDesignEditor__drawCursor"
                 >
                   <circle
@@ -19765,35 +19721,6 @@ onBeforeUnmount(() => {
                   class="subCategoryDesignEditor__overlayCursorImage"
                   preserveAspectRatio="xMidYMid meet"
                 />
-                <template
-                  v-if="interiorLibraryShowGuideAnnotations"
-                  v-memo="[interiorLibraryShowGuideAnnotations, interiorLibraryRenderedAnnotations.guides, interiorLibraryRenderedAnnotations.draftGuide]"
-                >
-                  <line
-                    v-for="guide in interiorLibraryRenderedAnnotations.guides"
-                    :key="guide.id"
-                    :x1="guide.screenStart.x"
-                    :y1="guide.screenStart.y"
-                    :x2="guide.screenEnd.x"
-                    :y2="guide.screenEnd.y"
-                    :stroke="guide.selected ? interiorLibraryAnnotationColors.selected : interiorLibraryAnnotationColors.guide"
-                    :stroke-width="guide.selected ? 2.8 : 1.6"
-                    stroke-linecap="round"
-                    opacity="0.92"
-                  />
-                  <line
-                    v-if="interiorLibraryRenderedAnnotations.draftGuide"
-                    :x1="interiorLibraryRenderedAnnotations.draftGuide.screenStart.x"
-                    :y1="interiorLibraryRenderedAnnotations.draftGuide.screenStart.y"
-                    :x2="interiorLibraryRenderedAnnotations.draftGuide.screenEnd.x"
-                    :y2="interiorLibraryRenderedAnnotations.draftGuide.screenEnd.y"
-                    :stroke="interiorLibraryAnnotationColors.guide"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-dasharray="8 6"
-                    opacity="0.75"
-                  />
-                </template>
                 <g v-memo="[interiorLibraryPreviewSvgLines.outer, interiorLibraryPreviewSvgLines.inner, interiorLibraryShowInnerLines]">
                   <line
                     v-for="(line, index) in interiorLibraryPreviewSvgLines.outer"
@@ -21241,12 +21168,22 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
-                :class="{ 'is-active': doorLibraryAnnotationTool === 'dimension' }"
-                title="اندازه گذاری"
-                aria-label="اندازه گذاری"
-                @click="doorLibraryAnnotationTool = doorLibraryAnnotationTool === 'dimension' ? null : 'dimension'; doorLibraryAnnotationDraft = null; doorLibrarySelectedAnnotation = null;"
+                :class="{ 'is-active': doorLibraryShowDimensions }"
+                title="نمایش اندازه گذاری"
+                aria-label="نمایش اندازه گذاری"
+                @click="toggleDoorLibraryDimensionsVisibility"
               >
                 <img src="/icons/turn_dim.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': doorLibraryAnnotationTool === 'dimension' }"
+                title="رسم اندازه گذاری"
+                aria-label="رسم اندازه گذاری"
+                @click="doorLibraryAnnotationTool = doorLibraryAnnotationTool === 'dimension' ? null : 'dimension'; doorLibraryAnnotationDraft = null; doorLibrarySelectedAnnotation = null;"
+              >
+                <img src="/icons/drawing_dimension.png" alt="" />
               </button>
               <button
                 type="button"
@@ -21308,17 +21245,6 @@ onBeforeUnmount(() => {
                   @input="setDoorLibraryPreviewOpacity($event.target.value)"
                 />
                 <span class="subCategoryDesignEditor__previewOpacityValue">100</span>
-              </div>
-              <div v-if="doorLibraryPreviewMode === 'front2d'" class="subCategoryDesignEditor__annotationTools">
-                <button
-                  type="button"
-                  class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn subCategoryDesignEditor__annotationToolBtn"
-                  :class="{ 'is-active': doorLibraryAnnotationTool === 'dimension' }"
-                  title="رسم اندازه گذاری"
-                  @click.stop="doorLibraryAnnotationTool = doorLibraryAnnotationTool === 'dimension' ? null : 'dimension'; doorLibraryAnnotationDraft = null; doorLibrarySelectedAnnotation = null;"
-                >
-                  <img src="/icons/drawing_dimension.png" alt="" />
-                </button>
               </div>
               <GlbViewerWidget
                 v-if="doorLibraryPreviewMode === 'model3d' && activeDoorLibraryModelViewerBoxes.length"
@@ -21594,8 +21520,8 @@ onBeforeUnmount(() => {
                   </g>
                 </g>
                 <template
-                  v-if="doorLibraryRenderedAnnotations.dimensions.length"
-                  v-memo="[doorLibraryRenderedAnnotations.dimensions]"
+                  v-if="doorLibraryShowDimensions && doorLibraryRenderedAnnotations.dimensions.length"
+                  v-memo="[doorLibraryShowDimensions, doorLibraryRenderedAnnotations.dimensions]"
                 >
                   <g v-for="dimension in doorLibraryRenderedAnnotations.dimensions" :key="dimension.id">
                     <line :x1="dimension.extensionA.x1" :y1="dimension.extensionA.y1" :x2="dimension.extensionA.x2" :y2="dimension.extensionA.y2" :stroke="dimension.selected ? doorLibraryAnnotationColors.selected : doorLibraryAnnotationColors.dimension" :stroke-width="dimension.selected ? 2.4 : 1.6" stroke-linecap="round" />
