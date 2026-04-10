@@ -3634,6 +3634,21 @@ const activeDoorLibraryStructureViewerBoxes = computed(() =>
     lineColor: item?.lineColor || DEFAULT_INTERIOR_LINE_COLOR,
   }))
 );
+const activeDoorLibraryModelViewerBoxes = computed(() => {
+  if (subCategoryDesignEditorOpen.value) {
+    return subCategoryDesignEditorPreview.value?.viewer_boxes || [];
+  }
+  const mergedBoxes = Array.isArray(activeDoorLibraryOrderDesign.value?.viewer_boxes)
+    ? activeDoorLibraryOrderDesign.value.viewer_boxes
+    : [];
+  if (mergedBoxes.length) return mergedBoxes;
+  const rootBoxes = getViewerBoxesFromPartSnapshots(activeDoorLibraryOrderDesign.value?.part_snapshots || []);
+  if (rootBoxes.length) return rootBoxes;
+  const sourceBoxes = Array.isArray(activeDoorLibrarySourceDesign.value?.preview?.viewer_boxes)
+    ? activeDoorLibrarySourceDesign.value.preview.viewer_boxes
+    : [];
+  return sourceBoxes;
+});
 const activeDoorLibraryViewerBoxes = computed(() => [
   ...activeDoorLibraryStructureViewerBoxes.value,
   ...getViewerBoxesFromDoorInstances(activeDoorLibraryInstances.value),
@@ -21118,12 +21133,12 @@ onBeforeUnmount(() => {
                 </button>
               </div>
               <GlbViewerWidget
-                v-if="doorLibraryPreviewMode === 'model3d' && activeDoorLibraryViewerBoxes.length"
+                v-if="doorLibraryPreviewMode === 'model3d' && activeDoorLibraryModelViewerBoxes.length"
                 ref="doorLibraryPreview3dRef"
                 src="/models/1_z1.glb"
                 :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
                 :placeholder-outline-color="activeDoorLibraryOutlineColor"
-                :placeholder-boxes="activeDoorLibraryViewerBoxes"
+                :placeholder-boxes="activeDoorLibraryModelViewerBoxes"
                 :display-unit="currentEditorDisplayUnit"
                 :show-attrs-panel="false"
                 :embedded="true"
@@ -21433,7 +21448,7 @@ onBeforeUnmount(() => {
                 </svg>
               </div>
               <div
-                v-if="doorLibraryPreviewMode === 'front2d' ? !doorLibraryFrontView.inner.length : !activeDoorLibraryViewerBoxes.length"
+                v-if="doorLibraryPreviewMode === 'front2d' ? !doorLibraryFrontView.inner.length : !activeDoorLibraryModelViewerBoxes.length"
                 class="designMenu__cabinetState doorLibrary__emptyState"
               >
                 {{ doorLibraryPreviewMode === 'model3d'
