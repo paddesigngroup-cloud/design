@@ -2628,9 +2628,24 @@ function getDoorDependentViewerBoxesFromInteriorInstances(instances) {
   return (Array.isArray(instances) ? instances : [])
     .flatMap((instance) => getDoorDependentViewerBoxesFromPartRows(instance?.part_snapshots || []));
 }
+function resolveDoorInstanceLineColor(instance) {
+  const group = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
+  return normalizeHexColor(
+    instance?.line_color
+    || group?.line_color
+    || DEFAULT_INTERIOR_LINE_COLOR,
+    DEFAULT_INTERIOR_LINE_COLOR
+  );
+}
 function getViewerBoxesFromDoorInstances(instances) {
   return (Array.isArray(instances) ? instances : [])
-    .flatMap((instance) => Array.isArray(instance?.viewer_boxes) ? instance.viewer_boxes : [])
+    .flatMap((instance) => {
+      const lineColor = resolveDoorInstanceLineColor(instance);
+      return (Array.isArray(instance?.viewer_boxes) ? instance.viewer_boxes : []).map((box) => ({
+        ...(box || {}),
+        lineColor,
+      }));
+    })
     .filter((box) => box && typeof box === "object")
     .map((box) => ({ ...(box || {}) }));
 }
@@ -2775,10 +2790,10 @@ function buildFrontViewLinesFromBoxes(boxes) {
     minZ = Math.min(minZ, z1);
     maxZ = Math.max(maxZ, z2);
     inner.push(
-      { ax: x1, az: z1, bx: x2, bz: z1 },
-      { ax: x2, az: z1, bx: x2, bz: z2 },
-      { ax: x2, az: z2, bx: x1, bz: z2 },
-      { ax: x1, az: z2, bx: x1, bz: z1 },
+      { ax: x1, az: z1, bx: x2, bz: z1, lineColor: box.lineColor },
+      { ax: x2, az: z1, bx: x2, bz: z2, lineColor: box.lineColor },
+      { ax: x2, az: z2, bx: x1, bz: z2, lineColor: box.lineColor },
+      { ax: x1, az: z2, bx: x1, bz: z1, lineColor: box.lineColor },
     );
   }
   const bounds = { minX, maxX, minZ, maxZ };
@@ -5803,6 +5818,7 @@ function normalizeCabinetBox(box) {
     cx: Number(box?.cx) || 0,
     cy: Number(box?.cy) || 0,
     cz: Number(box?.cz) || 0,
+    lineColor: String(box?.lineColor || box?.line_color || "").trim() || "",
   };
 }
 
@@ -19914,7 +19930,7 @@ onBeforeUnmount(() => {
                   :y1="-line.az"
                   :x2="line.bx"
                   :y2="-line.bz"
-                  stroke="#7B858C"
+                  :stroke="line.lineColor || '#7B858C'"
                   stroke-width="5.6"
                   stroke-linecap="round"
                 />
