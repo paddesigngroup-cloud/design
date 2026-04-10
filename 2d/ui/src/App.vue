@@ -329,6 +329,9 @@ const doorLibraryModelPanning = ref(false);
 const interiorInstanceEditorOpen = ref(false);
 const interiorInstanceEditorDraft = ref(null);
 const interiorInstanceEditorActiveGroupId = ref("");
+const doorInstanceEditorOpen = ref(false);
+const doorInstanceEditorDraft = ref(null);
+const doorInstanceEditorActiveGroupId = ref("");
 const interiorLibraryControllerEditingId = ref("");
 const interiorLibraryControllerInputDraft = ref("");
 const interiorLibraryHoveredControllerId = ref("");
@@ -626,6 +629,7 @@ const constructionParamsTableWrapEl = ref(null);
 const interiorLibraryAddingGroupKey = ref("");
 const doorLibraryAddingGroupKey = ref("");
 const interiorInstanceEditorApplying = ref(false);
+const doorInstanceEditorApplying = ref(false);
 const INTERIOR_LIBRARY_FRONT_ZOOM_MIN = 0.1;
 const INTERIOR_LIBRARY_FRONT_ZOOM_MAX = 20000;
 const INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR = 1.18;
@@ -2501,6 +2505,12 @@ const activeInteriorInstanceEditorGroup = computed(() =>
   || activeInteriorInstanceEditorGroups.value[0]
   || null
 );
+const activeDoorInstanceEditorGroups = computed(() => buildDoorInstanceGroups(doorInstanceEditorDraft.value));
+const activeDoorInstanceEditorGroup = computed(() =>
+  activeDoorInstanceEditorGroups.value.find((group) => String(group.id) === String(doorInstanceEditorActiveGroupId.value))
+  || activeDoorInstanceEditorGroups.value[0]
+  || null
+);
 const constructionSubCategoryDesignSubCategoryOptions = computed(() =>
   constructionSubCategories.value.map((item) => ({
     value: String(item.id),
@@ -2643,6 +2653,7 @@ const doorLibraryGroupCards = computed(() =>
     })
     .map((group) => ({
       ...group,
+      lineColor: normalizeHexColor(group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
       partsCount: Array.isArray(group.parts) ? group.parts.length : 0,
     }))
 );
@@ -3729,6 +3740,106 @@ function getInteriorInstanceEffectiveValue(instance, code) {
   return "";
 }
 
+function buildDoorInstanceGroups(instance) {
+  const groupsById = new Map();
+  const sourceDoorGroup = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
+  const subCategoryOverrides = activeInteriorLibrarySubCategory.value?.param_overrides || {};
+  const metaEntries = Object.entries(instance?.param_meta || {}).filter(([key]) => String(key || "").trim());
+  if (!metaEntries.length && sourceDoorGroup) {
+    return buildDoorPartGroupDefaultsGroups(sourceDoorGroup).map((group) => ({
+      ...group,
+      items: group.items.map((column) => ({
+        ...column,
+        value: getDoorInstanceEffectiveValue(instance, column.key),
+      })),
+    }));
+  }
+  for (const [key, meta] of metaEntries) {
+    const code = String(key || "").trim();
+    if (!code) continue;
+    const groupId = String(meta?.group_id || "").trim() || "__ungrouped__";
+    const sourceGroup = constructionSubCategoryParamTree.value.find((row) => String(row.id) === groupId);
+    const baseLabel = constructionSubCategoryParamMetaByCode.value[code]?.label || code;
+    const subCategoryOverride = normalizeInternalPartGroupParamOverride(subCategoryOverrides?.[code], baseLabel);
+    const fallbackOverride = {
+      ...subCategoryOverride,
+      display_title: subCategoryOverride.display_title || baseLabel,
+      description_text: subCategoryOverride.description_text || "",
+      icon_path: subCategoryOverride.icon_path || "",
+      binary_off_label: subCategoryOverride.binary_off_label || "0",
+      binary_on_label: subCategoryOverride.binary_on_label || "1",
+      binary_off_icon_path: subCategoryOverride.binary_off_icon_path || "",
+      binary_on_icon_path: subCategoryOverride.binary_on_icon_path || "",
+      input_mode: subCategoryOverride.input_mode === "binary" ? "binary" : "value",
+    };
+    const groupIconFileName = normalizeIconFileName(meta?.group_icon_path) || sourceGroup?.iconFileName || "";
+    if (!groupsById.has(groupId)) {
+      groupsById.set(groupId, {
+        id: groupId,
+        title: String(meta?.group_title || sourceGroup?.title || "بدون گروه").trim(),
+        iconUrl: groupIconFileName ? getSubCategoryDefaultIconUrl(groupIconFileName) : "",
+        order: Number(meta?.group_ui_order) || 0,
+        items: [],
+      });
+    }
+    const groupEntry = groupsById.get(groupId);
+    if (groupEntry && !groupEntry.iconUrl && groupIconFileName) {
+      groupEntry.iconUrl = getSubCategoryDefaultIconUrl(groupIconFileName);
+    }
+    const resolvedInputMode = meta?.input_mode === "binary" || fallbackOverride.input_mode === "binary" ? "binary" : "value";
+    const resolvedBinaryOffLabel = String(meta?.binary_off_label || "").trim();
+    const resolvedBinaryOnLabel = String(meta?.binary_on_label || "").trim();
+    groupEntry.items.push({
+      key: code,
+      displayTitle: String(meta?.label || fallbackOverride.display_title || baseLabel).trim() || code,
+      descriptionText: String(meta?.description_text || fallbackOverride.description_text || "").trim(),
+      inputMode: resolvedInputMode,
+      iconUrl: getSubCategoryDefaultIconUrl(meta?.icon_path || fallbackOverride.icon_path),
+      binaryOffLabel: (resolvedBinaryOffLabel && resolvedBinaryOffLabel !== "0" ? resolvedBinaryOffLabel : fallbackOverride.binary_off_label) || "0",
+      binaryOnLabel: (resolvedBinaryOnLabel && resolvedBinaryOnLabel !== "1" ? resolvedBinaryOnLabel : fallbackOverride.binary_on_label) || "1",
+      binaryOffIconUrl: getSubCategoryDefaultIconUrl(meta?.binary_off_icon_path || fallbackOverride.binary_off_icon_path),
+      binaryOnIconUrl: getSubCategoryDefaultIconUrl(meta?.binary_on_icon_path || fallbackOverride.binary_on_icon_path),
+      value: getDoorInstanceEffectiveValue(instance, code),
+      order: Number(meta?.param_ui_order) || 0,
+    });
+  }
+  return Array.from(groupsById.values())
+    .map((group) => ({
+      ...group,
+      items: group.items.sort((a, b) => a.order - b.order || a.displayTitle.localeCompare(b.displayTitle, "fa")),
+    }))
+    .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title, "fa"));
+}
+
+function getDoorInstanceEffectiveValue(instance, code) {
+  const key = String(code || "").trim();
+  if (!key) return "";
+  const ownValues = instance?.param_values || {};
+  if (Object.prototype.hasOwnProperty.call(ownValues, key)) {
+    const ownValue = ownValues[key];
+    if (ownValue != null && String(ownValue).trim() !== "") {
+      return String(ownValue).trim();
+    }
+    if (String(ownValue) === "0") return "0";
+  }
+  const group = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
+  ensureDoorPartGroupParamDefaults(group);
+  const groupDefaults = group?.param_defaults || {};
+  if (Object.prototype.hasOwnProperty.call(groupDefaults, key)) {
+    const groupValue = groupDefaults[key];
+    if (groupValue != null && String(groupValue).trim() !== "") {
+      return String(groupValue).trim();
+    }
+    if (String(groupValue) === "0") return "0";
+  }
+  const baseValue = activeInteriorLibraryBaseParamValues.value?.[key];
+  if (baseValue != null && String(baseValue).trim() !== "") {
+    return String(baseValue).trim();
+  }
+  if (String(baseValue) === "0") return "0";
+  return "";
+}
+
 function normalizeInteriorControllerNumericText(value) {
   return String(value ?? "")
     .trim()
@@ -4080,13 +4191,14 @@ const doorLibraryInstanceCards = computed(() =>
   activeDoorLibraryInstances.value
     .slice()
     .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
-    .map((instance) => {
+    .map((instance, instanceIndex) => {
       const group = constructionDoorPartGroupsById.value.get(String(instance.door_part_group_id));
       return {
         ...instance,
         groupTitle: String(group?.group_title || group?.title || instance.instance_code || "گروه درب").trim(),
         groupCode: String(group?.code || "").trim(),
         lineColor: normalizeHexColor(instance?.line_color || group?.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+        orderIndex: instanceIndex + 1,
         partsCount: Array.isArray(instance?.part_snapshots) ? instance.part_snapshots.length : (Array.isArray(group?.parts) ? group.parts.length : 0),
       };
     })
@@ -7598,6 +7710,173 @@ async function addDoorGroupToDesign(group) {
     showAlert(error?.message || "افزودن گروه درب به طرح انجام نشد.", { title: "خطا" });
   } finally {
     doorLibraryAddingGroupKey.value = "";
+  }
+}
+
+function selectDoorInstanceEditorGroup(groupId) {
+  doorInstanceEditorActiveGroupId.value = String(groupId || "").trim();
+}
+
+function setDoorInstanceBinaryValue(key, value) {
+  const normalizedKey = String(key || "").trim();
+  if (!normalizedKey || !doorInstanceEditorDraft.value) return;
+  doorInstanceEditorDraft.value.param_values = {
+    ...(doorInstanceEditorDraft.value.param_values || {}),
+    [normalizedKey]: String(value) === "1" ? "1" : "0",
+  };
+}
+
+async function openDoorInstanceEditor(instance) {
+  const normalized = normalizeDoorInstanceRecord(instance);
+  if (!normalized) return;
+  const previewGroups = buildDoorInstanceGroups(normalized);
+  const effectiveParamValues = Object.fromEntries(
+    previewGroups
+      .flatMap((group) => Array.isArray(group?.items) ? group.items : [])
+      .map((column) => [column.key, getDoorInstanceEffectiveValue(normalized, column.key)])
+  );
+  doorInstanceEditorDraft.value = {
+    ...normalized,
+    line_color: normalized.line_color || normalizeHexColor(normalized.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+    controller_box_snapshot: { ...(normalized.controller_box_snapshot || {}) },
+    param_values: {
+      ...effectiveParamValues,
+      ...Object.fromEntries(Object.entries(normalized.param_values || {}).map(([key, value]) => [key, String(value ?? "")])),
+    },
+    param_meta: Object.fromEntries(Object.entries(normalized.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])),
+    part_snapshots: Array.isArray(normalized.part_snapshots) ? normalized.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
+    viewer_boxes: Array.isArray(normalized.viewer_boxes) ? normalized.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
+  };
+  doorInstanceEditorActiveGroupId.value = previewGroups[0]?.id || "";
+  doorInstanceEditorOpen.value = true;
+}
+
+function resetDoorInstanceEditorState() {
+  doorInstanceEditorOpen.value = false;
+  doorInstanceEditorDraft.value = null;
+  doorInstanceEditorActiveGroupId.value = "";
+  doorInstanceEditorApplying.value = false;
+}
+
+function closeDoorInstanceEditor() {
+  if (doorInstanceEditorApplying.value) return;
+  resetDoorInstanceEditorState();
+}
+
+async function applyDoorInstanceEditor() {
+  const instance = doorInstanceEditorDraft.value;
+  if (!instance?.id || doorInstanceEditorApplying.value) return;
+  if (!subCategoryDesignEditorOpen.value) return;
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft?.id) return;
+  doorInstanceEditorApplying.value = true;
+  try {
+    const res = await fetch(
+      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances/${encodeURIComponent(String(instance.id))}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ui_order: Math.max(0, Number(instance.ui_order) || 0),
+          instance_code: String(instance.instance_code || "").trim() || "door",
+          line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+          structural_part_formula_ids: Array.isArray(instance.structural_part_formula_ids) ? instance.structural_part_formula_ids : [],
+          dependent_interior_instance_ids: Array.isArray(instance.dependent_interior_instance_ids) ? instance.dependent_interior_instance_ids : [],
+          param_values: Object.fromEntries(
+            Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+          ),
+        }),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه درب انجام نشد."));
+    syncDoorInstanceInDraft(await res.json());
+    syncOpenSubCategoryDesignDraftToCollection();
+    resetDoorInstanceEditorState();
+    await refreshSubCategoryDesignPreview();
+  } catch (error) {
+    showAlert(error?.message || "ذخیره تنظیمات نمونه درب انجام نشد.", { title: "خطا" });
+  } finally {
+    doorInstanceEditorApplying.value = false;
+  }
+}
+
+async function applyDoorInstanceLineColor(instance, lineColor) {
+  const normalized = normalizeDoorInstanceRecord({
+    ...(instance || {}),
+    line_color: lineColor ? normalizeHexColor(lineColor, DEFAULT_INTERIOR_LINE_COLOR) : "",
+  });
+  if (!normalized?.id) return;
+  if (!subCategoryDesignEditorOpen.value) return;
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft?.id) return;
+  try {
+    const res = await fetch(
+      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances/${encodeURIComponent(String(normalized.id))}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ui_order: Math.max(0, Number(normalized.ui_order) || 0),
+          instance_code: String(normalized.instance_code || "").trim() || "door",
+          line_color: normalized.line_color ? normalizeHexColor(normalized.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+          structural_part_formula_ids: Array.isArray(normalized.structural_part_formula_ids) ? normalized.structural_part_formula_ids : [],
+          dependent_interior_instance_ids: Array.isArray(normalized.dependent_interior_instance_ids) ? normalized.dependent_interior_instance_ids : [],
+          param_values: Object.fromEntries(
+            Object.entries(normalized.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+          ),
+        }),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه درب انجام نشد."));
+    syncDoorInstanceInDraft(await res.json());
+    syncOpenSubCategoryDesignDraftToCollection();
+    await refreshSubCategoryDesignPreview();
+  } catch (error) {
+    showAlert(error?.message || "ذخیره رنگ خطوط نمونه درب انجام نشد.", { title: "خطا" });
+  }
+}
+
+function previewDoorInstanceLineColor(instance, lineColor) {
+  const normalizedColor = lineColor ? normalizeHexColor(lineColor, DEFAULT_INTERIOR_LINE_COLOR) : "";
+  const instanceId = String(instance?.id || "").trim();
+  if (!instanceId || !subCategoryDesignEditorOpen.value) return;
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft) return;
+  draft.door_instances = (draft.door_instances || []).map((row) =>
+    String(row?.id || "") === instanceId
+      ? {
+          ...row,
+          line_color: normalizedColor,
+        }
+      : row
+  );
+  syncOpenSubCategoryDesignDraftToCollection();
+}
+
+async function deleteDoorInstanceFromDesign(instance) {
+  if (!instance?.id || !subCategoryDesignEditorOpen.value) return;
+  const ok = await showConfirm("این نمونه درب از طرح حذف شود؟", {
+    title: "حذف نمونه درب",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft?.id) return;
+  try {
+    const res = await fetch(
+      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances/${encodeURIComponent(String(instance.id))}`,
+      { method: "DELETE" }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه درب انجام نشد."));
+    draft.door_instances = (draft.door_instances || []).filter((row) => String(row.id) !== String(instance.id));
+    if (String(doorInstanceEditorDraft.value?.id || "") === String(instance.id || "")) {
+      closeDoorInstanceEditor();
+    }
+    syncOpenSubCategoryDesignDraftToCollection();
+    await refreshSubCategoryDesignPreview();
+  } catch (error) {
+    showAlert(error?.message || "حذف نمونه درب انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -18879,6 +19158,151 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
+  <div v-if="doorInstanceEditorOpen && doorInstanceEditorDraft" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeDoorInstanceEditor"></div>
+    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
+      <div class="subCategoryPreview__header">
+        <div>
+          <div class="subCategoryPreview__title">تنظیمات نمونه درب</div>
+          <div class="subCategoryPreview__caption">
+            {{ constructionDoorPartGroupsById.get(String(doorInstanceEditorDraft.door_part_group_id))?.group_title || doorInstanceEditorDraft.instance_code }}
+          </div>
+        </div>
+        <button type="button" class="constructionDialog__textBtn" @click="closeDoorInstanceEditor">بستن</button>
+      </div>
+      <div class="subCategoryDesignEditor__meta subCategoryDesignEditor__meta--interiorInstance">
+        <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+          <span>کد نمونه</span>
+          <input v-model="doorInstanceEditorDraft.instance_code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+        </label>
+        <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+          <span>ترتیب</span>
+          <input v-model.number="doorInstanceEditorDraft.ui_order" class="constructionDialog__input" type="number" min="0" step="1" />
+        </label>
+        <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+          <span>رنگ خطوط این نمونه</span>
+          <div class="constructionDialog__colorEditor">
+            <input
+              v-model="doorInstanceEditorDraft.line_color"
+              class="constructionDialog__colorInput"
+              type="color"
+              @input="doorInstanceEditorDraft.line_color = normalizeHexColor(doorInstanceEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+            />
+            <input
+              v-model="doorInstanceEditorDraft.line_color"
+              class="constructionDialog__input constructionDialog__input--mono constructionDialog__colorHex"
+              type="text"
+              dir="ltr"
+              maxlength="7"
+              :placeholder="normalizeHexColor(doorInstanceEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+              @change="doorInstanceEditorDraft.line_color = normalizeHexColor(doorInstanceEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+            />
+          </div>
+        </label>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        تغییرات این پنجره فقط روی همین نمونه درب اعمال می‌شود و روی پیش‌فرض گروه مادر اثری ندارد.
+      </div>
+      <div class="subCategoryPreview__body">
+        <div class="subCategoryPreview__tree">
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--groups">
+            <div class="subCategoryPreview__selectorList">
+              <button
+                v-for="group in activeDoorInstanceEditorGroups"
+                :key="group.id"
+                type="button"
+                class="subCategoryPreview__groupHead"
+                :class="{ 'is-active': String(activeDoorInstanceEditorGroup?.id || '') === String(group.id) }"
+                @click="selectDoorInstanceEditorGroup(group.id)"
+              >
+                <div class="subCategoryPreview__groupMeta">
+                  <div class="subCategoryPreview__groupTitle">{{ group.title }}</div>
+                  <div class="subCategoryPreview__groupCaption">{{ toPersianDigits(group.items.length) }} پارامتر</div>
+                </div>
+                <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !group.iconUrl }">
+                  <img
+                    v-if="group.iconUrl"
+                    :key="group.iconUrl"
+                    :src="group.iconUrl"
+                    :alt="group.title"
+                    class="subCategoryPreview__groupIcon"
+                    @error="handleSubCategoryDefaultIconError"
+                  />
+                  <span v-else class="subCategoryPreview__groupFallback">{{ toPersianDigits(group.items.length) }}</span>
+                </div>
+                <span class="subCategoryPreview__groupChevron" aria-hidden="true">‹</span>
+              </button>
+            </div>
+          </div>
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
+            <div v-if="activeDoorInstanceEditorGroup" class="subCategoryPreview__panelHead">
+              <div class="subCategoryPreview__panelTitle">{{ activeDoorInstanceEditorGroup.title }}</div>
+              <div class="subCategoryPreview__panelCaption">{{ toPersianDigits(activeDoorInstanceEditorGroup.items.length) }} پارامتر در این گروه</div>
+            </div>
+            <div v-if="activeDoorInstanceEditorGroup" class="subCategoryPreview__params">
+              <article v-for="column in activeDoorInstanceEditorGroup.items" :key="column.key" class="subCategoryPreview__paramCard">
+                <template v-if="column.inputMode === 'binary'">
+                  <div class="subCategoryPreview__paramMeta">
+                    <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                    <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                  </div>
+                  <div class="subCategoryPreview__binaryChoices">
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': String(doorInstanceEditorDraft.param_values?.[column.key] ?? '0') !== '1' }"
+                      @click="setDoorInstanceBinaryValue(column.key, '0')"
+                    >
+                      <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOffLabel }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': String(doorInstanceEditorDraft.param_values?.[column.key] ?? '0') === '1' }"
+                      @click="setDoorInstanceBinaryValue(column.key, '1')"
+                    >
+                      <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOnLabel }}</span>
+                    </button>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="subCategoryPreview__valueHead">
+                    <div class="subCategoryPreview__valueIconBox">
+                      <img :src="column.iconUrl" :alt="column.displayTitle" class="subCategoryPreview__valueIcon" @error="handleSubCategoryDefaultIconError" />
+                    </div>
+                    <div class="subCategoryPreview__paramMeta">
+                      <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                      <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                    </div>
+                  </div>
+                  <input
+                    v-model="doorInstanceEditorDraft.param_values[column.key]"
+                    class="constructionDialog__input subCategoryPreview__valueInput"
+                    type="number"
+                    inputmode="numeric"
+                    min="0"
+                    :placeholder="column.displayTitle"
+                  />
+                  <div class="subCategoryPreview__valueUnit">میلی‌متر</div>
+                </template>
+              </article>
+            </div>
+            <div v-else class="designMenu__cabinetState">برای این نمونه درب هنوز پارامتری قابل نمایش نیست.</div>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" :disabled="doorInstanceEditorApplying" @click="closeDoorInstanceEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" :disabled="doorInstanceEditorApplying" @click="applyDoorInstanceEditor">
+          <span v-if="doorInstanceEditorApplying" class="constructionDialog__spinner"></span>
+          <span>{{ doorInstanceEditorApplying ? "در حال اعمال..." : "اعمال" }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div v-if="baseFormulaBuilderOpen" class="appDialog" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeBaseFormulaBuilder"></div>
     <div class="appDialog__card appDialog__card--builder" dir="rtl">
@@ -19808,7 +20232,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
-        <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
+        <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances">
           <div class="subCategoryDesignEditor__panelTitle">نمونه‌های درب این طرح</div>
           <div v-if="!activeInteriorLibraryTargetId" class="designMenu__cabinetState">برای افزودن نمونه درب، ابتدا یک طرح معتبر را باز یا انتخاب کنید.</div>
           <div v-else-if="!doorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز هیچ گروه دربی به این طرح اضافه نشده است.</div>
@@ -19823,13 +20247,39 @@ onBeforeUnmount(() => {
                   <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
                   <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
                 </span>
-                <span class="subCategoryDesignEditor__colorSwatch" :style="{ backgroundColor: item.lineColor || DEFAULT_INTERIOR_LINE_COLOR }"></span>
+                <div class="subCategoryDesignEditor__interiorGroupActions">
+                  <button
+                    type="button"
+                    class="constructionDialog__iconBtn"
+                    title="حذف نمونه"
+                    @click="deleteDoorInstanceFromDesign(item)"
+                  >
+                    ×
+                  </button>
+                  <button
+                    type="button"
+                    class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
+                    title="تنظیمات این نمونه"
+                    @click="openDoorInstanceEditor(item)"
+                  >
+                    <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                  </button>
+                  <label class="subCategoryDesignEditor__miniColorBtn" :style="{ '--line-color': item.lineColor }" :title="`رنگ خطوط ${item.instance_code}`">
+                    <input
+                      :value="item.lineColor"
+                      class="subCategoryDesignEditor__miniColorInput"
+                      type="color"
+                      @input="previewDoorInstanceLineColor(item, $event.target.value)"
+                      @change="applyDoorInstanceLineColor(item, $event.target.value)"
+                    />
+                  </label>
+                  <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits(item.orderIndex) }}</span>
+                </div>
               </div>
-              <span class="constructionDialog__summaryLabel">{{ toPersianDigits(item.partsCount || 0) }} قطعه</span>
             </div>
           </div>
         </div>
-        <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
+        <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorSidebar">
           <div class="subCategoryDesignEditor__panelTitle">گروه‌های قطعات درب</div>
           <select v-model="doorLibraryPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
             <option value="">همه انواع قطعات درب</option>
@@ -19839,24 +20289,26 @@ onBeforeUnmount(() => {
           <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
             <div v-for="item in doorLibraryGroupCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
               <div class="subCategoryDesignEditor__interiorGroupHead">
-                <span class="subCategoryDesignEditor__partMeta">
+                <span class="subCategoryDesignEditor__partMeta" dir="rtl">
                   <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
                   <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
                 </span>
-                <button
-                  type="button"
-                  class="constructionDialog__textBtn constructionDialog__textBtn--compact"
-                  title="افزودن به طرح"
-                  :disabled="isAddingDoorGroup(item)"
-                  @click="addDoorGroupToDesign(item)"
-                >
-                  <span v-if="isAddingDoorGroup(item)" class="constructionDialog__spinner"></span>
-                  <span>{{ isAddingDoorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
-                </button>
-              </div>
-              <div class="subCategoryDesignEditor__interiorGroupHead">
-                <span class="constructionDialog__summaryLabel">{{ toPersianDigits(item.partsCount || 0) }} قطعه</span>
-                <span class="subCategoryDesignEditor__colorSwatch" :style="{ backgroundColor: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR) }"></span>
+                <div class="subCategoryDesignEditor__interiorGroupActions">
+                  <button
+                    type="button"
+                    class="constructionDialog__textBtn constructionDialog__textBtn--compact"
+                    title="افزودن به طرح"
+                    :disabled="isAddingDoorGroup(item)"
+                    @click="addDoorGroupToDesign(item)"
+                  >
+                    <span v-if="isAddingDoorGroup(item)" class="constructionDialog__spinner"></span>
+                    <span>{{ isAddingDoorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
+                  </button>
+                  <span class="constructionDialog__pill">{{ toPersianDigits(item.partsCount || 0) }} قطعه</span>
+                  <label class="subCategoryDesignEditor__miniColorBtn subCategoryDesignEditor__miniColorBtn--static" :style="{ '--line-color': item.lineColor }" :title="`رنگ پیش‌فرض خطوط ${item.group_title}`">
+                    <span class="subCategoryDesignEditor__miniColorPreview" aria-hidden="true"></span>
+                  </label>
+                </div>
               </div>
             </div>
           </div>
