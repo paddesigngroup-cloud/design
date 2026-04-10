@@ -326,6 +326,7 @@ const doorLibrarySelectedAnnotation = ref(null);
 const doorLibraryCurrentSnapPoint = ref(null);
 const doorLibraryCursorPoint = ref(null);
 const doorLibrarySelectedInstanceIds = ref([]);
+const doorLibrarySelectedPlacedInstanceId = ref("");
 const doorLibraryPendingControllerState = ref({
   pending_group_id: "",
   selected_part_ids: [],
@@ -1457,9 +1458,14 @@ function selectInteriorLibraryInstance(instanceId) {
 function selectDoorLibraryInstance(instanceId) {
   const normalizedId = String(instanceId || "").trim();
   if (!normalizedId) return;
-  const current = Array.isArray(doorLibrarySelectedInstanceIds.value) ? doorLibrarySelectedInstanceIds.value.slice() : [];
-  if (!current.includes(normalizedId)) current.push(normalizedId);
-  doorLibrarySelectedInstanceIds.value = current;
+  doorLibrarySelectedInstanceIds.value = [normalizedId];
+  doorLibrarySelectedAnnotation.value = null;
+}
+function clearDoorLibraryPlacedInstanceSelection() {
+  doorLibrarySelectedPlacedInstanceId.value = "";
+}
+function selectDoorLibraryPlacedInstance(instanceId) {
+  doorLibrarySelectedPlacedInstanceId.value = String(instanceId || "").trim();
   doorLibrarySelectedAnnotation.value = null;
 }
 function toggleDoorLibraryInstanceSelection(instanceId) {
@@ -1498,6 +1504,33 @@ function pointInInteriorRect(point, rect, padding = 0) {
     py >= Number(rect.y) - padding &&
     py <= Number(rect.y) + Number(rect.h) + padding
   );
+}
+function hitTestDoorLibraryPlacedOverlay(point) {
+  const target = point ? { x: Number(point.x) || 0, y: Number(point.y) || 0 } : null;
+  if (!target) return null;
+  for (let index = doorLibraryPersistedControllerOverlays.value.length - 1; index >= 0; index -= 1) {
+    const overlay = doorLibraryPersistedControllerOverlays.value[index];
+    if (pointInInteriorRect(target, overlay?.rect, 0)) return overlay;
+    const visualHit = (overlay?.visuals || []).some((controller) =>
+      pointInInteriorRect(target, {
+        x: Number(controller?.fieldX) || 0,
+        y: Number(controller?.fieldY) || 0,
+        w: Number(controller?.inputW) || 0,
+        h: Number(controller?.inputH) || 0,
+      }, 0)
+    );
+    if (visualHit) return overlay;
+    const metricHit = (overlay?.metrics || []).some((metric) =>
+      pointInInteriorRect(target, {
+        x: Number(metric?.fieldX) || 0,
+        y: Number(metric?.fieldY) || 0,
+        w: Number(metric?.inputW) || 0,
+        h: Number(metric?.inputH) || 0,
+      }, 0)
+    );
+    if (metricHit) return overlay;
+  }
+  return null;
 }
 function isInteriorPointerDeltaSignificant(nextPoint, prevPoint) {
   if (!nextPoint || !prevPoint) return true;
@@ -2430,6 +2463,15 @@ function onDoorLibraryFrontSvgPointerDown(event) {
   }
   clearDoorLibraryAnnotationSelection();
   if (doorLibraryAnnotationTool.value !== "dimension") {
+    if (!isDoorLibraryPendingControllerActive.value) {
+      const overlayHit = hitTestDoorLibraryPlacedOverlay(rawPoint);
+      if (overlayHit?.id) {
+        selectDoorLibraryPlacedInstance(overlayHit.id);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+    }
     const instanceHits = collectDoorLibraryInstanceHits(rawPoint);
     if (instanceHits.length) {
       if (isDoorLibraryPendingControllerActive.value) toggleDoorLibraryInstanceSelection(instanceHits[0].id);
@@ -2437,6 +2479,9 @@ function onDoorLibraryFrontSvgPointerDown(event) {
       event.preventDefault();
       event.stopPropagation();
       return;
+    }
+    if (!isDoorLibraryPendingControllerActive.value) {
+      clearDoorLibraryPlacedInstanceSelection();
     }
     clearDoorLibraryInstanceSelection();
     doorLibraryCurrentSnapPoint.value = null;
@@ -4496,6 +4541,16 @@ watch(
   },
   { immediate: true }
 );
+watch(activeDoorLibraryInstances, (items) => {
+  const ids = new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => String(item?.id || "").trim())
+      .filter(Boolean)
+  );
+  if (doorLibrarySelectedPlacedInstanceId.value && !ids.has(String(doorLibrarySelectedPlacedInstanceId.value))) {
+    clearDoorLibraryPlacedInstanceSelection();
+  }
+}, { immediate: true, deep: true });
 watch(
   [doorLibrarySelectedInstanceIds, doorLibraryControllerRect],
   () => {
@@ -8841,6 +8896,7 @@ function setDoorInstanceBinaryValue(key, value) {
 async function openDoorInstanceEditor(instance) {
   const normalized = normalizeDoorInstanceRecord(instance);
   if (!normalized) return;
+  selectDoorLibraryPlacedInstance(normalized.id);
   const previewGroups = buildDoorInstanceGroups(normalized);
   const effectiveParamValues = Object.fromEntries(
     previewGroups
@@ -8982,6 +9038,9 @@ async function deleteDoorInstanceFromDesign(instance) {
     );
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه درب انجام نشد."));
     draft.door_instances = (draft.door_instances || []).filter((row) => String(row.id) !== String(instance.id));
+    if (String(doorLibrarySelectedPlacedInstanceId.value || "") === String(instance.id || "")) {
+      clearDoorLibraryPlacedInstanceSelection();
+    }
     if (String(doorInstanceEditorDraft.value?.id || "") === String(instance.id || "")) {
       closeDoorInstanceEditor();
     }
@@ -15118,6 +15177,7 @@ async function openDoorLibrary(targetOrderDesignId = "") {
   }
   doorLibraryOpen.value = true;
   doorLibraryPreviewOpacity.value = 100;
+  clearDoorLibraryPlacedInstanceSelection();
   resetDoorLibraryPreviewView();
   activeMenu.value = null;
   openMenuPanel.value = null;
@@ -15174,6 +15234,7 @@ function closeInteriorLibrary() {
 function closeDoorLibrary() {
   doorLibraryOpen.value = false;
   doorLibraryForcedOrderDesignId.value = "";
+  clearDoorLibraryPlacedInstanceSelection();
   stopDoorLibraryPointerProcessing();
   resetDoorLibraryAnnotations();
   clearDoorLibraryCursorPoint();
@@ -21295,6 +21356,7 @@ onBeforeUnmount(() => {
                   v-for="overlay in doorLibraryPersistedControllerOverlays"
                   :key="`door-persisted-controller-${overlay.id}`"
                   class="subCategoryDesignEditor__controllerOverlay"
+                  :class="{ 'is-selected': String(doorLibrarySelectedPlacedInstanceId || '') === String(overlay.id || '') }"
                 >
                   <rect
                     :x="overlay.rect.x"
@@ -21467,6 +21529,8 @@ onBeforeUnmount(() => {
               v-for="item in doorLibraryInstanceCards"
               :key="item.id"
               class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard"
+              :class="{ 'is-active': String(doorLibrarySelectedPlacedInstanceId || '') === String(item.id || '') }"
+              @click="selectDoorLibraryPlacedInstance(item.id)"
             >
               <div class="subCategoryDesignEditor__interiorGroupHead">
                 <span class="subCategoryDesignEditor__partMeta" dir="rtl">
@@ -21478,6 +21542,7 @@ onBeforeUnmount(() => {
                     type="button"
                     class="constructionDialog__iconBtn"
                     title="حذف نمونه"
+                    @click.stop
                     @click="deleteDoorInstanceFromDesign(item)"
                   >
                     ×
@@ -21486,6 +21551,7 @@ onBeforeUnmount(() => {
                     type="button"
                     class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
                     title="تنظیمات این نمونه"
+                    @click.stop
                     @click="openDoorInstanceEditor(item)"
                   >
                     <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
@@ -21495,6 +21561,7 @@ onBeforeUnmount(() => {
                       :value="item.lineColor"
                       class="subCategoryDesignEditor__miniColorInput"
                       type="color"
+                      @click.stop
                       @input="previewDoorInstanceLineColor(item, $event.target.value)"
                       @change="applyDoorInstanceLineColor(item, $event.target.value)"
                     />
