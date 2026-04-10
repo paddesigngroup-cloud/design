@@ -4179,12 +4179,12 @@ option {
 .subCategoryDesignEditor__controllerRect {
   fill: color-mix(in srgb, var(--controller-line-color, #2f7fd3) 8%, transparent);
   stroke: color-mix(in srgb, var(--controller-line-color, #2f7fd3) 78%, white 22%);
-  stroke-width: 1.8px;
+  stroke-width: 0.78px;
 }
 .subCategoryDesignEditor__controllerOverlay.is-selected .subCategoryDesignEditor__controllerRect {
   fill: rgba(243, 222, 230, 0.55);
   stroke: color-mix(in srgb, var(--controller-line-color, #2f7fd3) 82%, white 18%);
-  stroke-width: 2.2px;
+  stroke-width: 0.96px;
 }
 .subCategoryDesignEditor__controllerHandle {
   pointer-events: none;
@@ -4192,7 +4192,7 @@ option {
 .subCategoryDesignEditor__controllerBody {
   fill: rgba(36, 182, 192, 0.92);
   stroke: rgba(62, 98, 107, 0.88);
-  stroke-width: 2px;
+  stroke-width: 0.82px;
   pointer-events: none;
 }
 .subCategoryDesignEditor__controllerHotspot {

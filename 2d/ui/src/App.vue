@@ -678,7 +678,7 @@ const INTERIOR_LIBRARY_POINTER_EPS = 0.4;
 const INTERIOR_LIBRARY_INSTANCE_HIT_PADDING = 6;
 const INTERIOR_LIBRARY_INSTANCE_HIT_DISTANCE = 10;
 const DOOR_LIBRARY_INSTANCE_HIT_PADDING = 11;
-const DOOR_LIBRARY_INSTANCE_HIT_DISTANCE = 15.5;
+const DOOR_LIBRARY_INSTANCE_HIT_DISTANCE = 21.39;
 const doorLibraryViewerWrapEl = ref(null);
 const doorLibraryFrontZoom = ref(1);
 const doorLibraryFrontPan = ref({ x: 0, y: 0 });
@@ -19845,7 +19845,7 @@ onBeforeUnmount(() => {
                     :y1="line.y1"
                     :x2="line.x2"
                     :y2="line.y2"
-                    :stroke-width="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 1.8 : (String(interiorLibraryPickerPreviewInstanceId || '') === String(instance.id || '') ? Math.max(1.45, Number(line.sw) || 1.25) : Math.max(1.25, Number(line.sw) || 1.25))"
+                    :stroke-width="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 0.92 : (String(interiorLibraryPickerPreviewInstanceId || '') === String(instance.id || '') ? Math.max(0.76, Number(line.sw) || 0.66) : Math.max(0.66, Number(line.sw) || 0.66))"
                     :stroke="instance.lineColor"
                     stroke-linecap="round"
                     stroke-dasharray="6 8"
@@ -19859,7 +19859,7 @@ onBeforeUnmount(() => {
                     :x2="line.x2"
                     :y2="line.y2"
                     :stroke="instance.lineColor"
-                    :stroke-width="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 2.2 : ((String(interiorLibraryHoveredInstanceId || '') === String(instance.id || '') || String(interiorLibraryPickerPreviewInstanceId || '') === String(instance.id || '')) ? 1.4 : 0)"
+                    :stroke-width="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 1.08 : ((String(interiorLibraryHoveredInstanceId || '') === String(instance.id || '') || String(interiorLibraryPickerPreviewInstanceId || '') === String(instance.id || '')) ? 0.66 : 0)"
                     stroke-linecap="round"
                     :opacity="String(interiorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 0.92 : ((String(interiorLibraryHoveredInstanceId || '') === String(instance.id || '') || String(interiorLibraryPickerPreviewInstanceId || '') === String(instance.id || '')) ? 0.88 : 0.78)"
                   />
