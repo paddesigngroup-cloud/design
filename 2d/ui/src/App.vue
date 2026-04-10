@@ -669,6 +669,8 @@ const INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR = 1.6;
 const INTERIOR_LIBRARY_POINTER_EPS = 0.4;
 const INTERIOR_LIBRARY_INSTANCE_HIT_PADDING = 6;
 const INTERIOR_LIBRARY_INSTANCE_HIT_DISTANCE = 10;
+const DOOR_LIBRARY_INSTANCE_HIT_PADDING = 11;
+const DOOR_LIBRARY_INSTANCE_HIT_DISTANCE = 15.5;
 const doorLibraryViewerWrapEl = ref(null);
 const doorLibraryFrontZoom = ref(1);
 const doorLibraryFrontPan = ref({ x: 0, y: 0 });
@@ -1570,7 +1572,39 @@ function buildInteriorLibraryInstanceHitCache(instances) {
   });
 }
 function buildDoorLibraryInstanceHitCache(instances) {
-  return buildInteriorLibraryInstanceHitCache(instances);
+  const pad = DOOR_LIBRARY_INSTANCE_HIT_PADDING;
+  return (instances || []).map((instance) => {
+    const boundsRect = normalizeInteriorRect(instance?.boundsRect);
+    const expandedHitRect = boundsRect
+      ? {
+          x: boundsRect.x - pad,
+          y: boundsRect.y - pad,
+          w: boundsRect.w + (pad * 2),
+          h: boundsRect.h + (pad * 2),
+        }
+      : null;
+    return {
+      id: String(instance?.id || "").trim(),
+      instanceCode: String(instance?.instanceCode || "").trim(),
+      title: String(instance?.groupTitle || instance?.instanceCode || instance?.id || "قطعه").trim(),
+      lineColor: String(instance?.lineColor || "").trim(),
+      visualOrder: Number(instance?.visualOrder) || 0,
+      boundsRect,
+      expandedHitRect,
+      outerLines: (instance?.outerLines || []).map((line) => ({
+        x1: Number(line?.x1) || 0,
+        y1: Number(line?.y1) || 0,
+        x2: Number(line?.x2) || 0,
+        y2: Number(line?.y2) || 0,
+      })),
+      innerLines: (instance?.innerLines || []).map((line) => ({
+        x1: Number(line?.x1) || 0,
+        y1: Number(line?.y1) || 0,
+        x2: Number(line?.x2) || 0,
+        y2: Number(line?.y2) || 0,
+      })),
+    };
+  });
 }
 function collectInteriorInstanceHitCandidates(point) {
   const target = { x: Number(point?.x) || 0, y: Number(point?.y) || 0 };
@@ -1642,7 +1676,46 @@ function collectInteriorInstanceHits(point) {
 }
 function collectDoorLibraryInstanceHits(point) {
   const candidates = collectDoorLibraryInstanceHitCandidates(point);
-  return scoreInteriorInstanceCandidates(point, candidates);
+  const target = { x: Number(point?.x) || 0, y: Number(point?.y) || 0 };
+  const hits = [];
+  for (const instance of candidates || []) {
+    if (!instance?.boundsRect) continue;
+    const inside = pointInInteriorRect(target, instance.boundsRect, 0);
+    let minDistance = Infinity;
+    for (const line of instance.outerLines || []) {
+      minDistance = Math.min(
+        minDistance,
+        distancePointToSegmentLocal(
+          target,
+          { x: line.x1, y: line.y1 },
+          { x: line.x2, y: line.y2 }
+        )
+      );
+    }
+    for (const line of instance.innerLines || []) {
+      minDistance = Math.min(
+        minDistance,
+        distancePointToSegmentLocal(
+          target,
+          { x: line.x1, y: line.y1 },
+          { x: line.x2, y: line.y2 }
+        )
+      );
+    }
+    if (!inside && minDistance > DOOR_LIBRARY_INSTANCE_HIT_DISTANCE) continue;
+    hits.push({
+      id: instance.id,
+      instanceCode: instance.instanceCode,
+      title: instance.title,
+      lineColor: instance.lineColor,
+      distance: inside ? Math.min(minDistance, 0) : minDistance,
+      visualOrder: instance.visualOrder,
+    });
+  }
+  return hits.sort((a, b) => {
+    if (Math.abs(a.distance - b.distance) > 0.01) return a.distance - b.distance;
+    return b.visualOrder - a.visualOrder;
+  });
 }
 function updateInteriorLibraryHoverState(point) {
   if (!point) return;
@@ -3131,8 +3204,9 @@ function buildDoorLibraryControllerRectFromFrameValues(frame, values) {
     h: heightMm,
   };
 }
-function buildDoorLibraryControllerVisuals(rect) {
+function buildDoorLibraryControllerVisuals(rect, controllerType = "") {
   if (!rect || doorLibraryPreviewMode.value !== "front2d") return [];
+  const isDoubleEqualHinged = normalizeDoorPartGroupControllerType(controllerType) === DOOR_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED;
   const scale = doorLibraryControllerVisualScale.value;
   const gap = Math.max(4 * scale, 3);
   const handleSize = Math.max(31.92 * scale, 24);
@@ -3147,8 +3221,11 @@ function buildDoorLibraryControllerVisuals(rect) {
       direction: "left",
       x: rect.x - horizontal.w,
       y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
-      fieldX: rect.x - horizontal.w - gap - horizontal.inputW,
+      fieldX: isDoubleEqualHinged
+        ? rect.x - gap - horizontal.inputW
+        : rect.x - horizontal.w - gap - horizontal.inputW,
       fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
+      showBody: !isDoubleEqualHinged,
       ...horizontal,
     },
     {
@@ -3158,7 +3235,10 @@ function buildDoorLibraryControllerVisuals(rect) {
       x: rect.x + (rect.w * 0.5) - (vertical.w * 0.5),
       y: rect.y - vertical.h,
       fieldX: rect.x + (rect.w * 0.5) - (vertical.inputW * 0.5),
-      fieldY: rect.y - vertical.h - gap - vertical.inputH,
+      fieldY: isDoubleEqualHinged
+        ? rect.y - gap - vertical.inputH
+        : rect.y - vertical.h - gap - vertical.inputH,
+      showBody: !isDoubleEqualHinged,
       ...vertical,
     },
     {
@@ -3167,8 +3247,11 @@ function buildDoorLibraryControllerVisuals(rect) {
       direction: "right",
       x: rect.x + rect.w,
       y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
-      fieldX: rect.x + rect.w + horizontal.w + gap,
+      fieldX: isDoubleEqualHinged
+        ? rect.x + rect.w + gap
+        : rect.x + rect.w + horizontal.w + gap,
       fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
+      showBody: !isDoubleEqualHinged,
       ...horizontal,
     },
     {
@@ -3178,16 +3261,37 @@ function buildDoorLibraryControllerVisuals(rect) {
       x: rect.x + (rect.w * 0.5) - (vertical.w * 0.5),
       y: rect.y + rect.h,
       fieldX: rect.x + (rect.w * 0.5) - (vertical.inputW * 0.5),
-      fieldY: rect.y + rect.h + vertical.h + gap,
+      fieldY: isDoubleEqualHinged
+        ? rect.y + rect.h + gap
+        : rect.y + rect.h + vertical.h + gap,
+      showBody: !isDoubleEqualHinged,
       ...vertical,
     },
   ];
 }
-function buildDoorLibraryControllerMetricVisuals(rect) {
+function buildDoorLibraryControllerMetricVisuals(rect, controllerType = "") {
   if (!rect || doorLibraryPreviewMode.value !== "front2d") return [];
   const scale = doorLibraryControllerVisualScale.value;
   const inputW = Math.max(72 * scale, 58);
   const inputH = Math.max(22.5 * scale, 20);
+  if (normalizeDoorPartGroupControllerType(controllerType) === DOOR_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED) {
+    return [
+      {
+        id: "door_width",
+        fieldX: rect.x + (rect.w * 0.5) - (inputW * 0.5),
+        fieldY: rect.y + rect.h - inputH - (10 * scale),
+        inputW,
+        inputH,
+      },
+      {
+        id: "door_height",
+        fieldX: rect.x + rect.w - inputW - (10 * scale),
+        fieldY: rect.y + (rect.h * 0.5) - (inputH * 0.5),
+        inputW,
+        inputH,
+      },
+    ];
+  }
   return [
     {
       id: "door_width",
@@ -3238,8 +3342,8 @@ function buildDoorLibraryControllerOverlayForInstance(instance) {
     rect,
     values,
     lineColor: resolveDoorInstanceLineColor(instance),
-    visuals: buildDoorLibraryControllerVisuals(rect),
-    metrics: buildDoorLibraryControllerMetricVisuals(rect),
+    visuals: buildDoorLibraryControllerVisuals(rect, controllerType),
+    metrics: buildDoorLibraryControllerMetricVisuals(rect, controllerType),
   };
 }
 const doorLibraryGroupCards = computed(() =>
@@ -3905,8 +4009,18 @@ const doorLibraryControllerVisualScale = computed(() => {
   );
   return 1 / zoom;
 });
-const doorLibraryControllerVisuals = computed(() => buildDoorLibraryControllerVisuals(doorLibraryControllerRect.value));
-const doorLibraryControllerMetricVisuals = computed(() => buildDoorLibraryControllerMetricVisuals(doorLibraryControllerRect.value));
+const doorLibraryControllerVisuals = computed(() =>
+  buildDoorLibraryControllerVisuals(
+    doorLibraryControllerRect.value,
+    doorLibraryPendingControllerState.value?.pending_controller_type,
+  )
+);
+const doorLibraryControllerMetricVisuals = computed(() =>
+  buildDoorLibraryControllerMetricVisuals(
+    doorLibraryControllerRect.value,
+    doorLibraryPendingControllerState.value?.pending_controller_type,
+  )
+);
 const doorLibraryPersistedControllerOverlays = computed(() =>
   activeDoorLibraryInstances.value
     .map((instance) => buildDoorLibraryControllerOverlayForInstance(instance))
@@ -5092,6 +5206,16 @@ const activeInteriorLibraryOutlineColor = computed(() => {
     activeInteriorLibraryOrderDesign.value?.design_outline_color
     || activeInteriorLibrarySourceDesign.value?.design_outline_color
     || activeInteriorLibrarySourceDesign.value?.preview?.design_outline_color
+  );
+});
+const activeDoorLibraryOutlineColor = computed(() => {
+  if (subCategoryDesignEditorOpen.value) {
+    return normalizeHexColor(subCategoryDesignEditorPreview.value?.design_outline_color);
+  }
+  return normalizeHexColor(
+    activeDoorLibraryOrderDesign.value?.design_outline_color
+    || activeDoorLibrarySourceDesign.value?.design_outline_color
+    || activeDoorLibrarySourceDesign.value?.preview?.design_outline_color
   );
 });
 const interiorLibraryPreviewPanelTitle = computed(() =>
@@ -19590,6 +19714,7 @@ onBeforeUnmount(() => {
                     }"
                   >
                     <path
+                      v-if="controller.showBody !== false"
                       :d="controller.kind === 'horizontal'
                         ? buildInteriorControllerHorizontalArrowPath(controller.direction, controller.x, controller.y, controller.w, controller.h)
                         : buildInteriorControllerVerticalArrowPath(controller.direction, controller.x, controller.y, controller.w, controller.h)"
@@ -20997,7 +21122,7 @@ onBeforeUnmount(() => {
                 ref="doorLibraryPreview3dRef"
                 src="/models/1_z1.glb"
                 :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
-                :placeholder-outline-color="'#7B858C'"
+                :placeholder-outline-color="activeDoorLibraryOutlineColor"
                 :placeholder-boxes="activeDoorLibraryViewerBoxes"
                 :display-unit="currentEditorDisplayUnit"
                 :show-attrs-panel="false"
@@ -21170,6 +21295,7 @@ onBeforeUnmount(() => {
                     class="subCategoryDesignEditor__controllerHandle"
                   >
                     <path
+                      v-if="controller.showBody !== false"
                       :d="controller.kind === 'horizontal'
                         ? buildInteriorControllerHorizontalArrowPath(controller.direction, controller.x, controller.y, controller.w, controller.h)
                         : buildInteriorControllerVerticalArrowPath(controller.direction, controller.x, controller.y, controller.w, controller.h)"
