@@ -325,11 +325,14 @@ const doorLibraryAnnotationDraft = ref(null);
 const doorLibrarySelectedAnnotation = ref(null);
 const doorLibraryCurrentSnapPoint = ref(null);
 const doorLibraryCursorPoint = ref(null);
+const doorLibrarySelectedInstanceId = ref("");
+const doorLibraryHoveredInstanceId = ref("");
 const doorLibraryHoverMode = ref(null);
 const doorLibraryViewerCursorPoint = ref(null);
 const doorLibraryModelPanning = ref(false);
 const doorLibraryPendingPointerPoint = ref(null);
 const doorLibraryLastProcessedPointerPoint = ref(null);
+const doorLibraryInstanceHitCache = ref([]);
 const doorLibraryAnnotationHitCache = ref({
   token: "",
   point: null,
@@ -890,6 +893,8 @@ function resetDoorLibraryAnnotations() {
   doorLibrarySelectedAnnotation.value = null;
   doorLibraryAnnotationTool.value = null;
   doorLibraryCurrentSnapPoint.value = null;
+  doorLibrarySelectedInstanceId.value = "";
+  doorLibraryHoveredInstanceId.value = "";
   doorLibraryHoverMode.value = null;
   stopDoorLibraryPointerProcessing();
   doorLibraryAnnotationHitCache.value = {
@@ -1198,6 +1203,9 @@ function clearInteriorLibraryAnnotationSelection() {
 function clearDoorLibraryAnnotationSelection() {
   doorLibrarySelectedAnnotation.value = null;
 }
+function clearDoorLibraryInstanceSelection() {
+  doorLibrarySelectedInstanceId.value = "";
+}
 function clearInteriorLibraryInstanceSelection() {
   interiorLibrarySelectedInstanceId.value = "";
   closeInteriorInstanceContextMenu();
@@ -1311,6 +1319,10 @@ function selectInteriorLibraryInstance(instanceId) {
   interiorLibrarySelectedAnnotation.value = null;
   clearInteriorLibraryOverlapPreview();
 }
+function selectDoorLibraryInstance(instanceId) {
+  doorLibrarySelectedInstanceId.value = String(instanceId || "").trim();
+  doorLibrarySelectedAnnotation.value = null;
+}
 function distancePointToSegmentLocal(point, start, end) {
   const px = Number(point?.x) || 0;
   const py = Number(point?.y) || 0;
@@ -1410,10 +1422,24 @@ function buildInteriorLibraryInstanceHitCache(instances) {
     };
   });
 }
+function buildDoorLibraryInstanceHitCache(instances) {
+  return buildInteriorLibraryInstanceHitCache(instances);
+}
 function collectInteriorInstanceHitCandidates(point) {
   const target = { x: Number(point?.x) || 0, y: Number(point?.y) || 0 };
   const candidates = [];
   for (const instance of interiorLibraryInstanceHitCache.value) {
+    const hitRect = instance?.expandedHitRect || instance?.boundsRect;
+    if (!hitRect) continue;
+    if (!pointInInteriorRect(target, hitRect, 0)) continue;
+    candidates.push(instance);
+  }
+  return candidates;
+}
+function collectDoorLibraryInstanceHitCandidates(point) {
+  const target = { x: Number(point?.x) || 0, y: Number(point?.y) || 0 };
+  const candidates = [];
+  for (const instance of doorLibraryInstanceHitCache.value) {
     const hitRect = instance?.expandedHitRect || instance?.boundsRect;
     if (!hitRect) continue;
     if (!pointInInteriorRect(target, hitRect, 0)) continue;
@@ -1467,6 +1493,10 @@ function collectInteriorInstanceHits(point) {
   const candidates = collectInteriorInstanceHitCandidates(point);
   return scoreInteriorInstanceCandidates(point, candidates);
 }
+function collectDoorLibraryInstanceHits(point) {
+  const candidates = collectDoorLibraryInstanceHitCandidates(point);
+  return scoreInteriorInstanceCandidates(point, candidates);
+}
 function updateInteriorLibraryHoverState(point) {
   if (!point) return;
   const rendered = interiorLibraryRenderedAnnotations.value;
@@ -1485,6 +1515,24 @@ function updateInteriorLibraryHoverState(point) {
   }
   if (interiorLibraryHoverMode.value !== nextHoverMode) {
     interiorLibraryHoverMode.value = nextHoverMode;
+  }
+}
+function updateDoorLibraryHoverState(point) {
+  if (!point) return;
+  const hitDimension = hitTestCachedAnnotationList(
+    doorLibraryAnnotationHitCache,
+    doorLibraryRenderedAnnotations.value.dimensions,
+    point,
+    12
+  );
+  const instanceHits = !hitDimension ? collectDoorLibraryInstanceHits(point) : [];
+  const nextHoveredInstanceId = instanceHits[0]?.id || "";
+  const nextHoverMode = (hitDimension || instanceHits.length) ? "clicker" : null;
+  if (doorLibraryHoveredInstanceId.value !== nextHoveredInstanceId) {
+    doorLibraryHoveredInstanceId.value = nextHoveredInstanceId;
+  }
+  if (doorLibraryHoverMode.value !== nextHoverMode) {
+    doorLibraryHoverMode.value = nextHoverMode;
   }
 }
 
@@ -1940,6 +1988,9 @@ function processDoorLibraryPointerFrame() {
     if (doorLibraryHoverMode.value !== null) {
       doorLibraryHoverMode.value = null;
     }
+    if (doorLibraryHoveredInstanceId.value !== "") {
+      doorLibraryHoveredInstanceId.value = "";
+    }
     if (doorLibraryPendingPointerPoint.value) {
       scheduleDoorLibraryPointerProcessing();
     }
@@ -1949,16 +2000,7 @@ function processDoorLibraryPointerFrame() {
     doorLibraryCurrentSnapPoint.value = null;
   }
   syncDoorLibraryCursorPoint(rawPoint, null);
-  const hitDimension = hitTestCachedAnnotationList(
-    doorLibraryAnnotationHitCache,
-    doorLibraryRenderedAnnotations.value.dimensions,
-    rawPoint,
-    12
-  );
-  const nextHoverMode = hitDimension ? "clicker" : null;
-  if (doorLibraryHoverMode.value !== nextHoverMode) {
-    doorLibraryHoverMode.value = nextHoverMode;
-  }
+  updateDoorLibraryHoverState(rawPoint);
   if (doorLibraryPendingPointerPoint.value) {
     scheduleDoorLibraryPointerProcessing();
   }
@@ -2168,6 +2210,14 @@ function onDoorLibraryFrontSvgPointerDown(event) {
   }
   clearDoorLibraryAnnotationSelection();
   if (doorLibraryAnnotationTool.value !== "dimension") {
+    const instanceHits = collectDoorLibraryInstanceHits(rawPoint);
+    if (instanceHits.length) {
+      selectDoorLibraryInstance(instanceHits[0].id);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    clearDoorLibraryInstanceSelection();
     doorLibraryCurrentSnapPoint.value = null;
     return;
   }
@@ -2192,6 +2242,7 @@ function onDoorLibraryFrontSvgPointerLeave() {
   doorLibraryCurrentSnapPoint.value = null;
   clearDoorLibraryCursorPoint();
   doorLibraryHoverMode.value = null;
+  doorLibraryHoveredInstanceId.value = "";
   stopDoorLibraryPointerProcessing();
 }
 function onDoorLibraryViewerPointerMove(event) {
@@ -2713,9 +2764,44 @@ function getDoorDependentViewerBoxesFromPartRows(parts) {
     .filter((box) => box && typeof box === "object")
     .map((box) => ({ ...(box || {}) }));
 }
+function getDoorDependentSelectablePartsFromPartRows(parts, sourceType = "structural", sourceId = "") {
+  return (Array.isArray(parts) ? parts : [])
+    .filter((row) => isDoorDependentPartFormulaId(row?.part_formula_id))
+    .map((row, index) => {
+      const box = row?.viewer_payload?.box;
+      if (!box || typeof box !== "object") return null;
+      const partFormulaId = Number(row?.part_formula_id) || 0;
+      const normalizedSourceType = sourceType === "internal" ? "internal" : "structural";
+      const normalizedSourceId = String(sourceId || "").trim() || "root";
+      return {
+        id: `${normalizedSourceType}:${normalizedSourceId}:${partFormulaId}:${index}`,
+        sourceType: normalizedSourceType,
+        sourceId: normalizedSourceId,
+        partFormulaId,
+        partCode: String(row?.part_code || "").trim(),
+        partTitle: String(row?.part_title || row?.part_code || `part_${partFormulaId}`).trim(),
+        lineColor: normalizeHexColor(box?.lineColor || box?.line_color || DEFAULT_INTERIOR_LINE_COLOR, DEFAULT_INTERIOR_LINE_COLOR),
+        box: { ...(box || {}) },
+      };
+    })
+    .filter(Boolean);
+}
 function getDoorDependentViewerBoxesFromInteriorInstances(instances) {
   return (Array.isArray(instances) ? instances : [])
     .flatMap((instance) => getDoorDependentViewerBoxesFromPartRows(instance?.part_snapshots || []));
+}
+function getDoorDependentSelectablePartsFromInteriorInstances(instances) {
+  return (Array.isArray(instances) ? instances : [])
+    .flatMap((instance) =>
+      getDoorDependentSelectablePartsFromPartRows(
+        instance?.part_snapshots || [],
+        "internal",
+        String(instance?.id || instance?.instance_code || "").trim() || "internal"
+      )
+    );
+}
+function getDoorLibraryPartHighlightColor(sourceType) {
+  return sourceType === "internal" ? "#F28C28" : "#2FAE66";
 }
 function resolveDoorInstanceLineColor(instance) {
   const group = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
@@ -2856,6 +2942,15 @@ function getViewerBoxesFromInteriorInstance(instance) {
 
   return [];
 }
+function getViewerBoxesFromDoorInstance(instance) {
+  const directBoxes = (Array.isArray(instance?.viewer_boxes) ? instance.viewer_boxes : [])
+    .filter((box) => box && typeof box === "object")
+    .map((box) => ({ ...(box || {}) }));
+  if (directBoxes.length) return directBoxes;
+  const snapshotBoxes = getViewerBoxesFromPartSnapshots(instance?.part_snapshots || []);
+  if (snapshotBoxes.length) return snapshotBoxes;
+  return [];
+}
 
 function buildFrontViewBoxFingerprint(boxes) {
   return (Array.isArray(boxes) ? boxes : [])
@@ -2977,30 +3072,41 @@ const activeInteriorLibraryStructureViewerBoxes = computed(() => {
   if (sourceBoxes.length) return sourceBoxes;
   return [];
 });
-const activeDoorLibraryViewerBoxes = computed(() => {
+const activeDoorLibrarySelectableParts = computed(() => {
   if (subCategoryDesignEditorOpen.value) {
-    const previewBoxes = [
-      ...getDoorDependentViewerBoxesFromPartRows(subCategoryDesignEditorPreview.value?.parts || []),
-      ...getDoorDependentViewerBoxesFromInteriorInstances(subCategoryDesignEditorPreview.value?.interior_instances || []),
-      ...getViewerBoxesFromDoorInstances(subCategoryDesignEditorPreview.value?.door_instances || []),
+    const previewParts = [
+      ...getDoorDependentSelectablePartsFromPartRows(subCategoryDesignEditorPreview.value?.parts || [], "structural", "preview"),
+      ...getDoorDependentSelectablePartsFromInteriorInstances(subCategoryDesignEditorPreview.value?.interior_instances || []),
     ];
-    if (previewBoxes.length) return previewBoxes;
+    if (previewParts.length) return previewParts;
     return [];
   }
-  const rootBoxes = [
-    ...getDoorDependentViewerBoxesFromPartRows(activeDoorLibraryOrderDesign.value?.part_snapshots || []),
-    ...getDoorDependentViewerBoxesFromInteriorInstances(activeDoorLibraryOrderDesign.value?.interior_instances || []),
-    ...getViewerBoxesFromDoorInstances(activeDoorLibraryOrderDesign.value?.door_instances || []),
+  const rootParts = [
+    ...getDoorDependentSelectablePartsFromPartRows(
+      activeDoorLibraryOrderDesign.value?.part_snapshots || [],
+      "structural",
+      String(activeDoorLibraryOrderDesign.value?.id || "").trim() || "order"
+    ),
+    ...getDoorDependentSelectablePartsFromInteriorInstances(activeDoorLibraryOrderDesign.value?.interior_instances || []),
   ];
-  if (rootBoxes.length) return rootBoxes;
-  const sourceBoxes = [
-    ...getDoorDependentViewerBoxesFromPartRows(activeDoorLibrarySourceDesign.value?.preview?.parts || []),
-    ...getDoorDependentViewerBoxesFromInteriorInstances(activeDoorLibrarySourceDesign.value?.preview?.interior_instances || []),
-    ...getViewerBoxesFromDoorInstances(activeDoorLibrarySourceDesign.value?.preview?.door_instances || []),
+  if (rootParts.length) return rootParts;
+  const sourceParts = [
+    ...getDoorDependentSelectablePartsFromPartRows(
+      activeDoorLibrarySourceDesign.value?.preview?.parts || [],
+      "structural",
+      String(activeDoorLibrarySourceDesign.value?.id || "").trim() || "source"
+    ),
+    ...getDoorDependentSelectablePartsFromInteriorInstances(activeDoorLibrarySourceDesign.value?.preview?.interior_instances || []),
   ];
-  if (sourceBoxes.length) return sourceBoxes;
+  if (sourceParts.length) return sourceParts;
   return [];
 });
+const activeDoorLibraryViewerBoxes = computed(() =>
+  activeDoorLibrarySelectableParts.value.map((item) => ({
+    ...(item?.box || {}),
+    lineColor: item?.lineColor || DEFAULT_INTERIOR_LINE_COLOR,
+  }))
+);
 const interiorLibraryFrontView = computed(() =>
   buildFrontViewLinesFromBoxes(
     activeInteriorLibraryStructureViewerBoxes.value || [],
@@ -3257,6 +3363,65 @@ const interiorLibraryPreviewInstances2d = computed(() => {
 });
 watch(interiorLibraryPreviewInstances2d, (next) => {
   interiorLibraryInstanceHitCache.value = buildInteriorLibraryInstanceHitCache(next || []);
+}, { immediate: true });
+const doorLibraryPreviewInstanceGeometry = computed(() =>
+  activeDoorLibrarySelectableParts.value
+    .map((part, index) => {
+      const data = buildFrontViewLinesFromBoxes([{ ...(part?.box || {}), lineColor: part?.lineColor || DEFAULT_INTERIOR_LINE_COLOR }]);
+      if (!data?.bounds) return null;
+      return {
+        id: String(part?.id || "").trim(),
+        instanceCode: String(part?.partCode || "").trim(),
+        groupTitle: String(part?.partTitle || part?.partCode || "قطعه").trim(),
+        sourceType: String(part?.sourceType || "structural").trim(),
+        lineColor: String(part?.lineColor || DEFAULT_INTERIOR_LINE_COLOR).trim(),
+        highlightColor: getDoorLibraryPartHighlightColor(part?.sourceType),
+        visualOrder: index,
+        geometry: data,
+      };
+    })
+    .filter(Boolean)
+);
+const doorLibraryPreviewInstances2d = computed(() =>
+  doorLibraryPreviewInstanceGeometry.value.map((instance) => {
+    const data = instance.geometry;
+    const outerLines = (data.outer || []).map((line) => ({
+      x1: Number(line?.ax) || 0,
+      y1: -(Number(line?.az) || 0),
+      x2: Number(line?.bx) || 0,
+      y2: -(Number(line?.bz) || 0),
+    }));
+    const innerLines = (data.inner || []).map((line) => ({
+      x1: Number(line?.ax) || 0,
+      y1: -(Number(line?.az) || 0),
+      x2: Number(line?.bx) || 0,
+      y2: -(Number(line?.bz) || 0),
+    }));
+    const minX = Number(data?.bounds?.minX) || 0;
+    const maxX = Number(data?.bounds?.maxX) || 0;
+    const minY = -(Number(data?.bounds?.maxZ) || 0);
+    const maxY = -(Number(data?.bounds?.minZ) || 0);
+    return {
+      id: instance.id,
+      instanceCode: instance.instanceCode,
+      groupTitle: instance.groupTitle,
+      sourceType: instance.sourceType,
+      lineColor: instance.lineColor,
+      highlightColor: instance.highlightColor,
+      visualOrder: instance.visualOrder,
+      outerLines,
+      innerLines,
+      boundsRect: {
+        x: Math.min(minX, maxX),
+        y: Math.min(minY, maxY),
+        w: Math.abs(maxX - minX),
+        h: Math.abs(maxY - minY),
+      },
+    };
+  })
+);
+watch(doorLibraryPreviewInstances2d, (next) => {
+  doorLibraryInstanceHitCache.value = buildDoorLibraryInstanceHitCache(next || []);
 }, { immediate: true });
 const interiorLibraryControllerVisualScale = computed(() => {
   const zoom = Math.min(
@@ -3680,6 +3845,15 @@ watch(activeInteriorLibraryInstances, (items) => {
   }
   if (interiorLibraryInstanceContextMenu.value.visible && !ids.has(String(interiorLibraryInstanceContextMenu.value.instanceId || "").trim())) {
     closeInteriorInstanceContextMenu();
+  }
+}, { immediate: true });
+watch(activeDoorLibrarySelectableParts, (items) => {
+  const ids = new Set((Array.isArray(items) ? items : []).map((item) => String(item?.id || "").trim()).filter(Boolean));
+  if (doorLibrarySelectedInstanceId.value && !ids.has(String(doorLibrarySelectedInstanceId.value))) {
+    doorLibrarySelectedInstanceId.value = "";
+  }
+  if (doorLibraryHoveredInstanceId.value && !ids.has(String(doorLibraryHoveredInstanceId.value))) {
+    doorLibraryHoveredInstanceId.value = "";
   }
 }, { immediate: true });
 watch(activeInteriorLibraryTargetId, () => {
@@ -20121,6 +20295,47 @@ onBeforeUnmount(() => {
                     :stroke="line.lineColor || '#7B858C'"
                     stroke-width="5.6"
                     stroke-linecap="round"
+                  />
+                </g>
+                <g
+                  v-for="instance in doorLibraryPreviewInstances2d"
+                  :key="`door-instance-${instance.id}`"
+                  class="subCategoryDesignEditor__instanceLayer"
+                  :class="{
+                    'is-hovered': String(doorLibraryHoveredInstanceId || '') === String(instance.id || ''),
+                    'is-selected': String(doorLibrarySelectedInstanceId || '') === String(instance.id || '')
+                  }"
+                >
+                  <rect
+                    :x="instance.boundsRect.x"
+                    :y="instance.boundsRect.y"
+                    :width="instance.boundsRect.w"
+                    :height="instance.boundsRect.h"
+                    class="subCategoryDesignEditor__instanceHitBox"
+                  />
+                  <line
+                    v-for="(line, index) in instance.innerLines"
+                    :key="`${instance.id}-inner-${index}`"
+                    :x1="line.x1"
+                    :y1="line.y1"
+                    :x2="line.x2"
+                    :y2="line.y2"
+                    :stroke-width="String(doorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 7.2 : 6.2"
+                    :stroke="instance.highlightColor"
+                    stroke-linecap="round"
+                    :opacity="String(doorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 1 : 0"
+                  />
+                  <line
+                    v-for="(line, index) in instance.outerLines"
+                    :key="`${instance.id}-outer-${index}`"
+                    :x1="line.x1"
+                    :y1="line.y1"
+                    :x2="line.x2"
+                    :y2="line.y2"
+                    :stroke="instance.highlightColor"
+                    :stroke-width="String(doorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 7.6 : ((String(doorLibraryHoveredInstanceId || '') === String(instance.id || '')) ? 6.4 : 0)"
+                    stroke-linecap="round"
+                    :opacity="String(doorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 0.98 : ((String(doorLibraryHoveredInstanceId || '') === String(instance.id || '')) ? 0.9 : 0)"
                   />
                 </g>
                 <template

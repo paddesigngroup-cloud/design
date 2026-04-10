@@ -48,30 +48,30 @@
 47,f47,((d_th_ca)*(d_th))+((f_th_ca)*(f_th))+((b_th_ca)*(b_th))+((fr_p)*(p_th))+((ba_p)*(p_th))+(fr_g)+(ba_g)+(fr_n)+(ba_n)+(p_f_m_s)+(p_b_m_s),system
 48,f48,((le_m_s)*(u_th))+((le_p)*(p_th))+(le_g)+(le_n)+(p_l_m_s),system
 49,f49,((d_th_ca)*(d_th))+((f_th_ca)*(f_th))+((fr_p)*(p_th))+(fr_g)+(fr_n)+(p_f_m_s),system
-50,f50,(dr_g_th)+((le_f_s_dr)*(le_ri_s_dr_th))+((ri_f_s_dr)*(le_ri_s_dr_th))+l_o_dr+r_o_dr+(le_p*p_th)+(ri_p*p_th)+le_g+ri_g+le_n+ri_n+p_l_f_s_dr+p_r_f_s_dr,system
+50,f50,(dr_g_th)+((le_f_s_dr)*(le_ri_s_dr_th))+((ri_f_s_dr)*(le_ri_s_dr_th))+l_o_dr+r_o_dr+(le_p*p_th)+(ri_p*p_th)+le_g+ri_g+le_n+ri_n+p_l_f_s_dr+p_r_f_s_dr+(2*(u_th)),system
 51,f51,u_f_o+u_f_h,system
 52,f52,p_t_f_s_dr+p_b_f_s_dr+( bo_dr_ca*bo_dr_th),system
-53,f53,((dr_g_th)/2)+((le_f_s_dr)*(le_ri_s_dr_th))+l_o_dr+(le_p*p_th)+le_g+le_n+p_l_f_s_dr,system
+53,f53,((dr_g_th)/2)+((le_f_s_dr)*(le_ri_s_dr_th))+l_o_dr+(le_p*p_th)+le_g+le_n+p_l_f_s_dr+u_th,system
 54,f54,((d_th_ca)*(d_th))+((f_th_ca)*(f_th))+((fr_p)*(p_th))+(fr_g)+(fr_n)+p_f_f_s_dr+p_f_dr_b,system
 55,f55,( bo_dr_ca*bo_dr_th)+((bo_p)*(p_th))+(bo_g)+p_b_f_s_dr+b_o_dr+u_f_o,system
-56,f56,(dr_g_th)+((le_b_s_dr)*(le_ri_s_dr_th))+((ri_b_s_dr)*(le_ri_s_dr_th))+l_o_dr+r_o_dr+(le_p*p_th)+(ri_p*p_th)+le_g+ri_g+le_n+ri_n+p_l_b_s_dr+p_r_b_s_dr,system
+56,f56,(dr_g_th)+((le_b_s_dr)*(le_ri_s_dr_th))+((ri_b_s_dr)*(le_ri_s_dr_th))+l_o_dr+r_o_dr+(le_p*p_th)+(ri_p*p_th)+le_g+ri_g+le_n+ri_n+p_l_b_s_dr+p_r_b_s_dr+(2*(u_th)),system
 57,f57,p_t_b_s_dr+p_bo_b_s_dr+( bo_dr_ca*bo_dr_th),system
-58,f58,((dr_g_th)/2)+((le_b_s_dr)*(le_ri_s_dr_th))+l_o_dr+(le_p*p_th)+le_g+le_n+p_l_b_s_dr,system
+58,f58,((dr_g_th)/2)+((le_b_s_dr)*(le_ri_s_dr_th))+l_o_dr+(le_p*p_th)+le_g+le_n+p_l_b_s_dr+u_th,system
 59,f59,((d_th_ca)*(d_th))+((f_th_ca)*(f_th))+((fr_p)*(p_th))+(fr_g)+(fr_n)+dr_g_d+p_f_dr_b-p_b_b_s_dr,system
 60,f60,( bo_dr_ca*bo_dr_th)+((bo_p)*(p_th))+(bo_g)+p_bo_b_s_dr+b_o_dr+u_f_o,system
 61,f61,(fr_l_s_dr*fr_ba_s_dr_th)+(ba_l_s_dr*fr_ba_s_dr_th)+p_f_l_s_dr+p_b_l_s_dr,system
 62,f62,p_t_l_s_dr+p_bo_l_s_dr+( bo_dr_ca*bo_dr_th),system
-63,f63,((dr_g_th)/2)+l_o_dr+(le_p*p_th)+le_g+le_n+p_r_l_s_dr,system
+63,f63,((dr_g_th)/2)+l_o_dr+(le_p*p_th)+le_g+le_n+p_r_l_s_dr+u_th,system
 64,f64,((d_th_ca)*(d_th))+((f_th_ca)*(f_th))+((fr_p)*(p_th))+(fr_g)+(fr_n)+(fr_l_s_dr*fr_ba_s_dr_th)+p_f_l_s_dr+p_f_dr_b,system
 65,f65,( bo_dr_ca*bo_dr_th)+((bo_p)*(p_th))+(bo_g)+p_bo_l_s_dr+b_o_dr+u_f_o,system
 66,f66,(fr_r_s_dr*fr_ba_s_dr_th)+(ba_r_s_dr*fr_ba_s_dr_th)+p_f_r_s_dr+p_b_r_s_dr,system
 67,f67,p_t_r_s_dr+p_bo_r_s_dr+( bo_dr_ca*bo_dr_th),system
-68,f68,((dr_g_th)/2)+r_o_dr+(ri_p*p_th)+ri_g+ri_n+p_l_r_s_dr,system
+68,f68,((dr_g_th)/2)+r_o_dr+(ri_p*p_th)+ri_g+ri_n+p_l_r_s_dr+u_th,system
 69,f69,((d_th_ca)*(d_th))+((f_th_ca)*(f_th))+((fr_p)*(p_th))+(fr_g)+(fr_n)+(fr_r_s_dr*fr_ba_s_dr_th)+p_f_r_s_dr+p_f_dr_b,system
 70,f70,( bo_dr_ca*bo_dr_th)+((bo_p)*(p_th))+(bo_g)+p_bo_r_s_dr+b_o_dr+u_f_o,system
-71,f71,(dr_g_th)+((le_bo_dr)*(le_ri_s_dr_th))+((ri_bo_dr)*(le_ri_s_dr_th))+l_o_dr+r_o_dr+(le_p*p_th)+(ri_p*p_th)+le_g+ri_g+le_n+ri_n+p_l_bo_dr+p_r_bo_dr,system
+71,f71,(dr_g_th)+((le_bo_dr)*(le_ri_s_dr_th))+((ri_bo_dr)*(le_ri_s_dr_th))+l_o_dr+r_o_dr+(le_p*p_th)+(ri_p*p_th)+le_g+ri_g+le_n+ri_n+p_l_bo_dr+p_r_bo_dr+(2*(u_th)),system
 72,f72,(fr_bo_dr*fr_ba_s_dr_th)+(ba_bo_dr*fr_ba_s_dr_th)+p_f_bo_dr+p_b_bo_dr,system
-73,f73,((dr_g_th)/2)+((le_bo_dr)*(le_ri_s_dr_th))+l_o_dr+(le_p*p_th)+le_g+le_n+p_l_bo_dr,system
+73,f73,((dr_g_th)/2)+((le_bo_dr)*(le_ri_s_dr_th))+l_o_dr+(le_p*p_th)+le_g+le_n+p_l_bo_dr+u_th,system
 74,f74,((d_th_ca)*(d_th))+((f_th_ca)*(f_th))+((fr_p)*(p_th))+(fr_g)+(fr_n)+(fr_bo_dr*fr_ba_s_dr_th)+p_f_bo_dr+p_f_dr_b,system
 75,f75,((bo_p)*(p_th))+(bo_g)+p_u_bo_dr+b_o_dr+u_f_o,system
 76,f76,((bo_p)*(p_th))+(bo_g)+((to_p)*(p_th))+(to_g)+(c_th)+(c_g)+p_to_pa+p_bo_pa+u_f_o,system
@@ -83,3 +83,22 @@
 82,f82,((ri_p)*(p_th))+(ri_g)+(ri_n)+ri_o_bar,system
 83,f83,((d_th_ca)*(d_th))+((f_th_ca)*(f_th))+((fr_p)*(p_th))+(fr_g)+(fr_n)+(p_fr_bar),system
 84,f84,((bo_p)*(p_th))+(bo_g)+p_bo_bar+u_f_o,system
+85,f85,((le_p)*(p_th))+(le_g)+(le_n)+le_o_pa,system
+86,f86,((le_p)*(p_th))+(le_g)+(le_n)+le_o_bar,system
+87,f87,((le_f_s)*(u_th))+((ri_f_s)*(u_th))+((ri_p)*(p_th))+(ri_g)+(ri_n),system
+88,f88,((ri_f_s)*(u_th))+((ri_p)*(p_th))+(ri_g)+(ri_n)+p_r_f_s,system
+89,f89,((le_m_s)*(u_th))+((ri_m_s)*(u_th))+((ri_p)*(p_th))+(ri_g)+(ri_n),system
+90,f90,((ri_m_s)*(u_th))+((ri_p)*(p_th))+(ri_g)+(ri_n)+p_r_m_s,system
+91,f91,((le_f_s)*(u_th))+((ri_f_s)*(u_th))+((le_p)*(p_th))+(le_g)+(le_n),system
+92,f92,((le_f_s)*(u_th))+((le_p)*(p_th))+(le_g)+(le_n)+p_l_f_s,system
+93,f93,((le_m_s)*(u_th))+((ri_m_s)*(u_th))+((le_p)*(p_th))+(le_g)+(le_n),system
+94,f94,((le_m_s)*(u_th))+((le_p)*(p_th))+(le_g)+(le_n)+p_l_m_s,system
+95,f95,(2*(u_th))+(dr_g_th)+((le_f_s_dr)*(le_ri_s_dr_th))+((ri_f_s_dr)*(le_ri_s_dr_th))+(ri_p*p_th)+ri_g+ri_n+p_l_f_s_dr+p_r_f_s_dr,system
+96,f96,(u_th)+(dr_g_th/2)+((ri_f_s_dr)*(le_ri_s_dr_th))+(ri_p*p_th)+ri_g+ri_n+p_r_f_s_dr+r_o_dr,system
+97,f97,(2*(u_th))+(dr_g_th)+((le_b_s_dr)*(le_ri_s_dr_th))+((ri_b_s_dr)*(le_ri_s_dr_th))+(ri_p*p_th)+ri_g+ri_n+p_l_b_s_dr+p_r_b_s_dr,system
+98,f98,(u_th)+(dr_g_th/2)+((ri_b_s_dr)*(le_ri_s_dr_th))+(ri_p*p_th)+ri_g+ri_n+p_r_b_s_dr+r_o_dr,system
+99,f99,(dr_w-(u_th+((dr_g_th)/2)+p_r_l_s_dr+le_ri_s_dr_th))+r_o_dr,system
+100,f100,(u_th)+(dr_g_th/2)+(ri_p*p_th)+ri_g+ri_n+p_l_r_s_dr+r_o_dr,system
+101,f101,(dr_g_th)+((le_bo_dr)*(le_ri_s_dr_th))+((ri_bo_dr)*(le_ri_s_dr_th))+(le_p*p_th)+le_g+le_n+p_l_bo_dr+p_r_bo_dr+(2*(u_th)),system
+102,f102,(u_th)+(dr_g_th/2)+(ri_p*p_th)+ri_g+ri_n+p_r_bo_dr+r_o_dr,system
+103,f103,(dr_w-(u_th+((dr_g_th)/2)+p_l_r_s_dr+le_ri_s_dr_th))+l_o_dr,system
