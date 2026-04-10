@@ -398,6 +398,13 @@ const interiorLibraryInstanceContextMenu = ref({
   instanceId: "",
   source: "",
 });
+const doorLibraryInstanceContextMenu = ref({
+  visible: false,
+  x: 0,
+  y: 0,
+  instanceId: "",
+  source: "",
+});
 const interiorLibraryFrontPan = ref({ x: 0, y: 0 });
 const interiorLibraryFrontPanning = ref(false);
 const interiorLibraryViewerCursorPoint = ref(null);
@@ -1389,12 +1396,33 @@ function closeInteriorInstanceContextMenu() {
     source: "",
   };
 }
+function closeDoorInstanceContextMenu() {
+  doorLibraryInstanceContextMenu.value = {
+    visible: false,
+    x: 0,
+    y: 0,
+    instanceId: "",
+    source: "",
+  };
+}
 function openInteriorInstanceContextMenu({ instanceId, x, y, source }) {
   const normalizedId = String(instanceId || "").trim();
   if (!normalizedId) return;
   selectInteriorLibraryInstance(normalizedId);
   hideInteriorLibraryOverlapPicker();
   interiorLibraryInstanceContextMenu.value = {
+    visible: true,
+    x: Number(x) || 0,
+    y: Number(y) || 0,
+    instanceId: normalizedId,
+    source: String(source || "").trim() || "card",
+  };
+}
+function openDoorInstanceContextMenu({ instanceId, x, y, source }) {
+  const normalizedId = String(instanceId || "").trim();
+  if (!normalizedId) return;
+  selectDoorLibraryPlacedInstance(normalizedId);
+  doorLibraryInstanceContextMenu.value = {
     visible: true,
     x: Number(x) || 0,
     y: Number(y) || 0,
@@ -1436,8 +1464,27 @@ const activeInteriorLibraryContextMenuInstance = computed(() =>
     (item) => String(item?.id || "").trim() === String(interiorLibraryInstanceContextMenu.value?.instanceId || "").trim()
   ) || null
 );
+const activeDoorLibraryContextMenuInstance = computed(() =>
+  activeDoorLibraryInstances.value.find(
+    (item) => String(item?.id || "").trim() === String(doorLibraryInstanceContextMenu.value?.instanceId || "").trim()
+  ) || null
+);
 const interiorLibraryInstanceContextMenuStyle = computed(() => {
   const state = interiorLibraryInstanceContextMenu.value || {};
+  const menuWidth = 176;
+  const estimatedHeight = 116;
+  const gutter = 8;
+  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
+  const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
+  const left = Math.max(gutter, Math.min((Number(state.x) || 0), viewportWidth - menuWidth - gutter));
+  const top = Math.max(gutter, Math.min((Number(state.y) || 0), viewportHeight - estimatedHeight - gutter));
+  return {
+    left: `${Math.round(left)}px`,
+    top: `${Math.round(top)}px`,
+  };
+});
+const doorLibraryInstanceContextMenuStyle = computed(() => {
+  const state = doorLibraryInstanceContextMenu.value || {};
   const menuWidth = 176;
   const estimatedHeight = 116;
   const gutter = 8;
@@ -2339,6 +2386,18 @@ function handleInteriorLibraryInstanceCardContextMenu(item, event) {
     source: "card",
   });
 }
+function handleDoorLibraryInstanceCardContextMenu(item, event) {
+  const instanceId = String(item?.id || "").trim();
+  if (!instanceId) return;
+  event.preventDefault();
+  event.stopPropagation();
+  openDoorInstanceContextMenu({
+    instanceId,
+    x: event.clientX,
+    y: event.clientY,
+    source: "card",
+  });
+}
 function onInteriorLibraryFrontSvgContextMenu(event) {
   if (interiorLibraryPreviewMode.value !== "front2d") return;
   const rawPoint = getInteriorLibraryFrontSvgPoint(event);
@@ -2362,6 +2421,28 @@ function onInteriorLibraryFrontSvgContextMenu(event) {
   event.stopPropagation();
   openInteriorInstanceContextMenu({
     instanceId: overlay.instanceId,
+    x: event.clientX,
+    y: event.clientY,
+    source: "preview",
+  });
+}
+function onDoorLibraryFrontSvgContextMenu(event) {
+  if (doorLibraryPreviewMode.value !== "front2d" || isDoorLibraryPendingControllerActive.value) return;
+  const rawPoint = getDoorLibraryFrontSvgPoint(event);
+  if (!rawPoint) return;
+  const hitDimension = hitTestCachedAnnotationList(
+    doorLibraryAnnotationHitCache,
+    doorLibraryRenderedAnnotations.value.dimensions,
+    rawPoint,
+    12
+  );
+  if (hitDimension) return;
+  const overlay = hitTestDoorLibraryPlacedOverlay(rawPoint);
+  if (!overlay?.id) return;
+  event.preventDefault();
+  event.stopPropagation();
+  openDoorInstanceContextMenu({
+    instanceId: overlay.id,
     x: event.clientX,
     y: event.clientY,
     source: "preview",
@@ -9477,6 +9558,39 @@ async function deleteInteriorInstanceFromContextMenu() {
   closeInteriorInstanceContextMenu();
   await deleteInteriorInstanceFromDesign(target);
 }
+async function duplicateDoorInstanceInDesign(instance) {
+  const normalized = normalizeDoorInstanceRecord(instance);
+  if (!normalized?.id || !subCategoryDesignEditorOpen.value) return null;
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft?.id) return null;
+  const res = await fetch(
+    `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances/${encodeURIComponent(String(normalized.id))}/duplicate`,
+    { method: "POST" }
+  );
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, "کپی نمونه درب انجام نشد."));
+  const duplicated = await res.json();
+  syncDoorInstanceInDraft(duplicated);
+  syncOpenSubCategoryDesignDraftToCollection();
+  selectDoorLibraryPlacedInstance(duplicated.id);
+  await refreshSubCategoryDesignPreview();
+  closeDoorInstanceContextMenu();
+  return duplicated;
+}
+async function duplicateDoorInstanceFromContextMenu() {
+  const target = activeDoorLibraryContextMenuInstance.value;
+  if (!target) return;
+  try {
+    await duplicateDoorInstanceInDesign(target);
+  } catch (error) {
+    showAlert(error?.message || "کپی نمونه درب انجام نشد.", { title: "خطا" });
+  }
+}
+async function deleteDoorInstanceFromContextMenu() {
+  const target = activeDoorLibraryContextMenuInstance.value;
+  if (!target) return;
+  closeDoorInstanceContextMenu();
+  await deleteDoorInstanceFromDesign(target);
+}
 
 function onSubCategoryDesignSubCategoryChange() {
   syncSubCategoryDesignDraftSubCategoryFields(subCategoryDesignEditorDraft.value);
@@ -15239,6 +15353,7 @@ function closeDoorLibrary() {
   resetDoorLibraryAnnotations();
   clearDoorLibraryCursorPoint();
   clearDoorLibraryViewerCursorPoint();
+  closeDoorInstanceContextMenu();
   doorLibraryPreviewMode.value = "front2d";
   doorLibraryPreviewOpacity.value = 100;
   resetDoorLibraryPreviewView();
@@ -15870,6 +15985,10 @@ onMounted(() => {
       if (el.closest(".subCategoryDesignEditor__contextMenu")) return;
       closeInteriorInstanceContextMenu();
     }
+    if (doorLibraryInstanceContextMenu.value.visible) {
+      if (el.closest(".subCategoryDesignEditor__contextMenu")) return;
+      closeDoorInstanceContextMenu();
+    }
     if (interiorLibraryOverlapPickerState.value.visible && !el.closest(".subCategoryDesignEditor__overlapPicker")) {
       hideInteriorLibraryOverlapPicker();
     }
@@ -15919,6 +16038,12 @@ onMounted(() => {
     }
     if (interiorLibraryInstanceContextMenu.value.visible) {
       closeInteriorInstanceContextMenu();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (doorLibraryInstanceContextMenu.value.visible) {
+      closeDoorInstanceContextMenu();
       e.preventDefault();
       e.stopPropagation();
       return;
@@ -16024,6 +16149,20 @@ onMounted(() => {
       e.preventDefault();
       e.stopPropagation();
       return;
+    }
+    if (doorLibraryOpen.value) {
+      const selectedDoorId = String(doorLibrarySelectedPlacedInstanceId.value || "").trim();
+      if (selectedDoorId) {
+        const targetDoorInstance = activeDoorLibraryInstances.value.find(
+          (item) => String(item?.id || "").trim() === selectedDoorId
+        );
+        if (targetDoorInstance) {
+          deleteDoorInstanceFromDesign(targetDoorInstance);
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+      }
     }
     if (!interiorLibraryOpen.value || interiorLibraryPreviewMode.value !== "front2d") return;
     if (interiorLibrarySelectedAnnotation.value) {
@@ -20132,6 +20271,16 @@ onBeforeUnmount(() => {
     <button type="button" class="menuItem menuItem--grow menuItem--danger" @click="deleteInteriorInstanceFromContextMenu">حذف</button>
   </div>
 
+  <div
+    v-if="doorLibraryOpen && doorLibraryInstanceContextMenu.visible && activeDoorLibraryContextMenuInstance"
+    class="subCategoryDesignEditor__contextMenu"
+    :style="doorLibraryInstanceContextMenuStyle"
+    @pointerdown.stop
+  >
+    <button type="button" class="menuItem menuItem--grow" @click="duplicateDoorInstanceFromContextMenu">کپی</button>
+    <button type="button" class="menuItem menuItem--grow menuItem--danger" @click="deleteDoorInstanceFromContextMenu">حذف</button>
+  </div>
+
   <div v-if="interiorInstanceEditorOpen && interiorInstanceEditorDraft" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeInteriorInstanceEditor"></div>
     <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
@@ -21215,6 +21364,7 @@ onBeforeUnmount(() => {
                 @pointerdown="onDoorLibraryFrontSvgPointerDown"
                 @pointermove="onDoorLibraryFrontSvgPointerMove"
                 @pointerleave="onDoorLibraryFrontSvgPointerLeave"
+                @contextmenu.prevent.stop="onDoorLibraryFrontSvgContextMenu"
               >
                 <defs>
                   <pattern id="door-front-grid" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -21531,6 +21681,7 @@ onBeforeUnmount(() => {
               class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard"
               :class="{ 'is-active': String(doorLibrarySelectedPlacedInstanceId || '') === String(item.id || '') }"
               @click="selectDoorLibraryPlacedInstance(item.id)"
+              @contextmenu.prevent.stop="handleDoorLibraryInstanceCardContextMenu(item, $event)"
             >
               <div class="subCategoryDesignEditor__interiorGroupHead">
                 <span class="subCategoryDesignEditor__partMeta" dir="rtl">
