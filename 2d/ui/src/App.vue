@@ -7733,7 +7733,7 @@ async function openDoorInstanceEditor(instance) {
   const effectiveParamValues = Object.fromEntries(
     previewGroups
       .flatMap((group) => Array.isArray(group?.items) ? group.items : [])
-      .map((column) => [column.key, getDoorInstanceEffectiveValue(normalized, column.key)])
+      .map((column) => [column.key, column.value == null ? "" : String(column.value)])
   );
   doorInstanceEditorDraft.value = {
     ...normalized,

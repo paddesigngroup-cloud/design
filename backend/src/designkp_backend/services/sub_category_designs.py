@@ -1497,6 +1497,12 @@ async def resolve_door_instance_preview(
         str(key): float(value)
         for key, value in dict(base_numeric_params or resolved_context.sub_category_numeric_params).items()
     }
+    copied_meta_values, copied_meta = await build_sub_category_param_display_snapshot(
+        session,
+        sub_category=sub_category,
+        codes=selected_param_codes,
+        context=resolved_context,
+    )
     meta_values, default_meta = await build_door_group_param_display_snapshot(
         session,
         group=door_part_group,
@@ -1504,12 +1510,12 @@ async def resolve_door_instance_preview(
         admin_id=admin_id,
     )
     bindings = _normalize_door_controller_bindings(getattr(door_part_group, "controller_bindings", None))
-    persisted_values = _merge_param_value_layers(meta_values, persisted_values)
+    persisted_values = _merge_param_value_layers(copied_meta_values, meta_values, persisted_values)
     for binding_key, computed_value in computed_params.items():
         bound_code = str((bindings.get(binding_key) or {}).get("param_code") or "").strip()
         if bound_code and bound_code in selected_param_codes:
             persisted_values[bound_code] = str(int(computed_value) if float(computed_value).is_integer() else computed_value)
-    merged_meta = _merge_param_meta_layers(default_meta, _normalize_param_meta(param_meta))
+    merged_meta = _merge_param_meta_layers(copied_meta, default_meta, _normalize_param_meta(param_meta))
     effective_numeric_params = dict(numeric_base_values)
     for code, value in persisted_values.items():
         effective_numeric_params[code] = _round_number(_coerce_numeric(value))
