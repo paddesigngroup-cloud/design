@@ -3427,6 +3427,44 @@ const doorLibraryPreviewInstances2d = computed(() =>
 watch(doorLibraryPreviewInstances2d, (next) => {
   doorLibraryInstanceHitCache.value = buildDoorLibraryInstanceHitCache(next || []);
 }, { immediate: true });
+const doorLibrarySelectedParts2d = computed(() => {
+  const selectedIds = new Set(
+    (Array.isArray(doorLibrarySelectedInstanceIds.value) ? doorLibrarySelectedInstanceIds.value : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean)
+  );
+  return doorLibraryPreviewInstances2d.value.filter((item) => selectedIds.has(String(item?.id || "").trim()));
+});
+const doorLibraryControllerSelectionSummary = computed(() => {
+  const selected = doorLibrarySelectedParts2d.value;
+  const vertical = selected.filter((item) => Number(item?.boundsRect?.h) >= Number(item?.boundsRect?.w));
+  const horizontal = selected.filter((item) => Number(item?.boundsRect?.w) > Number(item?.boundsRect?.h));
+  return {
+    selected,
+    vertical,
+    horizontal,
+    eligible: vertical.length >= 2 && horizontal.length >= 2,
+  };
+});
+const doorLibraryControllerRect = computed(() => {
+  const summary = doorLibraryControllerSelectionSummary.value;
+  if (!summary.eligible) return null;
+  const vertical = summary.vertical;
+  const horizontal = summary.horizontal;
+  const left = Math.min(...vertical.map((item) => Number(item?.boundsRect?.x) || 0));
+  const right = Math.max(...vertical.map((item) => (Number(item?.boundsRect?.x) || 0) + (Number(item?.boundsRect?.w) || 0)));
+  const top = Math.min(...horizontal.map((item) => Number(item?.boundsRect?.y) || 0));
+  const bottom = Math.max(...horizontal.map((item) => (Number(item?.boundsRect?.y) || 0) + (Number(item?.boundsRect?.h) || 0)));
+  const width = Math.max(0, right - left);
+  const height = Math.max(0, bottom - top);
+  if (width <= 0 || height <= 0) return null;
+  return {
+    x: left,
+    y: top,
+    w: width,
+    h: height,
+  };
+});
 const interiorLibraryControllerVisualScale = computed(() => {
   const zoom = Math.min(
     INTERIOR_LIBRARY_FRONT_ZOOM_MAX,
@@ -20162,6 +20200,13 @@ onBeforeUnmount(() => {
           <div class="designMenu__cabinetState">
             {{ subCategoryDesignEditorOpen ? "برای ساب‌کت فعال" : (activeDoorLibraryOrderDesign?.design_title || "برای طرح سفارش فعال") }}
           </div>
+          <div v-if="doorLibrarySelectedInstanceIds.length" class="designMenu__cabinetState">
+            {{ `انتخاب شده: ${toPersianDigits(doorLibrarySelectedInstanceIds.length)} قطعه` }}
+            <span v-if="doorLibraryControllerSelectionSummary.eligible"> | مستطیل کنترلر آماده نمایش است.</span>
+            <span v-else>
+              {{ ` | برای کنترلر حداقل ${toPersianDigits(2)} قطعه عمودی و ${toPersianDigits(2)} قطعه افقی انتخاب کنید.` }}
+            </span>
+          </div>
           <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
             <div
               ref="doorLibraryViewerWrapEl"
@@ -20347,6 +20392,19 @@ onBeforeUnmount(() => {
                     :stroke-width="doorLibrarySelectedInstanceIds.includes(String(instance.id || '')) ? 7.6 : ((String(doorLibraryHoveredInstanceId || '') === String(instance.id || '')) ? 6.4 : 0)"
                     stroke-linecap="round"
                     :opacity="doorLibrarySelectedInstanceIds.includes(String(instance.id || '')) ? 0.98 : ((String(doorLibraryHoveredInstanceId || '') === String(instance.id || '')) ? 0.9 : 0)"
+                  />
+                </g>
+                <g
+                  v-if="doorLibraryControllerRect"
+                  class="subCategoryDesignEditor__controllerOverlay is-selected"
+                >
+                  <rect
+                    :x="doorLibraryControllerRect.x"
+                    :y="doorLibraryControllerRect.y"
+                    :width="doorLibraryControllerRect.w"
+                    :height="doorLibraryControllerRect.h"
+                    :style="{ '--controller-line-color': '#2f7fd3' }"
+                    class="subCategoryDesignEditor__controllerRect"
                   />
                 </g>
                 <template
