@@ -325,7 +325,7 @@ const doorLibraryAnnotationDraft = ref(null);
 const doorLibrarySelectedAnnotation = ref(null);
 const doorLibraryCurrentSnapPoint = ref(null);
 const doorLibraryCursorPoint = ref(null);
-const doorLibrarySelectedInstanceId = ref("");
+const doorLibrarySelectedInstanceIds = ref([]);
 const doorLibraryHoveredInstanceId = ref("");
 const doorLibraryHoverMode = ref(null);
 const doorLibraryViewerCursorPoint = ref(null);
@@ -893,7 +893,7 @@ function resetDoorLibraryAnnotations() {
   doorLibrarySelectedAnnotation.value = null;
   doorLibraryAnnotationTool.value = null;
   doorLibraryCurrentSnapPoint.value = null;
-  doorLibrarySelectedInstanceId.value = "";
+  doorLibrarySelectedInstanceIds.value = [];
   doorLibraryHoveredInstanceId.value = "";
   doorLibraryHoverMode.value = null;
   stopDoorLibraryPointerProcessing();
@@ -1204,7 +1204,7 @@ function clearDoorLibraryAnnotationSelection() {
   doorLibrarySelectedAnnotation.value = null;
 }
 function clearDoorLibraryInstanceSelection() {
-  doorLibrarySelectedInstanceId.value = "";
+  doorLibrarySelectedInstanceIds.value = [];
 }
 function clearInteriorLibraryInstanceSelection() {
   interiorLibrarySelectedInstanceId.value = "";
@@ -1320,7 +1320,11 @@ function selectInteriorLibraryInstance(instanceId) {
   clearInteriorLibraryOverlapPreview();
 }
 function selectDoorLibraryInstance(instanceId) {
-  doorLibrarySelectedInstanceId.value = String(instanceId || "").trim();
+  const normalizedId = String(instanceId || "").trim();
+  if (!normalizedId) return;
+  const current = Array.isArray(doorLibrarySelectedInstanceIds.value) ? doorLibrarySelectedInstanceIds.value.slice() : [];
+  if (!current.includes(normalizedId)) current.push(normalizedId);
+  doorLibrarySelectedInstanceIds.value = current;
   doorLibrarySelectedAnnotation.value = null;
 }
 function distancePointToSegmentLocal(point, start, end) {
@@ -3849,9 +3853,9 @@ watch(activeInteriorLibraryInstances, (items) => {
 }, { immediate: true });
 watch(activeDoorLibrarySelectableParts, (items) => {
   const ids = new Set((Array.isArray(items) ? items : []).map((item) => String(item?.id || "").trim()).filter(Boolean));
-  if (doorLibrarySelectedInstanceId.value && !ids.has(String(doorLibrarySelectedInstanceId.value))) {
-    doorLibrarySelectedInstanceId.value = "";
-  }
+  doorLibrarySelectedInstanceIds.value = (Array.isArray(doorLibrarySelectedInstanceIds.value) ? doorLibrarySelectedInstanceIds.value : [])
+    .map((id) => String(id || "").trim())
+    .filter((id) => id && ids.has(id));
   if (doorLibraryHoveredInstanceId.value && !ids.has(String(doorLibraryHoveredInstanceId.value))) {
     doorLibraryHoveredInstanceId.value = "";
   }
@@ -15025,6 +15029,13 @@ onMounted(() => {
       e.stopPropagation();
       return;
     }
+    if (doorLibraryOpen.value && doorLibrarySelectedInstanceIds.value.length) {
+      clearDoorLibraryInstanceSelection();
+      doorLibraryHoveredInstanceId.value = "";
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     // If we were drawing, the first Esc ends drawing (engine handles it) and re-opens Design menu.
     // The next Esc (when not drawing) closes all menus and clears selection.
     if (drawUiLock.value) {
@@ -20303,7 +20314,7 @@ onBeforeUnmount(() => {
                   class="subCategoryDesignEditor__instanceLayer"
                   :class="{
                     'is-hovered': String(doorLibraryHoveredInstanceId || '') === String(instance.id || ''),
-                    'is-selected': String(doorLibrarySelectedInstanceId || '') === String(instance.id || '')
+                    'is-selected': doorLibrarySelectedInstanceIds.includes(String(instance.id || ''))
                   }"
                 >
                   <rect
@@ -20320,10 +20331,10 @@ onBeforeUnmount(() => {
                     :y1="line.y1"
                     :x2="line.x2"
                     :y2="line.y2"
-                    :stroke-width="String(doorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 7.2 : 6.2"
+                    :stroke-width="doorLibrarySelectedInstanceIds.includes(String(instance.id || '')) ? 7.2 : 6.2"
                     :stroke="instance.highlightColor"
                     stroke-linecap="round"
-                    :opacity="String(doorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 1 : 0"
+                    :opacity="doorLibrarySelectedInstanceIds.includes(String(instance.id || '')) ? 1 : 0"
                   />
                   <line
                     v-for="(line, index) in instance.outerLines"
@@ -20333,9 +20344,9 @@ onBeforeUnmount(() => {
                     :x2="line.x2"
                     :y2="line.y2"
                     :stroke="instance.highlightColor"
-                    :stroke-width="String(doorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 7.6 : ((String(doorLibraryHoveredInstanceId || '') === String(instance.id || '')) ? 6.4 : 0)"
+                    :stroke-width="doorLibrarySelectedInstanceIds.includes(String(instance.id || '')) ? 7.6 : ((String(doorLibraryHoveredInstanceId || '') === String(instance.id || '')) ? 6.4 : 0)"
                     stroke-linecap="round"
-                    :opacity="String(doorLibrarySelectedInstanceId || '') === String(instance.id || '') ? 0.98 : ((String(doorLibraryHoveredInstanceId || '') === String(instance.id || '')) ? 0.9 : 0)"
+                    :opacity="doorLibrarySelectedInstanceIds.includes(String(instance.id || '')) ? 0.98 : ((String(doorLibraryHoveredInstanceId || '') === String(instance.id || '')) ? 0.9 : 0)"
                   />
                 </g>
                 <template
