@@ -1612,9 +1612,25 @@ function normalizeInteriorRect(rect) {
     h: Number(rect.h) || 0,
   };
 }
-function buildInteriorLibraryInstanceHitCache(instances) {
-  const pad = INTERIOR_LIBRARY_INSTANCE_HIT_PADDING;
-  return (instances || []).map((instance) => {
+function buildInstanceHitBucketKeys(rect, bucketSize) {
+  const safeRect = normalizeInteriorRect(rect);
+  const safeBucket = Math.max(1, Number(bucketSize) || 1);
+  if (!safeRect) return [];
+  const minCol = Math.floor((Number(safeRect.x) || 0) / safeBucket);
+  const maxCol = Math.floor(((Number(safeRect.x) || 0) + (Number(safeRect.w) || 0)) / safeBucket);
+  const minRow = Math.floor((Number(safeRect.y) || 0) / safeBucket);
+  const maxRow = Math.floor(((Number(safeRect.y) || 0) + (Number(safeRect.h) || 0)) / safeBucket);
+  const keys = [];
+  for (let row = minRow; row <= maxRow; row += 1) {
+    for (let col = minCol; col <= maxCol; col += 1) {
+      keys.push(`${col}:${row}`);
+    }
+  }
+  return keys;
+}
+function buildSpatialInstanceHitCache(instances, pad, emptyTitle) {
+  const bucketSize = 160;
+  const items = (instances || []).map((instance) => {
     const boundsRect = normalizeInteriorRect(instance?.boundsRect);
     const expandedHitRect = boundsRect
       ? {
@@ -1627,7 +1643,7 @@ function buildInteriorLibraryInstanceHitCache(instances) {
     return {
       id: String(instance?.id || "").trim(),
       instanceCode: String(instance?.instanceCode || "").trim(),
-      title: String(instance?.groupTitle || instance?.instanceCode || instance?.id || "قطعه داخلی").trim(),
+      title: String(instance?.groupTitle || instance?.instanceCode || instance?.id || emptyTitle).trim(),
       lineColor: String(instance?.lineColor || "").trim(),
       visualOrder: Number(instance?.visualOrder) || 0,
       boundsRect,
@@ -1646,61 +1662,63 @@ function buildInteriorLibraryInstanceHitCache(instances) {
       })),
     };
   });
+  const buckets = new Map();
+  for (const item of items) {
+    const hitRect = item?.expandedHitRect || item?.boundsRect;
+    for (const key of buildInstanceHitBucketKeys(hitRect, bucketSize)) {
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(item);
+    }
+  }
+  return { items, buckets, bucketSize };
+}
+function buildInteriorLibraryInstanceHitCache(instances) {
+  return buildSpatialInstanceHitCache(instances, INTERIOR_LIBRARY_INSTANCE_HIT_PADDING, "قطعه داخلی");
 }
 function buildDoorLibraryInstanceHitCache(instances) {
-  const pad = DOOR_LIBRARY_INSTANCE_HIT_PADDING;
-  return (instances || []).map((instance) => {
-    const boundsRect = normalizeInteriorRect(instance?.boundsRect);
-    const expandedHitRect = boundsRect
-      ? {
-          x: boundsRect.x - pad,
-          y: boundsRect.y - pad,
-          w: boundsRect.w + (pad * 2),
-          h: boundsRect.h + (pad * 2),
-        }
-      : null;
-    return {
-      id: String(instance?.id || "").trim(),
-      instanceCode: String(instance?.instanceCode || "").trim(),
-      title: String(instance?.groupTitle || instance?.instanceCode || instance?.id || "قطعه").trim(),
-      lineColor: String(instance?.lineColor || "").trim(),
-      visualOrder: Number(instance?.visualOrder) || 0,
-      boundsRect,
-      expandedHitRect,
-      outerLines: (instance?.outerLines || []).map((line) => ({
-        x1: Number(line?.x1) || 0,
-        y1: Number(line?.y1) || 0,
-        x2: Number(line?.x2) || 0,
-        y2: Number(line?.y2) || 0,
-      })),
-      innerLines: (instance?.innerLines || []).map((line) => ({
-        x1: Number(line?.x1) || 0,
-        y1: Number(line?.y1) || 0,
-        x2: Number(line?.x2) || 0,
-        y2: Number(line?.y2) || 0,
-      })),
-    };
-  });
+  return buildSpatialInstanceHitCache(instances, DOOR_LIBRARY_INSTANCE_HIT_PADDING, "قطعه");
 }
 function collectInteriorInstanceHitCandidates(point) {
   const target = { x: Number(point?.x) || 0, y: Number(point?.y) || 0 };
+  const cache = interiorLibraryInstanceHitCache.value;
+  if (!cache?.buckets || !cache?.bucketSize) return [];
+  const baseCol = Math.floor(target.x / cache.bucketSize);
+  const baseRow = Math.floor(target.y / cache.bucketSize);
   const candidates = [];
-  for (const instance of interiorLibraryInstanceHitCache.value) {
-    const hitRect = instance?.expandedHitRect || instance?.boundsRect;
-    if (!hitRect) continue;
-    if (!pointInInteriorRect(target, hitRect, 0)) continue;
-    candidates.push(instance);
+  const seen = new Set();
+  for (let row = baseRow - 1; row <= baseRow + 1; row += 1) {
+    for (let col = baseCol - 1; col <= baseCol + 1; col += 1) {
+      for (const instance of cache.buckets.get(`${col}:${row}`) || []) {
+        if (seen.has(instance.id)) continue;
+        seen.add(instance.id);
+        const hitRect = instance?.expandedHitRect || instance?.boundsRect;
+        if (!hitRect) continue;
+        if (!pointInInteriorRect(target, hitRect, 0)) continue;
+        candidates.push(instance);
+      }
+    }
   }
   return candidates;
 }
 function collectDoorLibraryInstanceHitCandidates(point) {
   const target = { x: Number(point?.x) || 0, y: Number(point?.y) || 0 };
+  const cache = doorLibraryInstanceHitCache.value;
+  if (!cache?.buckets || !cache?.bucketSize) return [];
+  const baseCol = Math.floor(target.x / cache.bucketSize);
+  const baseRow = Math.floor(target.y / cache.bucketSize);
   const candidates = [];
-  for (const instance of doorLibraryInstanceHitCache.value) {
-    const hitRect = instance?.expandedHitRect || instance?.boundsRect;
-    if (!hitRect) continue;
-    if (!pointInInteriorRect(target, hitRect, 0)) continue;
-    candidates.push(instance);
+  const seen = new Set();
+  for (let row = baseRow - 1; row <= baseRow + 1; row += 1) {
+    for (let col = baseCol - 1; col <= baseCol + 1; col += 1) {
+      for (const instance of cache.buckets.get(`${col}:${row}`) || []) {
+        if (seen.has(instance.id)) continue;
+        seen.add(instance.id);
+        const hitRect = instance?.expandedHitRect || instance?.boundsRect;
+        if (!hitRect) continue;
+        if (!pointInInteriorRect(target, hitRect, 0)) continue;
+        candidates.push(instance);
+      }
+    }
   }
   return candidates;
 }
@@ -4004,6 +4022,58 @@ function buildFrontViewMetricSceneVisuals(metrics, values) {
     label: formatInteriorControllerDisplayValue(values?.[metric.id]),
   }));
 }
+const doorLibraryFrontCanvasEntitiesBase = computed(() =>
+  doorLibraryPreviewInstances2d.value.map((instance) => ({
+    id: instance.id,
+    boundsRect: instance.boundsRect,
+    outerLines: instance.outerLines || [],
+    innerLines: instance.innerLines || [],
+    lineColor: instance.lineColor,
+    highlightColor: instance.highlightColor || instance.lineColor,
+  }))
+);
+const doorLibraryFrontCanvasEntityStateById = computed(() =>
+  Object.fromEntries(doorLibraryPreviewInstances2d.value.map((instance) => {
+    const selected = doorLibrarySelectedInstanceIds.value.includes(String(instance.id || ""));
+    const hovered = String(doorLibraryHoveredInstanceId.value || "") === String(instance.id || "");
+    return [String(instance.id || ""), {
+      hovered,
+      selected,
+      preview: false,
+      outerStrokeWidth: selected ? 7.6 : (hovered ? 6.4 : 0),
+      outerOpacity: selected ? 0.98 : (hovered ? 0.9 : 0),
+      innerStrokeWidth: selected ? 7.2 : 6.2,
+      innerOpacity: selected ? 1 : 0,
+    }];
+  }))
+);
+const interiorLibraryFrontCanvasEntitiesBase = computed(() =>
+  interiorLibraryPreviewInstances2d.value.map((instance) => ({
+    id: instance.id,
+    boundsRect: instance.boundsRect,
+    outerLines: instance.outerLines || [],
+    innerLines: instance.innerLines || [],
+    lineColor: instance.lineColor,
+    highlightColor: instance.lineColor,
+  }))
+);
+const interiorLibraryFrontCanvasEntityStateById = computed(() =>
+  Object.fromEntries(interiorLibraryPreviewInstances2d.value.map((instance) => {
+    const hovered = String(interiorLibraryHoveredInstanceId.value || "") === String(instance.id || "")
+      || String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || "");
+    const preview = String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || "");
+    const selected = String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || "");
+    return [String(instance.id || ""), {
+      hovered,
+      preview,
+      selected,
+      outerStrokeWidth: selected ? 1.08 : (hovered ? 0.66 : 0),
+      outerOpacity: selected ? 0.92 : (hovered ? 0.88 : 0.78),
+      innerStrokeWidth: 1.4,
+      innerOpacity: 1,
+    }];
+  }))
+);
 const doorLibraryFrontCanvasScene = computed(() => ({
   renderToken: [
     String(doorLibraryFrontSvgViewBox.value || ""),
@@ -4018,6 +4088,47 @@ const doorLibraryFrontCanvasScene = computed(() => ({
     Number(doorLibraryPersistedControllerOverlays.value?.length || 0),
     isDoorLibraryPendingControllerActive.value ? "pending" : "idle",
   ].join("|"),
+  renderTokens: {
+    viewport: String(doorLibraryFrontSvgViewBox.value || ""),
+    structure: [
+      Number(doorLibraryFrontView.value?.inner?.length || 0),
+      Number(doorLibraryFrontView.value?.outer?.length || 0),
+    ].join("|"),
+    entities: [
+      Number(doorLibraryPreviewInstances2d.value?.length || 0),
+      ...doorLibraryPreviewInstances2d.value.map((instance) => `${instance.id}:${instance.outerLines?.length || 0}:${instance.innerLines?.length || 0}`),
+    ].join("|"),
+    dynamic: [
+      String(doorLibraryHoveredInstanceId.value || ""),
+      (doorLibrarySelectedInstanceIds.value || []).join(","),
+      String(doorLibrarySelectedPlacedInstanceId.value || ""),
+      isDoorLibraryPendingControllerActive.value ? "pending" : "idle",
+    ].join("|"),
+    controllers: [
+      Number(doorLibraryPersistedControllerOverlays.value?.length || 0),
+      String(doorLibrarySelectedPlacedInstanceId.value || ""),
+      isDoorLibraryPendingControllerActive.value ? "pending" : "idle",
+      ...(doorLibraryControllerRect.value ? [
+        Number(doorLibraryControllerRect.value.x || 0).toFixed(2),
+        Number(doorLibraryControllerRect.value.y || 0).toFixed(2),
+        Number(doorLibraryControllerRect.value.w || 0).toFixed(2),
+        Number(doorLibraryControllerRect.value.h || 0).toFixed(2),
+      ] : ["norect"]),
+      ...Object.entries(doorLibraryControllerParamValues.value || {})
+        .sort(([a], [b]) => String(a).localeCompare(String(b)))
+        .map(([key, value]) => `${key}:${Number(value || 0).toFixed(2)}`),
+    ].join("|"),
+    annotations: [
+      Number(doorLibraryRenderedAnnotations.value?.dimensions?.length || 0),
+      doorLibraryRenderedAnnotations.value?.draftDimension ? "draft" : "nodraft",
+      !!doorLibraryShowDimensions.value,
+    ].join("|"),
+    snap: [
+      !!doorLibraryShouldShowSnapMarkers.value,
+      Number(doorLibraryFrontSnapPoints.value?.length || 0),
+      String(doorLibraryCurrentSnapPoint.value ? `${doorLibraryCurrentSnapPoint.value.x}:${doorLibraryCurrentSnapPoint.value.y}:${doorLibraryCurrentSnapPoint.value.kind}` : ""),
+    ].join("|"),
+  },
   viewBox: { ...doorLibraryFrontSvgViewBoxRect.value },
   structure: {
     outerLines: [],
@@ -4032,16 +4143,9 @@ const doorLibraryFrontCanvasScene = computed(() => ({
       opacity: 1,
     })),
   },
-  entities: doorLibraryPreviewInstances2d.value.map((instance) => ({
-    ...instance,
-    hovered: String(doorLibraryHoveredInstanceId.value || "") === String(instance.id || ""),
-    selected: doorLibrarySelectedInstanceIds.value.includes(String(instance.id || "")),
-    lineColor: instance.highlightColor || instance.lineColor,
-    outerStrokeWidth: doorLibrarySelectedInstanceIds.value.includes(String(instance.id || "")) ? 7.6 : ((String(doorLibraryHoveredInstanceId.value || "") === String(instance.id || "")) ? 6.4 : 0),
-    outerOpacity: doorLibrarySelectedInstanceIds.value.includes(String(instance.id || "")) ? 0.98 : ((String(doorLibraryHoveredInstanceId.value || "") === String(instance.id || "")) ? 0.9 : 0),
-    innerStrokeWidth: doorLibrarySelectedInstanceIds.value.includes(String(instance.id || "")) ? 7.2 : 6.2,
-    innerOpacity: doorLibrarySelectedInstanceIds.value.includes(String(instance.id || "")) ? 1 : 0,
-  })),
+  entities: doorLibraryFrontCanvasEntitiesBase.value,
+  entityStates: doorLibraryFrontCanvasEntityStateById.value,
+  hitCache: doorLibraryInstanceHitCache.value,
   controllers: [
     ...doorLibraryPersistedControllerOverlays.value.map((overlay) => ({
       ...overlay,
@@ -4712,6 +4816,48 @@ const interiorLibraryFrontCanvasScene = computed(() => {
       interiorLibraryControllerState.value?.enabled ? "controller" : "nocontroller",
       String(interiorLibraryControllerPointerState.value?.mode || "idle"),
     ].join("|"),
+    renderTokens: {
+      viewport: String(interiorLibraryFrontSvgViewBox.value || ""),
+      structure: [
+        Number(interiorLibraryPreviewSvgLines.value?.outer?.length || 0),
+        Number(interiorLibraryPreviewSvgLines.value?.inner?.length || 0),
+        !!interiorLibraryShowInnerLines.value,
+      ].join("|"),
+      entities: [
+        Number(interiorLibraryPreviewInstances2d.value?.length || 0),
+        ...interiorLibraryPreviewInstances2d.value.map((instance) => `${instance.id}:${instance.outerLines?.length || 0}:${instance.innerLines?.length || 0}`),
+      ].join("|"),
+      dynamic: [
+        String(interiorLibrarySelectedInstanceId.value || ""),
+        String(interiorLibraryHoveredInstanceId.value || ""),
+        String(interiorLibraryPickerPreviewInstanceId.value || ""),
+      ].join("|"),
+      controllers: [
+        Number(interiorLibraryControllerOverlays.value?.length || 0),
+        String(interiorLibraryHoveredControllerId.value || ""),
+        String(interiorLibraryControllerPointerState.value?.mode || "idle"),
+        String(interiorLibraryControllerPointerState.value?.controllerId || ""),
+        ...(interiorLibraryControllerRect.value ? [
+          Number(interiorLibraryControllerRect.value.x || 0).toFixed(2),
+          Number(interiorLibraryControllerRect.value.y || 0).toFixed(2),
+          Number(interiorLibraryControllerRect.value.w || 0).toFixed(2),
+          Number(interiorLibraryControllerRect.value.h || 0).toFixed(2),
+        ] : ["norect"]),
+        ...Object.entries(interiorLibraryControllerParamValues.value || {})
+          .sort(([a], [b]) => String(a).localeCompare(String(b)))
+          .map(([key, value]) => `${key}:${Number(value || 0).toFixed(2)}`),
+      ].join("|"),
+      annotations: [
+        Number(interiorLibraryRenderedAnnotations.value?.dimensions?.length || 0),
+        interiorLibraryRenderedAnnotations.value?.draftDimension ? "draft" : "nodraft",
+        !!interiorLibraryShowDimensions.value,
+      ].join("|"),
+      snap: [
+        !!interiorLibraryShouldShowSnapMarkers.value,
+        Number(interiorLibraryFrontSnapPoints.value?.length || 0),
+        String(interiorLibraryCurrentSnapPoint.value ? `${interiorLibraryCurrentSnapPoint.value.x}:${interiorLibraryCurrentSnapPoint.value.y}:${interiorLibraryCurrentSnapPoint.value.kind}` : ""),
+      ].join("|"),
+    },
     viewBox: { ...interiorLibraryFrontSvgViewBoxRect.value },
     structure: {
       outerLines: (interiorLibraryPreviewSvgLines.value?.outer || []).map((line) => ({
@@ -4735,17 +4881,9 @@ const interiorLibraryFrontCanvasScene = computed(() => {
         }))),
       ],
     },
-    entities: interiorLibraryPreviewInstances2d.value.map((instance) => ({
-      ...instance,
-      hovered: String(interiorLibraryHoveredInstanceId.value || "") === String(instance.id || "")
-        || String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || ""),
-      preview: String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || ""),
-      selected: String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || ""),
-      outerStrokeWidth: String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || "") ? 1.08 : ((String(interiorLibraryHoveredInstanceId.value || "") === String(instance.id || "") || String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || "")) ? 0.66 : 0),
-      outerOpacity: String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || "") ? 0.92 : ((String(interiorLibraryHoveredInstanceId.value || "") === String(instance.id || "") || String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || "")) ? 0.88 : 0.78),
-      lineColor: instance.lineColor,
-      highlightColor: instance.lineColor,
-    })),
+    entities: interiorLibraryFrontCanvasEntitiesBase.value,
+    entityStates: interiorLibraryFrontCanvasEntityStateById.value,
+    hitCache: interiorLibraryInstanceHitCache.value,
     controllers,
     annotations: {
       visible: !!interiorLibraryShowDimensions.value,

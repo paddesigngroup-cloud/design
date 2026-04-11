@@ -28,6 +28,9 @@ const canvasEl = ref(null);
 const viewport = ref({ width: 320, height: 320 });
 let resizeObserver = null;
 let drawRafId = 0;
+let backgroundCanvas = null;
+let backgroundCanvasCtx = null;
+let backgroundToken = "";
 
 function syncViewport() {
   const el = wrapEl.value;
@@ -170,8 +173,29 @@ function hitTestScene(point) {
   }
 
   const entities = Array.isArray(props.scene.entities) ? props.scene.entities : [];
-  for (let i = entities.length - 1; i >= 0; i -= 1) {
-    const entity = entities[i];
+  const cache = props.scene?.hitCache;
+  const candidateEntities = [];
+  if (cache?.buckets && cache?.bucketSize) {
+    const baseCol = Math.floor((Number(point.x) || 0) / cache.bucketSize);
+    const baseRow = Math.floor((Number(point.y) || 0) / cache.bucketSize);
+    const seen = new Set();
+    for (let row = baseRow - 1; row <= baseRow + 1; row += 1) {
+      for (let col = baseCol - 1; col <= baseCol + 1; col += 1) {
+        for (const item of cache.buckets.get(`${col}:${row}`) || []) {
+          const id = String(item?.id || "");
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          candidateEntities.push(id);
+        }
+      }
+    }
+  }
+  const entityMap = new Map(entities.map((entity) => [String(entity?.id || ""), entity]));
+  const hitEntities = candidateEntities.length
+    ? candidateEntities.map((id) => entityMap.get(id)).filter(Boolean)
+    : entities;
+  for (let i = hitEntities.length - 1; i >= 0; i -= 1) {
+    const entity = hitEntities[i];
     if (pointInRect(point, entity?.boundsRect, 8)) {
       return { type: "entity", entityId: entity.id };
     }
@@ -355,6 +379,50 @@ function drawControllerOverlayRect(ctx, overlay) {
   });
 }
 
+function ensureBackgroundContext(width, height, dpr) {
+  if (!backgroundCanvas) {
+    backgroundCanvas = document.createElement("canvas");
+    backgroundCanvasCtx = backgroundCanvas.getContext("2d");
+  }
+  backgroundCanvas.width = Math.round(width * dpr);
+  backgroundCanvas.height = Math.round(height * dpr);
+  backgroundCanvasCtx?.setTransform(dpr, 0, 0, dpr, 0, 0);
+  backgroundCanvasCtx?.clearRect(0, 0, width, height);
+  return backgroundCanvasCtx;
+}
+
+function drawEntityBase(ctx, entity, state) {
+  const safeState = state || {};
+  for (const line of entity.innerLines || []) {
+    drawWorldLine(ctx, line, entity.lineColor || "#7B858C", safeState.innerStrokeWidth || 1.4, !!line.dashed, safeState.innerOpacity == null ? 1 : safeState.innerOpacity);
+  }
+  for (const line of entity.outerLines || []) {
+    if ((safeState.outerOpacity == null ? 1 : safeState.outerOpacity) <= 0 || (safeState.outerStrokeWidth || 0) <= 0) continue;
+    drawWorldLine(ctx, line, entity.lineColor || "#7B858C", safeState.outerStrokeWidth || 1.6, false, safeState.outerOpacity == null ? 1 : safeState.outerOpacity);
+  }
+}
+
+function drawEntityDynamic(ctx, entity, state) {
+  const safeState = state || {};
+  if (safeState.selected || safeState.hovered || safeState.preview) {
+    drawRectWorld(ctx, entity.boundsRect, {
+      stroke: entity.highlightColor || entity.lineColor || "#2f7fd3",
+      lineWidth: safeState.selected ? 2.4 : 1.6,
+      strokeAlpha: safeState.selected ? 0.94 : 0.78,
+    });
+  }
+  if ((safeState.outerOpacity == null ? 1 : safeState.outerOpacity) > 0 && (safeState.outerStrokeWidth || 0) > 0) {
+    for (const line of entity.outerLines || []) {
+      drawWorldLine(ctx, line, entity.highlightColor || entity.lineColor || "#7B858C", safeState.outerStrokeWidth || 1.6, false, safeState.outerOpacity == null ? 1 : safeState.outerOpacity);
+    }
+  }
+  if ((safeState.innerOpacity == null ? 1 : safeState.innerOpacity) > 0 && (safeState.innerStrokeWidth || 0) > 0 && (safeState.selected || safeState.hovered || safeState.preview)) {
+    for (const line of entity.innerLines || []) {
+      drawWorldLine(ctx, line, entity.highlightColor || entity.lineColor || "#7B858C", safeState.innerStrokeWidth || 1.4, !!line.dashed, safeState.innerOpacity == null ? 1 : safeState.innerOpacity);
+    }
+  }
+}
+
 function drawScene() {
   drawRafId = 0;
   const canvas = canvasEl.value;
@@ -369,14 +437,31 @@ function drawScene() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
   if (!props.scene) return;
-
-  drawGrid(ctx);
-
-  for (const line of props.scene?.structure?.outerLines || []) {
-    drawWorldLine(ctx, line, line.color || "#4f4144", Number(line.strokeWidth) || 2.2, false, line.opacity == null ? 1 : line.opacity);
+  const renderTokens = props.scene?.renderTokens || {};
+  const nextBackgroundToken = [
+    String(renderTokens.viewport || ""),
+    String(renderTokens.structure || ""),
+    String(renderTokens.entities || ""),
+  ].join("|");
+  if (backgroundToken !== nextBackgroundToken) {
+    const bgCtx = ensureBackgroundContext(width, height, dpr);
+    if (bgCtx) {
+      drawGrid(bgCtx);
+      for (const line of props.scene?.structure?.outerLines || []) {
+        drawWorldLine(bgCtx, line, line.color || "#4f4144", Number(line.strokeWidth) || 2.2, false, line.opacity == null ? 1 : line.opacity);
+      }
+      for (const line of props.scene?.structure?.innerLines || []) {
+        drawWorldLine(bgCtx, line, line.color || "#b9c3cd", Number(line.strokeWidth) || 1.2, !!line.dashed, line.opacity == null ? 0.82 : line.opacity);
+      }
+      const entityStates = props.scene?.entityStates || {};
+      for (const entity of props.scene.entities || []) {
+        drawEntityBase(bgCtx, entity, entityStates[String(entity?.id || "")]);
+      }
+    }
+    backgroundToken = nextBackgroundToken;
   }
-  for (const line of props.scene?.structure?.innerLines || []) {
-    drawWorldLine(ctx, line, line.color || "#b9c3cd", Number(line.strokeWidth) || 1.2, !!line.dashed, line.opacity == null ? 0.82 : line.opacity);
+  if (backgroundCanvas) {
+    ctx.drawImage(backgroundCanvas, 0, 0, width, height);
   }
 
   for (const point of props.scene?.snap?.points || []) {
@@ -399,20 +484,9 @@ function drawScene() {
     ctx.restore();
   }
 
+  const entityStates = props.scene?.entityStates || {};
   for (const entity of props.scene.entities || []) {
-    if (entity.selected || entity.hovered || entity.preview) {
-      drawRectWorld(ctx, entity.boundsRect, {
-        stroke: entity.highlightColor || entity.lineColor || "#2f7fd3",
-        lineWidth: entity.selected ? 2.4 : 1.6,
-        strokeAlpha: entity.selected ? 0.94 : 0.78,
-      });
-    }
-    for (const line of entity.innerLines || []) {
-      drawWorldLine(ctx, line, entity.lineColor || "#7B858C", entity.innerStrokeWidth || 1.4, !!line.dashed, entity.innerOpacity == null ? 1 : entity.innerOpacity);
-    }
-    for (const line of entity.outerLines || []) {
-      drawWorldLine(ctx, line, entity.lineColor || "#7B858C", entity.outerStrokeWidth || 1.6, false, entity.outerOpacity == null ? 1 : entity.outerOpacity);
-    }
+    drawEntityDynamic(ctx, entity, entityStates[String(entity?.id || "")]);
   }
 
   for (const overlay of props.scene.controllers || []) {
@@ -518,13 +592,38 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (resizeObserver) resizeObserver.disconnect();
   if (drawRafId) cancelAnimationFrame(drawRafId);
+  backgroundCanvas = null;
+  backgroundCanvasCtx = null;
+  backgroundToken = "";
 });
 
-watch(() => props.scene, () => {
+watch(() => props.scene?.renderTokens?.viewport, () => {
+  backgroundToken = "";
   scheduleDraw();
 }, { immediate: true });
+watch(() => props.scene?.renderTokens?.structure, () => {
+  backgroundToken = "";
+  scheduleDraw();
+});
+watch(() => props.scene?.renderTokens?.entities, () => {
+  backgroundToken = "";
+  scheduleDraw();
+});
+watch(() => props.scene?.renderTokens?.dynamic, () => {
+  scheduleDraw();
+});
+watch(() => props.scene?.renderTokens?.controllers, () => {
+  scheduleDraw();
+});
+watch(() => props.scene?.renderTokens?.annotations, () => {
+  scheduleDraw();
+});
+watch(() => props.scene?.renderTokens?.snap, () => {
+  scheduleDraw();
+});
 
 watch(viewport, () => {
+  backgroundToken = "";
   scheduleDraw();
 }, { deep: true });
 </script>
