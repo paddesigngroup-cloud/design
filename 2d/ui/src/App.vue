@@ -1953,7 +1953,7 @@ function applyInteriorLibraryControllerInput(controllerId, nextValueMm) {
   };
   const frameWidth = Math.max(0, frame.maxX - frame.minX);
   const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
-  const minWidth = 240;
+  const minWidth = isHeightController ? 0 : 240;
   const minHeight = 1;
   if (controllerId === "left") {
     if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT) {
@@ -2162,7 +2162,7 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
   const snappedY = snapInteriorControllerAxis(controllerId, anchorY, ignoreAxisValues);
   const frameWidth = Math.max(0, frame.maxX - frame.minX);
   const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
-  const minWidth = 240;
+  const minWidth = isHeightController ? 0 : 240;
   const minHeight = 1;
   const nextValues = {
     left: Number(startValues.left) || 0,
@@ -2172,7 +2172,7 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
   };
   if (controllerId === "left") {
     if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT) {
-      const totalLeft = ((frame.x + frame.w) - snappedX) / frame.scale;
+      const totalLeft = (snappedX - frame.x) / frame.scale;
       nextValues.left = Math.min(Math.max(minWidth, totalLeft), frameWidth);
     } else
     if (horizontalMode === "span_from_right") {
@@ -4412,7 +4412,9 @@ const interiorLibraryControllerVisuals = computed(() => {
   const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
   const leftHandleX = leftIconPlacement === "inside"
     ? rect.x
-    : rect.x - horizontal.w;
+    : normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT
+      ? rect.x + rect.w
+      : rect.x - horizontal.w;
   const rightHandleX = normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT
     ? rect.x - horizontal.w
     : rightIconPlacement === "inside"
@@ -4430,12 +4432,16 @@ const interiorLibraryControllerVisuals = computed(() => {
       kind: "horizontal",
       direction: "left",
       iconPlacement: leftIconPlacement,
-      anchor: { x: rect.x, y: rect.y + (rect.h * 0.5) },
+      anchor: normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT
+        ? { x: rect.x + rect.w, y: rect.y + (rect.h * 0.5) }
+        : { x: rect.x, y: rect.y + (rect.h * 0.5) },
       x: leftHandleX,
       y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
-      fieldX: leftIconPlacement === "inside"
-        ? rect.x - gap - horizontal.inputW
-        : leftHandleX - gap - horizontal.inputW,
+      fieldX: normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT
+        ? leftHandleX + horizontal.w + gap
+        : leftIconPlacement === "inside"
+          ? rect.x - gap - horizontal.inputW
+          : leftHandleX - gap - horizontal.inputW,
       fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
       ...horizontal,
     },
