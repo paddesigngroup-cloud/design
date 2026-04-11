@@ -1833,21 +1833,43 @@ function updateDoorLibraryHoverState(point) {
 function hitTestInteriorLibraryController(point) {
   if (!point) return null;
   const target = { x: Number(point.x) || 0, y: Number(point.y) || 0 };
-  let result = null;
   for (let index = interiorLibraryControllerVisuals.value.length - 1; index >= 0; index -= 1) {
     const item = interiorLibraryControllerVisuals.value[index];
-    const hotspot = getInteriorControllerMatchingHotspot(target, item);
-    if (hotspot) {
-      result = { ...item, activeHotspot: hotspot };
-      break;
+    if (pointInInteriorRect(target, {
+      x: Number(item?.fieldX) || 0,
+      y: Number(item?.fieldY) || 0,
+      w: Number(item?.inputW) || 0,
+      h: Number(item?.inputH) || 0,
+    }, 0)) {
+      const result = { ...item, hitType: "field" };
+      interiorLibraryControllerHitCache.value = {
+        token: interiorLibraryControllerVisualsToken.value,
+        point: target,
+        result,
+      };
+      return result;
+    }
+    if (pointInInteriorRect(target, {
+      x: Number(item?.x) || 0,
+      y: Number(item?.y) || 0,
+      w: Number(item?.w) || 0,
+      h: Number(item?.h) || 0,
+    }, 0)) {
+      const result = { ...item, hitType: "handle" };
+      interiorLibraryControllerHitCache.value = {
+        token: interiorLibraryControllerVisualsToken.value,
+        point: target,
+        result,
+      };
+      return result;
     }
   }
   interiorLibraryControllerHitCache.value = {
     token: interiorLibraryControllerVisualsToken.value,
     point: target,
-    result,
+    result: null,
   };
-  return result;
+  return null;
 }
 
 function clearInteriorLibraryControllerEditing() {
@@ -2324,9 +2346,13 @@ function onInteriorLibraryFrontSvgPointerDown(payload) {
   if (interiorLibraryControllerState.value.enabled) {
     const controllerHit = hitTestInteriorLibraryController(rawPoint);
     if (controllerHit) {
-      beginInteriorLibraryControllerDrag(controllerHit.id, payload);
       rawEvent?.preventDefault?.();
       rawEvent?.stopPropagation?.();
+      if (controllerHit.hitType === "field") {
+        void promptInteriorLibraryControllerEditing(controllerHit.id);
+        return;
+      }
+      beginInteriorLibraryControllerDrag(controllerHit.id, payload);
       return;
     }
   }
@@ -4361,6 +4387,14 @@ const interiorLibraryControllerVisuals = computed(() => {
   const inputH = Math.max(22.5 * scale, 20);
   const horizontal = { w: handleSize, h: handleSize, inputW, inputH };
   const vertical = { w: handleSize, h: handleSize, inputW, inputH };
+  const leftIconPlacement = getInternalGroupControllerIconPlacement(controllerType, "left");
+  const rightIconPlacement = getInternalGroupControllerIconPlacement(controllerType, "right");
+  const leftHandleX = leftIconPlacement === "inside"
+    ? rect.x
+    : rect.x - horizontal.w;
+  const rightHandleX = rightIconPlacement === "inside"
+    ? rect.x + rect.w - horizontal.w
+    : rect.x + rect.w;
   const allowedKeys = new Set(
     interiorLibraryControllerDefinitions.value
       .filter((definition) => !definition?.hidden)
@@ -4372,13 +4406,13 @@ const interiorLibraryControllerVisuals = computed(() => {
       id: "left",
       kind: "horizontal",
       direction: "left",
-      iconPlacement: getInternalGroupControllerIconPlacement(controllerType, "left"),
+      iconPlacement: leftIconPlacement,
       anchor: { x: rect.x, y: rect.y + (rect.h * 0.5) },
-      x: getInternalGroupControllerIconPlacement(controllerType, "left") === "inside"
-        ? rect.x
-        : rect.x - horizontal.w,
+      x: leftHandleX,
       y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
-      fieldX: rect.x - horizontal.w - gap - horizontal.inputW,
+      fieldX: leftIconPlacement === "inside"
+        ? rect.x - gap - horizontal.inputW
+        : leftHandleX - gap - horizontal.inputW,
       fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
       ...horizontal,
     },
@@ -4397,13 +4431,13 @@ const interiorLibraryControllerVisuals = computed(() => {
       id: "right",
       kind: "horizontal",
       direction: "right",
-      iconPlacement: getInternalGroupControllerIconPlacement(controllerType, "right"),
+      iconPlacement: rightIconPlacement,
       anchor: { x: rect.x + rect.w, y: rect.y + (rect.h * 0.5) },
-      x: getInternalGroupControllerIconPlacement(controllerType, "right") === "inside"
-        ? rect.x + rect.w - horizontal.w
-        : rect.x + rect.w,
+      x: rightHandleX,
       y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
-      fieldX: rect.x + rect.w + horizontal.w + gap,
+      fieldX: rightIconPlacement === "inside"
+        ? rect.x + rect.w + gap
+        : rightHandleX + horizontal.w + gap,
       fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
       ...horizontal,
     },

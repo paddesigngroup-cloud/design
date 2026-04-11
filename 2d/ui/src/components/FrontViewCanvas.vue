@@ -145,7 +145,7 @@ function hitTestScene(point) {
         w: Number(controller.w) || 0,
         h: Number(controller.h) || 0,
       };
-      if (pointInRect(point, handleRect, 6)) {
+      if (pointInRect(point, handleRect, 0)) {
         return { type: "controller-handle", overlayId: overlay.id, controllerId: controller.id };
       }
     }
