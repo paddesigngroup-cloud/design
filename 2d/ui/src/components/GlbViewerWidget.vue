@@ -77,7 +77,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords", "update:orderDesignAttr", "openInteriorLibraryForDesign"]);
+const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords", "update:orderDesignAttr", "openInteriorLibraryForDesign", "openDoorLibraryForDesign"]);
 
 const widgetEl = ref(null);
 const hostEl = ref(null);
@@ -302,6 +302,11 @@ function findOrderDesignGroupKey(tokens = []) {
 }
 
 function openDoorAttrsForActiveDesign() {
+  const designId = String(activeOrderDesign.value?.id || "").trim();
+  if (designId) {
+    emit("openDoorLibraryForDesign", designId);
+    return;
+  }
   const doorKey = findOrderDesignGroupKey(["door", "درب"]);
   if (doorKey) {
     openOrderDesignGroupKey.value = doorKey;

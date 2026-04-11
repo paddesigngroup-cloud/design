@@ -61,6 +61,9 @@ def test_subcategory_add_refreshes_only_target_instance(monkeypatch) -> None:
     async def fake_interior_ready(_session) -> bool:
         return True
 
+    async def fake_door_ready(_session) -> bool:
+        return False
+
     async def fake_next_state(_session, **_kwargs):
         return "inner-01", 0, {"width": 10}, {"depth": "550"}, {"depth": {"label": "عمق"}}
 
@@ -645,6 +648,9 @@ def test_order_design_read_path_can_trigger_snapshot_sync(monkeypatch) -> None:
     async def fake_interior_ready(_session) -> bool:
         return True
 
+    async def fake_door_ready(_session) -> bool:
+        return False
+
     async def fake_require_order(_session, *, order_id):
         assert order_id == item.order_id
         return SimpleNamespace(id=order_id, admin_id=uuid4())
@@ -659,6 +665,7 @@ def test_order_design_read_path_can_trigger_snapshot_sync(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(order_router, "interior_instance_tables_ready", fake_interior_ready)
+    monkeypatch.setattr(order_router, "door_instance_tables_ready", fake_door_ready)
     monkeypatch.setattr(order_router, "require_accessible_order", fake_require_order)
     monkeypatch.setattr(order_router, "require_accessible_sub_category_design", fake_require_source_design)
     monkeypatch.setattr(order_router, "sync_order_design_snapshot", fake_sync)

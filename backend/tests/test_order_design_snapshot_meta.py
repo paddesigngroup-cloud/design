@@ -252,6 +252,9 @@ def test_duplicate_order_design_record_clones_full_payload(monkeypatch) -> None:
     async def _interior_ready(_session):
         return True
 
+    async def _door_ready(_session):
+        return False
+
     async def _require_order(_session, *, order_id):
         return SimpleNamespace(id=order_id)
 
@@ -268,6 +271,7 @@ def test_duplicate_order_design_record_clones_full_payload(monkeypatch) -> None:
         return session.created_order_design
 
     monkeypatch.setattr(order_designs_router, "interior_instance_tables_ready", _interior_ready)
+    monkeypatch.setattr(order_designs_router, "door_instance_tables_ready", _door_ready)
     monkeypatch.setattr(order_designs_router, "require_accessible_order", _require_order)
     monkeypatch.setattr(order_designs_router, "next_order_design_instance_code", _next_instance_code)
     monkeypatch.setattr(order_designs_router, "next_order_design_sort_order", _next_sort_order)
@@ -310,3 +314,67 @@ def test_duplicate_order_design_record_clones_full_payload(monkeypatch) -> None:
     assert duplicated_interiors[0].instance_code == "inner-01"
     assert duplicated_interiors[0].param_values == {"depth": "550"}
     assert duplicated_interiors[0].param_values is not source_interior_instances[0].param_values
+
+
+def test_serialize_item_keeps_doors_separate_from_interiors() -> None:
+    door_id = uuid4()
+    interior_id = uuid4()
+    item = SimpleNamespace(
+        id=uuid4(),
+        order_id=uuid4(),
+        admin_id=uuid4(),
+        user_id=uuid4(),
+        sub_category_design_id=uuid4(),
+        sub_category_id=uuid4(),
+        design_code="z1",
+        design_title="طرح",
+        instance_code="U1",
+        sort_order=1,
+        status="draft",
+        order_attr_values={},
+        order_attr_meta={},
+        part_snapshots=[],
+        viewer_boxes=[],
+        snapshot_checksum="sum",
+        interior_instances=[
+            SimpleNamespace(
+                id=interior_id,
+                internal_part_group_id=uuid4(),
+                instance_code="inner-01",
+                line_color="#112233",
+                ui_order=1,
+                placement_z=0,
+                interior_box_snapshot={},
+                param_values={},
+                param_meta={},
+                part_snapshots=[],
+                viewer_boxes=[],
+                status="draft",
+            )
+        ],
+        door_instances=[
+            SimpleNamespace(
+                id=door_id,
+                door_part_group_id=uuid4(),
+                instance_code="door-01",
+                line_color="#445566",
+                ui_order=2,
+                structural_part_formula_ids=[11, 22],
+                dependent_interior_instance_ids=[str(interior_id)],
+                controller_box_snapshot={},
+                param_values={},
+                param_meta={},
+                part_snapshots=[],
+                viewer_boxes=[],
+                status="draft",
+            )
+        ],
+        sub_category_design=SimpleNamespace(sub_category=SimpleNamespace(category=SimpleNamespace(design_outline_color="#7A4A2B"))),
+    )
+
+    serialized = order_designs_router._serialize_item(item, include_interior=True)
+
+    assert len(serialized.interior_instances) == 1
+    assert len(serialized.door_instances) == 1
+    assert serialized.interior_instances[0]["id"] == interior_id
+    assert serialized.door_instances[0]["id"] == door_id

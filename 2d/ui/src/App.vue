@@ -3869,23 +3869,34 @@ const activeDoorLibraryViewerBoxes = computed(() => [
   ...activeDoorLibraryStructureViewerBoxes.value,
   ...getViewerBoxesFromDoorInstances(activeDoorLibraryInstances.value),
 ]);
+const isInteriorLibraryFront2dActive = computed(() =>
+  interiorLibraryOpen.value && interiorLibraryPreviewMode.value === "front2d"
+);
+const isDoorLibraryFront2dActive = computed(() =>
+  doorLibraryOpen.value && doorLibraryPreviewMode.value === "front2d"
+);
 const interiorLibraryFrontView = computed(() =>
-  buildFrontViewLinesFromBoxes(
-    activeInteriorLibraryStructureViewerBoxes.value || [],
-    subCategoryDesignEditorOpen.value
-      ? `interior-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
-      : `interior-structure:order:${String(activeInteriorLibraryOrderDesign.value?.id || activeInteriorLibrarySourceDesign.value?.id || "none").trim()}`
-  )
+  isInteriorLibraryFront2dActive.value
+    ? buildFrontViewLinesFromBoxes(
+      activeInteriorLibraryStructureViewerBoxes.value || [],
+      subCategoryDesignEditorOpen.value
+        ? `interior-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
+        : `interior-structure:order:${String(activeInteriorLibraryOrderDesign.value?.id || activeInteriorLibrarySourceDesign.value?.id || "none").trim()}`
+    )
+    : { outer: [], inner: [], bounds: null }
 );
 const doorLibraryFrontView = computed(() =>
-  buildFrontViewLinesFromBoxes(
-    activeDoorLibraryViewerBoxes.value || [],
-    subCategoryDesignEditorOpen.value
-      ? `door-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
-      : `door-structure:order:${String(activeDoorLibraryOrderDesign.value?.id || activeDoorLibrarySourceDesign.value?.id || "none").trim()}`
-  )
+  isDoorLibraryFront2dActive.value
+    ? buildFrontViewLinesFromBoxes(
+      activeDoorLibraryViewerBoxes.value || [],
+      subCategoryDesignEditorOpen.value
+        ? `door-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
+        : `door-structure:order:${String(activeDoorLibraryOrderDesign.value?.id || activeDoorLibrarySourceDesign.value?.id || "none").trim()}`
+    )
+    : { outer: [], inner: [], bounds: null }
 );
 const doorLibraryFrontBaseViewBox = computed(() => {
+  if (!isDoorLibraryFront2dActive.value) return `0 0 ${FRONT_VIEW_WIDTH} ${FRONT_VIEW_HEIGHT}`;
   const bounds = doorLibraryFrontView.value?.bounds;
   if (!bounds) return `0 0 ${FRONT_VIEW_WIDTH} ${FRONT_VIEW_HEIGHT}`;
   const pad = FRONT_VIEW_PAD;
@@ -3926,13 +3937,13 @@ const doorLibraryFrontSvgViewBoxRect = computed(() => {
   };
 });
 const doorLibraryFrontSnapLines = computed(() => ([
-  ...(doorLibraryFrontView.value?.outer || []).map((line) => ({
+  ...(isDoorLibraryFront2dActive.value ? (doorLibraryFrontView.value?.outer || []) : []).map((line) => ({
     x1: Number(line?.ax) || 0,
     y1: -(Number(line?.az) || 0),
     x2: Number(line?.bx) || 0,
     y2: -(Number(line?.bz) || 0),
   })),
-  ...(doorLibraryFrontView.value?.inner || []).map((line) => ({
+  ...(isDoorLibraryFront2dActive.value ? (doorLibraryFrontView.value?.inner || []) : []).map((line) => ({
     x1: Number(line?.ax) || 0,
     y1: -(Number(line?.az) || 0),
     x2: Number(line?.bx) || 0,
@@ -3940,7 +3951,7 @@ const doorLibraryFrontSnapLines = computed(() => ([
   })),
 ]));
 const doorLibraryFrontSnapPoints = computed(() =>
-  collectInteriorSnapPoints(doorLibraryFrontSnapLines.value)
+  isDoorLibraryFront2dActive.value ? collectInteriorSnapPoints(doorLibraryFrontSnapLines.value) : []
 );
 const doorLibraryFrontSnapTolerance = computed(() => {
   const viewBox = String(doorLibraryFrontSvgViewBox.value || "").split(/\s+/).map(Number);
@@ -3952,6 +3963,7 @@ const doorLibraryAnnotationColors = computed(() => ({
   selected: "#2F7FD3",
 }));
 const doorLibraryRenderedAnnotations = computed(() => {
+  if (!isDoorLibraryFront2dActive.value) return { dimensions: [], draftDimension: null };
   const dimensions = (doorLibraryAnnotations.value?.dimensions || []).map((item) => buildRenderedInteriorAnnotation(item, "dimension"));
   let draftDimension = null;
   if (doorLibraryAnnotationDraft.value?.type && doorLibraryAnnotationDraft.value?.startPoint && doorLibraryAnnotationDraft.value?.currentPoint) {
@@ -4024,7 +4036,7 @@ function buildFrontViewMetricSceneVisuals(metrics, values) {
   }));
 }
 const doorLibraryFrontCanvasEntitiesBase = computed(() =>
-  doorLibraryPreviewInstances2d.value.map((instance) => ({
+  (isDoorLibraryFront2dActive.value ? doorLibraryPreviewInstances2d.value : []).map((instance) => ({
     id: instance.id,
     boundsRect: instance.boundsRect,
     outerLines: instance.outerLines || [],
@@ -4034,7 +4046,7 @@ const doorLibraryFrontCanvasEntitiesBase = computed(() =>
   }))
 );
 const doorLibraryFrontCanvasEntityStateById = computed(() =>
-  Object.fromEntries(doorLibraryPreviewInstances2d.value.map((instance) => {
+  Object.fromEntries((isDoorLibraryFront2dActive.value ? doorLibraryPreviewInstances2d.value : []).map((instance) => {
     const selected = doorLibrarySelectedInstanceIds.value.includes(String(instance.id || ""));
     const hovered = String(doorLibraryHoveredInstanceId.value || "") === String(instance.id || "");
     return [String(instance.id || ""), {
@@ -4049,7 +4061,7 @@ const doorLibraryFrontCanvasEntityStateById = computed(() =>
   }))
 );
 const interiorLibraryFrontCanvasEntitiesBase = computed(() =>
-  interiorLibraryPreviewInstances2d.value.map((instance) => ({
+  (isInteriorLibraryFront2dActive.value ? interiorLibraryPreviewInstances2d.value : []).map((instance) => ({
     id: instance.id,
     boundsRect: instance.boundsRect,
     outerLines: instance.outerLines || [],
@@ -4059,7 +4071,7 @@ const interiorLibraryFrontCanvasEntitiesBase = computed(() =>
   }))
 );
 const interiorLibraryFrontCanvasEntityStateById = computed(() =>
-  Object.fromEntries(interiorLibraryPreviewInstances2d.value.map((instance) => {
+  Object.fromEntries((isInteriorLibraryFront2dActive.value ? interiorLibraryPreviewInstances2d.value : []).map((instance) => {
     const hovered = String(interiorLibraryHoveredInstanceId.value || "") === String(instance.id || "")
       || String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || "");
     const preview = String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || "");
@@ -4075,7 +4087,23 @@ const interiorLibraryFrontCanvasEntityStateById = computed(() =>
     }];
   }))
 );
-const doorLibraryFrontCanvasScene = computed(() => ({
+const doorLibraryFrontCanvasScene = computed(() => {
+  if (!isDoorLibraryFront2dActive.value) {
+    return {
+      renderToken: "inactive",
+      renderTokens: { viewport: "inactive", structure: "inactive", entities: "inactive", dynamic: "inactive", controllers: "inactive", annotations: "inactive", snap: "inactive" },
+      viewBox: { x: 0, y: 0, width: FRONT_VIEW_WIDTH, height: FRONT_VIEW_HEIGHT },
+      structure: { outerLines: [], innerLines: [] },
+      entities: [],
+      entityStates: {},
+      hitCache: { items: [], buckets: new Map(), bucketSize: 160 },
+      controllers: [],
+      annotations: { visible: false, color: "#E8A559", selectedColor: "#2F7FD3", dimensions: [], draftDimension: null },
+      snap: { visible: false, points: [], activePoint: null },
+      cursor: null,
+    };
+  }
+  return {
   renderToken: [
     String(doorLibraryFrontSvgViewBox.value || ""),
     String(doorLibraryHoveredInstanceId.value || ""),
@@ -4176,11 +4204,13 @@ const doorLibraryFrontCanvasScene = computed(() => ({
     activePoint: doorLibraryCurrentSnapPoint.value || null,
   },
   cursor: null,
-}));
+  };
+});
 const doorLibraryShouldShowSnapMarkers = computed(() =>
   doorLibraryAnnotationTool.value === "dimension"
 );
 const interiorLibraryPreviewProjection = computed(() => {
+  if (!isInteriorLibraryFront2dActive.value) return null;
   const bounds = interiorLibraryFrontView.value?.bounds;
   if (!bounds) return null;
   const width = Math.max(320, Number(interiorLibraryFrontViewport.value?.width) || FRONT_VIEW_WIDTH);
@@ -4217,6 +4247,7 @@ const interiorLibraryPreviewProjection = computed(() => {
   };
 });
 const interiorLibraryPreviewSvgLines = computed(() => {
+  if (!isInteriorLibraryFront2dActive.value) return { outer: [], inner: [] };
   const data = interiorLibraryFrontView.value;
   const projection = interiorLibraryPreviewProjection.value;
   if (!data?.bounds || !projection) return { outer: [], inner: [] };
@@ -4235,7 +4266,7 @@ function resolveInteriorInstanceLineColor(instance) {
   );
 }
 const interiorLibraryPreviewInstanceGeometry = computed(() =>
-  activeInteriorLibraryInstances.value
+  (isInteriorLibraryFront2dActive.value ? activeInteriorLibraryInstances.value : [])
     .slice()
     .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
     .map((instance, index) => {
@@ -4296,7 +4327,7 @@ watch(interiorLibraryPreviewInstances2d, (next) => {
   interiorLibraryInstanceHitCache.value = buildInteriorLibraryInstanceHitCache(next || []);
 }, { immediate: true });
 const doorLibraryPreviewInstanceGeometry = computed(() =>
-  activeDoorLibrarySelectableParts.value
+  (isDoorLibraryFront2dActive.value ? activeDoorLibrarySelectableParts.value : [])
     .map((part, index) => {
       const data = buildFrontViewLinesFromBoxes([{ ...(part?.box || {}), lineColor: part?.lineColor || DEFAULT_INTERIOR_LINE_COLOR }]);
       if (!data?.bounds) return null;
@@ -4422,7 +4453,7 @@ const doorLibraryControllerMetricVisuals = computed(() =>
   )
 );
 const doorLibraryPersistedControllerOverlays = computed(() =>
-  activeDoorLibraryInstances.value
+  (isDoorLibraryFront2dActive.value ? activeDoorLibraryInstances.value : [])
     .map((instance) => buildDoorLibraryControllerOverlayForInstance(instance))
     .filter(Boolean)
 );
@@ -4597,6 +4628,7 @@ watch(interiorLibraryControllerVisuals, () => {
   interiorLibraryControllerVisualsToken.value += 1;
 });
 const interiorLibraryFrontSnapLines = computed(() => {
+  if (!isInteriorLibraryFront2dActive.value) return [];
   const outer = (interiorLibraryPreviewSvgLines.value?.outer || []).map((line) => ({
     x1: Number(line?.x1) || 0,
     y1: Number(line?.y1) || 0,
@@ -4626,7 +4658,7 @@ const interiorLibraryFrontSnapLines = computed(() => {
   return [...outer, ...designInner, ...interiorInstanceLines];
 });
 const interiorLibraryFrontSnapPoints = computed(() =>
-  collectInteriorSnapPoints(interiorLibraryFrontSnapLines.value)
+  isInteriorLibraryFront2dActive.value ? collectInteriorSnapPoints(interiorLibraryFrontSnapLines.value) : []
 );
 
 const interiorLibraryFrontSnapTolerance = computed(() => {
@@ -4708,6 +4740,7 @@ function buildRenderedInteriorAnnotation(item, type) {
   };
 }
 const interiorLibraryRenderedAnnotations = computed(() => {
+  if (!isInteriorLibraryFront2dActive.value) return { dimensions: [], draftDimension: null };
   const dimensions = (interiorLibraryAnnotations.value?.dimensions || []).map((item) => buildRenderedInteriorAnnotation(item, "dimension"));
   let draftDimension = null;
   if (interiorLibraryAnnotationDraft.value?.type && interiorLibraryAnnotationDraft.value?.startPoint && interiorLibraryAnnotationDraft.value?.currentPoint) {
@@ -4773,6 +4806,21 @@ const interiorLibraryModelCursorStyle = computed(() => {
   };
 });
 const interiorLibraryFrontCanvasScene = computed(() => {
+  if (!isInteriorLibraryFront2dActive.value) {
+    return {
+      renderToken: "inactive",
+      renderTokens: { viewport: "inactive", structure: "inactive", entities: "inactive", dynamic: "inactive", controllers: "inactive", annotations: "inactive", snap: "inactive" },
+      viewBox: { x: 0, y: 0, width: FRONT_VIEW_WIDTH, height: FRONT_VIEW_HEIGHT },
+      structure: { outerLines: [], innerLines: [] },
+      entities: [],
+      entityStates: {},
+      hitCache: { items: [], buckets: new Map(), bucketSize: 160 },
+      controllers: [],
+      annotations: { visible: false, color: "#E8A559", selectedColor: "#2F7FD3", dimensions: [], draftDimension: null },
+      snap: { visible: false, points: [], activePoint: null },
+      cursor: null,
+    };
+  }
   const selectedOverlayLineColor = interiorLibrarySelectedControllerOverlay.value?.lineColor || "#2f7fd3";
   const controllers = interiorLibraryControllerOverlays.value
     .filter((overlay) => String(interiorLibrarySelectedInstanceId.value || "") !== String(overlay.instanceId || ""))
@@ -8528,6 +8576,21 @@ function buildOrderDesignHistoryRestorePayload(item) {
         param_values: { ...(instance.param_values || {}) },
         status: String(instance.status || "draft").trim() || "draft",
       })),
+    door_instances: (Array.isArray(target.door_instances) ? target.door_instances : [])
+      .map((instance) => normalizeDoorInstanceRecord(instance))
+      .filter(Boolean)
+      .map((instance) => ({
+        id: String(instance.id),
+        door_part_group_id: String(instance.door_part_group_id || ""),
+        instance_code: String(instance.instance_code || "").trim(),
+        ui_order: Number(instance.ui_order) || 0,
+        structural_part_formula_ids: Array.isArray(instance.structural_part_formula_ids) ? instance.structural_part_formula_ids.map((row) => Number(row) || 0).filter(Boolean) : [],
+        dependent_interior_instance_ids: Array.isArray(instance.dependent_interior_instance_ids) ? instance.dependent_interior_instance_ids.map((row) => String(row || "").trim()).filter(Boolean) : [],
+        controller_box_snapshot: { ...(instance.controller_box_snapshot || {}) },
+        param_values: { ...(instance.param_values || {}) },
+        line_color: instance.line_color || "",
+        status: String(instance.status || "draft").trim() || "draft",
+      })),
   };
 }
 
@@ -9386,25 +9449,103 @@ async function addInteriorGroupToDesign(group) {
   }
 }
 
+function syncDoorInstanceInOrderDesignCollection(orderDesignId, instance) {
+  const targetId = String(orderDesignId || "").trim();
+  const normalized = normalizeDoorInstanceRecord(instance);
+  if (!targetId || !normalized?.id) return null;
+  orderDesignCatalog.value = sortOrderDesignCatalogRecords(
+    orderDesignCatalog.value.map((item) => {
+      if (String(item.id) !== targetId) return item;
+      const doors = Array.isArray(item.door_instances) ? item.door_instances : [];
+      const existingIndex = doors.findIndex((row) => String(row.id) === String(normalized.id));
+      const nextDoors = existingIndex === -1
+        ? [...doors, normalized]
+        : doors.map((row, index) => index === existingIndex ? normalized : row);
+      return {
+        ...item,
+        door_instances: nextDoors
+          .slice()
+          .sort((a, b) => {
+            const orderDelta = (Number(a.ui_order) || 0) - (Number(b.ui_order) || 0);
+            if (orderDelta !== 0) return orderDelta;
+            return String(a.instance_code || "").localeCompare(String(b.instance_code || ""), "fa");
+          }),
+      };
+    })
+  );
+  if (String(orderDesignEditorDraft.value?.id || "") === targetId) {
+    const doors = Array.isArray(orderDesignEditorDraft.value?.door_instances) ? orderDesignEditorDraft.value.door_instances : [];
+    const existingIndex = doors.findIndex((row) => String(row.id) === String(normalized.id));
+    orderDesignEditorDraft.value = {
+      ...orderDesignEditorDraft.value,
+      door_instances: existingIndex === -1
+        ? [...doors, normalized]
+        : doors.map((row, index) => index === existingIndex ? normalized : row),
+    };
+  }
+  return normalized;
+}
+
+function removeDoorInstanceFromOrderDesignCollection(orderDesignId, instanceId) {
+  const targetId = String(orderDesignId || "").trim();
+  const doorId = String(instanceId || "").trim();
+  if (!targetId || !doorId) return;
+  orderDesignCatalog.value = sortOrderDesignCatalogRecords(
+    orderDesignCatalog.value.map((item) =>
+      String(item.id) === targetId
+        ? {
+            ...item,
+            door_instances: (item.door_instances || []).filter((row) => String(row.id) !== doorId),
+          }
+        : item
+    )
+  );
+  if (String(orderDesignEditorDraft.value?.id || "") === targetId) {
+    orderDesignEditorDraft.value = {
+      ...orderDesignEditorDraft.value,
+      door_instances: (orderDesignEditorDraft.value?.door_instances || []).filter((row) => String(row.id) !== doorId),
+    };
+  }
+}
+
 async function addDoorGroupToDesign(group) {
   if (isAddingDoorGroup(group)) return;
   const loadingKey = getDoorLibraryAddingGroupKey(group);
-  if (!subCategoryDesignEditorOpen.value) {
-    showAlert("افزودن نمونه درب فعلا فقط در ویرایش طرح‌های ساب‌کت فعال است.", { title: "قطعات درب" });
-    return;
-  }
-  const draft = subCategoryDesignEditorDraft.value;
-  if (!draft?.id) {
-    showAlert("ابتدا خود طرح ساب‌کت را ذخیره کنید، سپس گروه درب را به آن اضافه کنید.", { title: "قطعات درب" });
-    return;
-  }
   if (normalizeDoorPartGroupControllerType(group?.controller_type) === DOOR_GROUP_CONTROLLER_TYPE_DOUBLE_EQUAL_HINGED) {
     beginDoorLibraryPendingController(group);
     return;
   }
   doorLibraryAddingGroupKey.value = loadingKey;
   try {
-    const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances`, {
+    if (subCategoryDesignEditorOpen.value) {
+      const draft = subCategoryDesignEditorDraft.value;
+      if (!draft?.id) {
+        showAlert("ابتدا خود طرح ساب‌کت را ذخیره کنید، سپس گروه درب را به آن اضافه کنید.", { title: "قطعات درب" });
+        return;
+      }
+      const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          door_part_group_id: group.id,
+          line_color: normalizeHexColor(group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+          structural_part_formula_ids: [],
+          dependent_interior_instance_ids: [],
+          param_values: {},
+        }),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه درب به طرح انجام نشد."));
+      syncDoorInstanceInDraft(await res.json());
+      syncOpenSubCategoryDesignDraftToCollection();
+      await refreshSubCategoryDesignPreview();
+      return;
+    }
+    const orderDesign = activeDoorLibraryOrderDesign.value;
+    if (!orderDesign?.id) {
+      showAlert("ابتدا یک طرح ثبت‌شده را انتخاب کنید.", { title: "قطعات درب" });
+      return;
+    }
+    const res = await fetch(`/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/door-instances`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -9415,10 +9556,9 @@ async function addDoorGroupToDesign(group) {
         param_values: {},
       }),
     });
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه درب به طرح انجام نشد."));
-    syncDoorInstanceInDraft(await res.json());
-    syncOpenSubCategoryDesignDraftToCollection();
-    await refreshSubCategoryDesignPreview();
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه درب به طرح ثبت‌شده انجام نشد."));
+    syncDoorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
+    await refreshOrderDesignGeometryFromServer(orderDesign.id);
   } catch (error) {
     showAlert(error?.message || "افزودن گروه درب به طرح انجام نشد.", { title: "خطا" });
   } finally {
@@ -9427,35 +9567,50 @@ async function addDoorGroupToDesign(group) {
 }
 async function finalizePendingDoorController() {
   if (!isDoorLibraryPendingControllerActive.value || doorLibraryAddingGroupKey.value) return false;
-  if (!subCategoryDesignEditorOpen.value) return false;
-  const draft = subCategoryDesignEditorDraft.value;
   const group = activeDoorLibraryPendingGroup.value;
   const summary = doorLibraryControllerSelectionSummary.value;
-  if (!draft?.id || !group?.id || !summary?.eligible) return false;
+  if (!group?.id || !summary?.eligible) return false;
   const loadingKey = getDoorLibraryAddingGroupKey(group);
   doorLibraryAddingGroupKey.value = loadingKey;
   try {
-    const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        door_part_group_id: group.id,
-        line_color: normalizeHexColor(doorLibraryPendingControllerState.value.pending_color || group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
-        structural_part_formula_ids: summary.structural_part_formula_ids || [],
-        dependent_interior_instance_ids: summary.dependent_interior_instance_ids || [],
-        controller_box_snapshot: summary.controller_box_snapshot || {},
-        param_values: Object.fromEntries(
-          Object.entries(summary.preview_param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
-        ),
-      }),
-    });
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه درب به طرح انجام نشد."));
-    const created = await res.json();
-    syncDoorInstanceInDraft(created);
-    syncOpenSubCategoryDesignDraftToCollection();
+    const payload = {
+      door_part_group_id: group.id,
+      line_color: normalizeHexColor(doorLibraryPendingControllerState.value.pending_color || group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+      structural_part_formula_ids: summary.structural_part_formula_ids || [],
+      dependent_interior_instance_ids: summary.dependent_interior_instance_ids || [],
+      controller_box_snapshot: summary.controller_box_snapshot || {},
+      param_values: Object.fromEntries(
+        Object.entries(summary.preview_param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+      ),
+    };
+    if (subCategoryDesignEditorOpen.value) {
+      const draft = subCategoryDesignEditorDraft.value;
+      if (!draft?.id) return false;
+      const res = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه درب به طرح انجام نشد."));
+      const created = await res.json();
+      syncDoorInstanceInDraft(created);
+      syncOpenSubCategoryDesignDraftToCollection();
+      await refreshSubCategoryDesignPreview();
+    } else {
+      const orderDesign = activeDoorLibraryOrderDesign.value;
+      if (!orderDesign?.id) return false;
+      const res = await fetch(`/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/door-instances`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه درب به طرح ثبت‌شده انجام نشد."));
+      const created = await res.json();
+      syncDoorInstanceInOrderDesignCollection(orderDesign.id, created);
+      await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    }
     resetDoorLibraryPendingControllerState();
     doorLibraryHoveredInstanceId.value = "";
-    await refreshSubCategoryDesignPreview();
     return true;
   } catch (error) {
     showAlert(error?.message || "افزودن گروه درب به طرح انجام نشد.", { title: "خطا" });
@@ -9482,6 +9637,16 @@ async function openDoorInstanceEditor(instance) {
   const normalized = normalizeDoorInstanceRecord(instance);
   if (!normalized) return;
   selectDoorLibraryPlacedInstance(normalized.id);
+  if (!subCategoryDesignEditorOpen.value && Object.keys(normalized.param_meta || {}).length === 0) {
+    await refreshOrderDesignGeometryFromServer(activeDoorLibraryOrderDesign.value?.id, { updateStage: false });
+    const refreshed = activeDoorLibraryInstances.value.find(
+      (row) => String(row?.id || "").trim() === String(normalized.id || "").trim()
+    );
+    if (refreshed) {
+      const updated = normalizeDoorInstanceRecord(refreshed);
+      if (updated) Object.assign(normalized, updated);
+    }
+  }
   const previewGroups = buildDoorInstanceGroups(normalized);
   const effectiveParamValues = Object.fromEntries(
     previewGroups
@@ -9519,33 +9684,49 @@ function closeDoorInstanceEditor() {
 async function applyDoorInstanceEditor() {
   const instance = doorInstanceEditorDraft.value;
   if (!instance?.id || doorInstanceEditorApplying.value) return;
-  if (!subCategoryDesignEditorOpen.value) return;
-  const draft = subCategoryDesignEditorDraft.value;
-  if (!draft?.id) return;
   doorInstanceEditorApplying.value = true;
   try {
-    const res = await fetch(
-      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances/${encodeURIComponent(String(instance.id))}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ui_order: Math.max(0, Number(instance.ui_order) || 0),
-          instance_code: String(instance.instance_code || "").trim() || "door",
-          line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-          structural_part_formula_ids: Array.isArray(instance.structural_part_formula_ids) ? instance.structural_part_formula_ids : [],
-          dependent_interior_instance_ids: Array.isArray(instance.dependent_interior_instance_ids) ? instance.dependent_interior_instance_ids : [],
-          param_values: Object.fromEntries(
-            Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
-          ),
-        }),
-      }
-    );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه درب انجام نشد."));
-    syncDoorInstanceInDraft(await res.json());
-    syncOpenSubCategoryDesignDraftToCollection();
+    const requestBody = {
+      ui_order: Math.max(0, Number(instance.ui_order) || 0),
+      instance_code: String(instance.instance_code || "").trim() || "door",
+      line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+      structural_part_formula_ids: Array.isArray(instance.structural_part_formula_ids) ? instance.structural_part_formula_ids : [],
+      dependent_interior_instance_ids: Array.isArray(instance.dependent_interior_instance_ids) ? instance.dependent_interior_instance_ids : [],
+      param_values: Object.fromEntries(
+        Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+      ),
+    };
+    if (subCategoryDesignEditorOpen.value) {
+      const draft = subCategoryDesignEditorDraft.value;
+      if (!draft?.id) return;
+      const res = await fetch(
+        `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances/${encodeURIComponent(String(instance.id))}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه درب انجام نشد."));
+      syncDoorInstanceInDraft(await res.json());
+      syncOpenSubCategoryDesignDraftToCollection();
+      await refreshSubCategoryDesignPreview();
+    } else {
+      const orderDesign = activeDoorLibraryOrderDesign.value;
+      if (!orderDesign?.id) return;
+      const res = await fetch(
+        `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/door-instances/${encodeURIComponent(String(instance.id))}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه درب طرح ثبت‌شده انجام نشد."));
+      syncDoorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
+      await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    }
     resetDoorInstanceEditorState();
-    await refreshSubCategoryDesignPreview();
   } catch (error) {
     showAlert(error?.message || "ذخیره تنظیمات نمونه درب انجام نشد.", { title: "خطا" });
   } finally {
@@ -9559,31 +9740,47 @@ async function applyDoorInstanceLineColor(instance, lineColor) {
     line_color: lineColor ? normalizeHexColor(lineColor, DEFAULT_INTERIOR_LINE_COLOR) : "",
   });
   if (!normalized?.id) return;
-  if (!subCategoryDesignEditorOpen.value) return;
-  const draft = subCategoryDesignEditorDraft.value;
-  if (!draft?.id) return;
   try {
-    const res = await fetch(
-      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances/${encodeURIComponent(String(normalized.id))}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ui_order: Math.max(0, Number(normalized.ui_order) || 0),
-          instance_code: String(normalized.instance_code || "").trim() || "door",
-          line_color: normalized.line_color ? normalizeHexColor(normalized.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-          structural_part_formula_ids: Array.isArray(normalized.structural_part_formula_ids) ? normalized.structural_part_formula_ids : [],
-          dependent_interior_instance_ids: Array.isArray(normalized.dependent_interior_instance_ids) ? normalized.dependent_interior_instance_ids : [],
-          param_values: Object.fromEntries(
-            Object.entries(normalized.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
-          ),
-        }),
-      }
-    );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه درب انجام نشد."));
-    syncDoorInstanceInDraft(await res.json());
-    syncOpenSubCategoryDesignDraftToCollection();
-    await refreshSubCategoryDesignPreview();
+    const requestBody = {
+      ui_order: Math.max(0, Number(normalized.ui_order) || 0),
+      instance_code: String(normalized.instance_code || "").trim() || "door",
+      line_color: normalized.line_color ? normalizeHexColor(normalized.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+      structural_part_formula_ids: Array.isArray(normalized.structural_part_formula_ids) ? normalized.structural_part_formula_ids : [],
+      dependent_interior_instance_ids: Array.isArray(normalized.dependent_interior_instance_ids) ? normalized.dependent_interior_instance_ids : [],
+      param_values: Object.fromEntries(
+        Object.entries(normalized.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+      ),
+    };
+    if (subCategoryDesignEditorOpen.value) {
+      const draft = subCategoryDesignEditorDraft.value;
+      if (!draft?.id) return;
+      const res = await fetch(
+        `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances/${encodeURIComponent(String(normalized.id))}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه درب انجام نشد."));
+      syncDoorInstanceInDraft(await res.json());
+      syncOpenSubCategoryDesignDraftToCollection();
+      await refreshSubCategoryDesignPreview();
+    } else {
+      const orderDesign = activeDoorLibraryOrderDesign.value;
+      if (!orderDesign?.id) return;
+      const res = await fetch(
+        `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/door-instances/${encodeURIComponent(String(normalized.id))}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه درب طرح ثبت‌شده انجام نشد."));
+      syncDoorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
+      await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    }
   } catch (error) {
     showAlert(error?.message || "ذخیره رنگ خطوط نمونه درب انجام نشد.", { title: "خطا" });
   }
@@ -9592,45 +9789,66 @@ async function applyDoorInstanceLineColor(instance, lineColor) {
 function previewDoorInstanceLineColor(instance, lineColor) {
   const normalizedColor = lineColor ? normalizeHexColor(lineColor, DEFAULT_INTERIOR_LINE_COLOR) : "";
   const instanceId = String(instance?.id || "").trim();
-  if (!instanceId || !subCategoryDesignEditorOpen.value) return;
-  const draft = subCategoryDesignEditorDraft.value;
-  if (!draft) return;
-  draft.door_instances = (draft.door_instances || []).map((row) =>
-    String(row?.id || "") === instanceId
-      ? {
-          ...row,
-          line_color: normalizedColor,
-        }
-      : row
-  );
-  syncOpenSubCategoryDesignDraftToCollection();
+  if (!instanceId) return;
+  if (subCategoryDesignEditorOpen.value) {
+    const draft = subCategoryDesignEditorDraft.value;
+    if (!draft) return;
+    draft.door_instances = (draft.door_instances || []).map((row) =>
+      String(row?.id || "") === instanceId
+        ? {
+            ...row,
+            line_color: normalizedColor,
+          }
+        : row
+    );
+    syncOpenSubCategoryDesignDraftToCollection();
+    return;
+  }
+  const orderDesign = activeDoorLibraryOrderDesign.value;
+  if (!orderDesign?.id) return;
+  syncDoorInstanceInOrderDesignCollection(orderDesign.id, {
+    ...(instance || {}),
+    line_color: normalizedColor,
+  });
 }
 
 async function deleteDoorInstanceFromDesign(instance) {
-  if (!instance?.id || !subCategoryDesignEditorOpen.value) return;
+  if (!instance?.id) return;
   const ok = await showConfirm("این نمونه درب از طرح حذف شود؟", {
     title: "حذف نمونه درب",
     confirmText: "حذف",
     cancelText: "انصراف",
   });
   if (!ok) return;
-  const draft = subCategoryDesignEditorDraft.value;
-  if (!draft?.id) return;
   try {
-    const res = await fetch(
-      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances/${encodeURIComponent(String(instance.id))}`,
-      { method: "DELETE" }
-    );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه درب انجام نشد."));
-    draft.door_instances = (draft.door_instances || []).filter((row) => String(row.id) !== String(instance.id));
+    if (subCategoryDesignEditorOpen.value) {
+      const draft = subCategoryDesignEditorDraft.value;
+      if (!draft?.id) return;
+      const res = await fetch(
+        `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances/${encodeURIComponent(String(instance.id))}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه درب انجام نشد."));
+      draft.door_instances = (draft.door_instances || []).filter((row) => String(row.id) !== String(instance.id));
+      syncOpenSubCategoryDesignDraftToCollection();
+      await refreshSubCategoryDesignPreview();
+    } else {
+      const orderDesign = activeDoorLibraryOrderDesign.value;
+      if (!orderDesign?.id) return;
+      const res = await fetch(
+        `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/door-instances/${encodeURIComponent(String(instance.id))}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه درب طرح ثبت‌شده انجام نشد."));
+      removeDoorInstanceFromOrderDesignCollection(orderDesign.id, instance.id);
+      await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    }
     if (String(doorLibrarySelectedPlacedInstanceId.value || "") === String(instance.id || "")) {
       clearDoorLibraryPlacedInstanceSelection();
     }
     if (String(doorInstanceEditorDraft.value?.id || "") === String(instance.id || "")) {
       closeDoorInstanceEditor();
     }
-    syncOpenSubCategoryDesignDraftToCollection();
-    await refreshSubCategoryDesignPreview();
   } catch (error) {
     showAlert(error?.message || "حذف نمونه درب انجام نشد.", { title: "خطا" });
   }
@@ -10062,6 +10280,51 @@ async function deleteInteriorInstanceFromContextMenu() {
   closeInteriorInstanceContextMenu();
   await deleteInteriorInstanceFromDesign(target);
 }
+
+async function duplicateDoorInstanceInDesign(instance) {
+  const normalized = normalizeDoorInstanceRecord(instance);
+  if (!normalized?.id) return null;
+  if (subCategoryDesignEditorOpen.value) {
+    const draft = subCategoryDesignEditorDraft.value;
+    if (!draft?.id) return null;
+    const res = await fetch(
+      `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/door-instances/${encodeURIComponent(String(normalized.id))}/duplicate`,
+      { method: "POST" }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "کپی نمونه درب انجام نشد."));
+    const duplicated = await res.json();
+    syncDoorInstanceInDraft(duplicated);
+    syncOpenSubCategoryDesignDraftToCollection();
+    selectDoorLibraryPlacedInstance(duplicated.id);
+    await refreshSubCategoryDesignPreview();
+    closeDoorInstanceContextMenu();
+    return duplicated;
+  }
+  const orderDesign = activeDoorLibraryOrderDesign.value;
+  if (!orderDesign?.id) return null;
+  const res = await fetch(
+    `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/door-instances/${encodeURIComponent(String(normalized.id))}/duplicate`,
+    { method: "POST" }
+  );
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, "کپی نمونه درب طرح ثبت‌شده انجام نشد."));
+  const duplicated = await res.json();
+  syncDoorInstanceInOrderDesignCollection(orderDesign.id, duplicated);
+  selectDoorLibraryPlacedInstance(duplicated.id);
+  await refreshOrderDesignGeometryFromServer(orderDesign.id);
+  closeDoorInstanceContextMenu();
+  return duplicated;
+}
+
+async function duplicateDoorInstanceFromContextMenu() {
+  const target = activeDoorLibraryContextMenuInstance.value;
+  if (!target) return;
+  try {
+    await duplicateDoorInstanceInDesign(target);
+  } catch (error) {
+    showAlert(error?.message || "کپی نمونه درب انجام نشد.", { title: "خطا" });
+  }
+}
+
 async function deleteDoorInstanceFromContextMenu() {
   const target = activeDoorLibraryContextMenuInstance.value;
   if (!target) return;
@@ -17407,6 +17670,7 @@ onBeforeUnmount(() => {
             @update:selectedWallCoords="updateSelectedWallCoords"
             @update:orderDesignAttr="updateActiveOrderDesignAttr"
             @openInteriorLibraryForDesign="openInteriorLibraryForDesign"
+            @openDoorLibraryForDesign="openDoorLibraryForDesign"
             @model2d="onGlbModel2d"
             @mouseenter="disable2dInput"
             @mouseleave="enable2dInput"
@@ -19281,7 +19545,7 @@ onBeforeUnmount(() => {
               <span>داخلی</span>
             </button>
             <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': doorLibraryOpen }" title="قطعات درب" @click="openDoorLibrary">
-              <img src="/icons/door.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+              <img src="/icons/door_styles.png" alt="" class="subCategoryDesignEditor__metaIcon" />
               <span>درب</span>
             </button>
             <button type="button" class="subCategoryDesignEditor__settingsBtn" title="پیش‌فرض ادمین" @click="openSubCategoryAdminDefaultsFromDesignEditor">
@@ -20731,6 +20995,7 @@ onBeforeUnmount(() => {
     :style="doorLibraryInstanceContextMenuStyle"
     @pointerdown.stop
   >
+    <button type="button" class="menuItem menuItem--grow" @click="duplicateDoorInstanceFromContextMenu">کپی</button>
     <button type="button" class="menuItem menuItem--grow menuItem--danger" @click="deleteDoorInstanceFromContextMenu">حذف</button>
   </div>
 
@@ -21691,7 +21956,7 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeDoorLibrary">×</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        در این مرحله، کتابخانه گروه‌های قطعات درب برای طرح فعال نمایش داده می‌شود. کنترلرها و نمونه‌های اختصاصی درب در فاز بعدی تکمیل می‌شوند.
+        در این مرحله، کتابخانه گروه‌های قطعات درب برای طرح فعال نمایش داده می‌شود و می‌توانید نمونه‌های اختصاصی هر طرح را اضافه، ویرایش، کپی و حذف کنید.
       </div>
       <div class="subCategoryDesignEditor__layout subCategoryDesignEditor__layout--interiorLibrary">
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview subCategoryDesignEditor__panel--interiorPreview">
@@ -22140,7 +22405,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances">
           <div class="subCategoryDesignEditor__panelTitle">نمونه‌های درب این طرح</div>
-          <div v-if="!activeInteriorLibraryTargetId" class="designMenu__cabinetState">برای افزودن نمونه درب، ابتدا یک طرح معتبر را باز یا انتخاب کنید.</div>
+          <div v-if="!activeDoorLibraryTargetId" class="designMenu__cabinetState">برای افزودن نمونه درب، ابتدا یک طرح معتبر را باز یا انتخاب کنید.</div>
           <div v-else-if="!doorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز هیچ گروه دربی به این طرح اضافه نشده است.</div>
           <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
             <div
@@ -22157,6 +22422,15 @@ onBeforeUnmount(() => {
                   <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
                 </span>
                 <div class="subCategoryDesignEditor__interiorGroupActions">
+                  <button
+                    type="button"
+                    class="constructionDialog__iconBtn"
+                    title="کپی نمونه"
+                    @click.stop
+                    @click="duplicateDoorInstanceInDesign(item)"
+                  >
+                    ⧉
+                  </button>
                   <button
                     type="button"
                     class="constructionDialog__iconBtn"
@@ -22256,7 +22530,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="subCategoryDesignEditor__metaActions" style="margin-top: 12px;">
           <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': doorLibraryOpen }" title="قطعات درب" @click="openDoorLibraryForDesign(orderDesignEditorDraft.id)">
-            <img src="/icons/door.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+            <img src="/icons/door_styles.png" alt="" class="subCategoryDesignEditor__metaIcon" />
             <span>درب</span>
           </button>
         </div>
