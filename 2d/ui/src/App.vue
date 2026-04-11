@@ -5522,7 +5522,10 @@ function getInteriorControllerHotspots(controller) {
 }
 
 function snapInteriorControllerAxis(controllerId, axisValue, ignoreValues = []) {
-  const tolerance = Number(interiorLibraryFrontSnapTolerance.value) || 0;
+  const tolerance = Math.max(
+    Number(interiorLibraryFrontSnapTolerance.value) || 0,
+    6 * (Number(interiorLibraryControllerVisualScale.value) || 1),
+  );
   const isHorizontalAxis = controllerId === "left" || controllerId === "right";
   const { lineCandidates, pointCandidates } = getInteriorControllerAxisCandidates(isHorizontalAxis, tolerance);
   const ignored = (Array.isArray(ignoreValues) ? ignoreValues : [])
@@ -5542,6 +5545,8 @@ function snapInteriorControllerAxis(controllerId, axisValue, ignoreValues = []) 
 }
 
 function getInteriorControllerAxisCandidates(isHorizontalAxis, tolerance) {
+  const frame = interiorLibraryControllerFrameRect.value;
+  const selectedRect = interiorLibraryControllerRect.value;
   const lineCandidates = interiorLibraryFrontSnapLines.value
     .map((line) => {
       const x1 = Number(line?.x1) || 0;
@@ -5556,14 +5561,34 @@ function getInteriorControllerAxisCandidates(isHorizontalAxis, tolerance) {
       return null;
     })
     .filter((value) => Number.isFinite(value));
+  const edgeCandidates = isHorizontalAxis
+    ? [
+        Number(frame?.x),
+        Number(frame?.x) + Number(frame?.w || 0),
+        Number(selectedRect?.x),
+        Number(selectedRect?.x) + Number(selectedRect?.w || 0),
+      ]
+    : [
+        Number(frame?.y),
+        Number(frame?.y) + Number(frame?.h || 0),
+        Number(selectedRect?.y),
+        Number(selectedRect?.y) + Number(selectedRect?.h || 0),
+      ];
   const pointCandidates = interiorLibraryFrontSnapPoints.value
     .map((point) => isHorizontalAxis ? Number(point?.x) : Number(point?.y))
     .filter((value) => Number.isFinite(value));
-  return { lineCandidates, pointCandidates };
+  const unique = (values) => [...new Set(values.filter((value) => Number.isFinite(value)).map((value) => Number(value.toFixed(3))))];
+  return {
+    lineCandidates: unique([...lineCandidates, ...edgeCandidates]),
+    pointCandidates: unique(pointCandidates),
+  };
 }
 
 function snapInteriorControllerRectY(rectY, rectHeight, ignoreValues = []) {
-  const tolerance = Number(interiorLibraryFrontSnapTolerance.value) || 0;
+  const tolerance = Math.max(
+    Number(interiorLibraryFrontSnapTolerance.value) || 0,
+    6 * (Number(interiorLibraryControllerVisualScale.value) || 1),
+  );
   const { lineCandidates, pointCandidates } = getInteriorControllerAxisCandidates(false, tolerance);
   const ignored = (Array.isArray(ignoreValues) ? ignoreValues : [])
     .map((value) => Number(value))
