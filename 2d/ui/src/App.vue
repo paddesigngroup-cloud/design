@@ -1912,8 +1912,12 @@ function updateInteriorInstanceFromControllerValues(nextValues) {
   const instance = activeInteriorLibrarySelectedInstance.value;
   if (!instance?.id) return null;
   const bindings = interiorLibraryControllerBindingMap.value;
+  const persistedValues = denormalizeInteriorControllerValuesFromDisplay(
+    nextValues,
+    activeInteriorLibrarySelectedGroup.value?.controller_type,
+  );
   const nextParamValues = { ...(instance.param_values || {}) };
-  for (const [controllerId, valueMm] of Object.entries(nextValues || {})) {
+  for (const [controllerId, valueMm] of Object.entries(persistedValues || {})) {
     const paramCode = String(bindings?.[controllerId]?.param_code || "").trim();
     if (!paramCode) continue;
     nextParamValues[paramCode] = String(Math.round(Math.max(0, Number(valueMm) || 0)));
@@ -1937,6 +1941,7 @@ function applyInteriorLibraryControllerInput(controllerId, nextValueMm) {
   const values = interiorLibraryControllerParamValues.value;
   if (!frame || !Number.isFinite(nextValueMm)) return false;
   const controllerType = activeInteriorLibrarySelectedGroup.value?.controller_type;
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
   const isHeightController = isHeightInternalGroupControllerType(controllerType);
   const horizontalMode = getInternalGroupControllerHorizontalMode(controllerType, controllerId);
   const safeValue = Math.max(0, Number(nextValueMm) || 0);
@@ -1951,12 +1956,18 @@ function applyInteriorLibraryControllerInput(controllerId, nextValueMm) {
   const minWidth = 240;
   const minHeight = 1;
   if (controllerId === "left") {
+    if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT) {
+      nextValues.left = Math.min(Math.max(minWidth, safeValue), frameWidth);
+    } else
     if (horizontalMode === "span_from_right") {
       nextValues.left = Math.min(Math.max(minWidth, safeValue), Math.max(minWidth, frameWidth - nextValues.right));
     } else {
       nextValues.left = Math.min(Math.max(0, safeValue), Math.max(0, frameWidth - nextValues.right - minWidth));
     }
   } else if (controllerId === "right") {
+    if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT) {
+      nextValues.right = Math.min(Math.max(minWidth, safeValue), frameWidth);
+    } else
     if (horizontalMode === "span_from_left") {
       nextValues.right = Math.min(Math.max(minWidth, safeValue), Math.max(minWidth, frameWidth - nextValues.left));
     } else {
@@ -2137,6 +2148,7 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
   const startValues = state.startValues;
   if (!frame || !startValues || !currentPoint) return;
   const controllerType = activeInteriorLibrarySelectedGroup.value?.controller_type;
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
   const isHeightController = isHeightInternalGroupControllerType(controllerType);
   const horizontalMode = getInternalGroupControllerHorizontalMode(controllerType, controllerId);
   const startRect = buildInteriorLibraryControllerRectFromFrameValues(frame, startValues, controllerType);
@@ -2159,6 +2171,10 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
     bottom_offset: Number(startValues.bottom_offset) || 0,
   };
   if (controllerId === "left") {
+    if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT) {
+      const totalLeft = ((frame.x + frame.w) - snappedX) / frame.scale;
+      nextValues.left = Math.min(Math.max(minWidth, totalLeft), frameWidth);
+    } else
     if (horizontalMode === "span_from_right") {
       const rightEdge = frame.x + frame.w - ((Number(startValues.right) || 0) * frame.scale);
       const widthMm = (rightEdge - snappedX) / frame.scale;
@@ -2168,6 +2184,10 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
       nextValues.left = Math.min(Math.max(0, leftMm), Math.max(0, frameWidth - nextValues.right - minWidth));
     }
   } else if (controllerId === "right") {
+    if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT) {
+      const widthMm = ((frame.x + frame.w) - snappedX) / frame.scale;
+      nextValues.right = Math.min(Math.max(minWidth, widthMm), frameWidth);
+    } else
     if (horizontalMode === "span_from_left") {
       const leftEdge = frame.x + ((Number(startValues.left) || 0) * frame.scale);
       const widthMm = (snappedX - leftEdge) / frame.scale;
@@ -4389,12 +4409,15 @@ const interiorLibraryControllerVisuals = computed(() => {
   const vertical = { w: handleSize, h: handleSize, inputW, inputH };
   const leftIconPlacement = getInternalGroupControllerIconPlacement(controllerType, "left");
   const rightIconPlacement = getInternalGroupControllerIconPlacement(controllerType, "right");
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
   const leftHandleX = leftIconPlacement === "inside"
     ? rect.x
     : rect.x - horizontal.w;
-  const rightHandleX = rightIconPlacement === "inside"
-    ? rect.x + rect.w - horizontal.w
-    : rect.x + rect.w;
+  const rightHandleX = normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT
+    ? rect.x - horizontal.w
+    : rightIconPlacement === "inside"
+      ? rect.x + rect.w - horizontal.w
+      : rect.x + rect.w;
   const allowedKeys = new Set(
     interiorLibraryControllerDefinitions.value
       .filter((definition) => !definition?.hidden)
@@ -4432,12 +4455,16 @@ const interiorLibraryControllerVisuals = computed(() => {
       kind: "horizontal",
       direction: "right",
       iconPlacement: rightIconPlacement,
-      anchor: { x: rect.x + rect.w, y: rect.y + (rect.h * 0.5) },
+      anchor: normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT
+        ? { x: rect.x, y: rect.y + (rect.h * 0.5) }
+        : { x: rect.x + rect.w, y: rect.y + (rect.h * 0.5) },
       x: rightHandleX,
       y: rect.y + (rect.h * 0.5) - (horizontal.h * 0.5),
-      fieldX: rightIconPlacement === "inside"
-        ? rect.x + rect.w + gap
-        : rightHandleX + horizontal.w + gap,
+      fieldX: normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT
+        ? rightHandleX + horizontal.w + gap
+        : rightIconPlacement === "inside"
+          ? rect.x + rect.w + gap
+          : rightHandleX + horizontal.w + gap,
       fieldY: rect.y + (rect.h * 0.5) - (horizontal.inputH * 0.5),
       ...horizontal,
     },
@@ -5252,6 +5279,38 @@ function trimInteriorControllerDisplayNumber(value, decimals = 0) {
   return numeric.toFixed(Math.max(0, decimals)).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
 }
 
+function normalizeInteriorControllerValuesForDisplay(values, controllerType) {
+  const nextValues = {
+    left: Number(values?.left) || 0,
+    top: Number(values?.top) || 0,
+    right: Number(values?.right) || 0,
+    bottom_offset: Number(values?.bottom_offset) || 0,
+  };
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
+  if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT) {
+    nextValues.right = nextValues.left + nextValues.right;
+  } else if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT) {
+    nextValues.left = nextValues.left + nextValues.right;
+  }
+  return nextValues;
+}
+
+function denormalizeInteriorControllerValuesFromDisplay(values, controllerType) {
+  const nextValues = {
+    left: Number(values?.left) || 0,
+    top: Number(values?.top) || 0,
+    right: Number(values?.right) || 0,
+    bottom_offset: Number(values?.bottom_offset) || 0,
+  };
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
+  if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT) {
+    nextValues.right = Math.max(0, nextValues.right - nextValues.left);
+  } else if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT) {
+    nextValues.left = Math.max(0, nextValues.left - nextValues.right);
+  }
+  return nextValues;
+}
+
 function buildInteriorLibraryControllerRectFromFrameValues(frame, values, controllerType) {
   if (!frame) return null;
   const rawLeft = Number(values?.left);
@@ -5260,6 +5319,7 @@ function buildInteriorLibraryControllerRectFromFrameValues(frame, values, contro
   const bottomOffset = Number(values?.bottom_offset);
   if (![rawLeft, rawRight, bottomOffset].every(Number.isFinite) || top == null) return null;
   const isHeightController = isHeightInternalGroupControllerType(controllerType);
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
   const leftMode = getInternalGroupControllerHorizontalMode(controllerType, "left");
   const rightMode = getInternalGroupControllerHorizontalMode(controllerType, "right");
   const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
@@ -5267,6 +5327,29 @@ function buildInteriorLibraryControllerRectFromFrameValues(frame, values, contro
     ? Math.max(0, frameHeight - top - bottomOffset)
     : Math.max(0, top);
   const frameWidth = Math.max(0, frame.maxX - frame.minX);
+  if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT) {
+    const leftInset = Math.max(0, Math.min(frameWidth, rawLeft));
+    const totalRight = Math.max(leftInset, Math.min(frameWidth, rawRight));
+    const widthMm = Math.max(0, totalRight);
+    const x = frame.x + ((frameWidth - widthMm) * frame.scale);
+    const w = widthMm * frame.scale;
+    const h = heightMm * frame.scale;
+    const bottomMm = frame.minZ + bottomOffset;
+    const y = frame.y + ((frame.maxZ - (bottomMm + heightMm)) * frame.scale);
+    return { x, y, w, h, left: leftInset, right: totalRight, top, bottom_offset: bottomOffset };
+  }
+  if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT) {
+    const rightInset = Math.max(0, Math.min(frameWidth, rawRight));
+    const totalLeft = Math.max(rightInset, Math.min(frameWidth, rawLeft));
+    const widthMm = Math.max(0, totalLeft);
+    const leftInset = 0;
+    const x = frame.x + (leftInset * frame.scale);
+    const w = widthMm * frame.scale;
+    const h = heightMm * frame.scale;
+    const bottomMm = frame.minZ + bottomOffset;
+    const y = frame.y + ((frame.maxZ - (bottomMm + heightMm)) * frame.scale);
+    return { x, y, w, h, left: totalLeft, right: rightInset, top, bottom_offset: bottomOffset };
+  }
   const widthFromLeft = rightMode === "span_from_left"
     ? Math.min(Math.max(0, rawRight), Math.max(0, frameWidth - rawLeft))
     : null;
@@ -5303,6 +5386,23 @@ function deriveInteriorLibraryControllerValuesFromGeometry(instance, frame, cont
   const rightInset = Math.max(0, frame.maxX - boundsMaxX);
   const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
   const topInset = Math.max(0, frame.maxZ - (Number(bounds.maxZ) || 0));
+  const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
+  if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT) {
+    return {
+      left: leftInset,
+      right: leftInset + widthMm,
+      top: Math.min(frameHeight, topInset),
+      bottom_offset: Math.max(0, (Number(bounds.minZ) || 0) - frame.minZ),
+    };
+  }
+  if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT) {
+    return {
+      left: rightInset + widthMm,
+      right: rightInset,
+      top: Math.min(frameHeight, topInset),
+      bottom_offset: Math.max(0, (Number(bounds.minZ) || 0) - frame.minZ),
+    };
+  }
   return {
     left: leftMode === "span_from_right" ? widthMm : leftInset,
     right: rightMode === "span_from_left" ? widthMm : rightInset,
@@ -5333,7 +5433,8 @@ function buildInteriorLibraryControllerOverlayForInstance(instance, frame) {
   if (!Number.isFinite(Number(values.top))) {
     values.top = geometryValues.top;
   }
-  const rect = buildInteriorLibraryControllerRectFromFrameValues(frame, values, group?.controller_type);
+  const displayValues = normalizeInteriorControllerValuesForDisplay(values, group?.controller_type);
+  const rect = buildInteriorLibraryControllerRectFromFrameValues(frame, displayValues, group?.controller_type);
   if (!rect) return null;
   return {
     instanceId: String(instance?.id || "").trim(),
@@ -5342,7 +5443,7 @@ function buildInteriorLibraryControllerOverlayForInstance(instance, frame) {
     groupTitle: String(group?.group_title || group?.title || "").trim(),
     lineColor: resolveInteriorInstanceLineColor(instance),
     bindings,
-    values,
+    values: displayValues,
     rect,
   };
 }
