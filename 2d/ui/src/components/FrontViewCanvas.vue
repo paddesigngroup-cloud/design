@@ -51,13 +51,26 @@ const sceneViewBox = computed(() => {
   };
 });
 
-function worldToScreen(point) {
+const screenTransform = computed(() => {
   const box = sceneViewBox.value;
   const width = Math.max(1, Number(viewport.value.width) || 1);
   const height = Math.max(1, Number(viewport.value.height) || 1);
+  const scale = Math.min(width / box.width, height / box.height);
+  const drawWidth = box.width * scale;
+  const drawHeight = box.height * scale;
   return {
-    x: ((Number(point?.x) || 0) - box.x) / box.width * width,
-    y: ((Number(point?.y) || 0) - box.y) / box.height * height,
+    scale,
+    offsetX: (width - drawWidth) * 0.5,
+    offsetY: (height - drawHeight) * 0.5,
+  };
+});
+
+function worldToScreen(point) {
+  const box = sceneViewBox.value;
+  const transform = screenTransform.value;
+  return {
+    x: transform.offsetX + (((Number(point?.x) || 0) - box.x) * transform.scale),
+    y: transform.offsetY + (((Number(point?.y) || 0) - box.y) * transform.scale),
   };
 }
 
@@ -70,9 +83,16 @@ function screenToWorld(event) {
   const clientY = Number(event.clientY);
   if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
   const box = sceneViewBox.value;
+  const transform = screenTransform.value;
+  const localX = clientX - rect.left - transform.offsetX;
+  const localY = clientY - rect.top - transform.offsetY;
+  if (localX < 0 || localY < 0) return null;
+  const maxX = box.width * transform.scale;
+  const maxY = box.height * transform.scale;
+  if (localX > maxX || localY > maxY) return null;
   return {
-    x: box.x + ((clientX - rect.left) / rect.width) * box.width,
-    y: box.y + ((clientY - rect.top) / rect.height) * box.height,
+    x: box.x + (localX / transform.scale),
+    y: box.y + (localY / transform.scale),
   };
 }
 
@@ -502,7 +522,7 @@ onBeforeUnmount(() => {
 
 watch(() => props.scene, () => {
   scheduleDraw();
-}, { deep: true, immediate: true });
+}, { immediate: true });
 
 watch(viewport, () => {
   scheduleDraw();

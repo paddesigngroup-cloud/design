@@ -3959,6 +3959,19 @@ function buildFrontViewMetricSceneVisuals(metrics, values) {
   }));
 }
 const doorLibraryFrontCanvasScene = computed(() => ({
+  renderToken: [
+    String(doorLibraryFrontSvgViewBox.value || ""),
+    String(doorLibraryHoveredInstanceId.value || ""),
+    (doorLibrarySelectedInstanceIds.value || []).join(","),
+    String(doorLibrarySelectedPlacedInstanceId.value || ""),
+    String(doorLibraryCurrentSnapPoint.value ? `${doorLibraryCurrentSnapPoint.value.x}:${doorLibraryCurrentSnapPoint.value.y}:${doorLibraryCurrentSnapPoint.value.kind}` : ""),
+    Number(doorLibraryRenderedAnnotations.value?.dimensions?.length || 0),
+    doorLibraryRenderedAnnotations.value?.draftDimension ? "draft" : "nodraft",
+    Number(doorLibraryFrontView.value?.inner?.length || 0),
+    Number(doorLibraryPreviewInstances2d.value?.length || 0),
+    Number(doorLibraryPersistedControllerOverlays.value?.length || 0),
+    isDoorLibraryPendingControllerActive.value ? "pending" : "idle",
+  ].join("|"),
   viewBox: { ...doorLibraryFrontSvgViewBoxRect.value },
   structure: {
     outerLines: [],
@@ -3970,7 +3983,6 @@ const doorLibraryFrontCanvasScene = computed(() => ({
       color: String(line?.lineColor || "#7B858C"),
       strokeWidth: 1.2,
       dashed: true,
-      opacity: 0.82,
       opacity: 1,
     })),
   },
@@ -4012,16 +4024,7 @@ const doorLibraryFrontCanvasScene = computed(() => ({
     points: doorLibraryFrontSnapPoints.value || [],
     activePoint: doorLibraryCurrentSnapPoint.value || null,
   },
-  cursor: doorLibraryCursorPoint.value
-    ? {
-        point: doorLibraryCursorPoint.value,
-        kind: doorLibraryAnnotationTool.value === "dimension"
-          ? "dimension"
-          : (doorLibraryFrontShowPanCursor.value ? "pan" : "icon"),
-        icon: doorLibraryHoverMode.value === "clicker" ? "clicker" : "default",
-        scale: doorLibraryCursorVisualScale.value,
-      }
-    : null,
+  cursor: null,
 }));
 const doorLibraryShouldShowSnapMarkers = computed(() =>
   doorLibraryAnnotationTool.value === "dimension"
@@ -4626,6 +4629,22 @@ const interiorLibraryFrontCanvasScene = computed(() => {
     });
   }
   return {
+    renderToken: [
+      String(interiorLibraryFrontSvgViewBox.value || ""),
+      String(interiorLibrarySelectedInstanceId.value || ""),
+      String(interiorLibraryHoveredInstanceId.value || ""),
+      String(interiorLibraryPickerPreviewInstanceId.value || ""),
+      String(interiorLibraryHoveredControllerId.value || ""),
+      String(interiorLibraryCurrentSnapPoint.value ? `${interiorLibraryCurrentSnapPoint.value.x}:${interiorLibraryCurrentSnapPoint.value.y}:${interiorLibraryCurrentSnapPoint.value.kind}` : ""),
+      Number(interiorLibraryRenderedAnnotations.value?.dimensions?.length || 0),
+      interiorLibraryRenderedAnnotations.value?.draftDimension ? "draft" : "nodraft",
+      Number(interiorLibraryPreviewSvgLines.value?.outer?.length || 0),
+      Number(interiorLibraryPreviewSvgLines.value?.inner?.length || 0),
+      Number(interiorLibraryPreviewInstances2d.value?.length || 0),
+      Number(interiorLibraryControllerOverlays.value?.length || 0),
+      interiorLibraryControllerState.value?.enabled ? "controller" : "nocontroller",
+      String(interiorLibraryControllerPointerState.value?.mode || "idle"),
+    ].join("|"),
     viewBox: { ...interiorLibraryFrontSvgViewBoxRect.value },
     structure: {
       outerLines: (interiorLibraryPreviewSvgLines.value?.outer || []).map((line) => ({
@@ -4673,16 +4692,7 @@ const interiorLibraryFrontCanvasScene = computed(() => {
       points: interiorLibraryFrontSnapPoints.value || [],
       activePoint: interiorLibraryCurrentSnapPoint.value || null,
     },
-    cursor: interiorLibraryCursorPoint.value
-      ? {
-          point: interiorLibraryCursorPoint.value,
-          kind: interiorLibraryAnnotationTool.value === "dimension"
-            ? "dimension"
-            : (interiorLibraryFrontShowPanCursor.value ? "pan" : "icon"),
-          icon: interiorLibraryHoverMode.value === "clicker" ? "clicker" : "default",
-          scale: interiorLibraryCursorVisualScale.value,
-        }
-      : null,
+    cursor: null,
   };
 });
 const interiorLibraryShouldShowSnapMarkers = computed(() =>
