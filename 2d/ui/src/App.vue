@@ -17,6 +17,7 @@ import {
   fitAllHandlerRef,
 } from "./editor/editor_store.js";
 import GlbViewerWidget from "./components/GlbViewerWidget.vue";
+import FrontViewCanvas from "./components/FrontViewCanvas.vue";
 import { useDialogService } from "./dialog_service.js";
 import { WALL_READY_PRESETS, buildPresetLines, getPresetIconWalls } from "./features/wall_preset_drag.js";
 import { DOOR_READY_PRESETS, buildDoorPresetPayloadAsync, buildDoorPresetPreviewLines, getDoorPresetIconLines, primeDoorPresetModel } from "./features/door_preset_drag.js";
@@ -1049,6 +1050,9 @@ function cancelInteriorLibraryAnnotationDrawing() {
 function getInteriorLibraryFrontSvgPoint(event) {
   const svgEl = interiorLibraryFrontSvgEl.value;
   if (!svgEl || !event) return null;
+  if (typeof svgEl.getWorldPointFromEvent === "function") {
+    return svgEl.getWorldPointFromEvent(event);
+  }
   const rect = svgEl.getBoundingClientRect();
   if (!rect.width || !rect.height) return null;
   const clientX = Number(event.clientX);
@@ -1138,6 +1142,9 @@ function clearInteriorLibraryViewerCursorPoint() {
 function getDoorLibraryFrontSvgPoint(event) {
   const svgEl = doorLibraryFrontSvgEl.value;
   if (!svgEl || !event) return null;
+  if (typeof svgEl.getWorldPointFromEvent === "function") {
+    return svgEl.getWorldPointFromEvent(event);
+  }
   const rect = svgEl.getBoundingClientRect();
   if (!rect.width || !rect.height) return null;
   const clientX = Number(event.clientX);
@@ -1862,6 +1869,22 @@ function beginInteriorLibraryControllerEditing(controllerId) {
     inputEl?.select?.();
   });
 }
+async function promptInteriorLibraryControllerEditing(controllerId) {
+  if (!controllerId || !interiorLibraryControllerState.value.enabled) return;
+  const nextValue = await showPrompt(
+    `مقدار جدید ${controllerId}:`,
+    formatInteriorControllerRawValue(interiorLibraryControllerParamValues.value?.[controllerId]),
+    { title: "ویرایش کنترلر نمونه داخلی" }
+  );
+  if (nextValue == null) return;
+  const nextValueMm = parseInteriorControllerInputToMm(nextValue);
+  if (nextValueMm == null) return;
+  const applied = applyInteriorLibraryControllerInput(controllerId, nextValueMm);
+  if (!applied) return;
+  persistActiveInteriorLibraryControllerInstance().catch((error) => {
+    showAlert(error?.message || "ذخیره کنترلر نمونه داخلی انجام نشد.", { title: "خطا" });
+  });
+}
 
 function updateInteriorInstanceFromControllerValues(nextValues) {
   const instance = activeInteriorLibrarySelectedInstance.value;
@@ -2007,15 +2030,16 @@ function commitInteriorLibraryControllerEditing() {
   });
 }
 
-function beginInteriorLibraryControllerDrag(controllerId, event) {
-  const point = getInteriorLibraryFrontSvgPoint(event);
+function beginInteriorLibraryControllerDrag(controllerId, payload) {
+  const rawEvent = payload?.event || payload;
+  const point = payload?.point || getInteriorLibraryFrontSvgPoint(rawEvent);
   const controller = interiorLibraryControllerVisuals.value.find((item) => item.id === controllerId);
   if (!point || !controller?.anchor) return;
   interiorLibraryHoveredControllerId.value = String(controllerId || "").trim();
   interiorLibraryControllerDraftValues.value = { ...interiorLibraryControllerParamValues.value };
   interiorLibraryControllerPointerState.value = {
     mode: "controller",
-    pointerId: event.pointerId,
+    pointerId: rawEvent?.pointerId,
     controllerId: String(controllerId || "").trim(),
     startPoint: point,
     startPan: null,
@@ -2026,13 +2050,14 @@ function beginInteriorLibraryControllerDrag(controllerId, event) {
     },
     dirty: false,
   };
-  interiorLibraryFrontSvgEl.value?.setPointerCapture?.(event.pointerId);
+  interiorLibraryFrontSvgEl.value?.setPointerCapture?.(rawEvent?.pointerId);
 }
 
-function handleInteriorLibraryControllerPointerDown(controllerId, event) {
-  if (Number(event?.button) === 1) return;
-  if (Number(event?.button) !== 0) return;
-  beginInteriorLibraryControllerDrag(controllerId, event);
+function handleInteriorLibraryControllerPointerDown(controllerId, payload) {
+  const rawEvent = payload?.event || payload;
+  if (Number(rawEvent?.button) === 1) return;
+  if (Number(rawEvent?.button) !== 0) return;
+  beginInteriorLibraryControllerDrag(controllerId, payload);
 }
 
 function handleInteriorLibraryControllerValuePointerDown(event) {
@@ -2292,18 +2317,19 @@ function processDoorLibraryPointerFrame() {
     scheduleDoorLibraryPointerProcessing();
   }
 }
-function onInteriorLibraryFrontSvgPointerDown(event) {
-  if (interiorLibraryPreviewMode.value !== "front2d" || Number(event?.button) !== 0) return;
+function onInteriorLibraryFrontSvgPointerDown(payload) {
+  const rawEvent = payload?.event || payload;
+  const rawPoint = payload?.point || getInteriorLibraryFrontSvgPoint(rawEvent);
+  if (interiorLibraryPreviewMode.value !== "front2d" || Number(rawEvent?.button) !== 0) return;
   if (interiorLibraryControllerState.value.enabled) {
-    const controllerHit = hitTestInteriorLibraryController(getInteriorLibraryFrontSvgPoint(event));
+    const controllerHit = hitTestInteriorLibraryController(rawPoint);
     if (controllerHit) {
-      beginInteriorLibraryControllerDrag(controllerHit.id, event);
-      event.preventDefault();
-      event.stopPropagation();
+      beginInteriorLibraryControllerDrag(controllerHit.id, payload);
+      rawEvent?.preventDefault?.();
+      rawEvent?.stopPropagation?.();
       return;
     }
   }
-  const rawPoint = getInteriorLibraryFrontSvgPoint(event);
   if (!rawPoint) return;
   syncInteriorLibraryCursorPoint(rawPoint, interiorLibraryCurrentSnapPoint.value);
   const rendered = interiorLibraryRenderedAnnotations.value;
@@ -2319,8 +2345,8 @@ function onInteriorLibraryFrontSvgPointerDown(event) {
     interiorLibraryAnnotationDraft.value = null;
     interiorLibraryCurrentSnapPoint.value = null;
     hideInteriorLibraryOverlapPicker();
-    event.preventDefault();
-    event.stopPropagation();
+    rawEvent?.preventDefault?.();
+    rawEvent?.stopPropagation?.();
     return;
   }
   if (!interiorLibraryAnnotationTool.value) {
@@ -2330,14 +2356,14 @@ function onInteriorLibraryFrontSvgPointerDown(event) {
         selectInteriorLibraryInstance(instanceHits[0].id);
         hideInteriorLibraryOverlapPicker();
         interiorLibraryCurrentSnapPoint.value = null;
-        event.preventDefault();
-        event.stopPropagation();
+        rawEvent?.preventDefault?.();
+        rawEvent?.stopPropagation?.();
         return;
       }
-      showInteriorLibraryOverlapPicker(event.clientX, event.clientY, instanceHits);
+      showInteriorLibraryOverlapPicker(rawEvent?.clientX, rawEvent?.clientY, instanceHits);
       interiorLibraryCurrentSnapPoint.value = null;
-      event.preventDefault();
-      event.stopPropagation();
+      rawEvent?.preventDefault?.();
+      rawEvent?.stopPropagation?.();
       return;
     }
     hideInteriorLibraryOverlapPicker();
@@ -2355,8 +2381,8 @@ function onInteriorLibraryFrontSvgPointerDown(event) {
     updateInteriorLibraryAnnotationDraft(point);
     commitInteriorLibraryAnnotationDraft();
   }
-  event.preventDefault();
-  event.stopPropagation();
+  rawEvent?.preventDefault?.();
+  rawEvent?.stopPropagation?.();
 }
 function handleInteriorLibraryInstanceCardContextMenu(item, event) {
   const instanceId = String(item?.id || "").trim();
@@ -2382,9 +2408,10 @@ function handleDoorLibraryInstanceCardContextMenu(item, event) {
     source: "card",
   });
 }
-function onInteriorLibraryFrontSvgContextMenu(event) {
+function onInteriorLibraryFrontSvgContextMenu(payload) {
+  const rawEvent = payload?.event || payload;
   if (interiorLibraryPreviewMode.value !== "front2d") return;
-  const rawPoint = getInteriorLibraryFrontSvgPoint(event);
+  const rawPoint = payload?.point || getInteriorLibraryFrontSvgPoint(rawEvent);
   if (!rawPoint) return;
   const rendered = interiorLibraryRenderedAnnotations.value;
   const hitDimension = interiorLibraryShowDimensions.value
@@ -2398,18 +2425,19 @@ function onInteriorLibraryFrontSvgContextMenu(event) {
     : null;
   const overlay = selectedHit || interiorLibraryControllerOverlays.value.find((item) => pointInInteriorRect(rawPoint, item?.rect, 0));
   if (!overlay?.instanceId) return;
-  event.preventDefault();
-  event.stopPropagation();
+  rawEvent?.preventDefault?.();
+  rawEvent?.stopPropagation?.();
   openInteriorInstanceContextMenu({
     instanceId: overlay.instanceId,
-    x: event.clientX,
-    y: event.clientY,
+    x: rawEvent?.clientX,
+    y: rawEvent?.clientY,
     source: "preview",
   });
 }
-function onDoorLibraryFrontSvgContextMenu(event) {
+function onDoorLibraryFrontSvgContextMenu(payload) {
+  const rawEvent = payload?.event || payload;
   if (doorLibraryPreviewMode.value !== "front2d" || isDoorLibraryPendingControllerActive.value) return;
-  const rawPoint = getDoorLibraryFrontSvgPoint(event);
+  const rawPoint = payload?.point || getDoorLibraryFrontSvgPoint(rawEvent);
   if (!rawPoint) return;
   const hitDimension = hitTestCachedAnnotationList(
     doorLibraryAnnotationHitCache,
@@ -2420,12 +2448,12 @@ function onDoorLibraryFrontSvgContextMenu(event) {
   if (hitDimension) return;
   const overlay = hitTestDoorLibraryPlacedOverlay(rawPoint);
   if (!overlay?.id) return;
-  event.preventDefault();
-  event.stopPropagation();
+  rawEvent?.preventDefault?.();
+  rawEvent?.stopPropagation?.();
   openDoorInstanceContextMenu({
     instanceId: overlay.id,
-    x: event.clientX,
-    y: event.clientY,
+    x: rawEvent?.clientX,
+    y: rawEvent?.clientY,
     source: "preview",
   });
 }
@@ -2435,8 +2463,8 @@ function onInteriorLibraryOverlapPickerPointerDown(event) {
 function onInteriorLibraryOverlapPickerLeave() {
   clearInteriorLibraryOverlapPreview();
 }
-function onInteriorLibraryFrontSvgPointerMove(event) {
-  const rawPoint = getInteriorLibraryFrontSvgPoint(event);
+function onInteriorLibraryFrontSvgPointerMove(payload) {
+  const rawPoint = payload?.point || getInteriorLibraryFrontSvgPoint(payload?.event || payload);
   if (!rawPoint) return;
   if (interiorLibraryControllerPointerState.value.mode === "controller") {
     syncInteriorLibraryCursorPoint(rawPoint, null);
@@ -2461,6 +2489,16 @@ function onInteriorLibraryFrontSvgPointerUp() {
   if (interiorLibraryControllerPointerState.value.mode === "controller") {
     stopInteriorLibraryControllerDrag();
   }
+}
+
+async function onInteriorLibraryFrontSvgDoubleClick(payload) {
+  if (interiorLibraryPreviewMode.value !== "front2d") return;
+  const controllerHit = payload?.hit;
+  if (controllerHit?.type === "controller-field" || controllerHit?.type === "controller-handle") {
+    await promptInteriorLibraryControllerEditing(controllerHit.controllerId);
+    return;
+  }
+  focusInteriorLibraryPreviewCloser();
 }
 
 function onInteriorLibraryFrontSvgPointerCancel() {
@@ -2501,9 +2539,10 @@ function onInteriorLibraryViewerPointerDown(event) {
   }
   startInteriorLibraryFrontPan(event);
 }
-function onDoorLibraryFrontSvgPointerDown(event) {
-  if (doorLibraryPreviewMode.value !== "front2d" || Number(event?.button) !== 0) return;
-  const rawPoint = getDoorLibraryFrontSvgPoint(event);
+function onDoorLibraryFrontSvgPointerDown(payload) {
+  const rawEvent = payload?.event || payload;
+  if (doorLibraryPreviewMode.value !== "front2d" || Number(rawEvent?.button) !== 0) return;
+  const rawPoint = payload?.point || getDoorLibraryFrontSvgPoint(rawEvent);
   if (!rawPoint) return;
   syncDoorLibraryCursorPoint(rawPoint, doorLibraryCurrentSnapPoint.value);
   const hitDimension = hitTestCachedAnnotationList(
@@ -2519,8 +2558,8 @@ function onDoorLibraryFrontSvgPointerDown(event) {
     };
     doorLibraryAnnotationDraft.value = null;
     doorLibraryCurrentSnapPoint.value = null;
-    event.preventDefault();
-    event.stopPropagation();
+    rawEvent?.preventDefault?.();
+    rawEvent?.stopPropagation?.();
     return;
   }
   clearDoorLibraryAnnotationSelection();
@@ -2529,8 +2568,8 @@ function onDoorLibraryFrontSvgPointerDown(event) {
       const overlayHit = hitTestDoorLibraryPlacedOverlay(rawPoint);
       if (overlayHit?.id) {
         selectDoorLibraryPlacedInstance(overlayHit.id);
-        event.preventDefault();
-        event.stopPropagation();
+        rawEvent?.preventDefault?.();
+        rawEvent?.stopPropagation?.();
         return;
       }
     }
@@ -2540,8 +2579,8 @@ function onDoorLibraryFrontSvgPointerDown(event) {
     if (instanceHits.length) {
       if (isDoorLibraryPendingControllerActive.value) toggleDoorLibraryInstanceSelection(instanceHits[0].id);
       else selectDoorLibraryInstance(instanceHits[0].id);
-      event.preventDefault();
-      event.stopPropagation();
+      rawEvent?.preventDefault?.();
+      rawEvent?.stopPropagation?.();
       return;
     }
     if (!isDoorLibraryPendingControllerActive.value) {
@@ -2559,8 +2598,8 @@ function onDoorLibraryFrontSvgPointerDown(event) {
     updateDoorLibraryAnnotationDraft(point);
     commitDoorLibraryAnnotationDraft();
   }
-  event.preventDefault();
-  event.stopPropagation();
+  rawEvent?.preventDefault?.();
+  rawEvent?.stopPropagation?.();
 }
 async function handleDoorLibraryPreviewDoubleClick() {
   if (doorLibraryPreviewMode.value === "model3d") {
@@ -2574,8 +2613,8 @@ async function handleDoorLibraryPreviewDoubleClick() {
   }
   resetDoorLibraryPreviewView(true);
 }
-function onDoorLibraryFrontSvgPointerMove(event) {
-  const rawPoint = getDoorLibraryFrontSvgPoint(event);
+function onDoorLibraryFrontSvgPointerMove(payload) {
+  const rawPoint = payload?.point || getDoorLibraryFrontSvgPoint(payload?.event || payload);
   if (!rawPoint) return;
   doorLibraryPendingPointerPoint.value = rawPoint;
   scheduleDoorLibraryPointerProcessing();
@@ -2586,6 +2625,9 @@ function onDoorLibraryFrontSvgPointerLeave() {
   doorLibraryHoverMode.value = null;
   doorLibraryHoveredInstanceId.value = "";
   stopDoorLibraryPointerProcessing();
+}
+async function onDoorLibraryFrontSvgDoubleClick() {
+  await handleDoorLibraryPreviewDoubleClick();
 }
 function onDoorLibraryViewerPointerMove(event) {
   if (doorLibraryPreviewMode.value === "model3d") {
@@ -3901,6 +3943,86 @@ const doorLibraryModelCursorStyle = computed(() => {
     transform: "translate(-50%, -50%)",
   };
 });
+function buildFrontViewControllerSceneVisuals(visuals, values, hoveredControllerId, draggingControllerId, editingControllerId = "") {
+  return (Array.isArray(visuals) ? visuals : []).map((controller) => ({
+    ...controller,
+    label: formatInteriorControllerDisplayValue(values?.[controller.id]),
+    hovered: String(hoveredControllerId || "") === String(controller.id || ""),
+    dragging: String(draggingControllerId || "") === String(controller.id || ""),
+    editing: String(editingControllerId || "") === String(controller.id || ""),
+  }));
+}
+function buildFrontViewMetricSceneVisuals(metrics, values) {
+  return (Array.isArray(metrics) ? metrics : []).map((metric) => ({
+    ...metric,
+    label: formatInteriorControllerDisplayValue(values?.[metric.id]),
+  }));
+}
+const doorLibraryFrontCanvasScene = computed(() => ({
+  viewBox: { ...doorLibraryFrontSvgViewBoxRect.value },
+  structure: {
+    outerLines: [],
+    innerLines: (doorLibraryFrontView.value?.inner || []).map((line) => ({
+      x1: Number(line?.ax) || 0,
+      y1: -(Number(line?.az) || 0),
+      x2: Number(line?.bx) || 0,
+      y2: -(Number(line?.bz) || 0),
+      color: String(line?.lineColor || "#7B858C"),
+      strokeWidth: 1.2,
+      dashed: true,
+      opacity: 0.82,
+      opacity: 1,
+    })),
+  },
+  entities: doorLibraryPreviewInstances2d.value.map((instance) => ({
+    ...instance,
+    hovered: String(doorLibraryHoveredInstanceId.value || "") === String(instance.id || ""),
+    selected: doorLibrarySelectedInstanceIds.value.includes(String(instance.id || "")),
+    lineColor: instance.highlightColor || instance.lineColor,
+    outerStrokeWidth: doorLibrarySelectedInstanceIds.value.includes(String(instance.id || "")) ? 7.6 : ((String(doorLibraryHoveredInstanceId.value || "") === String(instance.id || "")) ? 6.4 : 0),
+    outerOpacity: doorLibrarySelectedInstanceIds.value.includes(String(instance.id || "")) ? 0.98 : ((String(doorLibraryHoveredInstanceId.value || "") === String(instance.id || "")) ? 0.9 : 0),
+    innerStrokeWidth: doorLibrarySelectedInstanceIds.value.includes(String(instance.id || "")) ? 7.2 : 6.2,
+    innerOpacity: doorLibrarySelectedInstanceIds.value.includes(String(instance.id || "")) ? 1 : 0,
+  })),
+  controllers: [
+    ...doorLibraryPersistedControllerOverlays.value.map((overlay) => ({
+      ...overlay,
+      selected: String(doorLibrarySelectedPlacedInstanceId.value || "") === String(overlay.id || ""),
+      visuals: buildFrontViewControllerSceneVisuals(overlay.visuals, overlay.values, "", ""),
+      metrics: buildFrontViewMetricSceneVisuals(overlay.metrics, overlay.values),
+    })),
+    ...((isDoorLibraryPendingControllerActive.value && doorLibraryControllerRect.value) ? [{
+      id: "__pending__",
+      rect: { ...doorLibraryControllerRect.value },
+      lineColor: String(doorLibraryPendingControllerState.value?.pending_color || "#2f7fd3"),
+      selected: true,
+      visuals: buildFrontViewControllerSceneVisuals(doorLibraryControllerVisuals.value, doorLibraryControllerParamValues.value, "", ""),
+      metrics: buildFrontViewMetricSceneVisuals(doorLibraryControllerMetricVisuals.value, doorLibraryControllerParamValues.value),
+    }] : []),
+  ],
+  annotations: {
+    visible: !!doorLibraryShowDimensions.value,
+    color: doorLibraryAnnotationColors.value.dimension,
+    selectedColor: doorLibraryAnnotationColors.value.selected,
+    dimensions: doorLibraryRenderedAnnotations.value.dimensions || [],
+    draftDimension: doorLibraryRenderedAnnotations.value.draftDimension || null,
+  },
+  snap: {
+    visible: !!doorLibraryShouldShowSnapMarkers.value,
+    points: doorLibraryFrontSnapPoints.value || [],
+    activePoint: doorLibraryCurrentSnapPoint.value || null,
+  },
+  cursor: doorLibraryCursorPoint.value
+    ? {
+        point: doorLibraryCursorPoint.value,
+        kind: doorLibraryAnnotationTool.value === "dimension"
+          ? "dimension"
+          : (doorLibraryFrontShowPanCursor.value ? "pan" : "icon"),
+        icon: doorLibraryHoverMode.value === "clicker" ? "clicker" : "default",
+        scale: doorLibraryCursorVisualScale.value,
+      }
+    : null,
+}));
 const doorLibraryShouldShowSnapMarkers = computed(() =>
   doorLibraryAnnotationTool.value === "dimension"
 );
@@ -4473,6 +4595,94 @@ const interiorLibraryModelCursorStyle = computed(() => {
     left: `${Math.round(Number(point.x) || 0)}px`,
     top: `${Math.round(Number(point.y) || 0)}px`,
     transform: "translate(-50%, -50%)",
+  };
+});
+const interiorLibraryFrontCanvasScene = computed(() => {
+  const selectedOverlayLineColor = interiorLibrarySelectedControllerOverlay.value?.lineColor || "#2f7fd3";
+  const controllers = interiorLibraryControllerOverlays.value
+    .filter((overlay) => String(interiorLibrarySelectedInstanceId.value || "") !== String(overlay.instanceId || ""))
+    .map((overlay) => ({
+      id: overlay.instanceId,
+      rect: { ...(overlay.rect || {}) },
+      lineColor: overlay.lineColor || "#2f7fd3",
+      selected: false,
+      visuals: [],
+      metrics: [],
+    }));
+  if (interiorLibraryControllerState.value.enabled && interiorLibraryControllerRect.value) {
+    controllers.push({
+      id: String(interiorLibrarySelectedInstanceId.value || "__selected__"),
+      rect: { ...interiorLibraryControllerRect.value },
+      lineColor: selectedOverlayLineColor,
+      selected: true,
+      visuals: buildFrontViewControllerSceneVisuals(
+        interiorLibraryControllerVisuals.value,
+        interiorLibraryControllerParamValues.value,
+        interiorLibraryHoveredControllerId.value,
+        interiorLibraryControllerPointerState.value?.mode === "controller" ? interiorLibraryControllerPointerState.value?.controllerId : "",
+        interiorLibraryControllerEditingId.value
+      ),
+      metrics: [],
+    });
+  }
+  return {
+    viewBox: { ...interiorLibraryFrontSvgViewBoxRect.value },
+    structure: {
+      outerLines: (interiorLibraryPreviewSvgLines.value?.outer || []).map((line) => ({
+        x1: Number(line?.x1) || 0,
+        y1: Number(line?.y1) || 0,
+        x2: Number(line?.x2) || 0,
+        y2: Number(line?.y2) || 0,
+        color: "#4f4144",
+        strokeWidth: Number(line?.sw) || 2.2,
+      })),
+      innerLines: [
+        ...((interiorLibraryShowInnerLines.value ? (interiorLibraryPreviewSvgLines.value?.inner || []) : []).map((line) => ({
+          x1: Number(line?.x1) || 0,
+          y1: Number(line?.y1) || 0,
+          x2: Number(line?.x2) || 0,
+          y2: Number(line?.y2) || 0,
+          color: "#b9c3cd",
+          strokeWidth: Number(line?.sw) || 1.2,
+          dashed: true,
+          opacity: 0.82,
+        }))),
+      ],
+    },
+    entities: interiorLibraryPreviewInstances2d.value.map((instance) => ({
+      ...instance,
+      hovered: String(interiorLibraryHoveredInstanceId.value || "") === String(instance.id || "")
+        || String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || ""),
+      preview: String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || ""),
+      selected: String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || ""),
+      outerStrokeWidth: String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || "") ? 1.08 : ((String(interiorLibraryHoveredInstanceId.value || "") === String(instance.id || "") || String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || "")) ? 0.66 : 0),
+      outerOpacity: String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || "") ? 0.92 : ((String(interiorLibraryHoveredInstanceId.value || "") === String(instance.id || "") || String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || "")) ? 0.88 : 0.78),
+      lineColor: instance.lineColor,
+      highlightColor: instance.lineColor,
+    })),
+    controllers,
+    annotations: {
+      visible: !!interiorLibraryShowDimensions.value,
+      color: interiorLibraryAnnotationColors.value.dimension,
+      selectedColor: interiorLibraryAnnotationColors.value.selected,
+      dimensions: interiorLibraryRenderedAnnotations.value.dimensions || [],
+      draftDimension: interiorLibraryRenderedAnnotations.value.draftDimension || null,
+    },
+    snap: {
+      visible: !!interiorLibraryShouldShowSnapMarkers.value,
+      points: interiorLibraryFrontSnapPoints.value || [],
+      activePoint: interiorLibraryCurrentSnapPoint.value || null,
+    },
+    cursor: interiorLibraryCursorPoint.value
+      ? {
+          point: interiorLibraryCursorPoint.value,
+          kind: interiorLibraryAnnotationTool.value === "dimension"
+            ? "dimension"
+            : (interiorLibraryFrontShowPanCursor.value ? "pan" : "icon"),
+          icon: interiorLibraryHoverMode.value === "clicker" ? "clicker" : "default",
+          scale: interiorLibraryCursorVisualScale.value,
+        }
+      : null,
   };
 });
 const interiorLibraryShouldShowSnapMarkers = computed(() =>
@@ -19562,7 +19772,7 @@ onBeforeUnmount(() => {
               @pointermove="onInteriorLibraryViewerPointerMove"
               @pointerleave="onInteriorLibraryViewerPointerLeave"
               @pointerdown="onInteriorLibraryViewerPointerDown"
-              @dblclick.prevent="focusInteriorLibraryPreviewCloser"
+              @dblclick.prevent="interiorLibraryPreviewMode === 'model3d' ? focusInteriorLibraryPreviewCloser() : null"
             >
               <div v-if="interiorLibraryPreviewMode === 'model3d'" class="subCategoryDesignEditor__previewOpacity subCategoryDesignEditor__previewOpacity--overlay">
                 <span class="subCategoryDesignEditor__previewOpacityValue">0</span>
@@ -19590,8 +19800,23 @@ onBeforeUnmount(() => {
                 :preview-only="true"
                 :preview-active="interiorLibraryOpen"
               />
+              <FrontViewCanvas
+                v-else-if="interiorLibraryPreviewMode === 'front2d' && interiorLibraryPreviewSvgLines.outer.length"
+                ref="interiorLibraryFrontSvgEl"
+                class="subCategoryDesignEditor__frontCanvas"
+                :scene="interiorLibraryFrontCanvasScene"
+                :cursor-class="interiorLibraryFrontCursorClass"
+                @canvas-wheel="handleInteriorLibraryPreviewWheel($event.event)"
+                @pointerdown="onInteriorLibraryFrontSvgPointerDown"
+                @pointermove="onInteriorLibraryFrontSvgPointerMove"
+                @pointerup="onInteriorLibraryFrontSvgPointerUp"
+                @pointercancel="onInteriorLibraryFrontSvgPointerCancel"
+                @pointerleave="onInteriorLibraryFrontSvgPointerLeave"
+                @contextmenu="onInteriorLibraryFrontSvgContextMenu"
+                @dblclick="onInteriorLibraryFrontSvgDoubleClick"
+              />
               <svg
-                v-else-if="interiorLibraryPreviewSvgLines.outer.length"
+                v-else-if="false"
                 ref="interiorLibraryFrontSvgEl"
                 :viewBox="interiorLibraryFrontSvgViewBox"
                 class="subCategoryDesignEditor__frontSvg"
@@ -21231,7 +21456,7 @@ onBeforeUnmount(() => {
               @pointermove="onDoorLibraryViewerPointerMove"
               @pointerleave="onDoorLibraryViewerPointerLeave"
               @pointerdown="onDoorLibraryViewerPointerDown"
-              @dblclick.prevent="handleDoorLibraryPreviewDoubleClick"
+              @dblclick.prevent="doorLibraryPreviewMode === 'model3d' ? handleDoorLibraryPreviewDoubleClick() : null"
             >
               <div v-if="doorLibraryPreviewMode === 'model3d'" class="subCategoryDesignEditor__previewOpacity subCategoryDesignEditor__previewOpacity--overlay">
                 <span class="subCategoryDesignEditor__previewOpacityValue">0</span>
@@ -21259,8 +21484,21 @@ onBeforeUnmount(() => {
                 :preview-only="true"
                 :preview-active="doorLibraryOpen"
               />
-              <svg
+              <FrontViewCanvas
                 v-else-if="doorLibraryPreviewMode === 'front2d' && doorLibraryFrontView.inner.length"
+                ref="doorLibraryFrontSvgEl"
+                class="subCategoryDesignEditor__frontCanvas"
+                :scene="doorLibraryFrontCanvasScene"
+                :cursor-class="doorLibraryFrontCursorClass"
+                @canvas-wheel="handleDoorLibraryPreviewWheel($event.event)"
+                @pointerdown="onDoorLibraryFrontSvgPointerDown"
+                @pointermove="onDoorLibraryFrontSvgPointerMove"
+                @pointerleave="onDoorLibraryFrontSvgPointerLeave"
+                @contextmenu="onDoorLibraryFrontSvgContextMenu"
+                @dblclick="onDoorLibraryFrontSvgDoubleClick"
+              />
+              <svg
+                v-else-if="false"
                 ref="doorLibraryFrontSvgEl"
                 :viewBox="doorLibraryFrontSvgViewBox"
                 class="subCategoryDesignEditor__frontSvg"

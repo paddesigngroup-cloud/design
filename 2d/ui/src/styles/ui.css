@@ -4137,7 +4137,8 @@ option {
   color: color-mix(in srgb, var(--c-menu) 78%, #ffffff 22%);
   white-space: nowrap;
 }
-.subCategoryDesignEditor__frontSvg {
+.subCategoryDesignEditor__frontSvg,
+.subCategoryDesignEditor__frontCanvas {
   display: block;
   flex: 1 1 auto;
   width: 100%;
@@ -4147,28 +4148,36 @@ option {
   cursor: none;
 }
 .subCategoryDesignEditor__viewerWrap--interior.is-idle,
-.subCategoryDesignEditor__frontSvg.is-idle {
-  cursor: none;
+.subCategoryDesignEditor__frontSvg.is-idle,
+.subCategoryDesignEditor__frontCanvas.is-idle {
+  cursor: default;
 }
 .subCategoryDesignEditor__viewerWrap--interior.is-clickable,
-.subCategoryDesignEditor__frontSvg.is-clickable {
-  cursor: none;
+.subCategoryDesignEditor__frontSvg.is-clickable,
+.subCategoryDesignEditor__frontCanvas.is-clickable {
+  cursor: default;
 }
 .subCategoryDesignEditor__viewerWrap--interior.is-resize-horizontal,
 .subCategoryDesignEditor__frontSvg.is-resize-horizontal,
+.subCategoryDesignEditor__frontCanvas.is-resize-horizontal,
 .subCategoryDesignEditor__viewerWrap--interior.is-resize-vertical,
 .subCategoryDesignEditor__frontSvg.is-resize-vertical,
+.subCategoryDesignEditor__frontCanvas.is-resize-vertical,
 .subCategoryDesignEditor__viewerWrap--interior.is-drag-horizontal,
 .subCategoryDesignEditor__frontSvg.is-drag-horizontal,
+.subCategoryDesignEditor__frontCanvas.is-drag-horizontal,
 .subCategoryDesignEditor__viewerWrap--interior.is-drag-vertical,
-.subCategoryDesignEditor__frontSvg.is-drag-vertical {
-  cursor: none;
+.subCategoryDesignEditor__frontSvg.is-drag-vertical,
+.subCategoryDesignEditor__frontCanvas.is-drag-vertical {
+  cursor: default;
 }
 .subCategoryDesignEditor__viewerWrap--interior.is-drawing-dimension,
 .subCategoryDesignEditor__frontSvg.is-drawing-dimension,
+.subCategoryDesignEditor__frontCanvas.is-drawing-dimension,
 .subCategoryDesignEditor__viewerWrap--interior.is-drawing-guide,
-.subCategoryDesignEditor__frontSvg.is-drawing-guide {
-  cursor: none;
+.subCategoryDesignEditor__frontSvg.is-drawing-guide,
+.subCategoryDesignEditor__frontCanvas.is-drawing-guide {
+  cursor: default;
 }
 .subCategoryDesignEditor__instanceLayer {
   pointer-events: none;
