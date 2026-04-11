@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
+from starlette.concurrency import run_in_threadpool
 
 from designkp_backend.config import get_settings
 
@@ -53,6 +54,10 @@ def write_table_snapshot(admin_id: uuid.UUID, table_name: str, headers: list[str
         writer.writerow(headers)
         writer.writerows(rows)
     return target
+
+
+async def write_table_snapshot_async(admin_id: uuid.UUID, table_name: str, headers: list[str], rows: list[list[object]]) -> Path:
+    return await run_in_threadpool(write_table_snapshot, admin_id, table_name, headers, rows)
 
 
 def csv_bytes(headers: list[str], rows: list[list[object]]) -> bytes:
@@ -124,8 +129,11 @@ async def save_param_group_icon(admin_id: uuid.UUID, file: UploadFile, *, slug_h
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
     if len(raw) > settings.max_icon_upload_bytes:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Icon file is too large.")
-    normalized = _validate_and_normalize_icon(raw)
+    return await run_in_threadpool(_save_param_group_icon_sync, admin_id, raw, slug_hint)
 
+
+def _save_param_group_icon_sync(admin_id: uuid.UUID, raw: bytes, slug_hint: str) -> tuple[str, Path]:
+    normalized = _validate_and_normalize_icon(raw)
     paths = ensure_admin_storage(admin_id)
     file_name = f"{STAGED_ICON_PREFIX}{_safe_slug(slug_hint)}-{secrets.token_hex(6)}.webp"
     target = paths["icons"] / file_name

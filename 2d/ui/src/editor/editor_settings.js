@@ -1,3 +1,5 @@
+import { getJson, sendJson } from "../services/api_client.js";
+
 export const EDITOR_SETTINGS_DEFAULTS = Object.freeze({
   unit: "cm",
   snapOn: true,
@@ -378,26 +380,24 @@ export function settingsViewStateFromEditorState(state = {}) {
 }
 
 export async function fetchPersistedEditorSettings(adminId, userId) {
-  const res = await fetch(
-    `/api/editor-settings?admin_id=${encodeURIComponent(adminId)}&user_id=${encodeURIComponent(userId)}`
-  );
-  if (!res.ok) {
+  try {
+    return await getJson(
+      `/api/editor-settings?admin_id=${encodeURIComponent(adminId)}&user_id=${encodeURIComponent(userId)}`,
+      { cacheTtlMs: 5000, abortChannel: `editor-settings:${adminId}:${userId}` }
+    );
+  } catch (_) {
     throw new Error("editor-settings-fetch-failed");
   }
-  return await res.json();
 }
 
 export async function savePersistedEditorSettings(adminId, userId, payload) {
-  const res = await fetch(
-    `/api/editor-settings?admin_id=${encodeURIComponent(adminId)}&user_id=${encodeURIComponent(userId)}`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }
-  );
-  if (!res.ok) {
+  try {
+    return await sendJson(
+      `/api/editor-settings?admin_id=${encodeURIComponent(adminId)}&user_id=${encodeURIComponent(userId)}`,
+      "PUT",
+      payload
+    );
+  } catch (_) {
     throw new Error("editor-settings-save-failed");
   }
-  return await res.json();
 }

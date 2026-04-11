@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   editorRef,
@@ -16,8 +16,6 @@ import {
   externalHistoryRestoreHandlerRef,
   fitAllHandlerRef,
 } from "./editor/editor_store.js";
-import GlbViewerWidget from "./components/GlbViewerWidget.vue";
-import FrontViewCanvas from "./components/FrontViewCanvas.vue";
 import { useDialogService } from "./dialog_service.js";
 import { WALL_READY_PRESETS, buildPresetLines, getPresetIconWalls } from "./features/wall_preset_drag.js";
 import { DOOR_READY_PRESETS, buildDoorPresetPayloadAsync, buildDoorPresetPreviewLines, getDoorPresetIconLines, primeDoorPresetModel } from "./features/door_preset_drag.js";
@@ -34,6 +32,10 @@ import {
   snapInteriorPointToGeometry,
 } from "./features/interior_library_annotations.js";
 import { CURRENT_ADMIN_ID, CURRENT_BOOTSTRAP_USER_ID, CURRENT_BOOTSTRAP_USER_NAME, PART_KINDS_CATALOG } from "./features/part_kinds_catalog.js";
+import { getJson, invalidateApiCache } from "./services/api_client.js";
+
+const GlbViewerWidget = defineAsyncComponent(() => import("./components/GlbViewerWidget.vue"));
+const FrontViewCanvas = defineAsyncComponent(() => import("./components/FrontViewCanvas.vue"));
 
 const activeTool = ref("select");
 const snapOn = ref(true);
@@ -13029,9 +13031,11 @@ async function loadConstructionTemplates() {
   constructionLoading.value = true;
   try {
     const url = `/api/templates?admin_id=${encodeURIComponent(currentAdminId.value)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("load-failed");
-    editableTemplates.value = (await res.json()).map(withConstructionDraftState);
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:templates:${currentAdminId.value}`,
+    });
+    editableTemplates.value = payload.map(withConstructionDraftState);
     constructionDeletedTemplateIds.value = [];
   } catch (_) {
     showAlert("خواندن جدول تمپلیت‌ها از دیتابیس انجام نشد.", { title: "خطا" });
@@ -13043,9 +13047,11 @@ async function loadConstructionTemplates() {
 async function loadConstructionCategories() {
   try {
     const url = `/api/categories?admin_id=${encodeURIComponent(currentAdminId.value)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("load-failed");
-    editableCategories.value = (await res.json()).map((item) => withConstructionDraftState({
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:categories:${currentAdminId.value}`,
+    });
+    editableCategories.value = payload.map((item) => withConstructionDraftState({
       ...item,
       design_outline_color: normalizeHexColor(item.design_outline_color),
     }));
@@ -13059,9 +13065,11 @@ async function loadConstructionPartKinds() {
   constructionLoading.value = true;
   try {
     const url = `/api/part-kinds?admin_id=${encodeURIComponent(currentAdminId.value)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("load-failed");
-    editablePartKinds.value = (await res.json()).map((item) => withConstructionDraftState({
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:part-kinds:${currentAdminId.value}`,
+    });
+    editablePartKinds.value = payload.map((item) => withConstructionDraftState({
       ...item,
       part_scope: normalizePartScope(item.part_scope),
     }));
@@ -13076,9 +13084,11 @@ async function loadConstructionPartKinds() {
 async function loadConstructionParamGroups() {
   try {
     const url = `/api/param-groups?admin_id=${encodeURIComponent(currentAdminId.value)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("load-failed");
-    editableParamGroups.value = (await res.json()).map((item) =>
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:param-groups:${currentAdminId.value}`,
+    });
+    editableParamGroups.value = payload.map((item) =>
       withConstructionDraftState({
         ...item,
         param_group_icon_path: normalizeIconFileName(item.param_group_icon_path),
@@ -13094,9 +13104,11 @@ async function loadConstructionParamGroups() {
 async function loadConstructionParams() {
   try {
     const url = `/api/params?admin_id=${encodeURIComponent(currentAdminId.value)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("load-failed");
-    editableParams.value = (await res.json()).map((item) =>
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:params:${currentAdminId.value}`,
+    });
+    editableParams.value = payload.map((item) =>
       withConstructionDraftState({
         ...item,
         interior_value_mode: "formula",
@@ -13111,9 +13123,11 @@ async function loadConstructionParams() {
 async function loadConstructionSubCategories() {
   try {
     const url = `/api/sub-categories?admin_id=${encodeURIComponent(currentAdminId.value)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("load-failed");
-    editableSubCategories.value = (await res.json()).map((item) => ensureSubCategoryParamDefaults(withConstructionDraftState(item)));
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:sub-categories:${currentAdminId.value}`,
+    });
+    editableSubCategories.value = payload.map((item) => ensureSubCategoryParamDefaults(withConstructionDraftState(item)));
     constructionDeletedSubCategoryIds.value = [];
   } catch (_) {
     showAlert("خواندن جدول ساب‌کت‌ها از دیتابیس انجام نشد.", { title: "خطا" });
@@ -13123,9 +13137,11 @@ async function loadConstructionSubCategories() {
 async function loadConstructionBaseFormulas() {
   try {
     const url = `/api/base-formulas?admin_id=${encodeURIComponent(currentAdminId.value)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("load-failed");
-    editableBaseFormulas.value = (await res.json()).map(withConstructionDraftState);
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:base-formulas:${currentAdminId.value}`,
+    });
+    editableBaseFormulas.value = payload.map(withConstructionDraftState);
     constructionDeletedBaseFormulaIds.value = [];
   } catch (_) {
     showAlert("خواندن جدول فرمول‌های پایه از دیتابیس انجام نشد.", { title: "خطا" });
@@ -13135,9 +13151,11 @@ async function loadConstructionBaseFormulas() {
 async function loadConstructionPartFormulas() {
   try {
     const url = `/api/part-formulas?admin_id=${encodeURIComponent(currentAdminId.value)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("load-failed");
-    editablePartFormulas.value = (await res.json()).map((item) => withConstructionDraftState({
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:part-formulas:${currentAdminId.value}`,
+    });
+    editablePartFormulas.value = payload.map((item) => withConstructionDraftState({
       ...item,
       door_dependent: normalizeBooleanFlag(item.door_dependent, false),
     }));
@@ -15222,9 +15240,11 @@ function formatOrderDate(value) {
 async function loadOrders() {
   ordersLoading.value = true;
   try {
-    const res = await fetch(`/api/orders?admin_id=${encodeURIComponent(currentAdminId.value)}`);
-    if (!res.ok) throw new Error("load-orders-failed");
-    ordersCatalog.value = (await res.json()).map(normalizeOrderRecord).filter(Boolean);
+    const payload = await getJson(`/api/orders?admin_id=${encodeURIComponent(currentAdminId.value)}`, {
+      cacheTtlMs: 3000,
+      abortChannel: `orders:list:${currentAdminId.value}`,
+    });
+    ordersCatalog.value = payload.map(normalizeOrderRecord).filter(Boolean);
     if (activeOrder.value) {
       const fresh = ordersCatalog.value.find((item) => item.id === activeOrder.value.id) || null;
       activeOrder.value = fresh;
@@ -15333,23 +15353,11 @@ async function loadOrderDrawing(orderId, { clearWhenMissing = true } = {}) {
   if (!normalizedOrderId) return false;
   orderDrawingLoading.value = true;
   try {
-    const res = await fetch(`/api/orders/${encodeURIComponent(normalizedOrderId)}/drawing`);
-    if (res.status === 404) {
-      if (clearWhenMissing) {
-        editorRef.value?.clearAll?.();
-        editorRef.value?.goOrigin?.();
-      }
-      return false;
-    }
-    if (!res.ok) {
-      const message = await readApiErrorMessage(res, "خواندن ترسیمات سفارش انجام نشد.");
-      if (res.status === 404 && /Order not found/i.test(message)) {
-        await handleMissingActiveOrder();
-        return false;
-      }
-      throw new Error(message);
-    }
-    const payload = await res.json();
+    const payload = await getJson(`/api/orders/${encodeURIComponent(normalizedOrderId)}/drawing`, {
+      cacheTtlMs: 0,
+      dedupe: false,
+      abortChannel: `orders:drawing:${normalizedOrderId}`,
+    });
     const snapshot = payload?.drawing_payload?.editorState || null;
     const savedUiState = payload?.drawing_payload?.uiState || {};
     if (snapshot && editorRef.value?.restoreSnapshot) {
@@ -15375,6 +15383,13 @@ async function loadOrderDrawing(orderId, { clearWhenMissing = true } = {}) {
     syncQuickStateFromEditor();
     return true;
   } catch (error) {
+    if (error?.status === 404) {
+      if (clearWhenMissing) {
+        editorRef.value?.clearAll?.();
+        editorRef.value?.goOrigin?.();
+      }
+      return false;
+    }
     showAlert(error?.message || "خواندن ترسیمات سفارش انجام نشد.", { title: "خطا" });
     return false;
   } finally {
@@ -15419,6 +15434,7 @@ async function createOrder() {
       throw new Error(detail || `create-order-failed-${res.status}`);
     }
     const created = normalizeOrderRecord(await res.json());
+    invalidateApiCache("/api/orders?");
     resetActiveOrderWorkspace();
     activeOrder.value = created;
     orderDraftMode.value = "edit";
@@ -15469,6 +15485,7 @@ async function updateOrder() {
     });
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "update-order-failed"));
     const updated = normalizeOrderRecord(await res.json());
+    invalidateApiCache("/api/orders?");
     activeOrder.value = updated;
     orderDraftMode.value = "edit";
     hydrateOrderDraftFromOrder(updated);

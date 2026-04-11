@@ -18,7 +18,7 @@ from designkp_backend.services.admin_storage import (
     normalize_icon_file_name,
     resolve_admin_icon_path,
     save_param_group_icon,
-    write_table_snapshot,
+    write_table_snapshot_async,
 )
 from designkp_backend.services.sub_category_defaults import get_params_for_scope, sync_defaults_for_sub_categories
 
@@ -344,7 +344,7 @@ async def export_part_kinds(admin_id: uuid.UUID, session: AsyncSession = Depends
     await require_admin(session, admin_id)
     headers = _part_kind_headers()
     rows = await _part_kind_rows(session, admin_id)
-    write_table_snapshot(admin_id, "part_kinds", headers, rows)
+    await write_table_snapshot_async(admin_id, "part_kinds", headers, rows)
     return Response(
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
@@ -357,7 +357,7 @@ async def export_param_groups(admin_id: uuid.UUID, session: AsyncSession = Depen
     await require_admin(session, admin_id)
     headers = _param_group_headers()
     rows = await _param_group_rows(session, admin_id)
-    write_table_snapshot(admin_id, "param_groups", headers, rows)
+    await write_table_snapshot_async(admin_id, "param_groups", headers, rows)
     return Response(
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
@@ -370,7 +370,7 @@ async def export_params(admin_id: uuid.UUID, session: AsyncSession = Depends(get
     await require_admin(session, admin_id)
     headers = _param_headers()
     rows = await _param_rows(session, admin_id)
-    write_table_snapshot(admin_id, "params", headers, rows)
+    await write_table_snapshot_async(admin_id, "params", headers, rows)
     return Response(
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
@@ -383,7 +383,7 @@ async def export_base_formulas(admin_id: uuid.UUID, session: AsyncSession = Depe
     await require_admin(session, admin_id)
     headers = _base_formula_headers()
     rows = await _base_formula_rows(session, admin_id)
-    write_table_snapshot(admin_id, "base_formulas", headers, rows)
+    await write_table_snapshot_async(admin_id, "base_formulas", headers, rows)
     return Response(
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
@@ -396,7 +396,7 @@ async def export_part_formulas(admin_id: uuid.UUID, session: AsyncSession = Depe
     await require_admin(session, admin_id)
     headers = _part_formula_headers()
     rows = await _part_formula_rows(session, admin_id)
-    write_table_snapshot(admin_id, "part_formulas", headers, rows)
+    await write_table_snapshot_async(admin_id, "part_formulas", headers, rows)
     return Response(
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
@@ -409,7 +409,7 @@ async def export_templates(admin_id: uuid.UUID, session: AsyncSession = Depends(
     await require_admin(session, admin_id)
     headers = _template_headers()
     rows = await _template_rows(session, admin_id)
-    write_table_snapshot(admin_id, "templates", headers, rows)
+    await write_table_snapshot_async(admin_id, "templates", headers, rows)
     return Response(
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
@@ -422,7 +422,7 @@ async def export_categories(admin_id: uuid.UUID, session: AsyncSession = Depends
     await require_admin(session, admin_id)
     headers = _category_headers()
     rows = await _category_rows(session, admin_id)
-    write_table_snapshot(admin_id, "categories", headers, rows)
+    await write_table_snapshot_async(admin_id, "categories", headers, rows)
     return Response(
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
@@ -435,7 +435,7 @@ async def export_sub_categories(admin_id: uuid.UUID, session: AsyncSession = Dep
     await require_admin(session, admin_id)
     headers = await _sub_category_headers(session, admin_id)
     rows = await _sub_category_rows(session, admin_id)
-    write_table_snapshot(admin_id, "sub_categories", headers, rows)
+    await write_table_snapshot_async(admin_id, "sub_categories", headers, rows)
     return Response(
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",

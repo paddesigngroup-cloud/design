@@ -7,8 +7,10 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.exc import StaleDataError
 
 from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.account import OrderDesign, OrderDesignDoorInstance, OrderDesignInteriorInstance
@@ -392,6 +394,19 @@ async def _ensure_unique_instance_code(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Instance code is already used in this order.")
 
 
+async def _commit_order_design_changes(session: AsyncSession, *, conflict_detail: str) -> None:
+    try:
+        await session.commit()
+    except StaleDataError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict_detail) from exc
+
+
+def _is_order_design_unique_conflict(exc: IntegrityError) -> bool:
+    message = str(getattr(exc, "orig", exc) or "").lower()
+    return "uq_order_designs_order_instance_code" in message or "order_designs" in message and "instance_code" in message
+
+
 def _deleted_order_design_instance_code(instance_code: str, item_id: uuid.UUID) -> str:
     prefix = (str(instance_code or "").strip() or "design")[:40]
     suffix = f"__deleted__{str(item_id).replace('-', '')[:12]}"
@@ -611,7 +626,10 @@ async def _rebuild_order_design_after_interior_change(
         source_state_signature=str(dict(snapshot.get("source_state") or {}).get("signature") or ""),
     )
     item.snapshot_checksum = snapshot_checksum
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="Order design changed in another request. Please reload and try again.",
+    )
     return await _require_item(session, item.id)
 
 
@@ -623,12 +641,6 @@ async def _duplicate_order_design_record(
     include_interior = await interior_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)
     order = await require_accessible_order(session, order_id=source_item.order_id)
-    next_instance_code = await next_order_design_instance_code(
-        session,
-        order_id=order.id,
-        design_code=str(source_item.design_code or "").strip(),
-    )
-    await _ensure_unique_instance_code(session, order_id=order.id, instance_code=next_instance_code)
     checksum = (
         str(source_item.snapshot_checksum or "").strip()
         or read_order_design_snapshot_checksum(dict(source_item.order_attr_meta or {}))
@@ -643,69 +655,82 @@ async def _duplicate_order_design_record(
             door_instances=list(getattr(source_item, "door_instances", []) or []) if include_doors else [],
         )
     )
-    duplicated = OrderDesign(
-        order_id=source_item.order_id,
-        admin_id=source_item.admin_id,
-        user_id=source_item.user_id,
-        sub_category_design_id=source_item.sub_category_design_id,
-        sub_category_id=source_item.sub_category_id,
-        design_code=str(source_item.design_code or "").strip(),
-        design_title=str(source_item.design_title or "").strip(),
-        instance_code=next_instance_code,
-        sort_order=await next_order_design_sort_order(session, order_id=source_item.order_id),
-        status=str(source_item.status or "draft").strip() or "draft",
-        order_attr_values=_clone_order_design_json(dict(source_item.order_attr_values or {})),
-        order_attr_meta=with_order_design_snapshot_checksum(
-            strip_snapshot_state_from_meta(dict(source_item.order_attr_meta or {})),
-            checksum=checksum,
-        ),
-        part_snapshots=_clone_order_design_json(list(source_item.part_snapshots or [])),
-        viewer_boxes=_clone_order_design_json(list(source_item.viewer_boxes or [])),
-        snapshot_checksum=checksum,
-    )
-    session.add(duplicated)
-    await session.flush()
-    if include_interior:
-        for interior in list(source_item.interior_instances or []):
-            session.add(
-                OrderDesignInteriorInstance(
-                    order_design_id=duplicated.id,
-                    source_instance_id=interior.source_instance_id,
-                    internal_part_group_id=interior.internal_part_group_id,
-                    instance_code=str(interior.instance_code or "").strip(),
-                    line_color=_normalize_hex_color(getattr(interior, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR) if getattr(interior, "line_color", None) else None,
-                    ui_order=int(interior.ui_order or 0),
-                    placement_z=float(interior.placement_z or 0),
-                    interior_box_snapshot=_clone_order_design_json(dict(interior.interior_box_snapshot or {})),
-                    param_values=_clone_order_design_json(dict(interior.param_values or {})),
-                    param_meta=_clone_order_design_json(dict(interior.param_meta or {})),
-                    part_snapshots=_clone_order_design_json(list(interior.part_snapshots or [])),
-                    viewer_boxes=_clone_order_design_json(list(interior.viewer_boxes or [])),
-                    status=str(interior.status or "draft").strip() or "draft",
+    for _ in range(5):
+        next_instance_code = await next_order_design_instance_code(
+            session,
+            order_id=order.id,
+            design_code=str(source_item.design_code or "").strip(),
+        )
+        duplicated = OrderDesign(
+            order_id=source_item.order_id,
+            admin_id=source_item.admin_id,
+            user_id=source_item.user_id,
+            sub_category_design_id=source_item.sub_category_design_id,
+            sub_category_id=source_item.sub_category_id,
+            design_code=str(source_item.design_code or "").strip(),
+            design_title=str(source_item.design_title or "").strip(),
+            instance_code=next_instance_code,
+            sort_order=await next_order_design_sort_order(session, order_id=source_item.order_id),
+            status=str(source_item.status or "draft").strip() or "draft",
+            order_attr_values=_clone_order_design_json(dict(source_item.order_attr_values or {})),
+            order_attr_meta=with_order_design_snapshot_checksum(
+                strip_snapshot_state_from_meta(dict(source_item.order_attr_meta or {})),
+                checksum=checksum,
+            ),
+            part_snapshots=_clone_order_design_json(list(source_item.part_snapshots or [])),
+            viewer_boxes=_clone_order_design_json(list(source_item.viewer_boxes or [])),
+            snapshot_checksum=checksum,
+        )
+        session.add(duplicated)
+        await session.flush()
+        if include_interior:
+            for interior in list(source_item.interior_instances or []):
+                session.add(
+                    OrderDesignInteriorInstance(
+                        order_design_id=duplicated.id,
+                        source_instance_id=interior.source_instance_id,
+                        internal_part_group_id=interior.internal_part_group_id,
+                        instance_code=str(interior.instance_code or "").strip(),
+                        line_color=_normalize_hex_color(getattr(interior, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR) if getattr(interior, "line_color", None) else None,
+                        ui_order=int(interior.ui_order or 0),
+                        placement_z=float(interior.placement_z or 0),
+                        interior_box_snapshot=_clone_order_design_json(dict(interior.interior_box_snapshot or {})),
+                        param_values=_clone_order_design_json(dict(interior.param_values or {})),
+                        param_meta=_clone_order_design_json(dict(interior.param_meta or {})),
+                        part_snapshots=_clone_order_design_json(list(interior.part_snapshots or [])),
+                        viewer_boxes=_clone_order_design_json(list(interior.viewer_boxes or [])),
+                        status=str(interior.status or "draft").strip() or "draft",
+                    )
                 )
-            )
-    if include_doors:
-        for door in list(getattr(source_item, "door_instances", []) or []):
-            session.add(
-                OrderDesignDoorInstance(
-                    order_design_id=duplicated.id,
-                    source_instance_id=door.source_instance_id,
-                    door_part_group_id=door.door_part_group_id,
-                    instance_code=str(door.instance_code or "").strip(),
-                    line_color=_normalize_hex_color(getattr(door, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR) if getattr(door, "line_color", None) else None,
-                    ui_order=int(door.ui_order or 0),
-                    structural_part_formula_ids=_clone_order_design_json(list(door.structural_part_formula_ids or [])),
-                    dependent_interior_instance_ids=_clone_order_design_json(list(door.dependent_interior_instance_ids or [])),
-                    controller_box_snapshot=_clone_order_design_json(dict(door.controller_box_snapshot or {})),
-                    param_values=_clone_order_design_json(dict(door.param_values or {})),
-                    param_meta=_clone_order_design_json(dict(door.param_meta or {})),
-                    part_snapshots=_clone_order_design_json(list(door.part_snapshots or [])),
-                    viewer_boxes=_clone_order_design_json(list(door.viewer_boxes or [])),
-                    status=str(door.status or "draft").strip() or "draft",
+        if include_doors:
+            for door in list(getattr(source_item, "door_instances", []) or []):
+                session.add(
+                    OrderDesignDoorInstance(
+                        order_design_id=duplicated.id,
+                        source_instance_id=door.source_instance_id,
+                        door_part_group_id=door.door_part_group_id,
+                        instance_code=str(door.instance_code or "").strip(),
+                        line_color=_normalize_hex_color(getattr(door, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR) if getattr(door, "line_color", None) else None,
+                        ui_order=int(door.ui_order or 0),
+                        structural_part_formula_ids=_clone_order_design_json(list(door.structural_part_formula_ids or [])),
+                        dependent_interior_instance_ids=_clone_order_design_json(list(door.dependent_interior_instance_ids or [])),
+                        controller_box_snapshot=_clone_order_design_json(dict(door.controller_box_snapshot or {})),
+                        param_values=_clone_order_design_json(dict(door.param_values or {})),
+                        param_meta=_clone_order_design_json(dict(door.param_meta or {})),
+                        part_snapshots=_clone_order_design_json(list(door.part_snapshots or [])),
+                        viewer_boxes=_clone_order_design_json(list(door.viewer_boxes or [])),
+                        status=str(door.status or "draft").strip() or "draft",
+                    )
                 )
-            )
-    await session.commit()
-    return await _require_item(session, duplicated.id)
+        try:
+            await session.commit()
+            return await _require_item(session, duplicated.id)
+        except IntegrityError as exc:
+            await session.rollback()
+            if not _is_order_design_unique_conflict(exc):
+                raise
+            continue
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Could not allocate a unique instance code for this order design.")
 
 
 @router.get("", response_model=list[OrderDesignItem])
@@ -790,100 +815,111 @@ async def create_order_design(payload: OrderDesignCreate, session: AsyncSession 
         interior_instances=list(source_design.interior_instances or []) if include_interior else [],
         door_instances=list(getattr(source_design, "door_instances", []) or []) if include_doors else [],
     )
-    instance_code = str(payload.instance_code or "").strip() or await next_order_design_instance_code(
-        session,
-        order_id=order.id,
-        design_code=str(snapshot["design_code"]),
-    )
-    await _ensure_unique_instance_code(session, order_id=order.id, instance_code=instance_code)
     title = str(payload.design_title or snapshot["design_title"] or "").strip()
     if not title:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Design title is required.")
-    item = OrderDesign(
-        order_id=order.id,
-        admin_id=order.admin_id,
-        user_id=order.user_id,
-        sub_category_design_id=source_design.id,
-        sub_category_id=source_design.sub_category_id,
-        design_code=str(snapshot["design_code"]),
-        design_title=title,
-        instance_code=instance_code,
-        sort_order=payload.sort_order if payload.sort_order is not None else await next_order_design_sort_order(session, order_id=order.id),
-        status=str(payload.status or "draft").strip() or "draft",
-        order_attr_values=snapshot["order_attr_values"],
-        order_attr_meta=with_order_design_snapshot_checksum(
-            snapshot["order_attr_meta"],
-            checksum=snapshot_checksum,
-            marker=snapshot_marker,
-            source_state_signature=str(dict(snapshot.get("source_state") or {}).get("signature") or ""),
-        ),
-        part_snapshots=snapshot["part_snapshots"],
-        viewer_boxes=snapshot["viewer_boxes"],
-        snapshot_checksum=snapshot_checksum,
-    )
-    session.add(item)
-    await session.flush()
-    if include_interior:
-        source_interiors_by_id = {
-            str(interior.id): interior
-            for interior in list(source_design.interior_instances or [])
-        }
-        for interior in list(snapshot["interior_instances"] or []):
-            source_interior = source_interiors_by_id.get(str(interior.get("id") or ""))
-            session.add(
-                OrderDesignInteriorInstance(
-                    order_design_id=item.id,
-                    source_instance_id=getattr(source_interior, "id", None),
-                    internal_part_group_id=uuid.UUID(str(interior.get("internal_part_group_id"))),
-                    instance_code=str(interior.get("instance_code") or "").strip(),
-                    line_color=(
-                        str(interior.get("line_color") or "").strip()
-                        or
-                        str(getattr(source_interior, "line_color", "") or "").strip()
-                        or None
-                    ),
-                    ui_order=int(interior.get("ui_order") or 0),
-                    placement_z=float(interior.get("placement_z") or 0),
-                    interior_box_snapshot=dict(interior.get("interior_box_snapshot") or {}),
-                    param_values=dict(interior.get("param_values") or {}),
-                    param_meta=dict(interior.get("param_meta") or {}),
-                    part_snapshots=list(interior.get("part_snapshots") or []),
-                    viewer_boxes=list(interior.get("viewer_boxes") or []),
-                    status=str(interior.get("status") or getattr(source_interior, "status", "draft") or "draft").strip() or "draft",
-                )
+    for _ in range(5):
+        instance_code = str(payload.instance_code or "").strip()
+        if not instance_code:
+            instance_code = await next_order_design_instance_code(
+                session,
+                order_id=order.id,
+                design_code=str(snapshot["design_code"]),
             )
-    if include_doors:
-        source_doors_by_id = {
-            str(door.id): door
-            for door in list(getattr(source_design, "door_instances", []) or [])
-        }
-        for door in list(snapshot["door_instances"] or []):
-            source_door = source_doors_by_id.get(str(door.get("id") or ""))
-            session.add(
-                OrderDesignDoorInstance(
-                    order_design_id=item.id,
-                    source_instance_id=getattr(source_door, "id", None),
-                    door_part_group_id=uuid.UUID(str(door.get("door_part_group_id"))),
-                    instance_code=str(door.get("instance_code") or "").strip(),
-                    line_color=(
-                        str(door.get("line_color") or "").strip()
-                        or str(getattr(source_door, "line_color", "") or "").strip()
-                        or None
-                    ),
-                    ui_order=int(door.get("ui_order") or 0),
-                    structural_part_formula_ids=[int(row) for row in list(door.get("structural_part_formula_ids") or []) if int(row) > 0],
-                    dependent_interior_instance_ids=[str(row).strip() for row in list(door.get("dependent_interior_instance_ids") or []) if str(row).strip()],
-                    controller_box_snapshot=dict(door.get("controller_box_snapshot") or {}),
-                    param_values=dict(door.get("param_values") or {}),
-                    param_meta=dict(door.get("param_meta") or {}),
-                    part_snapshots=list(door.get("part_snapshots") or []),
-                    viewer_boxes=list(door.get("viewer_boxes") or []),
-                    status=str(door.get("status") or getattr(source_door, "status", "draft") or "draft").strip() or "draft",
+        else:
+            await _ensure_unique_instance_code(session, order_id=order.id, instance_code=instance_code)
+        item = OrderDesign(
+            order_id=order.id,
+            admin_id=order.admin_id,
+            user_id=order.user_id,
+            sub_category_design_id=source_design.id,
+            sub_category_id=source_design.sub_category_id,
+            design_code=str(snapshot["design_code"]),
+            design_title=title,
+            instance_code=instance_code,
+            sort_order=payload.sort_order if payload.sort_order is not None else await next_order_design_sort_order(session, order_id=order.id),
+            status=str(payload.status or "draft").strip() or "draft",
+            order_attr_values=snapshot["order_attr_values"],
+            order_attr_meta=with_order_design_snapshot_checksum(
+                snapshot["order_attr_meta"],
+                checksum=snapshot_checksum,
+                marker=snapshot_marker,
+                source_state_signature=str(dict(snapshot.get("source_state") or {}).get("signature") or ""),
+            ),
+            part_snapshots=snapshot["part_snapshots"],
+            viewer_boxes=snapshot["viewer_boxes"],
+            snapshot_checksum=snapshot_checksum,
+        )
+        session.add(item)
+        await session.flush()
+        if include_interior:
+            source_interiors_by_id = {
+                str(interior.id): interior
+                for interior in list(source_design.interior_instances or [])
+            }
+            for interior in list(snapshot["interior_instances"] or []):
+                source_interior = source_interiors_by_id.get(str(interior.get("id") or ""))
+                session.add(
+                    OrderDesignInteriorInstance(
+                        order_design_id=item.id,
+                        source_instance_id=getattr(source_interior, "id", None),
+                        internal_part_group_id=uuid.UUID(str(interior.get("internal_part_group_id"))),
+                        instance_code=str(interior.get("instance_code") or "").strip(),
+                        line_color=(
+                            str(interior.get("line_color") or "").strip()
+                            or
+                            str(getattr(source_interior, "line_color", "") or "").strip()
+                            or None
+                        ),
+                        ui_order=int(interior.get("ui_order") or 0),
+                        placement_z=float(interior.get("placement_z") or 0),
+                        interior_box_snapshot=dict(interior.get("interior_box_snapshot") or {}),
+                        param_values=dict(interior.get("param_values") or {}),
+                        param_meta=dict(interior.get("param_meta") or {}),
+                        part_snapshots=list(interior.get("part_snapshots") or []),
+                        viewer_boxes=list(interior.get("viewer_boxes") or []),
+                        status=str(interior.get("status") or getattr(source_interior, "status", "draft") or "draft").strip() or "draft",
+                    )
                 )
-            )
-    await session.commit()
-    item = await _require_item(session, item.id)
-    return _serialize_item(item, include_interior=(include_interior or include_doors))
+        if include_doors:
+            source_doors_by_id = {
+                str(door.id): door
+                for door in list(getattr(source_design, "door_instances", []) or [])
+            }
+            for door in list(snapshot["door_instances"] or []):
+                source_door = source_doors_by_id.get(str(door.get("id") or ""))
+                session.add(
+                    OrderDesignDoorInstance(
+                        order_design_id=item.id,
+                        source_instance_id=getattr(source_door, "id", None),
+                        door_part_group_id=uuid.UUID(str(door.get("door_part_group_id"))),
+                        instance_code=str(door.get("instance_code") or "").strip(),
+                        line_color=(
+                            str(door.get("line_color") or "").strip()
+                            or str(getattr(source_door, "line_color", "") or "").strip()
+                            or None
+                        ),
+                        ui_order=int(door.get("ui_order") or 0),
+                        structural_part_formula_ids=[int(row) for row in list(door.get("structural_part_formula_ids") or []) if int(row) > 0],
+                        dependent_interior_instance_ids=[str(row).strip() for row in list(door.get("dependent_interior_instance_ids") or []) if str(row).strip()],
+                        controller_box_snapshot=dict(door.get("controller_box_snapshot") or {}),
+                        param_values=dict(door.get("param_values") or {}),
+                        param_meta=dict(door.get("param_meta") or {}),
+                        part_snapshots=list(door.get("part_snapshots") or []),
+                        viewer_boxes=list(door.get("viewer_boxes") or []),
+                        status=str(door.get("status") or getattr(source_door, "status", "draft") or "draft").strip() or "draft",
+                    )
+                )
+        try:
+            await session.commit()
+            item = await _require_item(session, item.id)
+            return _serialize_item(item, include_interior=(include_interior or include_doors))
+        except IntegrityError as exc:
+            await session.rollback()
+            if payload.instance_code or not _is_order_design_unique_conflict(exc):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Instance code is already used in this order.") from exc
+            continue
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Could not allocate a unique instance code for this order design.")
 
 
 @router.patch("/{item_id}", response_model=OrderDesignItem)
@@ -958,7 +994,10 @@ async def update_order_design(
             instance.part_snapshots = list(resolved.get("part_snapshots") or [])
             instance.viewer_boxes = list(resolved.get("viewer_boxes") or [])
     item.snapshot_checksum = snapshot_checksum
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="Order design changed in another request. Please reload and try again.",
+    )
     item = await _require_item(session, item.id)
     return _serialize_item(item, include_interior=(include_interior or include_doors))
 
@@ -985,7 +1024,10 @@ async def delete_order_design(item_id: uuid.UUID, session: AsyncSession = Depend
     item.order_attr_meta = _remember_deleted_instance_code(dict(item.order_attr_meta or {}), original_instance_code)
     item.instance_code = _deleted_order_design_instance_code(original_instance_code, item.id)
     item.deleted_at = datetime.now(timezone.utc)
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="Order design changed in another request. Please reload and try again.",
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1001,7 +1043,10 @@ async def restore_order_design(item_id: uuid.UUID, session: AsyncSession = Depen
     item.instance_code = instance_code
     item.order_attr_meta = next_meta
     item.deleted_at = None
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="Order design changed in another request. Please reload and try again.",
+    )
     item = await _require_item(session, item_id)
     include_interior = await interior_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)

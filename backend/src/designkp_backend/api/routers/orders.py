@@ -6,8 +6,10 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 from sqlalchemy.orm import joinedload
 
 from designkp_backend.db.dependencies import get_db_session
@@ -227,31 +229,24 @@ async def create_order(payload: OrderCreate, session: AsyncSession = Depends(get
 
     for _ in range(5):
         next_number = await _next_order_number(session, admin_id=payload.admin_id)
-        duplicate_exists = await session.scalar(
-            select(func.count())
-            .select_from(Order)
-            .where(
-                and_(
-                    Order.admin_id == payload.admin_id,
-                    Order.order_number == next_number,
-                )
-            )
+        item = Order(
+            order_name=normalized_name,
+            order_number=next_number,
+            status=payload.status,
+            notes=str(payload.notes or "").strip() or None,
+            admin_id=payload.admin_id,
+            user_id=payload.user_id,
         )
-        if not duplicate_exists:
-            item = Order(
-                order_name=normalized_name,
-                order_number=next_number,
-                status=payload.status,
-                notes=str(payload.notes or "").strip() or None,
-                admin_id=payload.admin_id,
-                user_id=payload.user_id,
-            )
-            session.add(item)
+        session.add(item)
+        try:
             await session.commit()
-            fresh = await _get_order_with_relations(session, item.id)
-            if not fresh:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Created order could not be reloaded.")
-            return _to_response(fresh)
+        except IntegrityError:
+            await session.rollback()
+            continue
+        fresh = await _get_order_with_relations(session, item.id)
+        if not fresh:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Created order could not be reloaded.")
+        return _to_response(fresh)
     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Could not allocate a unique order number.")
 
 
@@ -277,7 +272,11 @@ async def update_order(
     item.notes = str(payload.notes or "").strip() or None
     item.status = payload.status
 
-    await session.commit()
+    try:
+        await session.commit()
+    except StaleDataError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Order was updated by another request. Please reload and try again.") from exc
     fresh = await _get_order_with_relations(session, item.id)
     if not fresh:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Updated order could not be reloaded.")
@@ -320,7 +319,11 @@ async def upsert_order_drawing(
         drawing.dimensions_count = payload.dimensions_count
         drawing.beams_count = payload.beams_count
         drawing.columns_count = payload.columns_count
-    await session.commit()
+    try:
+        await session.commit()
+    except StaleDataError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Order drawing was updated by another request. Please reload and try again.") from exc
     await session.refresh(drawing)
     return _to_drawing_response(drawing)
 
@@ -332,5 +335,9 @@ async def archive_order(order_id: uuid.UUID, session: AsyncSession = Depends(get
     item.deleted_at = datetime.now(timezone.utc)
     if item.drawing and item.drawing.deleted_at is None:
         item.drawing.deleted_at = datetime.now(timezone.utc)
-    await session.commit()
+    try:
+        await session.commit()
+    except StaleDataError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Order was updated by another request. Please reload and try again.") from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
