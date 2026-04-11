@@ -41,6 +41,7 @@ const showDimensions = ref(true);
 const showOffsetWalls = ref(true);
 const showObjectAxes = ref(false);
 const currentEditorDisplayUnitState = ref("cm");
+const DEFAULT_3D_WIDGET_OPACITY = 85;
 const orderDesignGeometryCache = new Map();
 const frontViewGeometryCache = new Map();
 const interiorInstanceFrontGeometryCache = new Map();
@@ -319,7 +320,7 @@ const interiorLibraryPartKindFilter = ref("");
 const doorLibraryPartKindFilter = ref("");
 const doorLibraryPreviewMode = ref("front2d");
 const doorLibraryPreview3dRef = ref(null);
-const doorLibraryPreviewOpacity = ref(100);
+const doorLibraryPreviewOpacity = ref(DEFAULT_3D_WIDGET_OPACITY);
 const doorLibraryShowDimensions = ref(true);
 const doorLibraryAnnotationTool = ref(null);
 const doorLibraryAnnotations = ref(createEmptyInteriorLibraryAnnotations());
@@ -373,7 +374,7 @@ const interiorLibraryControllerPointerState = ref({
 const interiorLibraryPreviewMode = ref("front2d");
 const interiorLibraryFrontZoom = ref(1);
 const interiorLibraryPreview3dRef = ref(null);
-const interiorLibraryPreviewOpacity = ref(100);
+const interiorLibraryPreviewOpacity = ref(DEFAULT_3D_WIDGET_OPACITY);
 const interiorLibraryShowInnerLines = ref(true);
 const interiorLibraryShowDimensions = ref(true);
 const interiorLibraryAnnotationTool = ref(null);
@@ -15708,7 +15709,7 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
   interiorLibraryOpen.value = true;
   interiorLibraryPreviewMode.value = "front2d";
   interiorLibraryFrontZoom.value = 1;
-  interiorLibraryPreviewOpacity.value = 100;
+  interiorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
   interiorLibraryShowInnerLines.value = true;
   resetInteriorLibraryAnnotations();
   interiorLibraryFrontPan.value = { x: 0, y: 0 };
@@ -15766,7 +15767,7 @@ async function openDoorLibrary(targetOrderDesignId = "") {
     return;
   }
   doorLibraryOpen.value = true;
-  doorLibraryPreviewOpacity.value = 100;
+  doorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
   clearDoorLibraryPlacedInstanceSelection();
   resetDoorLibraryPreviewView();
   activeMenu.value = null;
@@ -15813,7 +15814,7 @@ function closeInteriorLibrary() {
   interiorLibraryForcedOrderDesignId.value = "";
   interiorLibraryPreviewMode.value = "front2d";
   interiorLibraryFrontZoom.value = 1;
-  interiorLibraryPreviewOpacity.value = 100;
+  interiorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
   interiorLibraryShowInnerLines.value = true;
   resetInteriorLibraryAnnotations();
   interiorLibraryFrontPan.value = { x: 0, y: 0 };
@@ -15831,7 +15832,7 @@ function closeDoorLibrary() {
   clearDoorLibraryViewerCursorPoint();
   closeDoorInstanceContextMenu();
   doorLibraryPreviewMode.value = "front2d";
-  doorLibraryPreviewOpacity.value = 100;
+  doorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
   resetDoorLibraryPreviewView();
 }
 
@@ -15858,6 +15859,16 @@ const currentEditorDisplayUnit = computed(() => {
     ? currentEditorDisplayUnitState.value
     : "cm";
 });
+const widgetPreviewWalls2d = computed(() => ({
+  nodes: [],
+  walls: [],
+  selection: { selectedWallId: null, selectedWallIds: [] },
+  state: {
+    axisXColor: String(walls3dSnapshot.value?.state?.axisXColor || "#9CC9B4").trim() || "#9CC9B4",
+    axisYColor: String(walls3dSnapshot.value?.state?.axisYColor || "#BCC8EB").trim() || "#BCC8EB",
+    axisZColor: String(walls3dSnapshot.value?.state?.axisZColor || "#0000FF").trim() || "#0000FF",
+  },
+}));
 
 function setDraftFromDesignTool(id) {
   const st = getEditorStateSnapshot();
@@ -19300,12 +19311,13 @@ onBeforeUnmount(() => {
               <div class="subCategoryDesignEditor__viewerWrap">
                 <GlbViewerWidget
                   src="/models/1_z1.glb"
-                  :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                  :walls2d="widgetPreviewWalls2d"
                   :placeholder-outline-color="normalizeHexColor(subCategoryDesignEditorPreview?.design_outline_color)"
                   :placeholder-boxes="subCategoryDesignEditorPreview.viewer_boxes"
                   :display-unit="currentEditorDisplayUnit"
                   :show-attrs-panel="false"
                   :embedded="true"
+                  :show-window-controls="false"
                 />
                 <div v-if="subCategoryDesignPreviewLoading" class="subCategoryDesignEditor__viewerOverlay">
                   <div class="constructionDialog__loading">در حال بازسازی preview طرح...</div>
@@ -20105,7 +20117,7 @@ onBeforeUnmount(() => {
                 v-if="interiorLibraryPreviewMode === 'model3d' && activeInteriorLibraryViewerBoxes.length"
                 ref="interiorLibraryPreview3dRef"
                 src="/models/1_z1.glb"
-                :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                :walls2d="widgetPreviewWalls2d"
                 :placeholder-outline-color="activeInteriorLibraryOutlineColor"
                 :placeholder-boxes="activeInteriorLibraryViewerBoxes"
                 :display-unit="currentEditorDisplayUnit"
@@ -21789,7 +21801,7 @@ onBeforeUnmount(() => {
                 v-if="doorLibraryPreviewMode === 'model3d' && activeDoorLibraryModelViewerBoxes.length"
                 ref="doorLibraryPreview3dRef"
                 src="/models/1_z1.glb"
-                :walls2d="{ nodes: [], walls: [], selection: { selectedWallId: null, selectedWallIds: [] }, state: {} }"
+                :walls2d="widgetPreviewWalls2d"
                 :placeholder-outline-color="activeDoorLibraryOutlineColor"
                 :placeholder-boxes="activeDoorLibraryModelViewerBoxes"
                 :display-unit="currentEditorDisplayUnit"

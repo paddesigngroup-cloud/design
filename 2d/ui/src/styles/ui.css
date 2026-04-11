@@ -1799,9 +1799,15 @@ option {
   top: 0;
 }
 .glbWidget.is-embedded .glbWidget__view,
-.glbWidget.is-embedded .glbWidget__edgeToggle,
-.glbWidget.is-embedded .glbWidget__opacity {
+.glbWidget.is-embedded .glbWidget__edgeToggle {
   display: none;
+}
+.glbWidget.is-embedded .glbWidget__opacity {
+  display: flex;
+  left: 18px;
+  bottom: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 10px 24px rgba(70, 24, 42, 0.08);
 }
 .glbWidget.is-embedded {
   border-color: rgba(52, 20, 31, 0.08);

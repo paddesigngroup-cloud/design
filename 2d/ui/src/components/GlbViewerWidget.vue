@@ -67,6 +67,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  showWindowControls: {
+    type: Boolean,
+    default: true,
+  },
   displayUnit: {
     type: String,
     default: "cm",
@@ -488,7 +492,7 @@ const wallMoveDeltaCm = ref({ x: 0, y: 0 });
 const coordInputDrafts = ref({});
 const styleInputDrafts = ref({});
 const showPlaceholderEdges = ref(true);
-const placeholderOpacity = ref(100);
+const placeholderOpacity = ref(85);
 
 const wallMetrics = computed(() => {
   const snapshot = attrsSnapshot.value || {};
@@ -2396,7 +2400,7 @@ defineExpose({
 
 <template>
   <div ref="widgetEl" class="glbWidget" :class="{ 'is-max': isMax, 'is-embedded': embedded }" @mouseenter="$emit('mouseenter')" @mouseleave="$emit('mouseleave')">
-    <div v-if="!previewOnly" class="glbWidget__head" dir="rtl">
+    <div v-if="!previewOnly && showWindowControls" class="glbWidget__head" dir="rtl">
       <div class="glbWidget__headBtns">
         <button type="button" class="glbWidget__btn" title="کوچک" @click="goSmall">–</button>
         <button type="button" class="glbWidget__btn" title="بزرگ" @click="goMax">□</button>
