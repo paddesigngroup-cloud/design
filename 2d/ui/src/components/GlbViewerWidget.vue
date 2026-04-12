@@ -2255,8 +2255,8 @@ onMounted(async () => {
 
   controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.055;
-  controls.rotateSpeed = 1.22;
+  controls.dampingFactor = 0.06;
+  controls.rotateSpeed = 1.5;
   controls.zoomSpeed = 1.02;
   controls.panSpeed = 0.88;
   controls.screenSpacePanning = true;
