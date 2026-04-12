@@ -2061,10 +2061,31 @@ const viewOpen = ref(false);
 
 let prevSize = null;
 let baseSize = { w: 260, h: 190 };
+let visibilityPaused = false;
 
 function stop() {
   if (raf) cancelAnimationFrame(raf);
   raf = 0;
+}
+
+function startRenderLoop() {
+  if (raf || !renderer || !scene || !camera) return;
+  const loop = () => {
+    raf = requestAnimationFrame(loop);
+    controls?.update?.();
+    renderer?.render(scene, camera);
+  };
+  loop();
+}
+
+function handleDocumentVisibilityChange() {
+  visibilityPaused = typeof document !== "undefined" && !!document.hidden;
+  if (visibilityPaused) {
+    stop();
+    return;
+  }
+  resizeToHost();
+  startRenderLoop();
 }
 
 function disposeScene(obj) {
@@ -2516,13 +2537,8 @@ onMounted(async () => {
 
   canvas.addEventListener("mousedown", onCanvasMouseDown);
   canvas.addEventListener("dblclick", onCanvasDoubleClick);
-
-  const loop = () => {
-    raf = requestAnimationFrame(loop);
-    controls?.update?.();
-    renderer?.render(scene, camera);
-  };
-  loop();
+  document.addEventListener("visibilitychange", handleDocumentVisibilityChange, true);
+  handleDocumentVisibilityChange();
 });
 
 onBeforeUnmount(() => {
@@ -2532,6 +2548,7 @@ onBeforeUnmount(() => {
   clearWidgetCursorPoint();
   canvasEl.value?.removeEventListener?.("mousedown", onCanvasMouseDown);
   canvasEl.value?.removeEventListener?.("dblclick", onCanvasDoubleClick);
+  document.removeEventListener("visibilitychange", handleDocumentVisibilityChange, true);
   if (ro) ro.disconnect();
   ro = null;
   if (widgetRo) widgetRo.disconnect();

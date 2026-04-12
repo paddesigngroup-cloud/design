@@ -16820,6 +16820,16 @@ let _shiftPx = 0;
 let _quickSyncTimer = 0;
 let _quickOutsidePointerDown = null;
 let _lastShortcutSaveAt = 0;
+function stopQuickSyncTimer() {
+  if (_quickSyncTimer) {
+    clearInterval(_quickSyncTimer);
+    _quickSyncTimer = 0;
+  }
+}
+function startQuickSyncTimer() {
+  if (_quickSyncTimer || typeof window === "undefined" || document.hidden) return;
+  _quickSyncTimer = window.setInterval(syncQuickStateFromEditor, 350);
+}
 function updateTopbarShift() {
   if (!topbarEl.value || !homeBtnEl.value) return;
   const stageHost = stageCardEl.value || stageEl.value;
@@ -16881,7 +16891,7 @@ onMounted(() => {
   scheduleSubRailPosition();
   syncQuickStateFromEditor();
   loadOrders().then(() => ensureOrderGate());
-  _quickSyncTimer = window.setInterval(syncQuickStateFromEditor, 350);
+  startQuickSyncTimer();
 
   _quickOutsidePointerDown = (e) => {
     const el = e.target;
@@ -17111,7 +17121,13 @@ onMounted(() => {
 
   const onFocus = () => syncLocksOnReturn();
   const onVisibilityChange = () => {
-    if (!document.hidden) syncLocksOnReturn();
+    if (document.hidden) {
+      stopQuickSyncTimer();
+      return;
+    }
+    syncLocksOnReturn();
+    syncQuickStateFromEditor();
+    startQuickSyncTimer();
   };
   const onBlur = () => {
     // Defensive: don't leave the engine in a permanently disabled-input state.
@@ -17188,10 +17204,7 @@ onBeforeUnmount(() => {
   if (window.__designkpDialogs) delete window.__designkpDialogs;
   window.removeEventListener("resize", scheduleShift);
   window.removeEventListener("resize", scheduleSubRailPosition);
-  if (_quickSyncTimer) {
-    clearInterval(_quickSyncTimer);
-    _quickSyncTimer = 0;
-  }
+  stopQuickSyncTimer();
   if (_orderDrawingSaveTimeout) {
     clearTimeout(_orderDrawingSaveTimeout);
     _orderDrawingSaveTimeout = 0;
