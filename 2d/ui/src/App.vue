@@ -8598,6 +8598,41 @@ async function deleteOrderDesignSilentlyById(orderDesignId) {
   removeOrderDesignPlacement(key);
 }
 
+async function pruneUnplacedOrderDesignsForActiveOrder() {
+  const retainedIds = new Set(
+    orderDesignPlacements.value
+      .map((placement) => String(placement?.orderDesignId || "").trim())
+      .filter(Boolean)
+  );
+  const activeId = String(activeCabinetDesignId.value || "").trim();
+  if (activeId) retainedIds.add(activeId);
+
+  const orphanIds = orderDesignCatalog.value
+    .map((item) => String(item?.id || "").trim())
+    .filter((id) => id && !retainedIds.has(id));
+
+  if (!orphanIds.length) return false;
+
+  for (const id of orphanIds) {
+    const res = await fetch(`/api/order-designs/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "پاکسازی طرح‌های حذف‌شده از سفارش انجام نشد."));
+  }
+
+  const deletedIdSet = new Set(orphanIds);
+  orderDesignCatalog.value = orderDesignCatalog.value.filter((item) => !deletedIdSet.has(String(item.id)));
+  orderDesignPlacements.value = orderDesignPlacements.value.filter((placement) => !deletedIdSet.has(String(placement.orderDesignId)));
+  selectedStageOrderDesignIds.value = selectedStageOrderDesignIds.value.filter((id) => !deletedIdSet.has(String(id)));
+
+  if (deletedIdSet.has(String(activeCabinetDesignId.value || ""))) {
+    stageCabinetPlaceholderBoxes.value = [];
+    activeCabinetDesignId.value = null;
+    activeStageOrderDesignSelected.value = false;
+    editorRef.value?.clearModel2dLines?.(false);
+  }
+
+  return true;
+}
+
 function buildOrderDesignDeleteConfirmMessage(targets, options = {}) {
   const count = Array.isArray(targets) ? targets.length : 0;
   const summary = options.selectionSummary || null;
@@ -15715,6 +15750,7 @@ async function saveActiveOrderDrawing() {
     }
     throw new Error(message);
   }
+  await pruneUnplacedOrderDesignsForActiveOrder();
   return true;
 }
 

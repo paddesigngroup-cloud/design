@@ -308,11 +308,13 @@ async def upsert_order_drawing(
     drawing.deleted_at = None
     incoming_payload = dict(payload.drawing_payload or {})
     incoming_has_content = _payload_has_persistable_content(incoming_payload)
+    incoming_has_snapshot = bool(incoming_payload)
     existing_payload = dict(drawing.drawing_payload or {})
     existing_has_content = _payload_has_persistable_content(existing_payload)
 
-    # Guard against accidental empty overwrites after client-side resets or refresh races.
-    if incoming_has_content or not existing_has_content:
+    # Allow intentional saves of an empty-but-valid snapshot (for example after deleting all walls),
+    # while still ignoring truly blank payloads produced by transient client resets.
+    if incoming_has_content or incoming_has_snapshot or not existing_has_content:
         drawing.drawing_payload = incoming_payload
         drawing.walls_count = payload.walls_count
         drawing.hidden_walls_count = payload.hidden_walls_count
