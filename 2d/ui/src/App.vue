@@ -3713,13 +3713,16 @@ function buildFrontViewBoxFingerprint(boxes) {
     .join(";");
 }
 
-function getCachedFrontViewLines(cacheKey, boxes) {
-  const fingerprint = buildFrontViewBoxFingerprint(boxes);
+function getCachedFrontViewLines(cacheKey, boxes, outerBoxes = null) {
+  const fingerprint = [
+    buildFrontViewBoxFingerprint(boxes),
+    buildFrontViewBoxFingerprint(Array.isArray(outerBoxes) && outerBoxes.length ? outerBoxes : boxes),
+  ].join("::");
   const existing = frontViewGeometryCache.get(cacheKey);
   if (existing?.fingerprint === fingerprint) {
     return existing.value;
   }
-  const value = buildFrontViewLinesFromBoxesUncached(boxes);
+  const value = buildFrontViewLinesFromBoxesUncached(boxes, outerBoxes);
   frontViewGeometryCache.set(cacheKey, { fingerprint, value });
   return value;
 }
@@ -3746,16 +3749,13 @@ function getCachedInteriorInstanceFrontGeometry(instance) {
   return value;
 }
 
-function buildFrontViewLinesFromBoxesUncached(boxes) {
-  const normalized = Array.isArray(boxes) ? boxes.map(normalizeCabinetBox) : [];
-  if (!normalized.length) {
-    return { outer: [], inner: [], bounds: null };
-  }
+function buildFrontViewBoundsFromBoxes(boxes) {
+  const normalized = Array.isArray(boxes) ? boxes.map(normalizeCabinetBox).filter(Boolean) : [];
+  if (!normalized.length) return null;
   let minX = Infinity;
   let maxX = -Infinity;
   let minZ = Infinity;
   let maxZ = -Infinity;
-  const inner = [];
   for (const box of normalized) {
     const halfW = box.width * 0.5;
     const halfH = box.height * 0.5;
@@ -3767,6 +3767,23 @@ function buildFrontViewLinesFromBoxesUncached(boxes) {
     maxX = Math.max(maxX, x2);
     minZ = Math.min(minZ, z1);
     maxZ = Math.max(maxZ, z2);
+  }
+  return { minX, maxX, minZ, maxZ };
+}
+
+function buildFrontViewLinesFromBoxesUncached(boxes, outerBoxes = null) {
+  const normalized = Array.isArray(boxes) ? boxes.map(normalizeCabinetBox).filter(Boolean) : [];
+  if (!normalized.length) {
+    return { outer: [], inner: [], bounds: null };
+  }
+  const inner = [];
+  for (const box of normalized) {
+    const halfW = box.width * 0.5;
+    const halfH = box.height * 0.5;
+    const x1 = box.cx - halfW;
+    const x2 = box.cx + halfW;
+    const z1 = box.cz - halfH;
+    const z2 = box.cz + halfH;
     inner.push(
       { ax: x1, az: z1, bx: x2, bz: z1, lineColor: box.lineColor },
       { ax: x2, az: z1, bx: x2, bz: z2, lineColor: box.lineColor },
@@ -3774,7 +3791,11 @@ function buildFrontViewLinesFromBoxesUncached(boxes) {
       { ax: x1, az: z2, bx: x1, bz: z1, lineColor: box.lineColor },
     );
   }
-  const bounds = { minX, maxX, minZ, maxZ };
+  const bounds = buildFrontViewBoundsFromBoxes(outerBoxes) || buildFrontViewBoundsFromBoxes(boxes);
+  if (!bounds) {
+    return { outer: [], inner, bounds: null };
+  }
+  const { minX, maxX, minZ, maxZ } = bounds;
   const outer = [
     { ax: minX, az: minZ, bx: maxX, bz: minZ },
     { ax: maxX, az: minZ, bx: maxX, bz: maxZ },
@@ -3784,12 +3805,12 @@ function buildFrontViewLinesFromBoxesUncached(boxes) {
   return { outer, inner, bounds };
 }
 
-function buildFrontViewLinesFromBoxes(boxes, cacheKey = "") {
+function buildFrontViewLinesFromBoxes(boxes, cacheKey = "", outerBoxes = null) {
   const normalizedKey = String(cacheKey || "").trim();
   if (!normalizedKey) {
-    return buildFrontViewLinesFromBoxesUncached(boxes);
+    return buildFrontViewLinesFromBoxesUncached(boxes, outerBoxes);
   }
-  return getCachedFrontViewLines(normalizedKey, boxes);
+  return getCachedFrontViewLines(normalizedKey, boxes, outerBoxes);
 }
 
 const activeInteriorLibraryViewerBoxes = computed(() => {
@@ -3883,7 +3904,8 @@ const interiorLibraryFrontView = computed(() =>
       activeInteriorLibraryStructureViewerBoxes.value || [],
       subCategoryDesignEditorOpen.value
         ? `interior-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
-        : `interior-structure:order:${String(activeInteriorLibraryOrderDesign.value?.id || activeInteriorLibrarySourceDesign.value?.id || "none").trim()}`
+        : `interior-structure:order:${String(activeInteriorLibraryOrderDesign.value?.id || activeInteriorLibrarySourceDesign.value?.id || "none").trim()}`,
+      activeDoorLibraryStructureViewerBoxes.value || []
     )
     : { outer: [], inner: [], bounds: null }
 );
@@ -3893,7 +3915,8 @@ const doorLibraryFrontView = computed(() =>
       activeDoorLibraryViewerBoxes.value || [],
       subCategoryDesignEditorOpen.value
         ? `door-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
-        : `door-structure:order:${String(activeDoorLibraryOrderDesign.value?.id || activeDoorLibrarySourceDesign.value?.id || "none").trim()}`
+        : `door-structure:order:${String(activeDoorLibraryOrderDesign.value?.id || activeDoorLibrarySourceDesign.value?.id || "none").trim()}`,
+      activeDoorLibraryStructureViewerBoxes.value || []
     )
     : { outer: [], inner: [], bounds: null }
 );
