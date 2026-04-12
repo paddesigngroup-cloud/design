@@ -366,7 +366,10 @@ async def _require_item_any_status(session: AsyncSession, item_id: uuid.UUID) ->
             design_id=item.sub_category_design_id,
         )
         if await sync_order_design_snapshot(session, item=item, order=order, source_design=source_design):
-            await session.commit()
+            await _commit_order_design_changes(
+                session,
+                conflict_detail="طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+            )
             item = await session.scalar(stmt.where(and_(OrderDesign.id == item_id, OrderDesign.deleted_at.is_(None))))
             if not item:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design not found.")
@@ -774,7 +777,10 @@ async def list_order_designs(
             if await sync_order_design_snapshot(session, item=item, order=order, source_design=source_design):
                 changed = True
         if changed:
-            await session.commit()
+            await _commit_order_design_changes(
+                session,
+                conflict_detail="طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+            )
             items = (
                 await session.scalars(
                     base_stmt
@@ -1171,7 +1177,10 @@ async def restore_order_design_history_state(
         source_design=source_design,
         force=True,
     )
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+    )
     item = await _require_item(session, item.id)
     return _serialize_item(item, include_interior=(include_interior or include_doors))
 
@@ -1210,7 +1219,10 @@ async def update_order_design_interior_instance(
     refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
     refresh_order_design_snapshot_state(item=item, source_design=source_design)
     response = _serialize_interior_instance_item(target)
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="نمونه داخلی طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+    )
     return response
 
 
@@ -1272,7 +1284,10 @@ async def create_order_design_interior_instance(
     refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
     refresh_order_design_snapshot_state(item=item, source_design=source_design)
     response = _serialize_interior_instance_item(target)
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="نمونه داخلی طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+    )
     return response
 
 
@@ -1336,7 +1351,10 @@ async def duplicate_order_design_interior_instance(
     refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
     refresh_order_design_snapshot_state(item=item, source_design=source_design)
     response = _serialize_interior_instance_item(target)
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="نمونه داخلی طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+    )
     return response
 
 
@@ -1366,7 +1384,10 @@ async def delete_order_design_interior_instance(
     ]
     refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
     refresh_order_design_snapshot_state(item=item, source_design=source_design)
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="نمونه داخلی طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1413,7 +1434,10 @@ async def update_order_design_door_instance(
     refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
     refresh_order_design_snapshot_state(item=item, source_design=source_design)
     response = _serialize_door_instance_item(target)
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="نمونه درب طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+    )
     return response
 
 
@@ -1479,7 +1503,10 @@ async def create_order_design_door_instance(
     refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
     refresh_order_design_snapshot_state(item=item, source_design=source_design)
     response = _serialize_door_instance_item(target)
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="نمونه درب طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+    )
     return response
 
 
@@ -1546,7 +1573,10 @@ async def duplicate_order_design_door_instance(
     refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
     refresh_order_design_snapshot_state(item=item, source_design=source_design)
     response = _serialize_door_instance_item(target)
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="نمونه درب طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+    )
     return response
 
 
@@ -1576,7 +1606,10 @@ async def delete_order_design_door_instance(
     ]
     refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
     refresh_order_design_snapshot_state(item=item, source_design=source_design)
-    await session.commit()
+    await _commit_order_design_changes(
+        session,
+        conflict_detail="نمونه درب طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1593,7 +1626,10 @@ async def recompute_order_design_snapshot(
         design_id=item.sub_category_design_id,
     )
     if await sync_order_design_snapshot(session, item=item, order=order, source_design=source_design):
-        await session.commit()
+        await _commit_order_design_changes(
+            session,
+            conflict_detail="طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+        )
     include_interior = await interior_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)
     item = await _require_item(session, item.id)

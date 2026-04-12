@@ -714,7 +714,13 @@ function changeInteriorLibraryFrontZoom(nextZoom) {
   );
   interiorLibraryFrontZoom.value = boundedZoom;
 }
+function shouldBlockInteriorLibraryFrontZoom() {
+  return interiorLibraryControllerApplying.value
+    || !!String(interiorLibraryControllerEditingId.value || "").trim()
+    || interiorLibraryControllerPointerState.value.mode === "controller";
+}
 function zoomInteriorLibraryFrontIn() {
+  if (shouldBlockInteriorLibraryFrontZoom()) return;
   if (interiorLibraryPreviewMode.value === "model3d") {
     interiorLibraryPreview3dRef.value?.zoomIn?.();
     return;
@@ -722,6 +728,7 @@ function zoomInteriorLibraryFrontIn() {
   changeInteriorLibraryFrontZoom((Number(interiorLibraryFrontZoom.value) || 1) * INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR);
 }
 function zoomInteriorLibraryFrontOut() {
+  if (shouldBlockInteriorLibraryFrontZoom()) return;
   if (interiorLibraryPreviewMode.value === "model3d") {
     interiorLibraryPreview3dRef.value?.zoomOut?.();
     return;
@@ -729,6 +736,7 @@ function zoomInteriorLibraryFrontOut() {
   changeInteriorLibraryFrontZoom((Number(interiorLibraryFrontZoom.value) || 1) / INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR);
 }
 function handleInteriorLibraryPreviewWheel(event) {
+  if (shouldBlockInteriorLibraryFrontZoom()) return;
   const deltaY = Number(event?.deltaY) || 0;
   if (!Number.isFinite(deltaY) || deltaY === 0) return;
   if (interiorLibraryPreviewMode.value === "model3d") return;
@@ -802,6 +810,7 @@ function resetInteriorLibraryPreviewView() {
   stopInteriorLibraryFrontPan();
 }
 function focusInteriorLibraryPreviewCloser() {
+  if (shouldBlockInteriorLibraryFrontZoom()) return;
   if (interiorLibraryPreviewMode.value === "model3d") {
     interiorLibraryPreview3dRef.value?.fitCameraToAll?.();
     interiorLibraryPreview3dRef.value?.zoomByFactor?.(INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR);
@@ -2060,7 +2069,11 @@ async function persistActiveInteriorLibraryControllerInstance() {
           instance_code: String(instance.instance_code || "").trim() || "interior",
           line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
           param_values: Object.fromEntries(
-            Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+            Object.entries(instance.param_values || {}).map(([key, value]) => {
+              const inputMode = instance.param_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
+              const text = value == null ? null : String(value);
+              return [key, text == null ? null : (inputMode === "binary" ? text : parseParamDisplayValueToStored(text))];
+            })
           ),
         }),
       }
@@ -3754,6 +3767,38 @@ function getCachedInteriorInstanceFrontGeometry(instance) {
   return value;
 }
 
+function buildFront2dProjectedLineFingerprint(lines) {
+  if (!Array.isArray(lines) || !lines.length) return "";
+  return lines
+    .map((line) => [
+      Number(line?.x1 || 0).toFixed(2),
+      Number(line?.y1 || 0).toFixed(2),
+      Number(line?.x2 || 0).toFixed(2),
+      Number(line?.y2 || 0).toFixed(2),
+      String(line?.key || ""),
+    ].join(","))
+    .join(";");
+}
+
+function buildFront2dBoundsRectFingerprint(rect) {
+  if (!rect) return "";
+  return [
+    Number(rect.x || 0).toFixed(2),
+    Number(rect.y || 0).toFixed(2),
+    Number(rect.w || 0).toFixed(2),
+    Number(rect.h || 0).toFixed(2),
+  ].join(",");
+}
+
+function buildInteriorLibraryFrontInstanceRenderFingerprint(instance) {
+  return [
+    String(instance?.id || ""),
+    buildFront2dBoundsRectFingerprint(instance?.boundsRect),
+    buildFront2dProjectedLineFingerprint(instance?.outerLines),
+    buildFront2dProjectedLineFingerprint(instance?.innerLines),
+  ].join("|");
+}
+
 function buildFrontViewBoundsFromBoxes(boxes) {
   const normalized = Array.isArray(boxes) ? boxes.map(normalizeCabinetBox).filter(Boolean) : [];
   if (!normalized.length) return null;
@@ -4878,6 +4923,15 @@ const interiorLibraryFrontCanvasScene = computed(() => {
       metrics: [],
     });
   }
+  const structureFingerprint = [
+    buildFront2dProjectedLineFingerprint(interiorLibraryPreviewSvgLines.value?.outer),
+    buildFront2dProjectedLineFingerprint(interiorLibraryPreviewSvgLines.value?.inner),
+    interiorLibraryShowInnerLines.value ? "inner-on" : "inner-off",
+  ].join("|");
+  const entitiesFingerprint = [
+    Number(interiorLibraryPreviewInstances2d.value?.length || 0),
+    ...interiorLibraryPreviewInstances2d.value.map((instance) => buildInteriorLibraryFrontInstanceRenderFingerprint(instance)),
+  ].join("|");
   return {
     renderToken: [
       String(interiorLibraryFrontSvgViewBox.value || ""),
@@ -4888,24 +4942,16 @@ const interiorLibraryFrontCanvasScene = computed(() => {
       String(interiorLibraryCurrentSnapPoint.value ? `${interiorLibraryCurrentSnapPoint.value.x}:${interiorLibraryCurrentSnapPoint.value.y}:${interiorLibraryCurrentSnapPoint.value.kind}` : ""),
       Number(interiorLibraryRenderedAnnotations.value?.dimensions?.length || 0),
       interiorLibraryRenderedAnnotations.value?.draftDimension ? "draft" : "nodraft",
-      Number(interiorLibraryPreviewSvgLines.value?.outer?.length || 0),
-      Number(interiorLibraryPreviewSvgLines.value?.inner?.length || 0),
-      Number(interiorLibraryPreviewInstances2d.value?.length || 0),
+      structureFingerprint,
+      entitiesFingerprint,
       Number(interiorLibraryControllerOverlays.value?.length || 0),
       interiorLibraryControllerState.value?.enabled ? "controller" : "nocontroller",
       String(interiorLibraryControllerPointerState.value?.mode || "idle"),
     ].join("|"),
     renderTokens: {
       viewport: String(interiorLibraryFrontSvgViewBox.value || ""),
-      structure: [
-        Number(interiorLibraryPreviewSvgLines.value?.outer?.length || 0),
-        Number(interiorLibraryPreviewSvgLines.value?.inner?.length || 0),
-        !!interiorLibraryShowInnerLines.value,
-      ].join("|"),
-      entities: [
-        Number(interiorLibraryPreviewInstances2d.value?.length || 0),
-        ...interiorLibraryPreviewInstances2d.value.map((instance) => `${instance.id}:${instance.outerLines?.length || 0}:${instance.innerLines?.length || 0}`),
-      ].join("|"),
+      structure: structureFingerprint,
+      entities: entitiesFingerprint,
       dynamic: [
         String(interiorLibrarySelectedInstanceId.value || ""),
         String(interiorLibraryHoveredInstanceId.value || ""),
