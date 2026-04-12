@@ -7707,7 +7707,11 @@ function buildModel2dOutlineFromBoxes(boxes) {
 
 function getCachedOrderDesignGeometry(item) {
   if (!item) return { lines: [], outline: [] };
-  const cacheKey = `${String(item.id || "").trim()}::${String(item.snapshot_checksum || "").trim()}::${Array.isArray(item.viewer_boxes) ? item.viewer_boxes.length : 0}`;
+  const cacheKey = [
+    String(item.id || "").trim(),
+    String(item.snapshot_checksum || "").trim(),
+    buildFrontViewBoxFingerprint(item.viewer_boxes || []),
+  ].join("::");
   const cached = orderDesignGeometryCache.get(cacheKey);
   if (cached) return cached;
   const next = {
