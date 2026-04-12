@@ -13,6 +13,17 @@ export const model2dTransformRef = shallowRef({
   phase: "commit",
 });
 
+// Live transform used for drag-time previews without forcing the whole UI to
+// react to every pointer move.
+export const liveModel2dTransformRef = shallowRef({
+  x: 0,
+  y: 0,
+  rotRad: 0,
+  mirrorX: 1,
+  interactive: false,
+  phase: "commit",
+});
+
 // Latest 2D viewport state used by stage overlays that must track pan/zoom live.
 export const editorViewportRef = shallowRef({ zoom: 1, offsetX: 0, offsetY: 0 });
 

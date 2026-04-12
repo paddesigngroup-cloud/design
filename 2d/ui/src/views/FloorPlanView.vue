@@ -2,6 +2,7 @@
 import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from "vue";
 import {
   editorRef,
+  liveModel2dTransformRef,
   model2dTransformRef,
   editorViewportRef,
   passiveModelSelectionHandlerRef,
@@ -69,7 +70,7 @@ onMounted(() => {
         const y = Number.isFinite(t?.y) ? t.y : 0;
         const rotRad = Number.isFinite(t?.rotRad) ? t.rotRad : 0;
         const mirrorX = Number(t?.mirrorX) === -1 ? -1 : 1;
-        model2dTransformRef.value = {
+        const nextTransform = {
           x,
           y,
           rotRad,
@@ -77,6 +78,10 @@ onMounted(() => {
           interactive: !!t?.interactive,
           phase: String(t?.phase || (t?.interactive ? "drag" : "commit")),
         };
+        liveModel2dTransformRef.value = nextTransform;
+        if (!nextTransform.interactive || nextTransform.phase === "commit") {
+          model2dTransformRef.value = nextTransform;
+        }
       },
       onViewportChange: (viewport) => {
         editorViewportRef.value = {

@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import { useRoute, useRouter } from "vue-router";
 import {
   editorRef,
+  liveModel2dTransformRef,
   model2dTransformRef,
   editorViewportRef,
   passiveModelSelectionHandlerRef,
@@ -8191,6 +8192,17 @@ function getCurrentModel2dTransform() {
   };
 }
 
+function getLiveModel2dTransform() {
+  return {
+    x: Number.isFinite(Number(liveModel2dTransformRef.value?.x)) ? Number(liveModel2dTransformRef.value.x) : 0,
+    y: Number.isFinite(Number(liveModel2dTransformRef.value?.y)) ? Number(liveModel2dTransformRef.value.y) : 0,
+    rotRad: Number.isFinite(Number(liveModel2dTransformRef.value?.rotRad)) ? Number(liveModel2dTransformRef.value.rotRad) : 0,
+    mirrorX: 1,
+    interactive: !!liveModel2dTransformRef.value?.interactive,
+    phase: String(liveModel2dTransformRef.value?.phase || (liveModel2dTransformRef.value?.interactive ? "drag" : "commit")),
+  };
+}
+
 function getCurrentEditorModelPlacement() {
   const full = editorRef.value?.getState?.();
   const snap = full?.model2dSnap || null;
@@ -8468,6 +8480,14 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
           null,
       }, false);
       model2dTransformRef.value = {
+        x: nextPlacement.x,
+        y: nextPlacement.y,
+        rotRad: nextPlacement.rotRad,
+        mirrorX: 1,
+        interactive: false,
+        phase: "commit",
+      };
+      liveModel2dTransformRef.value = {
         x: nextPlacement.x,
         y: nextPlacement.y,
         rotRad: nextPlacement.rotRad,
@@ -15049,9 +15069,9 @@ const draggedCabinetPreviewInstance = computed(() => {
 const activeStagePlaceholderTransform = computed(() =>
   activeCabinetDesignId.value
     ? {
-        x: Number.isFinite(Number(model2dTransformRef.value?.x)) ? Number(model2dTransformRef.value.x) : 0,
-        y: Number.isFinite(Number(model2dTransformRef.value?.y)) ? Number(model2dTransformRef.value.y) : 0,
-        rotRad: Number.isFinite(Number(model2dTransformRef.value?.rotRad)) ? Number(model2dTransformRef.value.rotRad) : 0,
+        x: Number.isFinite(Number(liveModel2dTransformRef.value?.x)) ? Number(liveModel2dTransformRef.value.x) : 0,
+        y: Number.isFinite(Number(liveModel2dTransformRef.value?.y)) ? Number(liveModel2dTransformRef.value.y) : 0,
+        rotRad: Number.isFinite(Number(liveModel2dTransformRef.value?.rotRad)) ? Number(liveModel2dTransformRef.value.rotRad) : 0,
         mirrorX: 1,
       }
     : null
@@ -15061,9 +15081,9 @@ const activeStageDoorAssetTransform = computed(() => {
   const activePlacement = getDoorScenePlacement(activeDoorAssetId.value);
   if (!activePlacement) return null;
   return {
-    x: Number.isFinite(Number(model2dTransformRef.value?.x)) ? Number(model2dTransformRef.value.x) : 0,
-    y: Number.isFinite(Number(model2dTransformRef.value?.y)) ? Number(model2dTransformRef.value.y) : 0,
-    rotRad: Number.isFinite(Number(model2dTransformRef.value?.rotRad)) ? Number(model2dTransformRef.value.rotRad) : 0,
+    x: Number.isFinite(Number(liveModel2dTransformRef.value?.x)) ? Number(liveModel2dTransformRef.value.x) : 0,
+    y: Number.isFinite(Number(liveModel2dTransformRef.value?.y)) ? Number(liveModel2dTransformRef.value.y) : 0,
+    rotRad: Number.isFinite(Number(liveModel2dTransformRef.value?.rotRad)) ? Number(liveModel2dTransformRef.value.rotRad) : 0,
     floorOffsetMm: activePlacement.floorOffsetMm || 0,
   };
 });
@@ -17710,7 +17730,7 @@ onBeforeUnmount(() => {
             ref="stageGlbViewerRef"
             v-if="showStageOverlays"
             src="/models/1_z1.glb"
-            :model2d-transform="model2dTransformRef"
+            :model2d-transform="liveModel2dTransformRef"
             :walls2d="walls3dSnapshot"
             :asset-instances="stageDoorAssetInstances"
             :active-asset-instance-id="activeDoorAssetId"
