@@ -436,6 +436,7 @@ let doorLibraryFrontLastMiddleClickMs = 0;
 let doorLibraryHoverRafId = 0;
 const orderDesignEditorOpen = ref(false);
 const orderDesignEditorDraft = ref(null);
+const orderDesignEditorActiveGroupId = ref("");
 const orderDesignSavingIds = ref([]);
 const orderDesignPlacements = ref([]);
 const stageCabinetPlaceholderBoxes = ref([]);
@@ -8004,15 +8005,30 @@ function openOrderDesignEditor(item) {
   if (!normalized) return;
   orderDesignEditorDraft.value = {
     ...normalized,
-    order_attr_values: { ...(normalized.order_attr_values || {}) },
+    order_attr_values: Object.fromEntries(
+      Object.entries(normalized.order_attr_values || {}).map(([key, value]) => {
+        const inputMode = normalized.order_attr_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
+        return [key, inputMode === "binary" ? String(value ?? "") : formatParamValueForDisplay(value)];
+      })
+    ),
     order_attr_meta: { ...(normalized.order_attr_meta || {}) },
   };
+  orderDesignEditorActiveGroupId.value = buildOrderDesignEditorGroups(normalized)[0]?.id || "";
   orderDesignEditorOpen.value = true;
+}
+
+function openOrderDesignEditorById(orderDesignId) {
+  const key = String(orderDesignId || "").trim();
+  if (!key) return;
+  const item = orderDesignCatalog.value.find((row) => String(row.id) === key);
+  if (!item) return;
+  openOrderDesignEditor(item);
 }
 
 function closeOrderDesignEditor() {
   orderDesignEditorOpen.value = false;
   orderDesignEditorDraft.value = null;
+  orderDesignEditorActiveGroupId.value = "";
 }
 
 function getOrderDesignAttrEntries(item) {
@@ -8033,6 +8049,102 @@ function getOrderDesignAttrEntries(item) {
       if (idDelta !== 0) return idDelta;
       return String(a.meta.label || a.key).localeCompare(String(b.meta.label || b.key), "fa");
     });
+}
+
+const orderDesignParamGroupsById = computed(() =>
+  new Map(
+    constructionParamGroups.value.map((group) => [
+      String(group?.param_group_id ?? ""),
+      group || {},
+    ])
+  )
+);
+
+function buildOrderDesignEditorGroups(item) {
+  const meta = item?.order_attr_meta || {};
+  const values = item?.order_attr_values || {};
+  const groupsMap = new Map();
+  for (const [key, rawMeta] of Object.entries(meta)) {
+    const entryMeta = rawMeta || {};
+    const liveGroup = orderDesignParamGroupsById.value.get(String(entryMeta.group_id ?? ""));
+    const showsInAttrs = liveGroup
+      ? liveGroup.show_in_order_attrs !== false
+      : entryMeta.group_show_in_order_attrs !== false;
+    const groupId = String((entryMeta.group_id ?? entryMeta.group_title) || "other").trim() || "other";
+    const groupTitle = String(
+      liveGroup?.org_param_group_title || liveGroup?.title || entryMeta.group_title || "سایر صفات"
+    ).trim() || "سایر صفات";
+    const groupIconPath = normalizeIconFileName(liveGroup?.param_group_icon_path || entryMeta.group_icon_path) || "";
+    const groupOrder = Number.isFinite(Number(liveGroup?.ui_order))
+      ? Number(liveGroup.ui_order)
+      : (Number(entryMeta.group_ui_order) || 0);
+    if (!groupsMap.has(groupId)) {
+      groupsMap.set(groupId, {
+        id: groupId,
+        title: groupTitle,
+        order: groupOrder,
+        visibilityLabel: showsInAttrs ? "نمایشی" : "مخفی",
+        iconUrl: groupIconPath ? getSubCategoryDefaultIconUrl(groupIconPath) : "",
+        items: [],
+      });
+    }
+    groupsMap.get(groupId).items.push({
+      key,
+      displayTitle: String(entryMeta.label || key).trim() || key,
+      descriptionText: String(entryMeta.description_text || "").trim(),
+      inputMode: entryMeta.input_mode === "binary" ? "binary" : "value",
+      iconUrl: getSubCategoryDefaultIconUrl(
+        normalizeIconFileName(entryMeta.icon_path || entryMeta.group_icon_path) || groupIconPath
+      ),
+      binaryOffLabel: String(entryMeta.binary_off_label || "0").trim() || "0",
+      binaryOnLabel: String(entryMeta.binary_on_label || "1").trim() || "1",
+      binaryOffIconUrl: getSubCategoryDefaultIconUrl(
+        normalizeIconFileName(entryMeta.binary_off_icon_path || entryMeta.icon_path || entryMeta.group_icon_path) || groupIconPath
+      ),
+      binaryOnIconUrl: getSubCategoryDefaultIconUrl(
+        normalizeIconFileName(entryMeta.binary_on_icon_path || entryMeta.icon_path || entryMeta.group_icon_path) || groupIconPath
+      ),
+      value: values[key] ?? "",
+      unitLabel: entryMeta.input_mode === "binary" ? "" : getCurrentParamLengthUnitLabel(),
+      sortOrder: Number(entryMeta.param_ui_order) || 0,
+      paramId: Number(entryMeta.param_id) || 0,
+    });
+  }
+  return Array.from(groupsMap.values())
+    .map((group) => ({
+      ...group,
+      items: group.items.sort((a, b) => {
+        const orderDelta = a.sortOrder - b.sortOrder;
+        if (orderDelta !== 0) return orderDelta;
+        const idDelta = a.paramId - b.paramId;
+        if (idDelta !== 0) return idDelta;
+        return a.displayTitle.localeCompare(b.displayTitle, "fa");
+      }),
+    }))
+    .sort((a, b) => a.order - b.order || a.title.localeCompare(b.title, "fa"));
+}
+
+const orderDesignEditorGroups = computed(() =>
+  orderDesignEditorDraft.value ? buildOrderDesignEditorGroups(orderDesignEditorDraft.value) : []
+);
+
+const activeOrderDesignEditorGroup = computed(() =>
+  orderDesignEditorGroups.value.find((group) => String(group.id) === String(orderDesignEditorActiveGroupId.value || ""))
+  || orderDesignEditorGroups.value[0]
+  || null
+);
+
+function selectOrderDesignEditorGroup(groupId) {
+  orderDesignEditorActiveGroupId.value = String(groupId || "").trim();
+}
+
+function setOrderDesignEditorBinaryValue(key, value) {
+  const normalizedKey = String(key || "").trim();
+  if (!normalizedKey || !orderDesignEditorDraft.value) return;
+  orderDesignEditorDraft.value.order_attr_values = {
+    ...(orderDesignEditorDraft.value.order_attr_values || {}),
+    [normalizedKey]: String(value) === "1" ? "1" : "0",
+  };
 }
 
 async function persistOrderDesignRecord(item, nextAttrValues = null) {
@@ -8133,26 +8245,21 @@ async function updateActiveOrderDesignAttr({ key, value }) {
 async function saveOrderDesignEditor() {
   const draft = orderDesignEditorDraft.value;
   if (!draft?.id || cabinetDesignDropLoading.value) return;
-  const designTitle = String(draft.design_title || "").trim();
-  const instanceCode = String(draft.instance_code || "").trim();
-  if (!designTitle) {
-    showAlert("عنوان طرح سفارش نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
-    return;
-  }
-  if (!instanceCode) {
-    showAlert("کد نمونه نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
-    return;
-  }
   const activePlacement = getOrderDesignPlacement(draft.id) || getCurrentModel2dTransform();
   cabinetDesignDropLoadingMode.value = "edit";
   cabinetDesignDropLoading.value = true;
-  cabinetDesignDropLoadingTitle.value = designTitle || instanceCode;
+  cabinetDesignDropLoadingTitle.value = String(draft.design_title || draft.instance_code || "").trim();
   try {
+    const nextAttrValues = Object.fromEntries(
+      Object.entries(draft.order_attr_values || {}).map(([key, value]) => {
+        const inputMode = draft.order_attr_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
+        const text = value == null ? "" : String(value);
+        return [key, inputMode === "binary" ? (text === "1" ? "1" : "0") : parseParamDisplayValueToStored(text)];
+      })
+    );
     const fresh = await persistOrderDesignRecord({
       ...draft,
-      design_title: designTitle,
-      instance_code: instanceCode,
-    });
+    }, nextAttrValues);
     if (fresh) {
       upsertOrderDesignCatalogItem(fresh);
       if (String(activeCabinetDesignId.value || "") === String(fresh.id)) {
@@ -8164,9 +8271,9 @@ async function saveOrderDesignEditor() {
       await loadOrderDesignCatalog(true);
     }
     closeOrderDesignEditor();
-    showAlert("طرح سفارش ذخیره شد.", { title: "ذخیره طرح" });
+    showAlert("تنظیمات طرح سفارش ذخیره شد.", { title: "ذخیره تنظیمات" });
   } catch (error) {
-    showAlert(error?.message || "ذخیره طرح سفارش انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || "ذخیره تنظیمات طرح سفارش انجام نشد.", { title: "خطا" });
   } finally {
     cabinetDesignDropLoading.value = false;
     cabinetDesignDropLoadingTitle.value = "";
@@ -17927,6 +18034,7 @@ onBeforeUnmount(() => {
             @update:wallStyleDraft="updateWallStyleDraft"
             @update:selectedWallCoords="updateSelectedWallCoords"
             @update:orderDesignAttr="updateActiveOrderDesignAttr"
+            @openOrderDesignSettings="openOrderDesignEditorById"
             @openInteriorLibraryForDesign="openInteriorLibraryForDesign"
             @openDoorLibraryForDesign="openDoorLibraryForDesign"
             @model2d="onGlbModel2d"
@@ -22140,7 +22248,6 @@ onBeforeUnmount(() => {
                   </td>
                   <td class="constructionDialog__col constructionDialog__col--actions">
                     <div class="constructionDialog__actionsCell" @click.stop>
-                      <button type="button" class="constructionDialog__textBtn" @click="openOrderDesignEditor(item)">ویرایش</button>
                       <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteOrderDesign(item)">×</button>
                     </div>
                   </td>
@@ -22766,67 +22873,116 @@ onBeforeUnmount(() => {
 
   <div v-if="orderDesignEditorOpen" class="appDialog" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeOrderDesignEditor"></div>
-    <div class="appDialog__card appDialog__card--order" dir="rtl">
-      <div class="formulaBuilder__head">
-        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش طرح سفارش</div>
-        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeOrderDesignEditor">×</button>
+    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
+      <div class="subCategoryPreview__header">
+        <div>
+          <div class="subCategoryPreview__title">تنظیمات پارامترهای طرح سفارش</div>
+          <div class="subCategoryPreview__caption">
+            {{ orderDesignEditorDraft?.design_title || "طرح سفارش" }}
+            <span v-if="orderDesignEditorDraft?.instance_code">{{ orderDesignEditorDraft.instance_code }}</span>
+            <span v-if="orderDesignEditorDraft?.design_code">{{ orderDesignEditorDraft.design_code }}</span>
+          </div>
+        </div>
+        <button type="button" class="constructionDialog__textBtn" @click="closeOrderDesignEditor">بستن</button>
       </div>
-      <div v-if="orderDesignEditorDraft" class="orderEntry__body">
-        <div class="orderEntry__grid">
-          <label class="orderEntry__field">
-            <span>عنوان</span>
-            <input v-model="orderDesignEditorDraft.design_title" class="constructionDialog__input" type="text" />
-          </label>
-          <label class="orderEntry__field">
-            <span>کد نمونه</span>
-            <input v-model="orderDesignEditorDraft.instance_code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
-          </label>
-          <label class="orderEntry__field">
-            <span>کد طرح منبع</span>
-            <input :value="orderDesignEditorDraft.design_code" class="constructionDialog__input constructionDialog__input--mono" type="text" readonly />
-          </label>
-        </div>
-        <div class="subCategoryDesignEditor__metaActions" style="margin-top: 12px;">
-          <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': doorLibraryOpen }" title="قطعات درب" @click="openDoorLibraryForDesign(orderDesignEditorDraft.id)">
-            <img src="/icons/door_styles.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-            <span>درب</span>
-          </button>
-        </div>
-        <div class="constructionDialog__tableWrap" style="margin-top: 16px;">
-          <table class="constructionDialog__table orderEntry__table">
-            <thead>
-              <tr>
-                <th class="constructionDialog__col constructionDialog__col--title">صفت</th>
-                <th class="constructionDialog__col constructionDialog__col--title">مقدار</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="entry in getOrderDesignAttrEntries(orderDesignEditorDraft)" :key="entry.key">
-                <td class="constructionDialog__col constructionDialog__col--title">{{ entry.meta.label || entry.key }}</td>
-                <td class="constructionDialog__col constructionDialog__col--title">
-                  <select
-                    v-if="entry.meta.input_mode === 'binary'"
-                    v-model="orderDesignEditorDraft.order_attr_values[entry.key]"
-                    class="constructionDialog__input"
-                  >
-                    <option value="0">{{ entry.meta.binary_off_label || "0" }}</option>
-                    <option value="1">{{ entry.meta.binary_on_label || "1" }}</option>
-                  </select>
-                  <input
-                    v-else
-                    v-model="orderDesignEditorDraft.order_attr_values[entry.key]"
-                    class="constructionDialog__input"
-                    type="text"
+      <div class="constructionDialog__sectionHint">
+        در این بخش پیش‌فرض پارامترهای همین طرح سفارش را به‌صورت گروه‌بندی‌شده تغییر می‌دهید. مقادیر عددی با واحد نمایشی فعلی دیده می‌شوند و هنگام ذخیره به میلی‌متر برمی‌گردند.
+      </div>
+      <div v-if="orderDesignEditorDraft" class="subCategoryPreview__body">
+        <div class="subCategoryPreview__tree">
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--groups">
+            <div class="subCategoryPreview__selectorList">
+              <button
+                v-for="group in orderDesignEditorGroups"
+                :key="group.id"
+                type="button"
+                class="subCategoryPreview__groupHead"
+                :class="{ 'is-active': String(activeOrderDesignEditorGroup?.id || '') === String(group.id) }"
+                @click="selectOrderDesignEditorGroup(group.id)"
+              >
+                <div class="subCategoryPreview__groupMeta">
+                  <div class="subCategoryPreview__groupTitle">{{ group.title }}</div>
+                  <div class="subCategoryPreview__groupCaption">
+                    {{ toPersianDigits(group.items.length) }} پارامتر
+                    <span v-if="group.visibilityLabel">- {{ group.visibilityLabel }}</span>
+                  </div>
+                </div>
+                <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !group.iconUrl }">
+                  <img
+                    v-if="group.iconUrl"
+                    :key="group.iconUrl"
+                    :src="group.iconUrl"
+                    :alt="group.title"
+                    class="subCategoryPreview__groupIcon"
+                    @error="handleSubCategoryDefaultIconError"
                   />
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                  <span v-else class="subCategoryPreview__groupFallback">{{ toPersianDigits(group.items.length) }}</span>
+                </div>
+                <span class="subCategoryPreview__groupChevron" aria-hidden="true">‹</span>
+              </button>
+            </div>
+          </div>
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
+            <div v-if="activeOrderDesignEditorGroup" class="subCategoryPreview__panelHead">
+              <div class="subCategoryPreview__panelTitle">{{ activeOrderDesignEditorGroup.title }}</div>
+              <div class="subCategoryPreview__panelCaption">{{ toPersianDigits(activeOrderDesignEditorGroup.items.length) }} پارامتر در این گروه</div>
+            </div>
+            <div v-if="activeOrderDesignEditorGroup" class="subCategoryPreview__params">
+              <article v-for="column in activeOrderDesignEditorGroup.items" :key="column.key" class="subCategoryPreview__paramCard">
+                <template v-if="column.inputMode === 'binary'">
+                  <div class="subCategoryPreview__paramMeta">
+                    <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                    <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                  </div>
+                  <div class="subCategoryPreview__binaryChoices">
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': String(orderDesignEditorDraft.order_attr_values?.[column.key] ?? '0') !== '1' }"
+                      @click="setOrderDesignEditorBinaryValue(column.key, '0')"
+                    >
+                      <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOffLabel }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': String(orderDesignEditorDraft.order_attr_values?.[column.key] ?? '0') === '1' }"
+                      @click="setOrderDesignEditorBinaryValue(column.key, '1')"
+                    >
+                      <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOnLabel }}</span>
+                    </button>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="subCategoryPreview__valueHead">
+                    <div class="subCategoryPreview__valueIconBox">
+                      <img :src="column.iconUrl" :alt="column.displayTitle" class="subCategoryPreview__valueIcon" @error="handleSubCategoryDefaultIconError" />
+                    </div>
+                    <div class="subCategoryPreview__paramMeta">
+                      <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                      <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                    </div>
+                  </div>
+                  <input
+                    v-model="orderDesignEditorDraft.order_attr_values[column.key]"
+                    class="constructionDialog__input subCategoryPreview__valueInput"
+                    type="text"
+                    inputmode="decimal"
+                    :placeholder="column.displayTitle"
+                  />
+                  <div class="subCategoryPreview__valueUnit">{{ column.unitLabel }}</div>
+                </template>
+              </article>
+            </div>
+            <div v-else class="designMenu__cabinetState">برای این طرح سفارش هنوز پارامتری قابل نمایش نیست.</div>
+          </div>
         </div>
       </div>
       <div class="appDialog__actions">
         <button type="button" class="constructionDialog__textBtn" @click="closeOrderDesignEditor">انصراف</button>
-        <button type="button" class="constructionDialog__textBtn is-primary" @click="saveOrderDesignEditor">ذخیره طرح</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="saveOrderDesignEditor">اعمال</button>
       </div>
     </div>
   </div>

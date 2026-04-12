@@ -89,7 +89,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords", "update:orderDesignAttr", "openInteriorLibraryForDesign", "openDoorLibraryForDesign"]);
+const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords", "update:orderDesignAttr", "openInteriorLibraryForDesign", "openDoorLibraryForDesign", "openOrderDesignSettings"]);
 
 const widgetEl = ref(null);
 const hostEl = ref(null);
@@ -1324,6 +1324,12 @@ function clearAssetInstances() {
   });
   scene.remove(assetInstancesRoot);
   assetInstancesRoot = null;
+}
+
+function openOrderDesignSettingsForActiveDesign() {
+  const designId = String(activeOrderDesign.value?.id || "").trim();
+  if (!designId) return;
+  emit("openOrderDesignSettings", designId);
 }
 
 function buildWallsStructureSignature(snapshot) {
@@ -2704,6 +2710,9 @@ defineExpose({
         <div v-if="isGroupEditMode || selectedOrderDesignCount > 1" class="glbWallAttrs__groupLabel">ویرایش گروهی</div>
       </div>
       <div v-if="showOrderDesignTools" class="glbWallAttrs__tools">
+        <button type="button" class="glbWallAttrs__toolBtn" title="تنظیمات پارامترها" @click="openOrderDesignSettingsForActiveDesign">
+          <img src="/icons/setting.png" alt="" class="glbWallAttrs__toolIcon" />
+        </button>
         <button type="button" class="glbWallAttrs__toolBtn" title="درب" @click="openDoorAttrsForActiveDesign">
           <img src="/icons/door_styles.png" alt="" class="glbWallAttrs__toolIcon" />
         </button>
