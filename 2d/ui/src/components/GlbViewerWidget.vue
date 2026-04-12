@@ -2255,10 +2255,10 @@ onMounted(async () => {
 
   controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
-  controls.rotateSpeed = 0.7;
-  controls.zoomSpeed = 0.9;
-  controls.panSpeed = 0.7;
+  controls.dampingFactor = 0.055;
+  controls.rotateSpeed = 1.22;
+  controls.zoomSpeed = 1.02;
+  controls.panSpeed = 0.88;
   controls.screenSpacePanning = true;
   controls.mouseButtons = {
     LEFT: THREE.MOUSE.ROTATE,
