@@ -2032,7 +2032,11 @@ async function persistActiveInteriorLibraryControllerInstance() {
             instance_code: String(instance.instance_code || "").trim() || "interior",
             line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
             param_values: Object.fromEntries(
-              Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+              Object.entries(instance.param_values || {}).map(([key, value]) => {
+                const inputMode = instance.param_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
+                const text = value == null ? null : String(value);
+                return [key, text == null ? null : (inputMode === "binary" ? text : parseParamDisplayValueToStored(text))];
+              })
             ),
           }),
         }
@@ -5469,6 +5473,34 @@ function normalizeInteriorControllerNumericText(value) {
 function parseInteriorControllerMm(value) {
   const numeric = Number.parseFloat(normalizeInteriorControllerNumericText(value));
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeParamDisplayUnit(unit = currentEditorDisplayUnit.value) {
+  const normalizedUnit = String(unit || "cm").trim().toLowerCase();
+  return normalizedUnit === "mm" || normalizedUnit === "inch" ? normalizedUnit : "cm";
+}
+
+function getCurrentParamLengthUnitLabel(unit = currentEditorDisplayUnit.value) {
+  const normalizedUnit = normalizeParamDisplayUnit(unit);
+  if (normalizedUnit === "mm") return "میلی‌متر";
+  if (normalizedUnit === "inch") return "اینچ";
+  return "سانتی‌متر";
+}
+
+function formatParamValueForDisplay(value, unit = currentEditorDisplayUnit.value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const numeric = Number.parseFloat(normalizeInteriorControllerNumericText(text));
+  if (!Number.isFinite(numeric)) return text;
+  return formatInteriorControllerRawValue(numeric, unit);
+}
+
+function parseParamDisplayValueToStored(value, unit = currentEditorDisplayUnit.value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const numericMm = parseInteriorControllerInputToMm(text);
+  if (!Number.isFinite(numericMm)) return text;
+  return trimInteriorControllerDisplayNumber(numericMm, Number.isInteger(numericMm) ? 0 : 3);
 }
 
 function formatInteriorControllerRawValue(valueMm, unit = currentEditorDisplayUnit.value) {
@@ -9202,7 +9234,7 @@ function openInternalPartGroupDefaultsEditor(item) {
       const value = String(row.param_defaults?.[column.key] ?? "").trim();
       return [
         column.key,
-        override.input_mode === "binary" ? (value === "1" ? "1" : "0") : value,
+        override.input_mode === "binary" ? (value === "1" ? "1" : "0") : formatParamValueForDisplay(value),
       ];
     })
   );
@@ -9360,6 +9392,28 @@ async function ensureOrderDesignInteriorParamMetaLoaded(orderDesignId) {
     const sourceInternalGroup = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
     const expectedMetaCount = sourceInternalGroup
       ? buildInternalGroupDefaultsTree(sourceInternalGroup).reduce((sum, group) => sum + group.items.length, 0)
+      : Object.keys(instance?.param_values || {}).length;
+    return expectedMetaCount > 0 && metaCount < expectedMetaCount;
+  });
+  if (!needsRefresh) return;
+  try {
+    await refreshOrderDesignGeometryFromServer(key, { updateStage: false });
+  } catch (_) {
+    // Silent: failing to refresh should not block opening the library.
+  }
+}
+
+async function ensureOrderDesignDoorParamMetaLoaded(orderDesignId) {
+  const key = String(orderDesignId || "").trim();
+  if (!key) return;
+  const item = orderDesignCatalog.value.find((row) => String(row.id) === key);
+  const doors = Array.isArray(item?.door_instances) ? item.door_instances : [];
+  if (!doors.length) return;
+  const needsRefresh = doors.some((instance) => {
+    const metaCount = Object.keys(instance?.param_meta || {}).length;
+    const sourceDoorGroup = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
+    const expectedMetaCount = sourceDoorGroup
+      ? buildDoorPartGroupDefaultsGroups(sourceDoorGroup).reduce((sum, group) => sum + group.items.length, 0)
       : Object.keys(instance?.param_values || {}).length;
     return expectedMetaCount > 0 && metaCount < expectedMetaCount;
   });
@@ -9686,8 +9740,8 @@ async function openDoorInstanceEditor(instance) {
   const normalized = normalizeDoorInstanceRecord(instance);
   if (!normalized) return;
   selectDoorLibraryPlacedInstance(normalized.id);
-  if (!subCategoryDesignEditorOpen.value && Object.keys(normalized.param_meta || {}).length === 0) {
-    await refreshOrderDesignGeometryFromServer(activeDoorLibraryOrderDesign.value?.id, { updateStage: false });
+  if (!subCategoryDesignEditorOpen.value) {
+    await ensureOrderDesignDoorParamMetaLoaded(activeDoorLibraryOrderDesign.value?.id);
     const refreshed = activeDoorLibraryInstances.value.find(
       (row) => String(row?.id || "").trim() === String(normalized.id || "").trim()
     );
@@ -9700,7 +9754,7 @@ async function openDoorInstanceEditor(instance) {
   const effectiveParamValues = Object.fromEntries(
     previewGroups
       .flatMap((group) => Array.isArray(group?.items) ? group.items : [])
-      .map((column) => [column.key, column.value == null ? "" : String(column.value)])
+      .map((column) => [column.key, column.inputMode === "binary" ? (column.value == null ? "" : String(column.value)) : formatParamValueForDisplay(column.value)])
   );
   doorInstanceEditorDraft.value = {
     ...normalized,
@@ -9708,7 +9762,10 @@ async function openDoorInstanceEditor(instance) {
     controller_box_snapshot: { ...(normalized.controller_box_snapshot || {}) },
     param_values: {
       ...effectiveParamValues,
-      ...Object.fromEntries(Object.entries(normalized.param_values || {}).map(([key, value]) => [key, String(value ?? "")])),
+      ...Object.fromEntries(Object.entries(normalized.param_values || {}).map(([key, value]) => {
+        const inputMode = normalized.param_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
+        return [key, inputMode === "binary" ? String(value ?? "") : formatParamValueForDisplay(value)];
+      })),
     },
     param_meta: Object.fromEntries(Object.entries(normalized.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])),
     part_snapshots: Array.isArray(normalized.part_snapshots) ? normalized.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
@@ -9742,7 +9799,11 @@ async function applyDoorInstanceEditor() {
       structural_part_formula_ids: Array.isArray(instance.structural_part_formula_ids) ? instance.structural_part_formula_ids : [],
       dependent_interior_instance_ids: Array.isArray(instance.dependent_interior_instance_ids) ? instance.dependent_interior_instance_ids : [],
       param_values: Object.fromEntries(
-        Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+        Object.entries(instance.param_values || {}).map(([key, value]) => {
+          const inputMode = instance.param_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
+          const text = value == null ? null : String(value);
+          return [key, text == null ? null : (inputMode === "binary" ? text : parseParamDisplayValueToStored(text))];
+        })
       ),
     };
     if (subCategoryDesignEditorOpen.value) {
@@ -9918,7 +9979,11 @@ async function openInteriorInstanceEditor(instance) {
     }
   }
   const effectiveParamValues = Object.fromEntries(
-    Object.keys(normalized.param_meta || {}).map((key) => [key, getInteriorInstanceEffectiveValue(normalized, key)])
+    Object.keys(normalized.param_meta || {}).map((key) => {
+      const inputMode = normalized.param_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
+      const rawValue = getInteriorInstanceEffectiveValue(normalized, key);
+      return [key, inputMode === "binary" ? rawValue : formatParamValueForDisplay(rawValue)];
+    })
   );
   interiorInstanceEditorDraft.value = {
     ...normalized,
@@ -9926,7 +9991,10 @@ async function openInteriorInstanceEditor(instance) {
     interior_box_snapshot: { ...(normalized.interior_box_snapshot || {}) },
     param_values: {
       ...effectiveParamValues,
-      ...Object.fromEntries(Object.entries(normalized.param_values || {}).map(([key, value]) => [key, String(value ?? "")])),
+      ...Object.fromEntries(Object.entries(normalized.param_values || {}).map(([key, value]) => {
+        const inputMode = normalized.param_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
+        return [key, inputMode === "binary" ? String(value ?? "") : formatParamValueForDisplay(value)];
+      })),
     },
     param_meta: Object.fromEntries(Object.entries(normalized.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])),
     part_snapshots: Array.isArray(normalized.part_snapshots) ? normalized.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
@@ -9971,7 +10039,11 @@ async function applyInteriorInstanceEditor() {
             instance_code: String(instance.instance_code || "").trim() || "interior",
             line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
             param_values: Object.fromEntries(
-              Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+              Object.entries(instance.param_values || {}).map(([key, value]) => {
+                const inputMode = instance.param_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
+                const text = value == null ? null : String(value);
+                return [key, text == null ? null : (inputMode === "binary" ? text : parseParamDisplayValueToStored(text))];
+              })
             ),
           }),
         }
@@ -11561,10 +11633,14 @@ function openSubCategoryDefaultsEditor(item) {
   clearSubCategoryDefaultIconPreviews();
   subCategoryDefaultsEditorRowId.value = item.id;
   subCategoryDefaultsEditorDraft.value = Object.fromEntries(
-    constructionSubCategoryParamColumns.value.map((column) => [
-      column.key,
-      String(item.param_defaults?.[column.key] ?? ""),
-    ])
+    constructionSubCategoryParamColumns.value.map((column) => {
+      const override = item.param_overrides?.[column.key] || {};
+      const rawValue = String(item.param_defaults?.[column.key] ?? "").trim();
+      return [
+        column.key,
+        override.input_mode === "binary" ? (rawValue === "1" ? "1" : "0") : formatParamValueForDisplay(rawValue),
+      ];
+    })
   );
   subCategoryDefaultsEditorOverridesDraft.value = Object.fromEntries(
     constructionSubCategoryParamColumns.value.map((column) => {
@@ -11599,7 +11675,11 @@ async function closeSubCategoryDefaultsEditor() {
       const baseLabel = constructionSubCategoryParamMetaByCode.value[column.key]?.label || column.key;
       const nextOverride = subCategoryDefaultsEditorOverridesDraft.value?.[column.key] || {};
       const prevOverride = originalOverrides[column.key] || {};
-      return String(original[column.key] ?? "").trim() !== String(subCategoryDefaultsEditorDraft.value?.[column.key] ?? "").trim()
+      const nextDraftValue = String(subCategoryDefaultsEditorDraft.value?.[column.key] ?? "").trim();
+      const nextStoredValue = String(nextOverride.input_mode || "value") === "binary"
+        ? (nextDraftValue === "1" ? "1" : "0")
+        : parseParamDisplayValueToStored(nextDraftValue);
+      return String(original[column.key] ?? "").trim() !== nextStoredValue
         || String(prevOverride.display_title || "").trim() !== String(nextOverride.display_title || "").trim()
         || String(prevOverride.description_text || "").trim() !== String(nextOverride.description_text || "").trim()
         || String(normalizeIconFileName(prevOverride.icon_path) || "").trim() !== String(normalizeIconFileName(nextOverride.icon_path) || "").trim()
@@ -11659,7 +11739,7 @@ async function applySubCategoryDefaultsEditor() {
   if (!row) return;
   ensureSubCategoryParamDefaults(row);
   for (const column of constructionSubCategoryParamColumns.value) {
-    row.param_defaults[column.key] = String(subCategoryDefaultsEditorDraft.value?.[column.key] ?? "").trim();
+    row.param_defaults[column.key] = parseParamDisplayValueToStored(subCategoryDefaultsEditorDraft.value?.[column.key] ?? "");
     const baseLabel = constructionSubCategoryParamMetaByCode.value[column.key]?.label || column.key;
     const nextOverride = subCategoryDefaultsEditorOverridesDraft.value?.[column.key] || {};
     row.param_overrides[column.key] = {
@@ -11703,7 +11783,7 @@ function openSubCategoryUserPreview(item) {
         column.key,
         override.input_mode === "binary"
           ? (value === "1" ? "1" : "0")
-          : value,
+          : formatParamValueForDisplay(value),
       ];
     })
   );
@@ -11721,7 +11801,7 @@ function hasSubCategoryUserPreviewChanges() {
     if (override.input_mode === "binary") {
       return (nextValue === "1" ? "1" : "0") !== (prevValue === "1" ? "1" : "0");
     }
-    return nextValue !== prevValue;
+    return parseParamDisplayValueToStored(nextValue) !== prevValue;
   });
 }
 
@@ -11749,7 +11829,7 @@ async function applySubCategoryUserPreview() {
     const nextValue = String(subCategoryUserPreviewValues.value?.[column.key] ?? "").trim();
     row.param_defaults[column.key] = override.input_mode === "binary"
       ? (nextValue === "1" ? "1" : "0")
-      : nextValue;
+      : parseParamDisplayValueToStored(nextValue);
   }
   markConstructionSubCategoryDirty(row);
   try {
@@ -11821,7 +11901,7 @@ function hasDoorPartGroupDefaultsChanges() {
     if (column.inputMode === "binary") {
       return (nextValue === "1" ? "1" : "0") !== (prevValue === "1" ? "1" : "0");
     }
-    return nextValue !== prevValue;
+    return parseParamDisplayValueToStored(nextValue) !== prevValue;
   });
 }
 
@@ -11862,7 +11942,7 @@ function openDoorPartGroupDefaultsEditor(item) {
   doorPartGroupDefaultsValues.value = Object.fromEntries(
     allColumns.map((column) => {
       const rawValue = String(row.param_defaults?.[column.key] ?? "").trim();
-      return [column.key, column.inputMode === "binary" ? (rawValue === "1" ? "1" : "0") : rawValue];
+      return [column.key, column.inputMode === "binary" ? (rawValue === "1" ? "1" : "0") : formatParamValueForDisplay(rawValue)];
     })
   );
   doorPartGroupDefaultsActiveGroupId.value = String(row.param_groups?.find((group) => group?.enabled !== false)?.param_group_id || "");
@@ -11882,7 +11962,7 @@ async function applyDoorPartGroupDefaultsEditor() {
     const nextValue = String(doorPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
     row.param_defaults[column.key] = column.inputMode === "binary"
       ? (nextValue === "1" ? "1" : "0")
-      : nextValue;
+      : parseParamDisplayValueToStored(nextValue);
   }
   try {
     await persistDoorPartGroupRow(row);
@@ -11922,7 +12002,7 @@ async function applyInternalPartGroupDefaultsEditor() {
     const nextValue = String(internalPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
     row.param_defaults[column.key] = override.input_mode === "binary"
       ? (nextValue === "1" ? "1" : "0")
-      : nextValue;
+      : parseParamDisplayValueToStored(nextValue);
   }
   try {
     await persistInternalPartGroupRow(row);
@@ -19925,7 +20005,7 @@ onBeforeUnmount(() => {
                     min="0"
                     :placeholder="column.displayTitle"
                   />
-                  <div class="subCategoryPreview__valueUnit">میلی‌متر</div>
+                  <div class="subCategoryPreview__valueUnit">{{ getCurrentParamLengthUnitLabel() }}</div>
                 </template>
               </article>
             </div>
@@ -20043,7 +20123,7 @@ onBeforeUnmount(() => {
                     min="0"
                     :placeholder="column.displayTitle"
                   />
-                  <div class="subCategoryPreview__valueUnit">میلی‌متر</div>
+                  <div class="subCategoryPreview__valueUnit">{{ getCurrentParamLengthUnitLabel() }}</div>
                 </template>
               </article>
             </div>
@@ -21205,7 +21285,7 @@ onBeforeUnmount(() => {
                     min="0"
                     :placeholder="column.displayTitle"
                   />
-                  <div class="subCategoryPreview__valueUnit">میلی‌متر</div>
+                  <div class="subCategoryPreview__valueUnit">{{ getCurrentParamLengthUnitLabel() }}</div>
                 </template>
               </article>
             </div>
@@ -21350,7 +21430,7 @@ onBeforeUnmount(() => {
                     min="0"
                     :placeholder="column.displayTitle"
                   />
-                  <div class="subCategoryPreview__valueUnit">میلی‌متر</div>
+                  <div class="subCategoryPreview__valueUnit">{{ getCurrentParamLengthUnitLabel() }}</div>
                 </template>
               </article>
             </div>
@@ -21846,7 +21926,7 @@ onBeforeUnmount(() => {
                   min="0"
                   :placeholder="column.displayTitle"
                 />
-                <div class="subCategoryPreview__valueUnit">میلی‌متر</div>
+                <div class="subCategoryPreview__valueUnit">{{ getCurrentParamLengthUnitLabel() }}</div>
               </template>
               </article>
             </div>
