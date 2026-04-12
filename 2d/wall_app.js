@@ -6217,6 +6217,28 @@ function addRectTarget(type, wallId, rect, payload = {}) {
 function pointInRect(x, y, r) {
   return !!r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
 }
+function getHitTargetRect(target) {
+  const rect = target?.rect;
+  if (!rect) return rect;
+
+  const type = String(target?.type || "");
+  if (
+    type !== "wall_chain_a" &&
+    type !== "wall_chain_b" &&
+    type !== "hidden_chain_a" &&
+    type !== "hidden_chain_b"
+  ) {
+    return rect;
+  }
+
+  const pad = 14;
+  return {
+    x: rect.x - pad,
+    y: rect.y - pad,
+    w: rect.w + pad * 2,
+    h: rect.h + pad * 2,
+  };
+}
 function hitTest(x, y) {
   let firstOffSideHit = null;
   let firstDimSideHit = null;
@@ -6224,7 +6246,7 @@ function hitTest(x, y) {
   let firstNonUiHit = null;
   for (let i = hitTargets.length - 1; i >= 0; i--) {
     const t = hitTargets[i];
-    const r = t.rect;
+    const r = getHitTargetRect(t);
     if (!pointInRect(x, y, r)) continue;
 
     // Deterministic overlap priority: off_side > dim_side > all others.
