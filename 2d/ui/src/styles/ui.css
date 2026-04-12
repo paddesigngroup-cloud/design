@@ -91,17 +91,17 @@ option {
   gap: 10px;
   padding: 10px 14px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(118, 45, 71, 0.16);
-  box-shadow: 0 14px 28px rgba(52, 20, 31, 0.14);
+  background: rgba(255, 240, 245, 0.96);
+  border: 1px solid rgba(188, 99, 132, 0.22);
+  box-shadow: 0 14px 28px rgba(96, 31, 55, 0.14);
   backdrop-filter: blur(10px);
 }
 
 .interiorLibraryLoadingPopup__spinner {
   width: 18px;
   height: 18px;
-  border: 2px solid rgba(118, 45, 71, 0.16);
-  border-top-color: var(--c-menu);
+  border: 2px solid rgba(188, 99, 132, 0.2);
+  border-top-color: #c45986;
   border-radius: 999px;
   animation: interiorLibraryLoadingSpin 0.75s linear infinite;
 }
@@ -110,7 +110,7 @@ option {
   font-family: Vazirmatn, sans-serif;
   font-size: 13px;
   font-weight: 700;
-  color: var(--text);
+  color: #5b2236;
   white-space: nowrap;
 }
 
@@ -4259,6 +4259,16 @@ option {
 }
 .subCategoryDesignEditor__controllerValueInput {
   cursor: text;
+}
+.subCategoryDesignEditor__controllerHandle.is-editing .subCategoryDesignEditor__controllerValueInput {
+  background: rgba(255, 232, 240, 0.96);
+  border-color: rgba(214, 120, 153, 0.78);
+  box-shadow: 0 0 0 2px rgba(214, 120, 153, 0.12);
+}
+.subCategoryDesignEditor__controllerHandle.is-editing .subCategoryDesignEditor__controllerValueInput:focus {
+  background: rgba(255, 236, 243, 0.99);
+  border-color: rgba(201, 88, 130, 0.88);
+  box-shadow: 0 0 0 2px rgba(201, 88, 130, 0.16);
 }
 .subCategoryDesignEditor__controllerHint {
   position: absolute;
