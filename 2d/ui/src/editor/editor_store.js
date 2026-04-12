@@ -4,7 +4,14 @@ import { shallowRef } from "vue";
 export const editorRef = shallowRef(null);
 
 // Latest 2D transform of the projected 3D model (millimeters in 2D world).
-export const model2dTransformRef = shallowRef({ x: 0, y: 0, rotRad: 0, mirrorX: 1 });
+export const model2dTransformRef = shallowRef({
+  x: 0,
+  y: 0,
+  rotRad: 0,
+  mirrorX: 1,
+  interactive: false,
+  phase: "commit",
+});
 
 // Latest 2D viewport state used by stage overlays that must track pan/zoom live.
 export const editorViewportRef = shallowRef({ zoom: 1, offsetX: 0, offsetY: 0 });

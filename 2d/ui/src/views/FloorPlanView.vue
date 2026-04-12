@@ -69,7 +69,14 @@ onMounted(() => {
         const y = Number.isFinite(t?.y) ? t.y : 0;
         const rotRad = Number.isFinite(t?.rotRad) ? t.rotRad : 0;
         const mirrorX = Number(t?.mirrorX) === -1 ? -1 : 1;
-        model2dTransformRef.value = { x, y, rotRad, mirrorX };
+        model2dTransformRef.value = {
+          x,
+          y,
+          rotRad,
+          mirrorX,
+          interactive: !!t?.interactive,
+          phase: String(t?.phase || (t?.interactive ? "drag" : "commit")),
+        };
       },
       onViewportChange: (viewport) => {
         editorViewportRef.value = {

@@ -11,6 +11,7 @@ const DEFAULT_FALLBACK_BOUNDS_MM = Object.freeze({
 
 let doorModelAssetPromise = null;
 let doorModelAssetResolved = null;
+const doorModelAssetCache = new Map();
 
 function normalizeBoundsMm(bounds) {
   const normalizeDimension = (value, fallback, min, max) => {
@@ -71,10 +72,12 @@ export function getFallbackDoorModelBoundsMm() {
 
 export function peekDoorModelAsset(modelUrl = DEFAULT_DOOR_MODEL_URL) {
   const url = String(modelUrl || DEFAULT_DOOR_MODEL_URL).trim() || DEFAULT_DOOR_MODEL_URL;
-  if (!doorModelAssetResolved || doorModelAssetResolved.url !== url) return null;
+  const cached = doorModelAssetCache.get(url)?.resolved
+    || (doorModelAssetResolved && doorModelAssetResolved.url === url ? doorModelAssetResolved : null);
+  if (!cached) return null;
   return {
-    ...doorModelAssetResolved,
-    boundsMm: normalizeBoundsMm(doorModelAssetResolved.boundsMm),
+    ...cached,
+    boundsMm: normalizeBoundsMm(cached.boundsMm),
   };
 }
 
@@ -90,33 +93,51 @@ export function cloneDoorModelSceneSync(modelUrl = DEFAULT_DOOR_MODEL_URL) {
 
 export async function loadDoorModelAsset(modelUrl = DEFAULT_DOOR_MODEL_URL) {
   const url = String(modelUrl || DEFAULT_DOOR_MODEL_URL).trim() || DEFAULT_DOOR_MODEL_URL;
-  if (doorModelAssetResolved && doorModelAssetResolved.url === url) {
+  const cached = doorModelAssetCache.get(url);
+  if (cached?.resolved) {
     return {
-      ...doorModelAssetResolved,
-      boundsMm: normalizeBoundsMm(doorModelAssetResolved.boundsMm),
+      ...cached.resolved,
+      boundsMm: normalizeBoundsMm(cached.resolved.boundsMm),
     };
   }
-  if (doorModelAssetPromise) return doorModelAssetPromise;
-  doorModelAssetPromise = (async () => {
+  if (cached?.promise) return cached.promise;
+  const nextPromise = (async () => {
     const loader = new GLTFLoader();
     const gltf = await loader.loadAsync(url);
     const sourceRoot = gltf?.scene || gltf?.scenes?.[0];
     if (!sourceRoot) throw new Error("door-model-scene-missing");
     const normalized = buildNormalizedDoorScene(sourceRoot);
-    doorModelAssetResolved = {
+    const resolved = {
       url,
       templateScene: normalized.scene,
       boundsMm: normalizeBoundsMm(normalized.boundsMm),
     };
+    doorModelAssetResolved = resolved;
+    doorModelAssetCache.set(url, {
+      promise: null,
+      resolved,
+    });
     return {
-      ...doorModelAssetResolved,
-      boundsMm: normalizeBoundsMm(doorModelAssetResolved.boundsMm),
+      ...resolved,
+      boundsMm: normalizeBoundsMm(resolved.boundsMm),
     };
   })();
+  doorModelAssetPromise = nextPromise;
+  doorModelAssetCache.set(url, {
+    promise: nextPromise,
+    resolved: null,
+  });
   try {
-    return await doorModelAssetPromise;
+    return await nextPromise;
   } finally {
-    doorModelAssetPromise = null;
+    const latest = doorModelAssetCache.get(url);
+    if (latest && latest.promise === nextPromise) {
+      doorModelAssetCache.set(url, {
+        promise: null,
+        resolved: latest.resolved,
+      });
+    }
+    if (doorModelAssetPromise === nextPromise) doorModelAssetPromise = null;
   }
 }
 

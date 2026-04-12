@@ -39,6 +39,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  activePlaceholderTransform: {
+    type: Object,
+    default: null,
+  },
   placeholderOutlineColor: {
     type: String,
     default: "#7A4A2B",
@@ -50,6 +54,14 @@ const props = defineProps({
   assetInstances: {
     type: Array,
     default: () => [],
+  },
+  activeAssetInstanceId: {
+    type: [String, Number],
+    default: "",
+  },
+  activeAssetTransform: {
+    type: Object,
+    default: null,
   },
   showAttrsPanel: {
     type: Boolean,
@@ -98,6 +110,10 @@ let modelBaseRotationY = 0;
 let wallsRoot = null;
 let placeholderBoxesRoot = null;
 let assetInstancesRoot = null;
+let wallsRebuildRaf = 0;
+let placeholderRebuildRaf = 0;
+let assetRebuildRaf = 0;
+const requestedDoorAssetUrls = new Set();
 
 let axesHelper = null;
 let lastMiddleClickMs = 0;
@@ -1310,6 +1326,121 @@ function clearAssetInstances() {
   assetInstancesRoot = null;
 }
 
+function buildWallsStructureSignature(snapshot) {
+  const normalized = normalizeLinearMembers(snapshot);
+  const nodes = Array.isArray(normalized?.nodes) ? normalized.nodes : [];
+  const walls = Array.isArray(normalized?.walls) ? normalized.walls : [];
+  const doors = Array.isArray(normalized?.doors) ? normalized.doors : [];
+  return JSON.stringify({
+    nodes: nodes.map((node) => [String(node?.id || ""), Number(node?.x) || 0, Number(node?.y) || 0]),
+    walls: walls.map((wall) => [
+      String(wall?.id || ""),
+      String(wall?.a || ""),
+      String(wall?.b || ""),
+      Number(wall?.thickness) || 0,
+      Number(wall?.heightMm) || 0,
+      Number(wall?.floorOffsetMm) || 0,
+      String(wall?.color3d || wall?.fillColor || ""),
+    ]),
+    doors: doors.map((door) => [
+      String(door?.id || ""),
+      String(door?.wallId || ""),
+      Number(door?.offsetMm) || 0,
+      Number(door?.widthMm) || 0,
+      Number(door?.heightMm) || 0,
+      Number(door?.sillHeightMm) || 0,
+      Number(door?.frameThicknessMm) || 0,
+      Number(door?.frameDepthMm) || 0,
+      String(door?.modelUrl || DEFAULT_DOOR_MODEL_URL),
+      Number(door?.modelBoundsMm?.widthMm) || 0,
+      Number(door?.modelBoundsMm?.heightMm) || 0,
+      Number(door?.modelBoundsMm?.depthMm) || 0,
+    ]),
+  });
+}
+
+function buildPlaceholderSignature() {
+  const instances = Array.isArray(props.placeholderInstances) ? props.placeholderInstances : [];
+  const boxes = Array.isArray(props.placeholderBoxes) ? props.placeholderBoxes : [];
+  return JSON.stringify({
+    hasInstances: instances.length > 0,
+    instances: instances.map((instance) => ({
+      id: String(instance?.orderDesignId || ""),
+      active: !!instance?.active,
+      dragPreview: !!instance?.dragPreview,
+      outlineColor: String(instance?.outlineColor || ""),
+      transform: {
+        x: Number(instance?.transform?.x) || 0,
+        y: Number(instance?.transform?.y) || 0,
+        rotRad: Number(instance?.transform?.rotRad) || 0,
+      },
+      boxSig: (Array.isArray(instance?.boxes) ? instance.boxes : []).map((box) => [
+        Number(box?.width) || 0,
+        Number(box?.depth) || 0,
+        Number(box?.height) || 0,
+        Number(box?.cx) || 0,
+        Number(box?.cy) || 0,
+        Number(box?.cz) || 0,
+      ]),
+    })),
+    boxes: boxes.map((box) => [
+      Number(box?.width) || 0,
+      Number(box?.depth) || 0,
+      Number(box?.height) || 0,
+      Number(box?.cx) || 0,
+      Number(box?.cy) || 0,
+      Number(box?.cz) || 0,
+    ]),
+    outlineColor: String(props.placeholderOutlineColor || ""),
+  });
+}
+
+function buildAssetInstancesSignature() {
+  const instances = Array.isArray(props.assetInstances) ? props.assetInstances : [];
+  return JSON.stringify(
+    instances.map((instance) => ({
+      id: String(instance?.id || ""),
+      dragPreview: !!instance?.dragPreview,
+      modelUrl: String(instance?.modelUrl || ""),
+      bounds: [
+        Number(instance?.modelBoundsMm?.widthMm) || 0,
+        Number(instance?.modelBoundsMm?.heightMm) || 0,
+        Number(instance?.modelBoundsMm?.depthMm) || 0,
+      ],
+      transform: {
+        x: Number(instance?.transform?.x) || 0,
+        y: Number(instance?.transform?.y) || 0,
+        rotRad: Number(instance?.transform?.rotRad) || 0,
+        floorOffsetMm: Number(instance?.transform?.floorOffsetMm) || 0,
+      },
+    }))
+  );
+}
+
+function scheduleRebuild(kind, cb) {
+  let current = 0;
+  const assign = (value) => {
+    if (kind === "walls") wallsRebuildRaf = value;
+    else if (kind === "placeholders") placeholderRebuildRaf = value;
+    else assetRebuildRaf = value;
+  };
+  current = kind === "walls" ? wallsRebuildRaf : (kind === "placeholders" ? placeholderRebuildRaf : assetRebuildRaf);
+  if (current) return;
+  assign(requestAnimationFrame(() => {
+    assign(0);
+    cb();
+  }));
+}
+
+function cancelScheduledRebuilds() {
+  for (const rafId of [wallsRebuildRaf, placeholderRebuildRaf, assetRebuildRaf]) {
+    if (rafId) cancelAnimationFrame(rafId);
+  }
+  wallsRebuildRaf = 0;
+  placeholderRebuildRaf = 0;
+  assetRebuildRaf = 0;
+}
+
 function normalizePlaceholderColor(value, fallback = "#7A4A2B") {
   const raw = String(value || "").trim();
   const normalized = raw.startsWith("#") ? raw : `#${raw}`;
@@ -1484,6 +1615,7 @@ function rebuildPlaceholderBoxes() {
 
   syncPlaceholderEdgeVisibility();
   syncPlaceholderOpacity();
+  syncActivePlaceholderTransform();
   syncSelectionHighlight();
 }
 
@@ -1546,6 +1678,39 @@ function rebuildAssetInstances() {
   if (!root.children.length) return;
   assetInstancesRoot = root;
   scene.add(root);
+  syncActiveAssetTransform();
+}
+
+function syncActivePlaceholderTransform() {
+  if (!placeholderBoxesRoot) return;
+  const transform = props.activePlaceholderTransform;
+  if (!transform) return;
+  for (const child of placeholderBoxesRoot.children) {
+    if (!child?.userData?.isActivePlaceholderInstance) continue;
+    child.position.set(
+      (Number(transform?.x) || 0) * 0.001,
+      0,
+      -(Number(transform?.y) || 0) * 0.001,
+    );
+    child.rotation.y = Number(transform?.rotRad) || 0;
+  }
+}
+
+function syncActiveAssetTransform() {
+  if (!assetInstancesRoot) return;
+  const targetId = String(props.activeAssetInstanceId || "").trim();
+  const transform = props.activeAssetTransform;
+  if (!targetId || !transform) return;
+  for (const child of assetInstancesRoot.children) {
+    const assetId = String(child?.userData?.assetInstanceId || "").trim();
+    if (assetId !== targetId) continue;
+    child.position.set(
+      (Number(transform?.x) || 0) * 0.001,
+      (Number(transform?.floorOffsetMm) || 0) * 0.001,
+      -(Number(transform?.y) || 0) * 0.001,
+    );
+    child.rotation.y = Number(transform?.rotRad) || 0;
+  }
 }
 
 function syncPlaceholderEdgeVisibility() {
@@ -1713,6 +1878,18 @@ function rebuildWalls3d(snapshot) {
   }
 }
 
+function scheduleWalls3dRebuild(snapshot = props.walls2d) {
+  scheduleRebuild("walls", () => rebuildWalls3d(snapshot));
+}
+
+function schedulePlaceholderRebuild() {
+  scheduleRebuild("placeholders", () => rebuildPlaceholderBoxes());
+}
+
+function scheduleAssetRebuild() {
+  scheduleRebuild("assets", () => rebuildAssetInstances());
+}
+
 function ensureDoorAssetsReady(snapshot) {
   const doors = Array.isArray(snapshot?.doors) ? snapshot.doors : [];
   const assetInstances = Array.isArray(props.assetInstances) ? props.assetInstances : [];
@@ -1722,11 +1899,13 @@ function ensureDoorAssetsReady(snapshot) {
   ])];
   if (!urls.length) return;
   for (const url of urls) {
+    if (requestedDoorAssetUrls.has(url)) continue;
+    requestedDoorAssetUrls.add(url);
     loadDoorModelAsset(url)
       .then(() => {
         if (!scene) return;
-        rebuildWalls3d(props.walls2d);
-        rebuildAssetInstances();
+        scheduleWalls3dRebuild(props.walls2d);
+        scheduleAssetRebuild();
         if (props.previewOnly) fitCameraToAll(PREVIEW_VIEW_DIR);
       })
       .catch(() => {});
@@ -2100,34 +2279,45 @@ function applyModel2dTransformTo3d(transform) {
     if (Array.isArray(props.placeholderInstances) && props.placeholderInstances.length) {
       placeholderBoxesRoot.position.set(0, 0, 0);
       placeholderBoxesRoot.rotation.y = 0;
+      syncActivePlaceholderTransform();
     } else {
       placeholderBoxesRoot.position.set(xMm * mPerMm, 0, -yMm * mPerMm);
       placeholderBoxesRoot.rotation.y = rotRad;
     }
   }
+
+  syncActiveAssetTransform();
 }
 
 watch(
-  () => props.placeholderBoxes,
+  () => buildPlaceholderSignature(),
   () => {
-    rebuildPlaceholderBoxes();
+    schedulePlaceholderRebuild();
+  },
+  { immediate: true }
+);
+
+watch(
+  () => props.activePlaceholderTransform,
+  () => {
+    syncActivePlaceholderTransform();
   },
   { immediate: true, deep: true }
 );
 
 watch(
-  () => props.placeholderInstances,
-  () => {
-    rebuildPlaceholderBoxes();
-  },
-  { immediate: true, deep: true }
-);
-
-watch(
-  () => props.assetInstances,
+  () => buildAssetInstancesSignature(),
   () => {
     ensureDoorAssetsReady(props.walls2d);
-    rebuildAssetInstances();
+    scheduleAssetRebuild();
+  },
+  { immediate: true }
+);
+
+watch(
+  () => [String(props.activeAssetInstanceId || ""), props.activeAssetTransform],
+  () => {
+    syncActiveAssetTransform();
   },
   { immediate: true, deep: true }
 );
@@ -2155,12 +2345,12 @@ watch(
 );
 
 watch(
-  () => props.walls2d,
+  () => buildWallsStructureSignature(props.walls2d),
   (snap) => {
-    ensureDoorAssetsReady(snap);
-    rebuildWalls3d(snap);
+    ensureDoorAssetsReady(props.walls2d);
+    scheduleWalls3dRebuild(props.walls2d);
   },
-  { immediate: true, deep: true }
+  { immediate: true }
 );
 
 watch(
@@ -2337,6 +2527,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stop();
+  cancelScheduledRebuilds();
   stopWidgetPanCursor();
   clearWidgetCursorPoint();
   canvasEl.value?.removeEventListener?.("mousedown", onCanvasMouseDown);

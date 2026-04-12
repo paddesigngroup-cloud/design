@@ -8186,6 +8186,8 @@ function getCurrentModel2dTransform() {
     y: Number.isFinite(Number(model2dTransformRef.value?.y)) ? Number(model2dTransformRef.value.y) : 0,
     rotRad: Number.isFinite(Number(model2dTransformRef.value?.rotRad)) ? Number(model2dTransformRef.value.rotRad) : 0,
     mirrorX: 1,
+    interactive: !!model2dTransformRef.value?.interactive,
+    phase: String(model2dTransformRef.value?.phase || (model2dTransformRef.value?.interactive ? "drag" : "commit")),
   };
 }
 
@@ -8470,6 +8472,8 @@ function restoreActiveOrderDesignToEditor(item, placement = null) {
         y: nextPlacement.y,
         rotRad: nextPlacement.rotRad,
         mirrorX: 1,
+        interactive: false,
+        phase: "commit",
       };
       restored = true;
     }
@@ -15042,6 +15046,27 @@ const draggedCabinetPreviewInstance = computed(() => {
     dragPreview: true,
   };
 });
+const activeStagePlaceholderTransform = computed(() =>
+  activeCabinetDesignId.value
+    ? {
+        x: Number.isFinite(Number(model2dTransformRef.value?.x)) ? Number(model2dTransformRef.value.x) : 0,
+        y: Number.isFinite(Number(model2dTransformRef.value?.y)) ? Number(model2dTransformRef.value.y) : 0,
+        rotRad: Number.isFinite(Number(model2dTransformRef.value?.rotRad)) ? Number(model2dTransformRef.value.rotRad) : 0,
+        mirrorX: 1,
+      }
+    : null
+);
+const activeStageDoorAssetTransform = computed(() => {
+  if (!activeDoorAssetId.value) return null;
+  const activePlacement = getDoorScenePlacement(activeDoorAssetId.value);
+  if (!activePlacement) return null;
+  return {
+    x: Number.isFinite(Number(model2dTransformRef.value?.x)) ? Number(model2dTransformRef.value.x) : 0,
+    y: Number.isFinite(Number(model2dTransformRef.value?.y)) ? Number(model2dTransformRef.value.y) : 0,
+    rotRad: Number.isFinite(Number(model2dTransformRef.value?.rotRad)) ? Number(model2dTransformRef.value.rotRad) : 0,
+    floorOffsetMm: activePlacement.floorOffsetMm || 0,
+  };
+});
 const stageOrderDesignInstances = computed(() =>
   [
     ...orderDesignPlacements.value
@@ -15049,24 +15074,16 @@ const stageOrderDesignInstances = computed(() =>
         const item = orderDesignCatalog.value.find((row) => String(row.id) === String(placement.orderDesignId));
         if (!item?.viewer_boxes?.length) return null;
         const isActive = String(item.id) === String(activeCabinetDesignId.value || "");
-        const liveTransform = isActive ? getCurrentModel2dTransform() : null;
         return {
           orderDesignId: item.id,
           boxes: item.viewer_boxes.map(normalizeCabinetBox),
           outlineColor: normalizeHexColor(item.design_outline_color),
-          transform: isActive
-            ? {
-                x: liveTransform.x,
-                y: liveTransform.y,
-                rotRad: liveTransform.rotRad,
-                mirrorX: liveTransform.mirrorX,
-              }
-            : {
-                x: placement.x,
-                y: placement.y,
-                rotRad: placement.rotRad,
-                mirrorX: placement.mirrorX,
-              },
+          transform: {
+            x: placement.x,
+            y: placement.y,
+            rotRad: placement.rotRad,
+            mirrorX: placement.mirrorX,
+          },
           active: isActive,
         };
       })
@@ -15092,15 +15109,14 @@ const stageDoorAssetInstances = computed(() => [
     ? (() => {
         const activePlacement = getDoorScenePlacement(activeDoorAssetId.value);
         if (!activePlacement) return [];
-        const liveTransform = getCurrentModel2dTransform();
         return [{
           id: activePlacement.id,
           modelUrl: activePlacement.modelUrl,
           modelBoundsMm: activePlacement.modelBoundsMm,
           transform: {
-            x: liveTransform.x,
-            y: liveTransform.y,
-            rotRad: liveTransform.rotRad,
+            x: activePlacement.x,
+            y: activePlacement.y,
+            rotRad: activePlacement.rotRad,
             floorOffsetMm: activePlacement.floorOffsetMm || 0,
           },
         }];
@@ -15888,7 +15904,7 @@ watch(
     mirrorX: 1,
   }),
   (transform) => {
-    if (_orderDesignPlacementSyncPaused) return;
+    if (_orderDesignPlacementSyncPaused || transform?.interactive) return;
     if (activeCabinetDesignId.value) {
       upsertOrderDesignPlacement({
         orderDesignId: activeCabinetDesignId.value,
@@ -17697,11 +17713,14 @@ onBeforeUnmount(() => {
             :model2d-transform="model2dTransformRef"
             :walls2d="walls3dSnapshot"
             :asset-instances="stageDoorAssetInstances"
+            :active-asset-instance-id="activeDoorAssetId"
+            :active-asset-transform="activeStageDoorAssetTransform"
             :display-unit="currentEditorDisplayUnit"
             :order-design="selectedOrderDesignSource"
             :selected-order-design-ids="selectedOrderDesignIds"
             :order-param-groups="constructionParamGroups"
             :placeholder-instances="stageOrderDesignInstances"
+            :active-placeholder-transform="activeStagePlaceholderTransform"
             :placeholder-outline-color="normalizeHexColor(selectedOrderDesignSource?.design_outline_color)"
             :placeholder-boxes="stageCabinetPlaceholderBoxes"
             :wall-style-draft="wallStyleDraft"

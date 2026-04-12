@@ -1201,6 +1201,8 @@ const modelDrag = {
   startSnap: null,
   moved: false,
 };
+let model2dTransformRaf = 0;
+let pendingModel2dTransformMeta = null;
 const axisDrag = {
   active: false,
   axis: null, // "x" | "y"
@@ -2275,7 +2277,7 @@ function startModelDrag(offsetX, offsetY) {
   modelDrag.moved = false;
   return true;
 }
-function emitModel2dTransform() {
+function dispatchModel2dTransformNow(meta = null) {
   if (typeof onModel2dTransformChange !== "function") return;
   try {
     onModel2dTransformChange({
@@ -2283,8 +2285,36 @@ function emitModel2dTransform() {
       y: model2d.offsetYmm || 0,
       rotRad: model2d.rotationRad || 0,
       mirrorX: Number(model2d.mirrorX) === -1 ? -1 : 1,
+      interactive: !!meta?.interactive,
+      phase: String(meta?.phase || (meta?.interactive ? "drag" : "commit")),
     });
   } catch (_) {}
+}
+function flushPendingModel2dTransform() {
+  if (model2dTransformRaf) {
+    cancelAnimationFrame(model2dTransformRaf);
+    model2dTransformRaf = 0;
+  }
+  const meta = pendingModel2dTransformMeta || null;
+  pendingModel2dTransformMeta = null;
+  dispatchModel2dTransformNow(meta);
+}
+function emitModel2dTransform(meta = null) {
+  const nextMeta = {
+    interactive: !!meta?.interactive,
+    phase: String(meta?.phase || (meta?.interactive ? "drag" : "commit")),
+  };
+  if (!nextMeta.interactive || nextMeta.phase === "commit") {
+    pendingModel2dTransformMeta = nextMeta;
+    flushPendingModel2dTransform();
+    return;
+  }
+  pendingModel2dTransformMeta = nextMeta;
+  if (model2dTransformRaf) return;
+  model2dTransformRaf = requestAnimationFrame(() => {
+    model2dTransformRaf = 0;
+    flushPendingModel2dTransform();
+  });
 }
 function applyModelDrag(targetWorld) {
   if (!modelDrag.active || !modelDrag.startMouseWorld) return;
@@ -2310,7 +2340,7 @@ function applyModelDrag(targetWorld) {
   model2d.offsetXmm = (modelDrag.startOffsetXmm || 0) + dx + snapTx;
   model2d.offsetYmm = (modelDrag.startOffsetYmm || 0) + dy + snapTy;
   model2d.rotationRad = wrapAnglePi(modelDrag.startRotationRad || 0);
-  emitModel2dTransform();
+  emitModel2dTransform({ interactive: true, phase: "drag" });
 }
 function resolveModelDragTargetWorld(rawTargetWorld) {
   if (!modelDrag.active || !modelDrag.startMouseWorld) return rawTargetWorld;
@@ -2365,7 +2395,7 @@ function stopModelDrag(keepMovedGeometry = true) {
     model2d.offsetXmm = modelDrag.startOffsetXmm || 0;
     model2d.offsetYmm = modelDrag.startOffsetYmm || 0;
     model2d.rotationRad = modelDrag.startRotationRad || 0;
-    emitModel2dTransform();
+    emitModel2dTransform({ interactive: false, phase: "commit" });
   }
   modelDrag.active = false;
   modelDrag.startMouseWorld = null;
@@ -2417,7 +2447,7 @@ function finalizeModelDrag(commit = true) {
     restoreModel2d(model2d, startSnap);
     undo.runAction(() => {
       restoreModel2d(model2d, endSnap);
-      emitModel2dTransform();
+      emitModel2dTransform({ interactive: false, phase: "commit" });
     });
   }
   selectedModelOutline = true;
@@ -12129,6 +12159,8 @@ function restoreSnapshot(snap) {
     y: model2d.offsetYmm || 0,
     rotRad: model2d.rotationRad || 0,
     mirrorX: Number(model2d.mirrorX) === -1 ? -1 : 1,
+    interactive: false,
+    phase: "commit",
   });
   emitPassiveModelsTransformChange();
   emitViewportChange(true);
