@@ -13701,6 +13701,7 @@ async function saveConstructionPartKinds(options = {}) {
       if (!res.ok) throw new Error("save-failed");
     }
 
+    invalidateApiCache("/api/part-kinds?");
     await loadConstructionPartKinds();
     showAlert(options.successMessage || "تغییرات جدول انواع قطعات با موفقیت ذخیره شد.", {
       title: options.successTitle || "ذخیره تغییرات",
@@ -13751,8 +13752,12 @@ async function saveConstructionTemplates(options = {}) {
       });
       if (!res.ok) throw new Error("save-failed");
     }
+    invalidateApiCache("/api/templates?");
+    invalidateApiCache("/api/categories?");
+    invalidateApiCache("/api/sub-categories?");
     await loadConstructionTemplates();
     await loadConstructionCategories();
+    await loadConstructionSubCategories();
     showAlert(options.successMessage || "تغییرات جدول تمپلیت‌ها با موفقیت ذخیره شد.", {
       title: options.successTitle || "ذخیره تغییرات",
     });
@@ -13804,6 +13809,8 @@ async function saveConstructionCategories(options = {}) {
       });
       if (!res.ok) throw new Error("save-failed");
     }
+    invalidateApiCache("/api/categories?");
+    invalidateApiCache("/api/sub-categories?");
     await loadConstructionCategories();
     await loadConstructionSubCategories();
     await loadCabinetDesignCatalog(true);
@@ -13893,7 +13900,7 @@ async function saveConstructionParamGroups(options = {}) {
   try {
     for (const id of constructionDeletedParamGroupIds.value) {
       const res = await fetch(`/api/param-groups/${encodeURIComponent(String(id))}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("delete-failed");
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف گروه پارامتر انجام نشد."));
     }
     for (const item of editableParamGroups.value.filter((row) => row.__isNew)) {
       const res = await fetch("/api/param-groups", {
@@ -13901,7 +13908,7 @@ async function saveConstructionParamGroups(options = {}) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(normalizeParamGroupPayload(item)),
       });
-      if (!res.ok) throw new Error("create-failed");
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ایجاد گروه پارامتر انجام نشد."));
     }
     for (const item of editableParamGroups.value.filter((row) => !row.__isNew && row.__dirty)) {
       const res = await fetch(`/api/param-groups/${encodeURIComponent(String(item.id))}`, {
@@ -13909,14 +13916,15 @@ async function saveConstructionParamGroups(options = {}) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(normalizeParamGroupPayload(item)),
       });
-      if (!res.ok) throw new Error("save-failed");
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره گروه پارامتر انجام نشد."));
     }
+    invalidateApiCache("/api/param-groups?");
     await loadConstructionParamGroups();
     showAlert(options.successMessage || "تغییرات جدول گروه پارامترها با موفقیت ذخیره شد.", {
       title: options.successTitle || "ذخیره تغییرات",
     });
-  } catch (_) {
-    showAlert("ذخیره تغییرات جدول گروه پارامترها در دیتابیس انجام نشد.", { title: "خطا" });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره تغییرات جدول گروه پارامترها در دیتابیس انجام نشد.", { title: "خطا" });
     await loadConstructionParamGroups();
   } finally {
     constructionSavingIds.value = [];
@@ -13961,6 +13969,8 @@ async function saveConstructionParams(options = {}) {
       });
       if (!res.ok) throw new Error("save-failed");
     }
+    invalidateApiCache("/api/params?");
+    invalidateApiCache("/api/sub-categories?");
     await loadConstructionParams();
     await loadConstructionSubCategories();
     showAlert(options.successMessage || "تغییرات جدول پارامترها با موفقیت ذخیره شد.", {
@@ -14013,6 +14023,7 @@ async function saveConstructionBaseFormulas(options = {}) {
       });
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "save-failed"));
     }
+    invalidateApiCache("/api/base-formulas?");
     await loadConstructionBaseFormulas();
     showAlert(options.successMessage || "تغییرات جدول فرمول‌های پایه با موفقیت ذخیره شد.", {
       title: options.successTitle || "ذخیره تغییرات",
@@ -14063,6 +14074,7 @@ async function saveConstructionPartFormulas(options = {}) {
       });
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "save-failed"));
     }
+    invalidateApiCache("/api/part-formulas?");
     await loadConstructionPartFormulas();
     showAlert(options.successMessage || "تغییرات جدول فرمول‌های قطعات با موفقیت ذخیره شد.", {
       title: options.successTitle || "ذخیره تغییرات",
@@ -18705,6 +18717,13 @@ onBeforeUnmount(() => {
           </template>
 
           <template v-else-if="constructionStep === 'param_groups'">
+            <input
+              ref="constructionImportInputEl"
+              class="constructionDialog__fileInput"
+              type="file"
+              accept=".csv"
+              @change="onConstructionImportFileChange"
+            />
             <input
               ref="paramGroupIconInputEl"
               class="constructionDialog__fileInput"
