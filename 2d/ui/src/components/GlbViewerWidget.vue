@@ -1435,6 +1435,7 @@ function scheduleRebuild(kind, cb) {
   assign(requestAnimationFrame(() => {
     assign(0);
     cb();
+    syncCameraAfterSceneRebuild();
   }));
 }
 
@@ -2062,12 +2063,29 @@ function fitCameraToSelectionOrAll(viewDir = null) {
   fitCameraToBounds(computeSelectionBounds() || computeRenderableSceneBounds(), viewDir);
 }
 
+function syncCameraAfterSceneRebuild() {
+  const hasRenderableContent = !!computeRenderableSceneBounds();
+
+  if (props.previewOnly) {
+    hadRenderableContent = hasRenderableContent;
+    if (hasRenderableContent) fitCameraToAll(PREVIEW_VIEW_DIR);
+    return;
+  }
+
+  if (!hadRenderableContent && hasRenderableContent) {
+    fitCameraToSelectionOrAll();
+  }
+
+  hadRenderableContent = hasRenderableContent;
+}
+
 const isMax = ref(false);
 const viewOpen = ref(false);
 
 let prevSize = null;
 let baseSize = { w: 260, h: 190 };
 let visibilityPaused = false;
+let hadRenderableContent = false;
 
 function stop() {
   if (raf) cancelAnimationFrame(raf);
@@ -2527,6 +2545,7 @@ onMounted(async () => {
   //   // ignore
   // }
   fitCameraToAll(props.previewOnly ? PREVIEW_VIEW_DIR : null);
+  hadRenderableContent = !!computeRenderableSceneBounds();
 
   baseSize = getWidgetSizePx();
 
