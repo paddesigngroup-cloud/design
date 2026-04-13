@@ -2041,13 +2041,7 @@ async function persistActiveInteriorLibraryControllerInstance() {
             ui_order: Math.max(0, Number(instance.ui_order) || 0),
             instance_code: String(instance.instance_code || "").trim() || "interior",
             line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-            param_values: Object.fromEntries(
-              Object.entries(instance.param_values || {}).map(([key, value]) => {
-                const inputMode = instance.param_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
-                const text = value == null ? null : String(value);
-                return [key, text == null ? null : (inputMode === "binary" ? text : parseParamDisplayValueToStored(text))];
-              })
-            ),
+            param_values: serializeStoredParamValuesForPayload(instance.param_values),
           }),
         }
       );
@@ -2069,13 +2063,7 @@ async function persistActiveInteriorLibraryControllerInstance() {
           ui_order: Math.max(0, Number(instance.ui_order) || 0),
           instance_code: String(instance.instance_code || "").trim() || "interior",
           line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-          param_values: Object.fromEntries(
-            Object.entries(instance.param_values || {}).map(([key, value]) => {
-              const inputMode = instance.param_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
-              const text = value == null ? null : String(value);
-              return [key, text == null ? null : (inputMode === "binary" ? text : parseParamDisplayValueToStored(text))];
-            })
-          ),
+          param_values: serializeStoredParamValuesForPayload(instance.param_values),
         }),
       }
     );
@@ -5545,7 +5533,7 @@ function formatParamValueForDisplay(value, unit = currentEditorDisplayUnit.value
 function parseParamDisplayValueToStored(value, unit = currentEditorDisplayUnit.value) {
   const text = String(value ?? "").trim();
   if (!text) return "";
-  const numericMm = parseInteriorControllerInputToMm(text);
+  const numericMm = parseInteriorControllerInputToMm(text, unit);
   if (!Number.isFinite(numericMm)) return text;
   return trimInteriorControllerDisplayNumber(numericMm, Number.isInteger(numericMm) ? 0 : 3);
 }
@@ -5562,13 +5550,29 @@ function formatInteriorControllerDisplayValue(valueMm) {
   return `${formatInteriorControllerRawValue(valueMm)} ${String(currentEditorDisplayUnit.value || "cm").trim().toLowerCase()}`;
 }
 
-function parseInteriorControllerInputToMm(value) {
+function parseInteriorControllerInputToMm(value, unit = currentEditorDisplayUnit.value) {
   const numeric = Number.parseFloat(normalizeInteriorControllerNumericText(value));
   if (!Number.isFinite(numeric)) return null;
-  const unit = String(currentEditorDisplayUnit.value || "cm").trim().toLowerCase();
-  if (unit === "mm") return numeric;
-  if (unit === "inch") return numeric * 25.4;
+  const normalizedUnit = String(unit || "cm").trim().toLowerCase();
+  if (normalizedUnit === "mm") return numeric;
+  if (normalizedUnit === "inch") return numeric * 25.4;
   return numeric * 10;
+}
+
+function serializeDisplayParamValuesForPayload(paramValues, paramMeta, unit = currentEditorDisplayUnit.value) {
+  return Object.fromEntries(
+    Object.entries(paramValues || {}).map(([key, value]) => {
+      const inputMode = paramMeta?.[key]?.input_mode === "binary" ? "binary" : "value";
+      const text = value == null ? null : String(value);
+      return [key, text == null ? null : (inputMode === "binary" ? text : parseParamDisplayValueToStored(text, unit))];
+    })
+  );
+}
+
+function serializeStoredParamValuesForPayload(paramValues) {
+  return Object.fromEntries(
+    Object.entries(paramValues || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+  );
 }
 
 function trimInteriorControllerDisplayNumber(value, decimals = 0) {
@@ -9990,13 +9994,7 @@ async function applyDoorInstanceEditor() {
       line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
       structural_part_formula_ids: Array.isArray(instance.structural_part_formula_ids) ? instance.structural_part_formula_ids : [],
       dependent_interior_instance_ids: Array.isArray(instance.dependent_interior_instance_ids) ? instance.dependent_interior_instance_ids : [],
-      param_values: Object.fromEntries(
-        Object.entries(instance.param_values || {}).map(([key, value]) => {
-          const inputMode = instance.param_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
-          const text = value == null ? null : String(value);
-          return [key, text == null ? null : (inputMode === "binary" ? text : parseParamDisplayValueToStored(text))];
-        })
-      ),
+      param_values: serializeDisplayParamValuesForPayload(instance.param_values, instance.param_meta),
     };
     if (subCategoryDesignEditorOpen.value) {
       const draft = subCategoryDesignEditorDraft.value;
@@ -10230,13 +10228,7 @@ async function applyInteriorInstanceEditor() {
             ui_order: Math.max(0, Number(instance.ui_order) || 0),
             instance_code: String(instance.instance_code || "").trim() || "interior",
             line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-            param_values: Object.fromEntries(
-              Object.entries(instance.param_values || {}).map(([key, value]) => {
-                const inputMode = instance.param_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
-                const text = value == null ? null : String(value);
-                return [key, text == null ? null : (inputMode === "binary" ? text : parseParamDisplayValueToStored(text))];
-              })
-            ),
+            param_values: serializeDisplayParamValuesForPayload(instance.param_values, instance.param_meta),
           }),
         }
       );
@@ -10268,9 +10260,7 @@ async function applyInteriorInstanceEditor() {
           ui_order: Math.max(0, Number(instance.ui_order) || 0),
           instance_code: String(instance.instance_code || "").trim() || "interior",
           line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-          param_values: Object.fromEntries(
-            Object.entries(instance.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
-          ),
+          param_values: serializeDisplayParamValuesForPayload(instance.param_values, instance.param_meta),
         }),
       }
     );
