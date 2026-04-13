@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from uuid import uuid4
+
 import pytest
 from fastapi import HTTPException
 
-from designkp_backend.services.sub_category_designs import _compute_door_controller_box_snapshot
+from designkp_backend.services.sub_category_designs import (
+    _collect_controller_selection_boxes_by_formula_id,
+    _collect_dependent_interior_boxes_by_formula_id,
+    _compute_door_controller_box_snapshot,
+)
 
 
 def test_compute_double_equal_hinged_controller_snapshot_and_params() -> None:
@@ -92,3 +99,60 @@ def test_compute_double_equal_hinged_controller_requires_two_vertical_and_two_ho
         )
 
     assert exc_info.value.status_code == 422
+
+
+def test_collect_dependent_interior_boxes_prefers_selected_instance_for_same_formula() -> None:
+    selected_id = uuid4()
+    other_id = uuid4()
+
+    selected_boxes = _collect_dependent_interior_boxes_by_formula_id(
+        [
+            SimpleNamespace(
+                id=other_id,
+                part_snapshots=[
+                    {"part_formula_id": 501, "viewer_payload": {"box": {"cx": 90, "cz": 50, "width": 2, "height": 100}}},
+                ],
+            ),
+            SimpleNamespace(
+                id=selected_id,
+                part_snapshots=[
+                    {"part_formula_id": 501, "viewer_payload": {"box": {"cx": 10, "cz": 50, "width": 2, "height": 100}}},
+                ],
+            ),
+        ],
+        [str(selected_id)],
+    )
+
+    assert selected_boxes == {
+        501: {"cx": 10, "cz": 50, "width": 2, "height": 100},
+    }
+
+
+def test_collect_controller_selection_boxes_uses_selected_snapshot_index() -> None:
+    selected_id = uuid4()
+
+    selected_boxes = _collect_controller_selection_boxes_by_formula_id(
+        controller_box_snapshot={
+            "selected_parts": [
+                {
+                    "source_type": "internal",
+                    "source_id": str(selected_id),
+                    "part_formula_id": 501,
+                    "source_snapshot_index": 1,
+                }
+            ]
+        },
+        interiors=[
+            SimpleNamespace(
+                id=selected_id,
+                part_snapshots=[
+                    {"part_formula_id": 501, "viewer_payload": {"box": {"cx": 10, "cz": 50, "width": 2, "height": 100}}},
+                    {"part_formula_id": 501, "viewer_payload": {"box": {"cx": 40, "cz": 50, "width": 2, "height": 100}}},
+                ],
+            ),
+        ],
+    )
+
+    assert selected_boxes == {
+        501: {"cx": 40, "cz": 50, "width": 2, "height": 100},
+    }

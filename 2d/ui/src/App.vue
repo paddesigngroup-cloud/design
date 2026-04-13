@@ -3224,25 +3224,25 @@ function getDoorDependentViewerBoxesFromPartRows(parts) {
 }
 function getDoorDependentSelectablePartsFromPartRows(parts, sourceType = "structural", sourceId = "") {
   return (Array.isArray(parts) ? parts : [])
-    .filter((row) => isDoorDependentPartFormulaId(row?.part_formula_id))
-    .map((row, index) => {
+    .flatMap((row, sourceSnapshotIndex) => {
+      if (!isDoorDependentPartFormulaId(row?.part_formula_id)) return [];
       const box = row?.viewer_payload?.box;
-      if (!box || typeof box !== "object") return null;
+      if (!box || typeof box !== "object") return [];
       const partFormulaId = Number(row?.part_formula_id) || 0;
       const normalizedSourceType = sourceType === "internal" ? "internal" : "structural";
       const normalizedSourceId = String(sourceId || "").trim() || "root";
-      return {
-        id: `${normalizedSourceType}:${normalizedSourceId}:${partFormulaId}:${index}`,
+      return [{
+        id: `${normalizedSourceType}:${normalizedSourceId}:${partFormulaId}:${sourceSnapshotIndex}`,
         sourceType: normalizedSourceType,
         sourceId: normalizedSourceId,
+        sourceSnapshotIndex,
         partFormulaId,
         partCode: String(row?.part_code || "").trim(),
         partTitle: String(row?.part_title || row?.part_code || `part_${partFormulaId}`).trim(),
         lineColor: normalizeHexColor(box?.lineColor || box?.line_color || DEFAULT_INTERIOR_LINE_COLOR, DEFAULT_INTERIOR_LINE_COLOR),
         box: { ...(box || {}) },
-      };
+      }];
     })
-    .filter(Boolean);
 }
 function getDoorDependentViewerBoxesFromInteriorInstances(instances) {
   return (Array.isArray(instances) ? instances : [])
@@ -3380,6 +3380,12 @@ function computeDoorLibraryControllerPreviewGeometry(parts, frameBounds = null) 
       cx: (minX + maxX) * 0.5,
       cz: (minZ + maxZ) * 0.5,
       structural_part_formula_ids: uniqueParts.map((item) => item.partFormulaId),
+      selected_parts: uniqueParts.map((item) => ({
+        source_type: String(item?.sourceType || "").trim() || "structural",
+        source_id: String(item?.sourceId || "").trim(),
+        part_formula_id: Number(item?.partFormulaId) || 0,
+        source_snapshot_index: Number(item?.sourceSnapshotIndex) || 0,
+      })),
     },
     preview_param_values: {
       door_width: widthBackToBack,

@@ -1486,6 +1486,130 @@ def _compute_door_controller_box_snapshot(
     return snapshot, computed
 
 
+def _compute_door_controller_params_from_snapshot(
+    *,
+    controller_box_snapshot: dict[str, object] | None,
+    source_boxes_by_formula_id: dict[int, dict[str, object]] | None,
+) -> dict[str, float]:
+    snapshot = dict(controller_box_snapshot or {})
+    min_x = snapshot.get("min_x")
+    max_x = snapshot.get("max_x")
+    min_z = snapshot.get("min_z")
+    max_z = snapshot.get("max_z")
+    if not all(isinstance(value, (int, float)) for value in (min_x, max_x, min_z, max_z)):
+        return {}
+    all_extents = [
+        _box_front_extents(box)
+        for box in dict(source_boxes_by_formula_id or {}).values()
+        if isinstance(box, dict)
+    ]
+    if not all_extents:
+        frame_min_x = float(min_x)
+        frame_max_x = float(max_x)
+        frame_min_z = float(min_z)
+        frame_max_z = float(max_z)
+    else:
+        frame_min_x = min(float(item["min_x"]) for item in all_extents)
+        frame_max_x = max(float(item["max_x"]) for item in all_extents)
+        frame_min_z = min(float(item["min_z"]) for item in all_extents)
+        frame_max_z = max(float(item["max_z"]) for item in all_extents)
+    width_back_to_back = _round_number(float(max_x) - float(min_x))
+    height_back_to_back = _round_number(float(max_z) - float(min_z))
+    return {
+        "width_back_to_back": width_back_to_back,
+        "height_back_to_back": height_back_to_back,
+        "door_width": width_back_to_back,
+        "door_height": height_back_to_back,
+        "left": _round_number(float(min_x) - float(frame_min_x)),
+        "right": _round_number(float(frame_max_x) - float(max_x)),
+        "top": _round_number(float(frame_max_z) - float(max_z)),
+        "bottom_offset": _round_number(float(min_z) - float(frame_min_z)),
+    }
+
+
+def _collect_part_snapshot_boxes_by_formula_id(
+    part_snapshots: list[dict[str, object]] | None,
+) -> dict[int, dict[str, object]]:
+    boxes_by_formula_id: dict[int, dict[str, object]] = {}
+    for row in list(part_snapshots or []):
+        box = dict((row or {}).get("viewer_payload", {}) or {}).get("box")
+        part_formula_id = int((row or {}).get("part_formula_id") or 0)
+        if part_formula_id > 0 and isinstance(box, dict):
+            boxes_by_formula_id[part_formula_id] = dict(box)
+    return boxes_by_formula_id
+
+
+def _collect_dependent_interior_boxes_by_formula_id(
+    interiors: list[object] | None,
+    dependent_interior_instance_ids: list[str] | None,
+) -> dict[int, dict[str, object]]:
+    allowed_ids = {
+        str(item).strip()
+        for item in list(dependent_interior_instance_ids or [])
+        if str(item).strip()
+    }
+    if not allowed_ids:
+        return {}
+    boxes_by_formula_id: dict[int, dict[str, object]] = {}
+    for interior in list(interiors or []):
+        if str(getattr(interior, "id", "") or "").strip() not in allowed_ids:
+            continue
+        boxes_by_formula_id.update(
+            _collect_part_snapshot_boxes_by_formula_id(
+                list(getattr(interior, "part_snapshots", []) or []),
+            )
+        )
+    return boxes_by_formula_id
+
+
+def _collect_controller_selection_boxes_by_formula_id(
+    *,
+    controller_box_snapshot: dict[str, object] | None,
+    root_part_snapshots: list[dict[str, object]] | None = None,
+    interiors: list[object] | None = None,
+) -> dict[int, dict[str, object]]:
+    selected_parts = list(dict(controller_box_snapshot or {}).get("selected_parts") or [])
+    if not selected_parts:
+        return {}
+    interior_by_id = {
+        str(getattr(interior, "id", "") or "").strip(): interior
+        for interior in list(interiors or [])
+        if str(getattr(interior, "id", "") or "").strip()
+    }
+    boxes_by_formula_id: dict[int, dict[str, object]] = {}
+    for item in selected_parts:
+        if not isinstance(item, dict):
+            continue
+        source_type = str(item.get("source_type") or "").strip() or "structural"
+        source_id = str(item.get("source_id") or "").strip()
+        part_formula_id = int(item.get("part_formula_id") or 0)
+        source_snapshot_index = int(item.get("source_snapshot_index") or -1)
+        if part_formula_id <= 0 or source_snapshot_index < 0:
+            continue
+        if source_type == "internal":
+            rows = list(getattr(interior_by_id.get(source_id), "part_snapshots", []) or [])
+        else:
+            rows = list(root_part_snapshots or [])
+        if source_snapshot_index >= len(rows):
+            continue
+        row = rows[source_snapshot_index]
+        row_part_formula_id = int(
+            (row.get("part_formula_id") if isinstance(row, dict) else getattr(getattr(row, "part_formula", None), "part_formula_id", None))
+            or (getattr(row, "part_formula_id", None) if not isinstance(row, dict) else 0)
+            or 0
+        )
+        if row_part_formula_id != part_formula_id:
+            continue
+        if isinstance(row, dict):
+            viewer_payload = dict(row.get("viewer_payload") or {})
+        else:
+            viewer_payload = dict(getattr(row, "viewer_payload", {}) or {})
+        box = viewer_payload.get("box")
+        if isinstance(box, dict):
+            boxes_by_formula_id[part_formula_id] = dict(box)
+    return boxes_by_formula_id
+
+
 async def resolve_door_instance_preview(
     session: AsyncSession,
     *,
@@ -1548,17 +1672,33 @@ async def resolve_door_instance_preview(
         **dict(getattr(door_part_group, "controller_bindings", {}) or {}),
     })
     persisted_values = _merge_param_value_layers(copied_meta_values, meta_values, persisted_values)
-    if controller_type in DOOR_CONTROLLER_BINDING_KEYS_BY_TYPE and source_boxes_by_formula_id:
+    if controller_type in DOOR_CONTROLLER_BINDING_KEYS_BY_TYPE:
+        normalized_source_boxes = {
+            int(key): dict(value)
+            for key, value in dict(source_boxes_by_formula_id or {}).items()
+        }
         try:
-            next_box_snapshot, computed_params = _compute_door_controller_box_snapshot(
-                structural_part_formula_ids=structural_part_formula_ids,
-                source_boxes_by_formula_id={int(key): dict(value) for key, value in dict(source_boxes_by_formula_id or {}).items()},
-            )
+            if normalized_source_boxes:
+                next_box_snapshot, computed_params = _compute_door_controller_box_snapshot(
+                    structural_part_formula_ids=structural_part_formula_ids,
+                    source_boxes_by_formula_id=normalized_source_boxes,
+                )
+            if dict(controller_box_snapshot or {}):
+                computed_from_snapshot = _compute_door_controller_params_from_snapshot(
+                    controller_box_snapshot=dict(controller_box_snapshot or {}),
+                    source_boxes_by_formula_id=normalized_source_boxes,
+                )
+                if computed_from_snapshot:
+                    computed_params = computed_from_snapshot
+                    next_box_snapshot = dict(controller_box_snapshot or {})
         except HTTPException:
             if instance_id is None:
                 raise
             next_box_snapshot = dict(controller_box_snapshot or {})
-            computed_params = {}
+            computed_params = _compute_door_controller_params_from_snapshot(
+                controller_box_snapshot=dict(controller_box_snapshot or {}),
+                source_boxes_by_formula_id=normalized_source_boxes,
+            )
     for binding_key, computed_value in computed_params.items():
         bound_code = str((bindings.get(binding_key) or {}).get("param_code") or "").strip()
         if bound_code and bound_code in selected_param_codes:
@@ -1708,11 +1848,11 @@ async def compose_sub_category_design_preview(
             )
         )
     for interior in resolved_interior:
-        for row in list(getattr(interior, "part_snapshots", []) or []):
-            box = dict((row or {}).get("viewer_payload", {}) or {}).get("box")
-            part_formula_id = int((row or {}).get("part_formula_id") or 0)
-            if part_formula_id > 0 and isinstance(box, dict):
-                source_boxes_by_formula_id[part_formula_id] = dict(box)
+        source_boxes_by_formula_id.update(
+            _collect_part_snapshot_boxes_by_formula_id(
+                list(getattr(interior, "part_snapshots", []) or []),
+            )
+        )
     resolved_doors: list[ResolvedDoorInstanceSnapshot] = []
     for instance in sorted(list(door_instances or []), key=lambda item: (int(item.ui_order or 0), str(item.instance_code or ""))):
         door_group = await require_accessible_door_part_group(
@@ -1730,6 +1870,20 @@ async def compose_sub_category_design_preview(
             for item in list(getattr(instance, "dependent_interior_instance_ids", []) or [])
             if str(item).strip() and str(item).strip() in allowed_dependent_ids
         ]
+        selected_source_boxes_by_formula_id = dict(source_boxes_by_formula_id)
+        selected_source_boxes_by_formula_id.update(
+            _collect_dependent_interior_boxes_by_formula_id(
+                resolved_interior,
+                normalized_dependent_ids,
+            )
+        )
+        selected_source_boxes_by_formula_id.update(
+            _collect_controller_selection_boxes_by_formula_id(
+                controller_box_snapshot=dict(getattr(instance, "controller_box_snapshot", {}) or {}),
+                root_part_snapshots=snapshots,
+                interiors=resolved_interior,
+            )
+        )
         resolved_doors.append(
             await resolve_door_instance_preview(
                 session,
@@ -1745,7 +1899,7 @@ async def compose_sub_category_design_preview(
                 controller_box_snapshot=dict(getattr(instance, "controller_box_snapshot", {}) or {}),
                 param_values=dict(getattr(instance, "param_values", {}) or {}),
                 param_meta={str(key): dict(value or {}) for key, value in dict(getattr(instance, "param_meta", {}) or {}).items()},
-                source_boxes_by_formula_id=source_boxes_by_formula_id,
+                source_boxes_by_formula_id=selected_source_boxes_by_formula_id,
                 base_raw_values=raw_params,
                 base_numeric_params=numeric_params,
                 context=context,

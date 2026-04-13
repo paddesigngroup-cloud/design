@@ -26,7 +26,10 @@ from designkp_backend.db.models.catalog import (
 from designkp_backend.services.admin_access import require_admin
 from designkp_backend.services.admin_storage import admin_icon_exists, normalize_icon_file_name
 from designkp_backend.services.sub_category_designs import (
+    _collect_controller_selection_boxes_by_formula_id,
     DesignExecutionContext,
+    _collect_dependent_interior_boxes_by_formula_id,
+    _collect_part_snapshot_boxes_by_formula_id,
     _coerce_numeric,
     _round_number,
     build_design_execution_context,
@@ -767,11 +770,11 @@ async def build_order_design_snapshot(
         )
         viewer_boxes.extend([dict(box or {}) for box in resolved.viewer_boxes])
         part_snapshots.extend([dict(row or {}) for row in resolved.part_snapshots])
-        for row in list(resolved.part_snapshots or []):
-            box = dict((row or {}).get("viewer_payload", {}) or {}).get("box")
-            part_formula_id = int((row or {}).get("part_formula_id") or 0)
-            if part_formula_id > 0 and isinstance(box, dict):
-                source_boxes_by_formula_id[part_formula_id] = dict(box)
+        source_boxes_by_formula_id.update(
+            _collect_part_snapshot_boxes_by_formula_id(
+                list(resolved.part_snapshots or []),
+            )
+        )
     resolved_door_instances: list[dict[str, object]] = []
     door_groups_by_id = await _load_accessible_door_groups(
         session,
@@ -783,6 +786,24 @@ async def build_order_design_snapshot(
         door_group = door_groups_by_id.get(instance.door_part_group_id)
         if door_group is None:
             door_group = await require_accessible_door_part_group(session, admin_id=order.admin_id, group_id=instance.door_part_group_id)
+        selected_source_boxes_by_formula_id = dict(source_boxes_by_formula_id)
+        selected_source_boxes_by_formula_id.update(
+            _collect_dependent_interior_boxes_by_formula_id(
+                sorted_interior_instances,
+                [
+                    str(row).strip()
+                    for row in list(getattr(instance, "dependent_interior_instance_ids", []) or [])
+                    if str(row).strip() and str(row).strip() in valid_interior_ids
+                ],
+            )
+        )
+        selected_source_boxes_by_formula_id.update(
+            _collect_controller_selection_boxes_by_formula_id(
+                controller_box_snapshot=dict(getattr(instance, "controller_box_snapshot", {}) or {}),
+                root_part_snapshots=list(_root_part_snapshots_for_order_item(item=item, source_design=source_design) or []),
+                interiors=sorted_interior_instances,
+            )
+        )
         resolved = await resolve_door_instance_preview(
             session,
             admin_id=order.admin_id,
@@ -801,7 +822,7 @@ async def build_order_design_snapshot(
             controller_box_snapshot=dict(getattr(instance, "controller_box_snapshot", {}) or {}),
             param_values=dict(getattr(instance, "param_values", {}) or {}),
             param_meta=dict(getattr(instance, "param_meta", {}) or {}),
-            source_boxes_by_formula_id=source_boxes_by_formula_id,
+            source_boxes_by_formula_id=selected_source_boxes_by_formula_id,
             base_raw_values=raw_params,
             base_numeric_params=numeric_params,
             context=context,
@@ -1107,6 +1128,13 @@ async def refresh_order_design_door_instance(
             part_formula_id = int((row or {}).get("part_formula_id") or 0)
             if part_formula_id > 0 and isinstance(box, dict):
                 source_boxes_by_formula_id[part_formula_id] = dict(box)
+    source_boxes_by_formula_id.update(
+        _collect_controller_selection_boxes_by_formula_id(
+            controller_box_snapshot=dict(getattr(instance, "controller_box_snapshot", {}) or {}),
+            root_part_snapshots=list(_root_part_snapshots_for_order_item(item=item, source_design=source_design) or []),
+            interiors=list(item.interior_instances or []),
+        )
+    )
 
     resolved = await resolve_door_instance_preview(
         session,

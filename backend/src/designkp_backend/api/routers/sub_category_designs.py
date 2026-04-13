@@ -14,6 +14,7 @@ from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import Category, SubCategory, SubCategoryDesign, SubCategoryDesignDoorInstance, SubCategoryDesignInteriorInstance, SubCategoryDesignPart
 from designkp_backend.services.admin_access import require_admin_if_present
 from designkp_backend.services.sub_category_designs import (
+    _collect_controller_selection_boxes_by_formula_id,
     build_sub_category_param_display_snapshot,
     compose_sub_category_design_preview,
     door_instance_tables_ready,
@@ -960,6 +961,20 @@ async def _refresh_design_door_instance(
             part_formula_id = int((row or {}).get("part_formula_id") or 0)
             if part_formula_id > 0 and isinstance(box, dict):
                 part_boxes[part_formula_id] = dict(box)
+    part_boxes.update(
+        _collect_controller_selection_boxes_by_formula_id(
+            controller_box_snapshot=dict(instance.controller_box_snapshot or {}),
+            root_part_snapshots=[
+                {
+                    "part_formula_id": int(part.part_formula_id or 0),
+                    "viewer_payload": dict(getattr(snapshot, "viewer_payload", {}) or {}),
+                }
+                for part in list(design.parts or [])
+                for snapshot in list(part.snapshots or [])[:1]
+            ],
+            interiors=list(getattr(design, "interior_instances", []) or []),
+        )
+    )
     resolved = await resolve_door_instance_preview(
         session,
         admin_id=design.admin_id,
@@ -1025,6 +1040,20 @@ async def _next_door_instance_state(
             part_formula_id = int((row or {}).get("part_formula_id") or 0)
             if part_formula_id > 0 and isinstance(box, dict):
                 part_boxes[part_formula_id] = dict(box)
+    part_boxes.update(
+        _collect_controller_selection_boxes_by_formula_id(
+            controller_box_snapshot=dict(controller_box_snapshot or {}),
+            root_part_snapshots=[
+                {
+                    "part_formula_id": int(part.part_formula_id or 0),
+                    "viewer_payload": dict(getattr(snapshot, "viewer_payload", {}) or {}),
+                }
+                for part in list(design.parts or [])
+                for snapshot in list(part.snapshots or [])[:1]
+            ],
+            interiors=list(getattr(design, "interior_instances", []) or []),
+        )
+    )
     resolved = await resolve_door_instance_preview(
         session,
         admin_id=design.admin_id,
