@@ -14,6 +14,7 @@ from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import Category, SubCategory, SubCategoryDesign, SubCategoryDesignDoorInstance, SubCategoryDesignInteriorInstance, SubCategoryDesignPart
 from designkp_backend.services.admin_access import require_admin_if_present
 from designkp_backend.services.sub_category_designs import (
+    _collect_controller_selection_boxes,
     _collect_controller_selection_boxes_by_formula_id,
     build_sub_category_param_display_snapshot,
     compose_sub_category_design_preview,
@@ -890,6 +891,27 @@ async def _refresh_design_interior_instance(
     instance.part_snapshots = resolved.part_snapshots
     instance.viewer_boxes = resolved.viewer_boxes
 
+    # Keep dependent door controllers in sync with interior moves.
+    target_id = str(getattr(instance, "id", "") or "").strip()
+    if target_id:
+        for door in list(getattr(design, "door_instances", []) or []):
+            deps = [
+                str(row).strip()
+                for row in list(getattr(door, "dependent_interior_instance_ids", []) or [])
+                if str(row).strip()
+            ]
+            if target_id in deps:
+                await _refresh_design_door_instance(session, design=design, instance=door)
+                continue
+            controller_snapshot = dict(getattr(door, "controller_box_snapshot", {}) or {})
+            selected_parts = list(controller_snapshot.get("selected_parts") or [])
+            if any(
+                str(part.get("source_type") or "") == "interior"
+                and str(part.get("source_id") or "").strip() == target_id
+                for part in selected_parts
+            ):
+                await _refresh_design_door_instance(session, design=design, instance=door)
+
 
 async def _next_interior_instance_state(
     session: AsyncSession,
@@ -975,6 +997,18 @@ async def _refresh_design_door_instance(
             interiors=list(getattr(design, "interior_instances", []) or []),
         )
     )
+    selected_part_boxes = _collect_controller_selection_boxes(
+        controller_box_snapshot=dict(instance.controller_box_snapshot or {}),
+        root_part_snapshots=[
+            {
+                "part_formula_id": int(part.part_formula_id or 0),
+                "viewer_payload": dict(getattr(snapshot, "viewer_payload", {}) or {}),
+            }
+            for part in list(design.parts or [])
+            for snapshot in list(part.snapshots or [])[:1]
+        ],
+        interiors=list(getattr(design, "interior_instances", []) or []),
+    )
     resolved = await resolve_door_instance_preview(
         session,
         admin_id=design.admin_id,
@@ -990,6 +1024,7 @@ async def _refresh_design_door_instance(
         param_values=dict(instance.param_values or {}),
         param_meta=dict(instance.param_meta or {}),
         source_boxes_by_formula_id=part_boxes,
+        selected_part_boxes=selected_part_boxes,
     )
     instance.controller_box_snapshot = resolved.controller_box_snapshot
     instance.param_values = resolved.param_values
@@ -1054,6 +1089,18 @@ async def _next_door_instance_state(
             interiors=list(getattr(design, "interior_instances", []) or []),
         )
     )
+    selected_part_boxes = _collect_controller_selection_boxes(
+        controller_box_snapshot=dict(controller_box_snapshot or {}),
+        root_part_snapshots=[
+            {
+                "part_formula_id": int(part.part_formula_id or 0),
+                "viewer_payload": dict(getattr(snapshot, "viewer_payload", {}) or {}),
+            }
+            for part in list(design.parts or [])
+            for snapshot in list(part.snapshots or [])[:1]
+        ],
+        interiors=list(getattr(design, "interior_instances", []) or []),
+    )
     resolved = await resolve_door_instance_preview(
         session,
         admin_id=design.admin_id,
@@ -1069,6 +1116,7 @@ async def _next_door_instance_state(
         param_values=_normalize_door_param_values(param_values),
         param_meta={},
         source_boxes_by_formula_id=part_boxes,
+        selected_part_boxes=selected_part_boxes,
     )
     return next_code, next_order, resolved.controller_box_snapshot, resolved.param_values, resolved.param_meta
 

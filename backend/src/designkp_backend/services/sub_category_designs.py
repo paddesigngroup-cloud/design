@@ -1486,6 +1486,87 @@ def _compute_door_controller_box_snapshot(
     return snapshot, computed
 
 
+def _compute_door_controller_box_snapshot_from_selected_boxes(
+    *,
+    structural_part_formula_ids: list[int],
+    selected_boxes: list[dict[str, object]],
+    source_boxes_by_formula_id: dict[int, dict[str, object]] | None,
+) -> tuple[dict[str, object], dict[str, float]]:
+    normalized_ids = [int(item) for item in structural_part_formula_ids if int(item) > 0]
+    unique_ids: list[int] = []
+    seen: set[int] = set()
+    for item in normalized_ids:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique_ids.append(item)
+    if len(selected_boxes) != 4:
+        return {}, {}
+    selected = []
+    for item in selected_boxes:
+        box = item.get("box")
+        if not isinstance(box, dict):
+            return {}, {}
+        extents = _box_front_extents(box)
+        axis = "vertical" if extents["height"] >= extents["width"] else "horizontal"
+        selected.append(
+            {
+                "part_formula_id": int(item.get("part_formula_id") or 0),
+                "axis": axis,
+                "box": dict(box),
+                "extents": extents,
+                "order": int(item.get("order") or 0),
+            }
+        )
+    vertical = [item for item in selected if item["axis"] == "vertical"]
+    horizontal = [item for item in selected if item["axis"] == "horizontal"]
+    if len(vertical) != 2 or len(horizontal) != 2:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Door instance structural parts must resolve to exactly 2 vertical and 2 horizontal members.")
+    vertical.sort(key=lambda item: (float(item["extents"]["min_x"]), int(item["order"])))
+    horizontal.sort(key=lambda item: (-float(item["extents"]["max_z"]), int(item["order"])))
+    left, right = vertical
+    top, bottom = horizontal
+    all_extents = [
+        _box_front_extents(box)
+        for box in dict(source_boxes_by_formula_id or {}).values()
+        if isinstance(box, dict)
+    ]
+    if not all_extents:
+        all_extents = [item["extents"] for item in selected]
+    frame_min_x = min(float(item["min_x"]) for item in all_extents)
+    frame_max_x = max(float(item["max_x"]) for item in all_extents)
+    frame_min_z = min(float(item["min_z"]) for item in all_extents)
+    frame_max_z = max(float(item["max_z"]) for item in all_extents)
+    min_x = float(left["extents"]["min_x"])
+    max_x = float(right["extents"]["max_x"])
+    min_z = float(bottom["extents"]["min_z"])
+    max_z = float(top["extents"]["max_z"])
+    width_back_to_back = _round_number(max_x - min_x)
+    height_back_to_back = _round_number(max_z - min_z)
+    snapshot = {
+        "min_x": _round_number(min_x),
+        "max_x": _round_number(max_x),
+        "min_z": _round_number(min_z),
+        "max_z": _round_number(max_z),
+        "width": _round_number(max_x - min_x),
+        "height": _round_number(max_z - min_z),
+        "cx": _round_number((min_x + max_x) * 0.5),
+        "cz": _round_number((min_z + max_z) * 0.5),
+        "structural_part_formula_ids": unique_ids,
+    }
+    computed = {
+        "width_back_to_back": width_back_to_back,
+        "height_back_to_back": height_back_to_back,
+        "door_width": width_back_to_back,
+        "door_height": height_back_to_back,
+        "left": _round_number(float(min_x) - float(frame_min_x)),
+        "right": _round_number(float(frame_max_x) - float(max_x)),
+        "top": _round_number(float(frame_max_z) - float(max_z)),
+        "bottom_offset": _round_number(float(min_z) - float(frame_min_z)),
+    }
+    return snapshot, computed
+
+
 def _compute_door_controller_params_from_snapshot(
     *,
     controller_box_snapshot: dict[str, object] | None,
@@ -1568,31 +1649,70 @@ def _collect_controller_selection_boxes_by_formula_id(
     root_part_snapshots: list[dict[str, object]] | None = None,
     interiors: list[object] | None = None,
 ) -> dict[int, dict[str, object]]:
+    selected_boxes = _collect_controller_selection_boxes(
+        controller_box_snapshot=controller_box_snapshot,
+        root_part_snapshots=root_part_snapshots,
+        interiors=interiors,
+    )
+    boxes_by_formula_id: dict[int, dict[str, object]] = {}
+    for item in selected_boxes:
+        part_formula_id = int(item.get("part_formula_id") or 0)
+        box = item.get("box")
+        if part_formula_id > 0 and isinstance(box, dict):
+            boxes_by_formula_id[part_formula_id] = dict(box)
+    return boxes_by_formula_id
+
+
+def _collect_controller_selection_boxes(
+    *,
+    controller_box_snapshot: dict[str, object] | None,
+    root_part_snapshots: list[dict[str, object]] | None = None,
+    interiors: list[object] | None = None,
+) -> list[dict[str, object]]:
     selected_parts = list(dict(controller_box_snapshot or {}).get("selected_parts") or [])
     if not selected_parts:
-        return {}
-    interior_by_id = {
-        str(getattr(interior, "id", "") or "").strip(): interior
-        for interior in list(interiors or [])
-        if str(getattr(interior, "id", "") or "").strip()
-    }
-    boxes_by_formula_id: dict[int, dict[str, object]] = {}
-    for item in selected_parts:
+        return []
+    interior_by_id: dict[str, object] = {}
+    for interior in list(interiors or []):
+        candidate_ids = []
+        if isinstance(interior, dict):
+            candidate_ids.extend([
+                str(interior.get("id") or "").strip(),
+                str(interior.get("instance_id") or "").strip(),
+                str(interior.get("source_instance_id") or "").strip(),
+                str(interior.get("instance_code") or "").strip(),
+            ])
+        else:
+            candidate_ids.extend([
+                str(getattr(interior, "id", "") or "").strip(),
+                str(getattr(interior, "instance_id", "") or "").strip(),
+                str(getattr(interior, "source_instance_id", "") or "").strip(),
+                str(getattr(interior, "instance_code", "") or "").strip(),
+            ])
+        for candidate_id in candidate_ids:
+            if candidate_id:
+                interior_by_id[candidate_id] = interior
+    selected_boxes: list[dict[str, object]] = []
+    for index, item in enumerate(selected_parts):
         if not isinstance(item, dict):
             continue
         source_type = str(item.get("source_type") or "").strip() or "structural"
         source_id = str(item.get("source_id") or "").strip()
         part_formula_id = int(item.get("part_formula_id") or 0)
         source_snapshot_index = int(item.get("source_snapshot_index") or -1)
-        if part_formula_id <= 0 or source_snapshot_index < 0:
+        if part_formula_id <= 0:
             continue
-        if source_type == "internal":
+        if source_type in {"internal", "interior"}:
             rows = list(getattr(interior_by_id.get(source_id), "part_snapshots", []) or [])
         else:
             rows = list(root_part_snapshots or [])
-        if source_snapshot_index >= len(rows):
+        row = None
+        if source_snapshot_index >= 0 and source_snapshot_index < len(rows):
+            row = rows[source_snapshot_index]
+        if row is None:
+            row = next((candidate for candidate in rows if int((candidate.get("part_formula_id") if isinstance(candidate, dict) else getattr(candidate, "part_formula_id", 0)) or 0) == part_formula_id), None)
+        if row is None:
             continue
-        row = rows[source_snapshot_index]
         row_part_formula_id = int(
             (row.get("part_formula_id") if isinstance(row, dict) else getattr(getattr(row, "part_formula", None), "part_formula_id", None))
             or (getattr(row, "part_formula_id", None) if not isinstance(row, dict) else 0)
@@ -1606,8 +1726,14 @@ def _collect_controller_selection_boxes_by_formula_id(
             viewer_payload = dict(getattr(row, "viewer_payload", {}) or {})
         box = viewer_payload.get("box")
         if isinstance(box, dict):
-            boxes_by_formula_id[part_formula_id] = dict(box)
-    return boxes_by_formula_id
+            selected_boxes.append(
+                {
+                    "part_formula_id": part_formula_id,
+                    "box": dict(box),
+                    "order": index,
+                }
+            )
+    return selected_boxes
 
 
 async def resolve_door_instance_preview(
@@ -1626,6 +1752,7 @@ async def resolve_door_instance_preview(
     param_values: dict[str, object] | None = None,
     param_meta: dict[str, dict[str, object]] | None = None,
     source_boxes_by_formula_id: dict[int, dict[str, object]] | None = None,
+    selected_part_boxes: list[dict[str, object]] | None = None,
     base_raw_values: dict[str, str | None] | None = None,
     base_numeric_params: dict[str, float] | None = None,
     context: DesignExecutionContext | None = None,
@@ -1677,13 +1804,26 @@ async def resolve_door_instance_preview(
             int(key): dict(value)
             for key, value in dict(source_boxes_by_formula_id or {}).items()
         }
+        normalized_selected_boxes = [
+            dict(item or {})
+            for item in list(selected_part_boxes or [])
+            if isinstance(item, dict)
+        ]
         try:
-            if normalized_source_boxes:
+            if normalized_selected_boxes:
+                next_box_snapshot, computed_params = _compute_door_controller_box_snapshot_from_selected_boxes(
+                    structural_part_formula_ids=structural_part_formula_ids,
+                    selected_boxes=normalized_selected_boxes,
+                    source_boxes_by_formula_id=normalized_source_boxes,
+                )
+            elif normalized_source_boxes:
+                # When source boxes are available (e.g., after moving a dependent part),
+                # always recompute from current geometry so controller params stay in sync.
                 next_box_snapshot, computed_params = _compute_door_controller_box_snapshot(
                     structural_part_formula_ids=structural_part_formula_ids,
                     source_boxes_by_formula_id=normalized_source_boxes,
                 )
-            if dict(controller_box_snapshot or {}):
+            elif dict(controller_box_snapshot or {}):
                 computed_from_snapshot = _compute_door_controller_params_from_snapshot(
                     controller_box_snapshot=dict(controller_box_snapshot or {}),
                     source_boxes_by_formula_id=normalized_source_boxes,
@@ -1884,6 +2024,11 @@ async def compose_sub_category_design_preview(
                 interiors=resolved_interior,
             )
         )
+        selected_part_boxes = _collect_controller_selection_boxes(
+            controller_box_snapshot=dict(getattr(instance, "controller_box_snapshot", {}) or {}),
+            root_part_snapshots=snapshots,
+            interiors=resolved_interior,
+        )
         resolved_doors.append(
             await resolve_door_instance_preview(
                 session,
@@ -1900,6 +2045,7 @@ async def compose_sub_category_design_preview(
                 param_values=dict(getattr(instance, "param_values", {}) or {}),
                 param_meta={str(key): dict(value or {}) for key, value in dict(getattr(instance, "param_meta", {}) or {}).items()},
                 source_boxes_by_formula_id=selected_source_boxes_by_formula_id,
+                selected_part_boxes=selected_part_boxes,
                 base_raw_values=raw_params,
                 base_numeric_params=numeric_params,
                 context=context,

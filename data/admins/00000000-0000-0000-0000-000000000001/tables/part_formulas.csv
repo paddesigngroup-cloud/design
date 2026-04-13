@@ -35,3 +35,5 @@
 34,4,15,bottom_left_space_drawer,کف کشو فضای چپ,(dr_w)-f101,dr_g_d-f72,(dr_w)-f101,dr_g_d-f72,bo_dr_th,f73+((dr_w-f101)/2),((dr_g_d-f72)/2)+f74,(bo_dr_th/2)+f75,0,system
 35,6,1,left_vertical_equal_door,درب برابر عمودی چپ,d_h-f104,(d_w-f105)/2,(d_w-f105)/2,d_th,d_h-f104,((d_w-f105)/4)+f106,f107+(d_th/2),((d_h-f104)/2)+f108+u_f_h,0,system
 36,6,2,right_vertical_equal_door,درب برابر عمودی راست,d_h-f104,(d_w-f105)/2,(d_w-f105)/2,d_th,d_h-f104,w-f109-((d_w-f105)/4),f107+(d_th/2),((d_h-f104)/2)+f108+u_f_h,0,system
+37,6,3,left_vertical_door,درب عمودی چپ,d_h-f104,d_w-f105,d_w-f105,d_th,d_h-f104,((d_w-f105)/2)+f106,f107+(d_th/2),((d_h-f104)/2)+f108+u_f_h,0,system
+38,6,4,right_vertical_door,درب عمودی راست,d_h-f104,d_w-f105,d_w-f105,d_th,d_h-f104,w-f109-((d_w-f105)/2),f107+(d_th/2),((d_h-f104)/2)+f108+u_f_h,0,system

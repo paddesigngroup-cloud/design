@@ -3254,7 +3254,13 @@ function getDoorDependentSelectablePartsFromInteriorInstances(instances) {
       getDoorDependentSelectablePartsFromPartRows(
         instance?.part_snapshots || [],
         "internal",
-        String(instance?.id || instance?.instance_code || "").trim() || "internal"
+        String(
+          instance?.id
+          || instance?.instance_id
+          || instance?.source_instance_id
+          || instance?.instance_code
+          || ""
+        ).trim() || "internal"
       )
     );
 }
@@ -3303,19 +3309,22 @@ function computeDoorLibraryControllerPreviewGeometry(parts, frameBounds = null) 
       partFormulaId: Number(item?.partFormulaId) || 0,
       sourceType: String(item?.sourceType || "").trim() || "structural",
       sourceId: String(item?.sourceId || "").trim(),
+      sourceSnapshotIndex: Number(item?.sourceSnapshotIndex) || 0,
+      selectionId: String(item?.id || "").trim()
+        || `${String(item?.sourceType || "").trim() || "structural"}:${String(item?.sourceId || "").trim()}:${Number(item?.partFormulaId) || 0}:${Number(item?.sourceSnapshotIndex) || 0}`,
       extents: getDoorLibraryBoxFrontExtents(item?.box || {}),
     }))
     .filter((item) => item.partFormulaId > 0);
   const uniqueParts = [];
-  const seenFormulaIds = new Set();
+  const seenSelectionIds = new Set();
   for (const item of normalized) {
-    if (seenFormulaIds.has(item.partFormulaId)) continue;
-    seenFormulaIds.add(item.partFormulaId);
+    if (seenSelectionIds.has(item.selectionId)) continue;
+    seenSelectionIds.add(item.selectionId);
     uniqueParts.push(item);
   }
   const vertical = uniqueParts.filter((item) => item.extents.height >= item.extents.width);
   const horizontal = uniqueParts.filter((item) => item.extents.width > item.extents.height);
-  const eligible = uniqueParts.length === 4 && uniqueParts.length === normalized.length && vertical.length === 2 && horizontal.length === 2;
+  const eligible = uniqueParts.length === 4 && vertical.length === 2 && horizontal.length === 2;
   if (!eligible) {
     return {
       selected: uniqueParts,

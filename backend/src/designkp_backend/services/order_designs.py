@@ -26,6 +26,7 @@ from designkp_backend.db.models.catalog import (
 from designkp_backend.services.admin_access import require_admin
 from designkp_backend.services.admin_storage import admin_icon_exists, normalize_icon_file_name
 from designkp_backend.services.sub_category_designs import (
+    _collect_controller_selection_boxes,
     _collect_controller_selection_boxes_by_formula_id,
     DesignExecutionContext,
     _collect_dependent_interior_boxes_by_formula_id,
@@ -776,6 +777,12 @@ async def build_order_design_snapshot(
             )
         )
     resolved_door_instances: list[dict[str, object]] = []
+    root_part_formula_ids = _enabled_source_part_formula_ids(source_design)
+    root_part_snapshots = [
+        dict(snapshot or {})
+        for snapshot in list(part_snapshots or [])
+        if int((snapshot or {}).get("part_formula_id") or 0) in root_part_formula_ids
+    ]
     door_groups_by_id = await _load_accessible_door_groups(
         session,
         admin_id=order.admin_id,
@@ -800,9 +807,14 @@ async def build_order_design_snapshot(
         selected_source_boxes_by_formula_id.update(
             _collect_controller_selection_boxes_by_formula_id(
                 controller_box_snapshot=dict(getattr(instance, "controller_box_snapshot", {}) or {}),
-                root_part_snapshots=list(_root_part_snapshots_for_order_item(item=item, source_design=source_design) or []),
+                root_part_snapshots=root_part_snapshots,
                 interiors=sorted_interior_instances,
             )
+        )
+        selected_part_boxes = _collect_controller_selection_boxes(
+            controller_box_snapshot=dict(getattr(instance, "controller_box_snapshot", {}) or {}),
+            root_part_snapshots=root_part_snapshots,
+            interiors=sorted_interior_instances,
         )
         resolved = await resolve_door_instance_preview(
             session,
@@ -823,6 +835,7 @@ async def build_order_design_snapshot(
             param_values=dict(getattr(instance, "param_values", {}) or {}),
             param_meta=dict(getattr(instance, "param_meta", {}) or {}),
             source_boxes_by_formula_id=selected_source_boxes_by_formula_id,
+            selected_part_boxes=selected_part_boxes,
             base_raw_values=raw_params,
             base_numeric_params=numeric_params,
             context=context,
@@ -1068,6 +1081,40 @@ async def refresh_order_design_interior_instance(
     instance.part_snapshots = resolved.part_snapshots
     instance.viewer_boxes = resolved.viewer_boxes
 
+    interior_id = str(getattr(instance, "id", "") or "").strip()
+    if not interior_id:
+        return
+
+    for door_instance in list(getattr(item, "door_instances", []) or []):
+        dependent_ids = [
+            str(row).strip()
+            for row in list(getattr(door_instance, "dependent_interior_instance_ids", []) or [])
+            if str(row).strip()
+        ]
+        if interior_id in dependent_ids:
+            await refresh_order_design_door_instance(
+                session,
+                item=item,
+                order=order,
+                source_design=source_design,
+                instance=door_instance,
+            )
+            continue
+        controller_snapshot = dict(getattr(door_instance, "controller_box_snapshot", {}) or {})
+        selected_parts = list(controller_snapshot.get("selected_parts") or [])
+        if any(
+            str(part.get("source_type") or "") == "interior"
+            and str(part.get("source_id") or "").strip() == interior_id
+            for part in selected_parts
+        ):
+            await refresh_order_design_door_instance(
+                session,
+                item=item,
+                order=order,
+                source_design=source_design,
+                instance=door_instance,
+            )
+
 
 async def refresh_order_design_door_instance(
     session: AsyncSession,
@@ -1135,6 +1182,11 @@ async def refresh_order_design_door_instance(
             interiors=list(item.interior_instances or []),
         )
     )
+    selected_part_boxes = _collect_controller_selection_boxes(
+        controller_box_snapshot=dict(getattr(instance, "controller_box_snapshot", {}) or {}),
+        root_part_snapshots=list(_root_part_snapshots_for_order_item(item=item, source_design=source_design) or []),
+        interiors=list(item.interior_instances or []),
+    )
 
     resolved = await resolve_door_instance_preview(
         session,
@@ -1151,6 +1203,7 @@ async def refresh_order_design_door_instance(
         param_values=dict(getattr(instance, "param_values", {}) or {}),
         param_meta=dict(getattr(instance, "param_meta", {}) or {}),
         source_boxes_by_formula_id=source_boxes_by_formula_id,
+        selected_part_boxes=selected_part_boxes,
         base_raw_values=raw_params,
         base_numeric_params=numeric_params,
         context=context,
