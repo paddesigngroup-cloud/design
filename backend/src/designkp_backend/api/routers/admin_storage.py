@@ -282,7 +282,10 @@ async def _sub_category_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
     items = (
         await session.scalars(
             select(SubCategory)
-            .where(or_(SubCategory.admin_id.is_(None), SubCategory.admin_id == admin_id))
+            .where(
+                or_(SubCategory.admin_id.is_(None), SubCategory.admin_id == admin_id),
+                SubCategory.deleted_at.is_(None),
+            )
             .order_by(SubCategory.sort_order.asc(), SubCategory.sub_cat_id.asc())
         )
     ).all()

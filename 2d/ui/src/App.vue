@@ -10907,10 +10907,10 @@ async function deleteConstructionInternalPartGroup(id) {
   if (!ok) return;
   try {
     const res = await fetch(`/api/internal-part-groups/${encodeURIComponent(String(id))}`, { method: "DELETE" });
-    if (!res.ok) throw new Error("delete-failed");
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف گروه قطعات داخلی انجام نشد."));
     await loadConstructionInternalPartGroups();
-  } catch (_) {
-    showAlert("حذف گروه قطعات داخلی انجام نشد.", { title: "خطا" });
+  } catch (error) {
+    showAlert(error?.message || "حذف گروه قطعات داخلی انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -13860,6 +13860,7 @@ async function saveConstructionSubCategories(options = {}) {
       });
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره ساب‌کت انجام نشد."));
     }
+    invalidateApiCache("/api/sub-categories?");
     await loadConstructionSubCategories();
     showAlert(options.successMessage || "تغییرات جدول ساب‌کت‌ها با موفقیت ذخیره شد.", {
       title: options.successTitle || "ذخیره تغییرات",

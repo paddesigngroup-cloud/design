@@ -3,12 +3,14 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from designkp_backend.db.dependencies import get_db_session
+from designkp_backend.db.models.account import OrderDesign, OrderDesignInteriorInstance
 from designkp_backend.db.models.catalog import (
     InternalPartGroup,
     InternalPartGroupItem,
@@ -19,6 +21,8 @@ from designkp_backend.db.models.catalog import (
     PartFormula,
     PartKind,
     SubCategory,
+    SubCategoryDesign,
+    SubCategoryDesignInteriorInstance,
     SubCategoryParamDefault,
 )
 from designkp_backend.services.admin_access import require_admin_if_present
@@ -778,6 +782,41 @@ async def delete_internal_part_group(group_uuid: uuid.UUID, session: AsyncSessio
     item = await session.get(InternalPartGroup, group_uuid)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Internal part group not found.")
+
+    # Clean up orphaned interior-instance rows that belong only to already-deleted parents.
+    deleted_subcat_instance_ids = select(SubCategoryDesignInteriorInstance.id).join(
+        SubCategoryDesign,
+        SubCategoryDesign.id == SubCategoryDesignInteriorInstance.design_id,
+    ).where(
+        SubCategoryDesignInteriorInstance.internal_part_group_id == group_uuid,
+        SubCategoryDesign.deleted_at.is_not(None),
+    )
+    await session.execute(
+        delete(SubCategoryDesignInteriorInstance).where(
+            SubCategoryDesignInteriorInstance.id.in_(deleted_subcat_instance_ids)
+        )
+    )
+
+    deleted_order_instance_ids = select(OrderDesignInteriorInstance.id).join(
+        OrderDesign,
+        OrderDesign.id == OrderDesignInteriorInstance.order_design_id,
+    ).where(
+        OrderDesignInteriorInstance.internal_part_group_id == group_uuid,
+        OrderDesign.deleted_at.is_not(None),
+    )
+    await session.execute(
+        delete(OrderDesignInteriorInstance).where(
+            OrderDesignInteriorInstance.id.in_(deleted_order_instance_ids)
+        )
+    )
+
     await session.delete(item)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="این گروه قطعات داخلی هنوز در طرح‌ها یا سفارش‌ها استفاده شده است و تا حذف وابستگی‌ها قابل حذف نیست.",
+        ) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

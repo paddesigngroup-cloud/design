@@ -5,11 +5,12 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from designkp_backend.db.dependencies import get_db_session
+from designkp_backend.db.models.account import Order, OrderDesign
 from designkp_backend.db.models.catalog import Category, Param, SubCategory, SubCategoryDesign, SubCategoryParamDefault, Template
 from designkp_backend.services.admin_access import require_admin_if_present
 from designkp_backend.services.admin_storage import admin_icon_exists, finalize_param_group_icon, normalize_icon_file_name
@@ -407,26 +408,61 @@ async def delete_sub_category(sub_category_uuid: uuid.UUID, session: AsyncSessio
     item = await session.get(SubCategory, sub_category_uuid)
     if not item or item.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found.")
-    deleted_at = datetime.now(timezone.utc)
-    item.deleted_at = deleted_at
-    item.sub_cat_id = None
-    item.code = _deleted_sub_category_code(item.code, item.id)
-    next_title = _deleted_sub_category_title(item.sub_cat_title, item.id)
-    item.sub_cat_title = next_title
-    item.title = next_title
-    designs = (
-        await session.scalars(
-            select(SubCategoryDesign).where(
-                and_(
-                    SubCategoryDesign.sub_category_id == sub_category_uuid,
-                    SubCategoryDesign.deleted_at.is_(None),
+    try:
+        deleted_at = datetime.now(timezone.utc)
+
+        # Remove orphaned deleted order-design rows first, so already-deleted design rows
+        # can be purged without tripping historical RESTRICT references.
+        deleted_order_design_ids = select(OrderDesign.id).join(
+            SubCategoryDesign,
+            SubCategoryDesign.id == OrderDesign.sub_category_design_id,
+        ).join(
+            Order,
+            Order.id == OrderDesign.order_id,
+        ).where(
+            SubCategoryDesign.sub_category_id == sub_category_uuid,
+            SubCategoryDesign.deleted_at.is_not(None),
+            OrderDesign.deleted_at.is_not(None),
+            Order.deleted_at.is_not(None),
+        )
+        await session.execute(
+            delete(OrderDesign).where(OrderDesign.id.in_(deleted_order_design_ids))
+        )
+
+        # Purge already-deleted designs that no longer have any order-design reference.
+        purgeable_design_ids = select(SubCategoryDesign.id).where(
+            SubCategoryDesign.sub_category_id == sub_category_uuid,
+            SubCategoryDesign.deleted_at.is_not(None),
+            ~SubCategoryDesign.id.in_(select(OrderDesign.sub_category_design_id)),
+        )
+        await session.execute(
+            delete(SubCategoryDesign).where(SubCategoryDesign.id.in_(purgeable_design_ids))
+        )
+
+        item.deleted_at = deleted_at
+        item.code = _deleted_sub_category_code(item.code, item.id)
+        next_title = _deleted_sub_category_title(item.sub_cat_title, item.id)
+        item.sub_cat_title = next_title
+        item.title = next_title
+        designs = (
+            await session.scalars(
+                select(SubCategoryDesign).where(
+                    and_(
+                        SubCategoryDesign.sub_category_id == sub_category_uuid,
+                        SubCategoryDesign.deleted_at.is_(None),
+                    )
                 )
             )
-        )
-    ).all()
-    for design in designs:
-        design.deleted_at = deleted_at
-        design.design_id = None
-        design.code = f"{(design.code or 'design')[:41]}__deleted__{str(design.id).replace('-', '')[:12]}"
-    await session.commit()
+        ).all()
+        for design in designs:
+            design.deleted_at = deleted_at
+            design.design_id = None
+            design.code = f"{(design.code or 'design')[:41]}__deleted__{str(design.id).replace('-', '')[:12]}"
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="این ساب‌کت هنوز در طرح‌ها یا سفارش‌ها استفاده شده است و تا حذف وابستگی‌ها قابل حذف نیست.",
+        ) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
