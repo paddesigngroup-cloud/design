@@ -1486,6 +1486,48 @@ def _compute_door_controller_box_snapshot(
     return snapshot, computed
 
 
+def _resolve_door_controller_frame_extents(
+    *,
+    source_boxes_by_formula_id: dict[int, dict[str, object]] | None,
+    fallback_snapshot: dict[str, object] | None = None,
+    fallback_selected_extents: list[dict[str, float]] | None = None,
+) -> tuple[float, float, float, float]:
+    all_extents = [
+        _box_front_extents(box)
+        for box in dict(source_boxes_by_formula_id or {}).values()
+        if isinstance(box, dict)
+    ]
+    if all_extents:
+        return (
+            min(float(item["min_x"]) for item in all_extents),
+            max(float(item["max_x"]) for item in all_extents),
+            min(float(item["min_z"]) for item in all_extents),
+            max(float(item["max_z"]) for item in all_extents),
+        )
+    snapshot = dict(fallback_snapshot or {})
+    frame_min_x = snapshot.get("frame_min_x")
+    frame_max_x = snapshot.get("frame_max_x")
+    frame_min_z = snapshot.get("frame_min_z")
+    frame_max_z = snapshot.get("frame_max_z")
+    if all(isinstance(value, (int, float)) for value in (frame_min_x, frame_max_x, frame_min_z, frame_max_z)):
+        return float(frame_min_x), float(frame_max_x), float(frame_min_z), float(frame_max_z)
+    selected_extents = list(fallback_selected_extents or [])
+    if selected_extents:
+        return (
+            min(float(item["min_x"]) for item in selected_extents),
+            max(float(item["max_x"]) for item in selected_extents),
+            min(float(item["min_z"]) for item in selected_extents),
+            max(float(item["max_z"]) for item in selected_extents),
+        )
+    min_x = snapshot.get("min_x")
+    max_x = snapshot.get("max_x")
+    min_z = snapshot.get("min_z")
+    max_z = snapshot.get("max_z")
+    if all(isinstance(value, (int, float)) for value in (min_x, max_x, min_z, max_z)):
+        return float(min_x), float(max_x), float(min_z), float(max_z)
+    return 0.0, 0.0, 0.0, 0.0
+
+
 def _compute_door_controller_box_snapshot_from_selected_boxes(
     *,
     structural_part_formula_ids: list[int],
@@ -1527,23 +1569,11 @@ def _compute_door_controller_box_snapshot_from_selected_boxes(
     horizontal.sort(key=lambda item: (-float(item["extents"]["max_z"]), -float(item["extents"]["min_z"]), int(item["order"])))
     left, right = vertical
     top, bottom = horizontal
-    snapshot = dict(controller_box_snapshot or {})
-    frame_min_x = snapshot.get("frame_min_x")
-    frame_max_x = snapshot.get("frame_max_x")
-    frame_min_z = snapshot.get("frame_min_z")
-    frame_max_z = snapshot.get("frame_max_z")
-    if not all(isinstance(value, (int, float)) for value in (frame_min_x, frame_max_x, frame_min_z, frame_max_z)):
-        all_extents = [
-            _box_front_extents(box)
-            for box in dict(source_boxes_by_formula_id or {}).values()
-            if isinstance(box, dict)
-        ]
-        if not all_extents:
-            all_extents = [item["extents"] for item in selected]
-        frame_min_x = min(float(item["min_x"]) for item in all_extents)
-        frame_max_x = max(float(item["max_x"]) for item in all_extents)
-        frame_min_z = min(float(item["min_z"]) for item in all_extents)
-        frame_max_z = max(float(item["max_z"]) for item in all_extents)
+    frame_min_x, frame_max_x, frame_min_z, frame_max_z = _resolve_door_controller_frame_extents(
+        source_boxes_by_formula_id=source_boxes_by_formula_id,
+        fallback_snapshot=dict(controller_box_snapshot or {}),
+        fallback_selected_extents=[item["extents"] for item in selected],
+    )
     min_x = float(left["extents"]["min_x"])
     max_x = float(right["extents"]["max_x"])
     min_z = float(bottom["extents"]["min_z"])
@@ -1590,26 +1620,16 @@ def _compute_door_controller_params_from_snapshot(
     max_z = snapshot.get("max_z")
     if not all(isinstance(value, (int, float)) for value in (min_x, max_x, min_z, max_z)):
         return {}
-    frame_min_x = snapshot.get("frame_min_x")
-    frame_max_x = snapshot.get("frame_max_x")
-    frame_min_z = snapshot.get("frame_min_z")
-    frame_max_z = snapshot.get("frame_max_z")
-    if not all(isinstance(value, (int, float)) for value in (frame_min_x, frame_max_x, frame_min_z, frame_max_z)):
-        all_extents = [
-            _box_front_extents(box)
-            for box in dict(source_boxes_by_formula_id or {}).values()
-            if isinstance(box, dict)
-        ]
-        if not all_extents:
-            frame_min_x = float(min_x)
-            frame_max_x = float(max_x)
-            frame_min_z = float(min_z)
-            frame_max_z = float(max_z)
-        else:
-            frame_min_x = min(float(item["min_x"]) for item in all_extents)
-            frame_max_x = max(float(item["max_x"]) for item in all_extents)
-            frame_min_z = min(float(item["min_z"]) for item in all_extents)
-            frame_max_z = max(float(item["max_z"]) for item in all_extents)
+    frame_min_x, frame_max_x, frame_min_z, frame_max_z = _resolve_door_controller_frame_extents(
+        source_boxes_by_formula_id=source_boxes_by_formula_id,
+        fallback_snapshot=snapshot,
+        fallback_selected_extents=[{
+            "min_x": float(min_x),
+            "max_x": float(max_x),
+            "min_z": float(min_z),
+            "max_z": float(max_z),
+        }],
+    )
     width_back_to_back = _round_number(float(max_x) - float(min_x))
     height_back_to_back = _round_number(float(max_z) - float(min_z))
     return {

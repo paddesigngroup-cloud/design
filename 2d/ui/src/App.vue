@@ -3607,11 +3607,11 @@ function buildDoorLibraryControllerOverlayForInstance(instance) {
   const controllerType = normalizeDoorPartGroupControllerType(group?.controller_type || instance?.controller_type);
   const snapshotValues = getDoorLibraryControllerValuesFromSnapshot(instance?.controller_box_snapshot || {});
   const values = {
-    ...getDoorLibraryControllerValuesForInstance(instance, group),
     ...snapshotValues,
+    ...getDoorLibraryControllerValuesForInstance(instance, group),
   };
   const snapshotRect = normalizeDoorControllerSnapshotRect(instance?.controller_box_snapshot || {});
-  const rect = snapshotRect || buildDoorLibraryControllerRectFromFrameValues(doorLibraryControllerFrameRect.value, values);
+  const rect = buildDoorLibraryControllerRectFromFrameValues(doorLibraryControllerFrameRect.value, values) || snapshotRect;
   if (!group || !controllerType || !rect) return null;
   return {
     id: String(instance?.id || "").trim(),
@@ -8221,6 +8221,50 @@ async function persistOrderDesignRecord(item, nextAttrValues = null) {
   return normalizeOrderDesignRecord(await res.json());
 }
 
+function hasOrderDesignDependentInstances(item) {
+  const normalized = normalizeOrderDesignRecord(item);
+  if (!normalized?.id) return false;
+  const hasDoors = Array.isArray(normalized.door_instances) && normalized.door_instances.length > 0;
+  const hasInteriors = Array.isArray(normalized.interior_instances) && normalized.interior_instances.length > 0;
+  return hasDoors || hasInteriors;
+}
+
+const pendingOrderDesignGeometryRefreshes = new Map();
+
+function queueOrderDesignGeometryRefresh(item, { placement = null, persistDrawing = false, debounceMs = 90 } = {}) {
+  const normalized = normalizeOrderDesignRecord(item);
+  if (!normalized?.id || !hasOrderDesignDependentInstances(normalized) || typeof window === "undefined") return false;
+  const key = String(normalized.id);
+  const previous = pendingOrderDesignGeometryRefreshes.get(key);
+  if (previous?.timerId) {
+    window.clearTimeout(previous.timerId);
+  }
+  const job = {
+    placement: placement || previous?.placement || null,
+    persistDrawing: !!persistDrawing || !!previous?.persistDrawing,
+    timerId: window.setTimeout(async () => {
+      const activeJob = pendingOrderDesignGeometryRefreshes.get(key);
+      if (activeJob !== job) return;
+      pendingOrderDesignGeometryRefreshes.delete(key);
+      try {
+        const fresh = await refreshOrderDesignGeometryFromServer(key, {
+          updateStage: String(activeCabinetDesignId.value || "") === key,
+        });
+        if (fresh && activeJob?.placement && String(activeCabinetDesignId.value || "") === String(fresh.id)) {
+          restoreActiveOrderDesignToEditor(fresh, activeJob.placement);
+        }
+        if (fresh && activeJob?.persistDrawing && String(activeCabinetDesignId.value || "") === String(fresh.id)) {
+          saveActiveOrderDrawing().catch(() => {});
+        }
+      } catch (error) {
+        console.error("order-design-geometry-refresh-failed", error);
+      }
+    }, Math.max(0, Number(debounceMs) || 0)),
+  };
+  pendingOrderDesignGeometryRefreshes.set(key, job);
+  return true;
+}
+
 async function updateActiveOrderDesignAttr({ key, value }) {
   const attrKey = String(key || "").trim();
   const normalizedValue = value == null ? "" : String(value);
@@ -8273,17 +8317,26 @@ async function updateActiveOrderDesignAttr({ key, value }) {
         : String(changedTargets[0]?.design_title || changedTargets[0]?.instance_code || "").trim();
   }
   try {
+    let shouldSaveDrawingImmediately = true;
     for (const item of changedTargets) {
       const fresh = await persistOrderDesignRecord(item, nextValuesById.get(String(item.id)) || {});
       if (fresh) {
+        const queued = queueOrderDesignGeometryRefresh(fresh, {
+          placement: placementById.get(String(fresh.id)) || null,
+          persistDrawing: String(activeCabinetDesignId.value || "") === String(fresh.id),
+        });
+        shouldSaveDrawingImmediately = shouldSaveDrawingImmediately && !queued;
         upsertOrderDesignCatalogItem(fresh);
-        if (String(activeCabinetDesignId.value || "") === String(fresh.id)) {
-          stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
-          restoreActiveOrderDesignToEditor(fresh, placementById.get(String(fresh.id)) || null);
+        const nextActive = fresh;
+        if (String(activeCabinetDesignId.value || "") === String(nextActive.id)) {
+          stageCabinetPlaceholderBoxes.value = (nextActive.viewer_boxes || []).map(normalizeCabinetBox);
+          restoreActiveOrderDesignToEditor(nextActive, placementById.get(String(nextActive.id)) || null);
         }
       }
     }
-    await saveActiveOrderDrawing();
+    if (shouldSaveDrawingImmediately) {
+      await saveActiveOrderDrawing();
+    }
   } catch (error) {
     showAlert(error?.message || "ذخیره صفات طرح سفارش انجام نشد.", { title: "خطا" });
     await loadOrderDesignCatalog(true);
@@ -8316,11 +8369,18 @@ async function saveOrderDesignEditor() {
       ...draft,
     }, nextAttrValues);
     if (fresh) {
-      upsertOrderDesignCatalogItem(fresh);
-      if (String(activeCabinetDesignId.value || "") === String(fresh.id)) {
-        stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
-        restoreActiveOrderDesignToEditor(fresh, activePlacement);
-        await saveActiveOrderDrawing();
+      const queued = queueOrderDesignGeometryRefresh(fresh, {
+        placement: activePlacement,
+        persistDrawing: String(activeCabinetDesignId.value || "") === String(fresh.id),
+      });
+      const nextActive = fresh;
+      upsertOrderDesignCatalogItem(nextActive);
+      if (String(activeCabinetDesignId.value || "") === String(nextActive.id)) {
+        stageCabinetPlaceholderBoxes.value = (nextActive.viewer_boxes || []).map(normalizeCabinetBox);
+        restoreActiveOrderDesignToEditor(nextActive, activePlacement);
+        if (!queued) {
+          await saveActiveOrderDrawing();
+        }
       }
     } else {
       await loadOrderDesignCatalog(true);
@@ -16432,7 +16492,6 @@ async function openDoorLibrary(targetOrderDesignId = "") {
     showAlert("ابتدا یک طرح ثبت‌شده را انتخاب کنید.", { title: "قطعات درب" });
     return;
   }
-  doorLibraryOpen.value = true;
   doorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
   clearDoorLibraryPlacedInstanceSelection();
   resetDoorLibraryPreviewView();
@@ -16451,6 +16510,7 @@ async function openDoorLibrary(targetOrderDesignId = "") {
   if (subCategoryDesignEditorOpen.value && !subCategoryDesignPreviewLoading.value) {
     await refreshSubCategoryDesignPreview();
   }
+  doorLibraryOpen.value = true;
   doorLibraryPreviewMode.value = "front2d";
   resetDoorLibraryAnnotations();
   scheduleSubRailPosition();
