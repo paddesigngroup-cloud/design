@@ -1720,41 +1720,72 @@ def _collect_controller_selection_boxes(
         direct_box = item.get("box")
         if part_formula_id <= 0:
             continue
-        if isinstance(direct_box, dict):
-            selected_boxes.append(
-                {
-                    "part_formula_id": part_formula_id,
-                    "part_code": part_code,
-                    "box": dict(direct_box),
-                    "order": index,
-                }
-            )
-            continue
         if source_type in {"internal", "interior"}:
             rows = list(getattr(interior_by_id.get(source_id), "part_snapshots", []) or [])
         else:
             rows = list(root_part_snapshots or [])
+        def _row_part_formula_id(candidate: object) -> int:
+            if isinstance(candidate, dict):
+                return int(candidate.get("part_formula_id") or 0)
+            return int(getattr(candidate, "part_formula_id", 0) or 0)
+
+        def _row_part_code(candidate: object) -> str:
+            if isinstance(candidate, dict):
+                return str(candidate.get("part_code") or "").strip()
+            return str(getattr(candidate, "part_code", "") or "").strip()
+
+        def _row_box(candidate: object) -> dict[str, object] | None:
+            if isinstance(candidate, dict):
+                viewer_payload = dict(candidate.get("viewer_payload") or {})
+            else:
+                viewer_payload = dict(getattr(candidate, "viewer_payload", {}) or {})
+            box = viewer_payload.get("box")
+            return dict(box) if isinstance(box, dict) else None
+
+        def _box_match_score(candidate_box: dict[str, object] | None, reference_box: dict[str, object] | None) -> float:
+            if not isinstance(candidate_box, dict) or not isinstance(reference_box, dict):
+                return float("inf")
+            candidate_extents = _box_front_extents(candidate_box)
+            reference_extents = _box_front_extents(reference_box)
+            return (
+                abs(float(candidate_extents["cx"]) - float(reference_extents["cx"]))
+                + abs(float(candidate_extents["cz"]) - float(reference_extents["cz"]))
+                + abs(float(candidate_extents["width"]) - float(reference_extents["width"]))
+                + abs(float(candidate_extents["height"]) - float(reference_extents["height"]))
+            )
+
+        candidates = [
+            candidate
+            for candidate in rows
+            if _row_part_formula_id(candidate) == part_formula_id
+            and (not part_code or _row_part_code(candidate) == part_code)
+        ]
         row = None
         if source_snapshot_index >= 0 and source_snapshot_index < len(rows):
-            row = rows[source_snapshot_index]
+            indexed = rows[source_snapshot_index]
+            if _row_part_formula_id(indexed) == part_formula_id and (not part_code or _row_part_code(indexed) == part_code):
+                row = indexed
+        if row is None and candidates:
+            if isinstance(direct_box, dict):
+                row = min(
+                    candidates,
+                    key=lambda candidate: (
+                        _box_match_score(_row_box(candidate), dict(direct_box)),
+                        abs(rows.index(candidate) - source_snapshot_index) if source_snapshot_index >= 0 else rows.index(candidate),
+                    ),
+                )
+            else:
+                row = candidates[0]
         if row is None:
-            row = next(
-                (
-                    candidate
-                    for candidate in rows
-                    if int(
-                        (candidate.get("part_formula_id") if isinstance(candidate, dict) else getattr(candidate, "part_formula_id", 0))
-                        or 0
-                    )
-                    == part_formula_id
-                    and (
-                        not part_code
-                        or str((candidate.get("part_code") if isinstance(candidate, dict) else getattr(candidate, "part_code", "")) or "").strip() == part_code
-                    )
-                ),
-                None,
-            )
-        if row is None:
+            if isinstance(direct_box, dict):
+                selected_boxes.append(
+                    {
+                        "part_formula_id": part_formula_id,
+                        "part_code": part_code,
+                        "box": dict(direct_box),
+                        "order": index,
+                    }
+                )
             continue
         row_part_formula_id = int(
             (row.get("part_formula_id") if isinstance(row, dict) else getattr(getattr(row, "part_formula", None), "part_formula_id", None))
