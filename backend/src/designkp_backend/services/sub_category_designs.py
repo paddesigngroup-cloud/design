@@ -1491,6 +1491,7 @@ def _compute_door_controller_box_snapshot_from_selected_boxes(
     structural_part_formula_ids: list[int],
     selected_boxes: list[dict[str, object]],
     source_boxes_by_formula_id: dict[int, dict[str, object]] | None,
+    controller_box_snapshot: dict[str, object] | None = None,
 ) -> tuple[dict[str, object], dict[str, float]]:
     normalized_ids = [int(item) for item in structural_part_formula_ids if int(item) > 0]
     unique_ids: list[int] = []
@@ -1522,21 +1523,27 @@ def _compute_door_controller_box_snapshot_from_selected_boxes(
     horizontal = [item for item in selected if item["axis"] == "horizontal"]
     if len(vertical) != 2 or len(horizontal) != 2:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Door instance structural parts must resolve to exactly 2 vertical and 2 horizontal members.")
-    vertical.sort(key=lambda item: (float(item["extents"]["min_x"]), int(item["order"])))
-    horizontal.sort(key=lambda item: (-float(item["extents"]["max_z"]), int(item["order"])))
+    vertical.sort(key=lambda item: (float(item["extents"]["min_x"]), float(item["extents"]["max_x"]), int(item["order"])))
+    horizontal.sort(key=lambda item: (-float(item["extents"]["max_z"]), -float(item["extents"]["min_z"]), int(item["order"])))
     left, right = vertical
     top, bottom = horizontal
-    all_extents = [
-        _box_front_extents(box)
-        for box in dict(source_boxes_by_formula_id or {}).values()
-        if isinstance(box, dict)
-    ]
-    if not all_extents:
-        all_extents = [item["extents"] for item in selected]
-    frame_min_x = min(float(item["min_x"]) for item in all_extents)
-    frame_max_x = max(float(item["max_x"]) for item in all_extents)
-    frame_min_z = min(float(item["min_z"]) for item in all_extents)
-    frame_max_z = max(float(item["max_z"]) for item in all_extents)
+    snapshot = dict(controller_box_snapshot or {})
+    frame_min_x = snapshot.get("frame_min_x")
+    frame_max_x = snapshot.get("frame_max_x")
+    frame_min_z = snapshot.get("frame_min_z")
+    frame_max_z = snapshot.get("frame_max_z")
+    if not all(isinstance(value, (int, float)) for value in (frame_min_x, frame_max_x, frame_min_z, frame_max_z)):
+        all_extents = [
+            _box_front_extents(box)
+            for box in dict(source_boxes_by_formula_id or {}).values()
+            if isinstance(box, dict)
+        ]
+        if not all_extents:
+            all_extents = [item["extents"] for item in selected]
+        frame_min_x = min(float(item["min_x"]) for item in all_extents)
+        frame_max_x = max(float(item["max_x"]) for item in all_extents)
+        frame_min_z = min(float(item["min_z"]) for item in all_extents)
+        frame_max_z = max(float(item["max_z"]) for item in all_extents)
     min_x = float(left["extents"]["min_x"])
     max_x = float(right["extents"]["max_x"])
     min_z = float(bottom["extents"]["min_z"])
@@ -1548,6 +1555,10 @@ def _compute_door_controller_box_snapshot_from_selected_boxes(
         "max_x": _round_number(max_x),
         "min_z": _round_number(min_z),
         "max_z": _round_number(max_z),
+        "frame_min_x": _round_number(float(frame_min_x)),
+        "frame_max_x": _round_number(float(frame_max_x)),
+        "frame_min_z": _round_number(float(frame_min_z)),
+        "frame_max_z": _round_number(float(frame_max_z)),
         "width": _round_number(max_x - min_x),
         "height": _round_number(max_z - min_z),
         "cx": _round_number((min_x + max_x) * 0.5),
@@ -1579,21 +1590,26 @@ def _compute_door_controller_params_from_snapshot(
     max_z = snapshot.get("max_z")
     if not all(isinstance(value, (int, float)) for value in (min_x, max_x, min_z, max_z)):
         return {}
-    all_extents = [
-        _box_front_extents(box)
-        for box in dict(source_boxes_by_formula_id or {}).values()
-        if isinstance(box, dict)
-    ]
-    if not all_extents:
-        frame_min_x = float(min_x)
-        frame_max_x = float(max_x)
-        frame_min_z = float(min_z)
-        frame_max_z = float(max_z)
-    else:
-        frame_min_x = min(float(item["min_x"]) for item in all_extents)
-        frame_max_x = max(float(item["max_x"]) for item in all_extents)
-        frame_min_z = min(float(item["min_z"]) for item in all_extents)
-        frame_max_z = max(float(item["max_z"]) for item in all_extents)
+    frame_min_x = snapshot.get("frame_min_x")
+    frame_max_x = snapshot.get("frame_max_x")
+    frame_min_z = snapshot.get("frame_min_z")
+    frame_max_z = snapshot.get("frame_max_z")
+    if not all(isinstance(value, (int, float)) for value in (frame_min_x, frame_max_x, frame_min_z, frame_max_z)):
+        all_extents = [
+            _box_front_extents(box)
+            for box in dict(source_boxes_by_formula_id or {}).values()
+            if isinstance(box, dict)
+        ]
+        if not all_extents:
+            frame_min_x = float(min_x)
+            frame_max_x = float(max_x)
+            frame_min_z = float(min_z)
+            frame_max_z = float(max_z)
+        else:
+            frame_min_x = min(float(item["min_x"]) for item in all_extents)
+            frame_max_x = max(float(item["max_x"]) for item in all_extents)
+            frame_min_z = min(float(item["min_z"]) for item in all_extents)
+            frame_max_z = max(float(item["max_z"]) for item in all_extents)
     width_back_to_back = _round_number(float(max_x) - float(min_x))
     height_back_to_back = _round_number(float(max_z) - float(min_z))
     return {
@@ -1699,8 +1715,20 @@ def _collect_controller_selection_boxes(
         source_type = str(item.get("source_type") or "").strip() or "structural"
         source_id = str(item.get("source_id") or "").strip()
         part_formula_id = int(item.get("part_formula_id") or 0)
+        part_code = str(item.get("part_code") or "").strip()
         source_snapshot_index = int(item.get("source_snapshot_index") or -1)
+        direct_box = item.get("box")
         if part_formula_id <= 0:
+            continue
+        if isinstance(direct_box, dict):
+            selected_boxes.append(
+                {
+                    "part_formula_id": part_formula_id,
+                    "part_code": part_code,
+                    "box": dict(direct_box),
+                    "order": index,
+                }
+            )
             continue
         if source_type in {"internal", "interior"}:
             rows = list(getattr(interior_by_id.get(source_id), "part_snapshots", []) or [])
@@ -1710,7 +1738,22 @@ def _collect_controller_selection_boxes(
         if source_snapshot_index >= 0 and source_snapshot_index < len(rows):
             row = rows[source_snapshot_index]
         if row is None:
-            row = next((candidate for candidate in rows if int((candidate.get("part_formula_id") if isinstance(candidate, dict) else getattr(candidate, "part_formula_id", 0)) or 0) == part_formula_id), None)
+            row = next(
+                (
+                    candidate
+                    for candidate in rows
+                    if int(
+                        (candidate.get("part_formula_id") if isinstance(candidate, dict) else getattr(candidate, "part_formula_id", 0))
+                        or 0
+                    )
+                    == part_formula_id
+                    and (
+                        not part_code
+                        or str((candidate.get("part_code") if isinstance(candidate, dict) else getattr(candidate, "part_code", "")) or "").strip() == part_code
+                    )
+                ),
+                None,
+            )
         if row is None:
             continue
         row_part_formula_id = int(
@@ -1729,6 +1772,7 @@ def _collect_controller_selection_boxes(
             selected_boxes.append(
                 {
                     "part_formula_id": part_formula_id,
+                    "part_code": part_code,
                     "box": dict(box),
                     "order": index,
                 }
@@ -1815,6 +1859,7 @@ async def resolve_door_instance_preview(
                     structural_part_formula_ids=structural_part_formula_ids,
                     selected_boxes=normalized_selected_boxes,
                     source_boxes_by_formula_id=normalized_source_boxes,
+                    controller_box_snapshot=dict(controller_box_snapshot or {}),
                 )
             elif normalized_source_boxes:
                 # When source boxes are available (e.g., after moving a dependent part),

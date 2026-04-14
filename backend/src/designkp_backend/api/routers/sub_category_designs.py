@@ -1391,7 +1391,7 @@ async def create_sub_category_design_door_instance(
     design = await _load_design(session, design_uuid)
     group = await require_accessible_door_part_group(session, admin_id=design.admin_id, group_id=payload.door_part_group_id)
     structural_part_formula_ids = [int(row) for row in list(payload.structural_part_formula_ids or []) if int(row) > 0]
-    if str(getattr(group, "controller_type", "") or "").strip() == "double_equal_hinged_doors" and len(set(structural_part_formula_ids)) != 4:
+    if str(getattr(group, "controller_type", "") or "").strip() == "double_equal_hinged_doors" and len(structural_part_formula_ids) != 4:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Double-equal hinged door controller requires exactly 4 structural parts.")
     next_code, next_order, controller_box_snapshot, param_values, param_meta = await _next_door_instance_state(
         session,

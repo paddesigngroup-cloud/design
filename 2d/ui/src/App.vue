@@ -3324,7 +3324,9 @@ function computeDoorLibraryControllerPreviewGeometry(parts, frameBounds = null) 
   }
   const vertical = uniqueParts.filter((item) => item.extents.height >= item.extents.width);
   const horizontal = uniqueParts.filter((item) => item.extents.width > item.extents.height);
-  const eligible = uniqueParts.length === 4 && vertical.length === 2 && horizontal.length === 2;
+  const eligible = uniqueParts.length === 4
+    && vertical.length === 2
+    && horizontal.length === 2;
   if (!eligible) {
     return {
       selected: uniqueParts,
@@ -3384,16 +3386,23 @@ function computeDoorLibraryControllerPreviewGeometry(parts, frameBounds = null) 
       max_x: maxX,
       min_z: minZ,
       max_z: maxZ,
+      frame_min_x: resolvedFrameMinX,
+      frame_max_x: resolvedFrameMaxX,
+      frame_min_z: resolvedFrameMinZ,
+      frame_max_z: resolvedFrameMaxZ,
       width: widthBackToBack,
       height: heightBackToBack,
       cx: (minX + maxX) * 0.5,
       cz: (minZ + maxZ) * 0.5,
       structural_part_formula_ids: uniqueParts.map((item) => item.partFormulaId),
       selected_parts: uniqueParts.map((item) => ({
+        selection_id: String(item?.selectionId || "").trim(),
         source_type: String(item?.sourceType || "").trim() || "structural",
         source_id: String(item?.sourceId || "").trim(),
         part_formula_id: Number(item?.partFormulaId) || 0,
+        part_code: String(item?.partCode || "").trim(),
         source_snapshot_index: Number(item?.sourceSnapshotIndex) || 0,
+        box: item?.box && typeof item.box === "object" ? { ...(item.box || {}) } : null,
       })),
     },
     preview_param_values: {
@@ -3420,6 +3429,29 @@ function normalizeDoorControllerSnapshotRect(snapshot) {
     y: -maxZ,
     w: width,
     h: height,
+  };
+}
+function getDoorLibraryControllerValuesFromSnapshot(snapshot) {
+  const minX = Number(snapshot?.min_x);
+  const maxX = Number(snapshot?.max_x);
+  const minZ = Number(snapshot?.min_z);
+  const maxZ = Number(snapshot?.max_z);
+  if (![minX, maxX, minZ, maxZ].every(Number.isFinite)) return {};
+  const frameMinX = Number(snapshot?.frame_min_x);
+  const frameMaxX = Number(snapshot?.frame_max_x);
+  const frameMinZ = Number(snapshot?.frame_min_z);
+  const frameMaxZ = Number(snapshot?.frame_max_z);
+  const resolvedFrameMinX = Number.isFinite(frameMinX) ? frameMinX : minX;
+  const resolvedFrameMaxX = Number.isFinite(frameMaxX) ? frameMaxX : maxX;
+  const resolvedFrameMinZ = Number.isFinite(frameMinZ) ? frameMinZ : minZ;
+  const resolvedFrameMaxZ = Number.isFinite(frameMaxZ) ? frameMaxZ : maxZ;
+  return {
+    door_width: Math.max(0, maxX - minX),
+    door_height: Math.max(0, maxZ - minZ),
+    left: Math.max(0, minX - resolvedFrameMinX),
+    right: Math.max(0, resolvedFrameMaxX - maxX),
+    top: Math.max(0, resolvedFrameMaxZ - maxZ),
+    bottom_offset: Math.max(0, minZ - resolvedFrameMinZ),
   };
 }
 function buildDoorLibraryControllerRectFromFrameValues(frame, values) {
@@ -3573,9 +3605,13 @@ function getDoorLibraryControllerValuesForInstance(instance, group) {
 function buildDoorLibraryControllerOverlayForInstance(instance) {
   const group = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
   const controllerType = normalizeDoorPartGroupControllerType(group?.controller_type || instance?.controller_type);
-  const values = getDoorLibraryControllerValuesForInstance(instance, group);
-  const rect = buildDoorLibraryControllerRectFromFrameValues(doorLibraryControllerFrameRect.value, values)
-    || normalizeDoorControllerSnapshotRect(instance?.controller_box_snapshot || {});
+  const snapshotValues = getDoorLibraryControllerValuesFromSnapshot(instance?.controller_box_snapshot || {});
+  const values = {
+    ...getDoorLibraryControllerValuesForInstance(instance, group),
+    ...snapshotValues,
+  };
+  const snapshotRect = normalizeDoorControllerSnapshotRect(instance?.controller_box_snapshot || {});
+  const rect = snapshotRect || buildDoorLibraryControllerRectFromFrameValues(doorLibraryControllerFrameRect.value, values);
   if (!group || !controllerType || !rect) return null;
   return {
     id: String(instance?.id || "").trim(),

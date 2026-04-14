@@ -1421,7 +1421,7 @@ async def update_order_design_door_instance(
         admin_id=order.admin_id,
         group_id=target.door_part_group_id,
     )
-    if str(getattr(door_group, "controller_type", "") or "").strip() == "double_equal_hinged_doors" and len(set(target.structural_part_formula_ids)) != 4:
+    if str(getattr(door_group, "controller_type", "") or "").strip() == "double_equal_hinged_doors" and len(target.structural_part_formula_ids) != 4:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Double-equal hinged door controller requires exactly 4 structural parts.")
     await refresh_order_design_door_instance(
         session,
@@ -1462,7 +1462,7 @@ async def create_order_design_door_instance(
         design_id=item.sub_category_design_id,
     )
     structural_part_formula_ids = [int(row) for row in list(payload.structural_part_formula_ids or []) if int(row) > 0]
-    if str(getattr(group, "controller_type", "") or "").strip() == "double_equal_hinged_doors" and len(set(structural_part_formula_ids)) != 4:
+    if str(getattr(group, "controller_type", "") or "").strip() == "double_equal_hinged_doors" and len(structural_part_formula_ids) != 4:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Double-equal hinged door controller requires exactly 4 structural parts.")
     existing_instances = list(getattr(item, "door_instances", []) or [])
     next_order = payload.ui_order if payload.ui_order is not None else (max([int(row.ui_order or 0) for row in existing_instances], default=-1) + 1)
@@ -1555,7 +1555,7 @@ async def duplicate_order_design_door_instance(
         viewer_boxes=[],
         status=str(source.status or "draft").strip() or "draft",
     )
-    if str(getattr(group, "controller_type", "") or "").strip() == "double_equal_hinged_doors" and len(set(target.structural_part_formula_ids)) != 4:
+    if str(getattr(group, "controller_type", "") or "").strip() == "double_equal_hinged_doors" and len(target.structural_part_formula_ids) != 4:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Double-equal hinged door controller requires exactly 4 structural parts.")
     session.add(target)
     await session.flush()
