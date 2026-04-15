@@ -899,9 +899,11 @@ async def _load_internal_group_display_snapshots(
                 Param.param_id,
                 Param.ui_order,
                 ParamGroup,
+                InternalPartGroup.icon_path,
             )
             .join(Param, Param.param_id == InternalPartGroupParamDefault.param_id)
             .join(ParamGroup, ParamGroup.param_group_id == Param.param_group_id)
+            .join(InternalPartGroup, InternalPartGroup.id == InternalPartGroupParamDefault.internal_part_group_id)
             .where(InternalPartGroupParamDefault.internal_part_group_id.in_(list(group_ids)))
             .order_by(
                 InternalPartGroupParamDefault.internal_part_group_id.asc(),
@@ -913,10 +915,15 @@ async def _load_internal_group_display_snapshots(
     ).all()
     values_by_group: dict[uuid.UUID, dict[str, str | None]] = {}
     meta_by_group: dict[uuid.UUID, dict[str, dict[str, object]]] = {}
-    for group_id, default_row, param_code, param_title_fa, param_id, param_ui_order, group in rows:
+    for group_id, default_row, param_code, param_title_fa, param_id, param_ui_order, group, internal_group_icon_path in rows:
         code = str(param_code or "").strip()
         if not code:
             continue
+        resolved_group_icon_path = (
+            str(internal_group_icon_path or "").strip()
+            or str(group.param_group_icon_path or "").strip()
+            or None
+        )
         values_by_group.setdefault(group_id, {})[code] = default_row.default_value
         meta_by_group.setdefault(group_id, {})[code] = {
             "label": str(default_row.display_title or param_title_fa or code).strip() or code,
@@ -929,7 +936,7 @@ async def _load_internal_group_display_snapshots(
             "binary_on_icon_path": str(default_row.binary_on_icon_path or "").strip() or None,
             "group_id": int(group.param_group_id or 0),
             "group_title": str(group.org_param_group_title or group.title or group.param_group_code or "").strip() or None,
-            "group_icon_path": str(group.param_group_icon_path or "").strip() or None,
+            "group_icon_path": resolved_group_icon_path,
             "group_ui_order": int(group.ui_order or 0),
             "group_show_in_order_attrs": bool(group.show_in_order_attrs),
             "param_id": int(param_id or 0),

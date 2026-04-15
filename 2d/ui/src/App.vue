@@ -2752,11 +2752,17 @@ function isAddingDoorGroup(group) {
   return String(doorLibraryAddingGroupKey.value || "") === getDoorLibraryAddingGroupKey(group);
 }
 const paramGroupIconInputEl = ref(null);
+const internalPartGroupIconInputEl = ref(null);
+const doorPartGroupIconInputEl = ref(null);
 const constructionImportPreviewRows = ref([]);
 const constructionImportFileName = ref("");
 const constructionImportPreviewKind = ref(null);
 const activeParamGroupIconRowId = ref(null);
+const activeInternalPartGroupIconRowId = ref(null);
+const activeDoorPartGroupIconRowId = ref(null);
 const constructionUploadingIconRowId = ref(null);
+const constructionUploadingInternalPartGroupIconRowId = ref(null);
+const constructionUploadingDoorPartGroupIconRowId = ref(null);
 const constructionTables = [
   { id: "templates", title: "تمپلیت‌ها", status: "active" },
   { id: "categories", title: "دسته‌بندی‌ها", status: "active" },
@@ -3629,11 +3635,16 @@ const doorLibraryGroupCards = computed(() =>
       if (!filter) return true;
       return (group.parts || []).some((part) => String(part.part_kind_id) === filter);
     })
-    .map((group) => ({
-      ...group,
-      lineColor: normalizeHexColor(group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
-      partsCount: Array.isArray(group.parts) ? group.parts.length : 0,
-    }))
+    .map((group) => {
+      const iconPath = normalizeIconFileName(group.icon_path || group.param_group_icon_path) || "";
+      return {
+        ...group,
+        iconPath,
+        iconUrl: iconPath ? getAdminStorageIconUrl(iconPath) : "",
+        lineColor: normalizeHexColor(group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+        partsCount: Array.isArray(group.parts) ? group.parts.length : 0,
+      };
+    })
 );
 const activeInteriorLibrarySourceDesign = computed(() => {
   if (subCategoryDesignEditorOpen.value) return null;
@@ -5382,17 +5393,21 @@ function buildInteriorInstanceGroups(instance) {
       binary_on_icon_path: groupOverride.binary_on_icon_path || subCategoryOverride.binary_on_icon_path || "",
       input_mode: groupOverride.input_mode === "binary" || subCategoryOverride.input_mode === "binary" ? "binary" : "value",
     };
-    const groupIconFileName = normalizeIconFileName(meta?.group_icon_path) || sourceGroup?.iconFileName || "";
+    const groupIconFileName = normalizeIconFileName(meta?.group_icon_path || sourceInternalGroup?.icon_path) || sourceGroup?.iconFileName || "";
     if (!groupsById.has(groupId)) {
       groupsById.set(groupId, {
         id: groupId,
         title: String(meta?.group_title || sourceGroup?.title || "بدون گروه").trim(),
+        iconPath: groupIconFileName,
         iconUrl: groupIconFileName ? getSubCategoryDefaultIconUrl(groupIconFileName) : "",
         order: Number(meta?.group_ui_order) || 0,
         items: [],
       });
     }
     const groupEntry = groupsById.get(groupId);
+    if (groupEntry && !groupEntry.iconPath && groupIconFileName) {
+      groupEntry.iconPath = groupIconFileName;
+    }
     if (groupEntry && !groupEntry.iconUrl && groupIconFileName) {
       groupEntry.iconUrl = getSubCategoryDefaultIconUrl(groupIconFileName);
     }
@@ -5481,17 +5496,21 @@ function buildDoorInstanceGroups(instance) {
       binary_on_icon_path: subCategoryOverride.binary_on_icon_path || "",
       input_mode: subCategoryOverride.input_mode === "binary" ? "binary" : "value",
     };
-    const groupIconFileName = normalizeIconFileName(meta?.group_icon_path) || sourceGroup?.iconFileName || "";
+    const groupIconFileName = normalizeIconFileName(meta?.group_icon_path || sourceDoorGroup?.icon_path) || sourceGroup?.iconFileName || "";
     if (!groupsById.has(groupId)) {
       groupsById.set(groupId, {
         id: groupId,
         title: String(meta?.group_title || sourceGroup?.title || "بدون گروه").trim(),
+        iconPath: groupIconFileName,
         iconUrl: groupIconFileName ? getSubCategoryDefaultIconUrl(groupIconFileName) : "",
         order: Number(meta?.group_ui_order) || 0,
         items: [],
       });
     }
     const groupEntry = groupsById.get(groupId);
+    if (groupEntry && !groupEntry.iconPath && groupIconFileName) {
+      groupEntry.iconPath = groupIconFileName;
+    }
     if (groupEntry && !groupEntry.iconUrl && groupIconFileName) {
       groupEntry.iconUrl = getSubCategoryDefaultIconUrl(groupIconFileName);
     }
@@ -6010,8 +6029,11 @@ const interiorLibraryGroupCards = computed(() => {
     .filter((group) => matchesInteriorLibraryPartKindFilter(group))
     .map((group) => {
       const groupTree = buildInternalGroupDefaultsTree(group);
+      const iconPath = normalizeIconFileName(group.icon_path || group.param_group_icon_path) || "";
       return {
         ...group,
+        iconPath,
+        iconUrl: iconPath ? getAdminStorageIconUrl(iconPath) : "",
         lineColor: normalizeHexColor(group.line_color, DEFAULT_INTERIOR_LINE_COLOR),
         groupTree,
         relatedGroups: groupTree.map((row) => ({ id: String(row.id), title: row.title, count: row.items.length })),
@@ -6026,10 +6048,13 @@ const interiorLibraryInstanceCards = computed(() =>
     .map((instance) => {
       const group = constructionInternalPartGroupsById.value.get(String(instance.internal_part_group_id));
       const groups = buildInteriorInstanceGroups(instance);
+      const iconPath = normalizeIconFileName(groups[0]?.iconPath || group?.icon_path || group?.param_group_icon_path) || "";
       return {
         ...instance,
         groupTitle: String(group?.group_title || group?.title || instance.instance_code || "گروه داخلی").trim(),
         groupCode: String(group?.code || "").trim(),
+        iconPath,
+        iconUrl: iconPath ? getAdminStorageIconUrl(iconPath) : "",
         lineColor: resolveInteriorInstanceLineColor(instance),
         groups,
       };
@@ -6045,12 +6070,17 @@ const doorLibraryInstanceCards = computed(() =>
     .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
     .map((instance, instanceIndex) => {
       const group = constructionDoorPartGroupsById.value.get(String(instance.door_part_group_id));
+      const groups = buildDoorInstanceGroups(instance);
+      const iconPath = normalizeIconFileName(groups[0]?.iconPath || group?.icon_path || group?.param_group_icon_path) || "";
       return {
         ...instance,
         groupTitle: String(group?.group_title || group?.title || instance.instance_code || "گروه درب").trim(),
         groupCode: String(group?.code || "").trim(),
+        iconPath,
+        iconUrl: iconPath ? getAdminStorageIconUrl(iconPath) : "",
         lineColor: normalizeHexColor(instance?.line_color || group?.line_color, DEFAULT_INTERIOR_LINE_COLOR),
         orderIndex: instanceIndex + 1,
+        groups,
         partsCount: Array.isArray(instance?.part_snapshots) ? instance.part_snapshots.length : (Array.isArray(group?.parts) ? group.parts.length : 0),
       };
     })
@@ -6438,6 +6468,7 @@ function normalizeInternalPartGroupPayload(item) {
     group_id: Number(item.group_id),
     group_title: String(item.group_title || "").trim(),
     code: String(item.code || "").trim(),
+    icon_path: normalizeIconFileName(item.icon_path) || null,
     line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.group_id),
     is_system: !!item.is_system,
@@ -6505,6 +6536,7 @@ function normalizeDoorPartGroupPayload(item) {
     group_id: Number(item.group_id),
     group_title: String(item.group_title || "").trim(),
     code: String(item.code || "").trim(),
+    icon_path: normalizeIconFileName(item.icon_path) || null,
     line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.group_id),
     is_system: !!item.is_system,
@@ -6562,6 +6594,8 @@ function normalizeInteriorInstanceRecord(item) {
 function normalizeEditableDoorPartGroupRecord(item) {
   return withConstructionDraftState(ensureDoorPartGroupControllerConfig({
     ...item,
+    icon_path: normalizeIconFileName(item.icon_path || item.param_group_icon_path) || "",
+    param_group_icon_path: normalizeIconFileName(item.param_group_icon_path || item.icon_path) || "",
     line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
     parts: Array.isArray(item.parts) ? item.parts.map((part) => ({
       ...part,
@@ -6610,6 +6644,10 @@ function hasParamGroupIcon(item) {
   return !!normalizeIconFileName(item?.param_group_icon_path);
 }
 
+function hasConstructionItemIcon(item) {
+  return !!normalizeIconFileName(item?.icon_path);
+}
+
 function isStagedParamGroupIcon(value) {
   return normalizeIconFileName(value).startsWith("staged-");
 }
@@ -6620,7 +6658,19 @@ function getParamGroupIconTooltip(item) {
   return `آیکون بارگذاری شده: ${fileName}`;
 }
 
+function getConstructionItemIconTooltip(item) {
+  const fileName = normalizeIconFileName(item?.icon_path);
+  if (!fileName) return "آیکون خالی است. برای آپلود کلیک کنید.";
+  return `آیکون بارگذاری شده: ${fileName}`;
+}
+
 function getParamGroupOptionIconUrl(fileName) {
+  const normalized = normalizeIconFileName(fileName);
+  if (!normalized) return "";
+  return getAdminStorageIconUrl(normalized);
+}
+
+function getAdminStorageIconUrl(fileName) {
   const normalized = normalizeIconFileName(fileName);
   if (!normalized) return "";
   return `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/icons/${encodeURIComponent(normalized)}`;
@@ -6628,6 +6678,14 @@ function getParamGroupOptionIconUrl(fileName) {
 
 function isUploadingParamGroupIcon(item) {
   return String(constructionUploadingIconRowId.value || "") === String(item?.id || "");
+}
+
+function isUploadingInternalPartGroupIcon(item) {
+  return String(constructionUploadingInternalPartGroupIconRowId.value || "") === String(item?.id || "");
+}
+
+function isUploadingDoorPartGroupIcon(item) {
+  return String(constructionUploadingDoorPartGroupIconRowId.value || "") === String(item?.id || "");
 }
 
 function getSubCategoryDefaultIconUrl(fileName) {
@@ -7428,6 +7486,7 @@ function buildNewInternalPartGroupDraft() {
     group_id: nextId,
     group_title: `گروه داخلی ${toPersianDigits(nextId)}`,
     code: `internal_part_group_${nextId}`,
+    icon_path: "",
     line_color: DEFAULT_INTERIOR_LINE_COLOR,
     sort_order: nextId,
     is_system: true,
@@ -7448,6 +7507,7 @@ function buildNewDoorPartGroupDraft() {
     group_id: nextId,
     group_title: `گروه درب ${toPersianDigits(nextId)}`,
     code: `door_part_group_${nextId}`,
+    icon_path: "",
     line_color: DEFAULT_INTERIOR_LINE_COLOR,
     sort_order: nextId,
     is_system: true,
@@ -7979,6 +8039,8 @@ async function loadConstructionInternalPartGroups() {
       ensureInternalPartGroupControllerConfig(
         ensureInternalPartGroupParamDefaults(withConstructionDraftState({
           ...item,
+          icon_path: normalizeIconFileName(item.icon_path || item.param_group_icon_path) || "",
+          param_group_icon_path: normalizeIconFileName(item.param_group_icon_path || item.icon_path) || "",
           line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
           param_groups: Array.isArray(item.param_groups) ? item.param_groups.map((group) => ({
             ...group,
@@ -9394,6 +9456,7 @@ function openInternalPartGroupEditor(item = null) {
         group_id: item.group_id,
         group_title: item.group_title,
         code: item.code,
+        icon_path: normalizeIconFileName(item.icon_path) || "",
         line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
         sort_order: item.sort_order,
         is_system: item.is_system,
@@ -9443,6 +9506,7 @@ function openDoorPartGroupEditor(item = null) {
         group_id: item.group_id,
         group_title: item.group_title,
         code: item.code,
+        icon_path: normalizeIconFileName(item.icon_path) || "",
         line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
         sort_order: item.sort_order,
         is_system: item.is_system,
@@ -10513,6 +10577,7 @@ async function saveConstructionInternalPartGroupLineColor(item) {
       String(row.id) === saveKey
         ? ensureInternalPartGroupParamDefaults(withConstructionDraftState({
             ...saved,
+            icon_path: normalizeIconFileName(saved.icon_path) || "",
             line_color: normalizeHexColor(saved.line_color, DEFAULT_INTERIOR_LINE_COLOR),
             param_groups: Array.isArray(saved.param_groups) ? saved.param_groups.map((group) => ({
               ...group,
@@ -11007,6 +11072,7 @@ async function deleteConstructionInternalPartGroup(id) {
   });
   if (!ok) return;
   try {
+    await discardStagedParamGroupIcon(item.icon_path);
     const res = await fetch(`/api/internal-part-groups/${encodeURIComponent(String(id))}`, { method: "DELETE" });
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف گروه قطعات داخلی انجام نشد."));
     await loadConstructionInternalPartGroups();
@@ -11611,6 +11677,7 @@ async function deleteConstructionDoorPartGroup(id) {
   });
   if (!ok) return;
   try {
+    await discardStagedParamGroupIcon(item.icon_path);
     const res = await fetch(`/api/door-part-groups/${encodeURIComponent(String(id))}`, { method: "DELETE" });
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف گروه قطعات درب انجام نشد."));
     await loadConstructionDoorPartGroups();
@@ -14504,6 +14571,82 @@ async function onParamGroupIconFileChange(event) {
     constructionUploadingIconRowId.value = null;
     activeParamGroupIconRowId.value = null;
     if (paramGroupIconInputEl.value) paramGroupIconInputEl.value.value = "";
+  }
+}
+
+function triggerInternalPartGroupIconUpload(item) {
+  if (isUploadingInternalPartGroupIcon(item)) return;
+  activeInternalPartGroupIconRowId.value = String(item.id);
+  internalPartGroupIconInputEl.value?.click?.();
+}
+
+async function onInternalPartGroupIconFileChange(event) {
+  const file = event?.target?.files?.[0];
+  const rowId = activeInternalPartGroupIconRowId.value;
+  if (!file || !rowId) return;
+  const item = editableInternalPartGroups.value.find((row) => String(row.id) === rowId);
+  if (!item) return;
+  const previousIconFileName = normalizeIconFileName(item.icon_path);
+  constructionUploadingInternalPartGroupIconRowId.value = rowId;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const slugHint = encodeURIComponent(String(item.code || `internal-part-group-${item.group_id || "new"}`));
+    const res = await fetch(`/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/param-group-icons?slug_hint=${slugHint}`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) throw new Error("upload-failed");
+    const payload = await res.json();
+    if (isStagedParamGroupIcon(previousIconFileName)) {
+      await discardStagedParamGroupIcon(previousIconFileName);
+    }
+    item.icon_path = normalizeIconFileName(payload.file_name || payload.icon_path);
+    if (!item.__isNew) item.__dirty = true;
+  } catch (_) {
+    showAlert("آپلود آیکون انجام نشد. فقط فایل تصویری معتبر با اندازه استاندارد قابل قبول است.", { title: "آیکون گروه داخلی" });
+  } finally {
+    constructionUploadingInternalPartGroupIconRowId.value = null;
+    activeInternalPartGroupIconRowId.value = null;
+    if (internalPartGroupIconInputEl.value) internalPartGroupIconInputEl.value.value = "";
+  }
+}
+
+function triggerDoorPartGroupIconUpload(item) {
+  if (isUploadingDoorPartGroupIcon(item)) return;
+  activeDoorPartGroupIconRowId.value = String(item.id);
+  doorPartGroupIconInputEl.value?.click?.();
+}
+
+async function onDoorPartGroupIconFileChange(event) {
+  const file = event?.target?.files?.[0];
+  const rowId = activeDoorPartGroupIconRowId.value;
+  if (!file || !rowId) return;
+  const item = editableDoorPartGroups.value.find((row) => String(row.id) === rowId);
+  if (!item) return;
+  const previousIconFileName = normalizeIconFileName(item.icon_path);
+  constructionUploadingDoorPartGroupIconRowId.value = rowId;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const slugHint = encodeURIComponent(String(item.code || `door-part-group-${item.group_id || "new"}`));
+    const res = await fetch(`/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/param-group-icons?slug_hint=${slugHint}`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) throw new Error("upload-failed");
+    const payload = await res.json();
+    if (isStagedParamGroupIcon(previousIconFileName)) {
+      await discardStagedParamGroupIcon(previousIconFileName);
+    }
+    item.icon_path = normalizeIconFileName(payload.file_name || payload.icon_path);
+    if (!item.__isNew) item.__dirty = true;
+  } catch (_) {
+    showAlert("آپلود آیکون انجام نشد. فقط فایل تصویری معتبر با اندازه استاندارد قابل قبول است.", { title: "آیکون گروه درب" });
+  } finally {
+    constructionUploadingDoorPartGroupIconRowId.value = null;
+    activeDoorPartGroupIconRowId.value = null;
+    if (doorPartGroupIconInputEl.value) doorPartGroupIconInputEl.value.value = "";
   }
 }
 
@@ -19441,6 +19584,13 @@ onBeforeUnmount(() => {
           </template>
 
           <template v-else-if="constructionStep === 'internal_part_groups'">
+            <input
+              ref="internalPartGroupIconInputEl"
+              class="constructionDialog__fileInput"
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp"
+              @change="onInternalPartGroupIconFileChange"
+            />
             <div class="constructionDialog__toolbar">
               <div class="constructionDialog__toolbarMain">
                 <div class="constructionDialog__sectionTitle">جدول گروه قطعات داخلی</div>
@@ -19468,6 +19618,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--code">کد گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--icon">آیکون</th>
                     <th class="constructionDialog__col constructionDialog__col--outlineColor">رنگ خطوط</th>
                     <th class="constructionDialog__col constructionDialog__col--defaults">پیش‌فرض‌ها</th>
                     <th class="constructionDialog__col constructionDialog__col--defaults">کنترلر گروه</th>
@@ -19488,6 +19639,21 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.group_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--code">{{ item.code }}</td>
                     <td class="constructionDialog__col constructionDialog__col--title">{{ item.group_title }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--icon">
+                      <div class="constructionDialog__iconCell">
+                        <button
+                          type="button"
+                          class="constructionDialog__miniBtn constructionDialog__iconUploadBtn"
+                          :class="[hasConstructionItemIcon(item) ? 'is-filled' : 'is-empty', isUploadingInternalPartGroupIcon(item) ? 'is-loading' : '']"
+                          :title="isUploadingInternalPartGroupIcon(item) ? 'در حال آپلود آیکون...' : getConstructionItemIconTooltip(item)"
+                          :disabled="isUploadingInternalPartGroupIcon(item)"
+                          @click="triggerInternalPartGroupIconUpload(item)"
+                        >
+                          <span v-if="isUploadingInternalPartGroupIcon(item)" class="constructionDialog__spinner"></span>
+                          <span v-else>↑</span>
+                        </button>
+                      </div>
+                    </td>
                     <td class="constructionDialog__col constructionDialog__col--outlineColor">
                       <div class="constructionDialog__colorEditor">
                         <input
@@ -19536,7 +19702,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionInternalPartGroups.length">
-                    <td class="constructionDialog__col constructionDialog__col--title" colspan="9">هنوز گروهی برای قطعات داخلی ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="10">هنوز گروهی برای قطعات داخلی ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -19547,6 +19713,13 @@ onBeforeUnmount(() => {
           </template>
 
           <template v-else-if="constructionStep === 'door_part_groups'">
+            <input
+              ref="doorPartGroupIconInputEl"
+              class="constructionDialog__fileInput"
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp"
+              @change="onDoorPartGroupIconFileChange"
+            />
             <div class="constructionDialog__toolbar">
               <div class="constructionDialog__toolbarMain">
                 <div class="constructionDialog__sectionTitle">جدول گروه قطعات درب</div>
@@ -19574,6 +19747,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--code">کد گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--icon">آیکون</th>
                     <th class="constructionDialog__col constructionDialog__col--outlineColor">رنگ خطوط</th>
                     <th class="constructionDialog__col constructionDialog__col--defaults">پیش‌فرض‌ها</th>
                     <th class="constructionDialog__col constructionDialog__col--defaults">کنترلر گروه</th>
@@ -19594,6 +19768,21 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.group_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--code">{{ item.code }}</td>
                     <td class="constructionDialog__col constructionDialog__col--title">{{ item.group_title }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--icon">
+                      <div class="constructionDialog__iconCell">
+                        <button
+                          type="button"
+                          class="constructionDialog__miniBtn constructionDialog__iconUploadBtn"
+                          :class="[hasConstructionItemIcon(item) ? 'is-filled' : 'is-empty', isUploadingDoorPartGroupIcon(item) ? 'is-loading' : '']"
+                          :title="isUploadingDoorPartGroupIcon(item) ? 'در حال آپلود آیکون...' : getConstructionItemIconTooltip(item)"
+                          :disabled="isUploadingDoorPartGroupIcon(item)"
+                          @click="triggerDoorPartGroupIconUpload(item)"
+                        >
+                          <span v-if="isUploadingDoorPartGroupIcon(item)" class="constructionDialog__spinner"></span>
+                          <span v-else>↑</span>
+                        </button>
+                      </div>
+                    </td>
                     <td class="constructionDialog__col constructionDialog__col--outlineColor">
                       <div class="constructionDialog__colorEditor">
                         <input
@@ -19640,7 +19829,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionDoorPartGroups.length">
-                    <td class="constructionDialog__col constructionDialog__col--title" colspan="9">هنوز گروهی برای قطعات درب ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="10">هنوز گروهی برای قطعات درب ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -21386,37 +21575,52 @@ onBeforeUnmount(() => {
               @contextmenu.prevent.stop="handleInteriorLibraryInstanceCardContextMenu(item, $event)"
             >
               <div class="subCategoryDesignEditor__interiorGroupHead">
-                <span class="subCategoryDesignEditor__partMeta" dir="rtl">
-                  <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
-                  <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
-                </span>
-                <div class="subCategoryDesignEditor__interiorGroupActions">
-                  <button
-                    type="button"
-                    class="constructionDialog__iconBtn"
-                    title="حذف نمونه"
-                    @click="deleteInteriorInstanceFromDesign(item)"
-                  >
-                    ×
-                  </button>
-                  <button
-                    type="button"
-                    class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
-                    title="تنظیمات این نمونه"
-                    @click="openInteriorInstanceEditor(item)"
-                  >
-                    <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-                  </button>
-                  <label class="subCategoryDesignEditor__miniColorBtn" :style="{ '--line-color': item.lineColor }" :title="`رنگ خطوط ${item.instance_code}`">
-                    <input
-                      :value="item.lineColor"
-                      class="subCategoryDesignEditor__miniColorInput"
-                      type="color"
-                      @input="previewInteriorInstanceLineColor(item, $event.target.value)"
-                      @change="applyInteriorInstanceLineColor(item, $event.target.value)"
+                <div class="subCategoryDesignEditor__interiorGroupSummary">
+                  <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !item.iconUrl }">
+                    <img
+                      v-if="item.iconUrl"
+                      :key="item.iconUrl"
+                      :src="item.iconUrl"
+                      :alt="item.groupTitle"
+                      class="subCategoryPreview__groupIcon"
+                      @error="handleSubCategoryDefaultIconError"
                     />
-                  </label>
+                    <span v-else class="subCategoryPreview__groupFallback">•</span>
+                  </div>
+                  <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                    <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
+                    <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
+                  </span>
+                </div>
+                <div class="subCategoryDesignEditor__interiorGroupFooter">
                   <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits(itemIndex + 1) }}</span>
+                  <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--instance">
+                    <label class="subCategoryDesignEditor__miniColorBtn" :style="{ '--line-color': item.lineColor }" :title="`رنگ خطوط ${item.instance_code}`">
+                      <input
+                        :value="item.lineColor"
+                        class="subCategoryDesignEditor__miniColorInput"
+                        type="color"
+                        @input="previewInteriorInstanceLineColor(item, $event.target.value)"
+                        @change="applyInteriorInstanceLineColor(item, $event.target.value)"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
+                      title="تنظیمات این نمونه"
+                      @click="openInteriorInstanceEditor(item)"
+                    >
+                      <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                    </button>
+                    <button
+                      type="button"
+                      class="constructionDialog__iconBtn"
+                      title="حذف نمونه"
+                      @click="deleteInteriorInstanceFromDesign(item)"
+                    >
+                      ×
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -21434,11 +21638,30 @@ onBeforeUnmount(() => {
           <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
             <div v-for="item in interiorLibraryGroupCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
               <div class="subCategoryDesignEditor__interiorGroupHead">
-                <span class="subCategoryDesignEditor__partMeta" dir="rtl">
-                  <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
-                  <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
-                </span>
-                <div class="subCategoryDesignEditor__interiorGroupActions">
+                <div class="subCategoryDesignEditor__interiorGroupSummary">
+                  <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !item.iconUrl }">
+                    <img
+                      v-if="item.iconUrl"
+                      :key="item.iconUrl"
+                      :src="item.iconUrl"
+                      :alt="item.group_title"
+                      class="subCategoryPreview__groupIcon"
+                      @error="handleSubCategoryDefaultIconError"
+                    />
+                    <span v-else class="subCategoryPreview__groupFallback">•</span>
+                  </div>
+                  <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                    <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
+                    <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+                  </span>
+                </div>
+                <div class="subCategoryDesignEditor__interiorGroupFooter">
+                  <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--sidebar">
+                    <label class="subCategoryDesignEditor__miniColorBtn subCategoryDesignEditor__miniColorBtn--static" :style="{ '--line-color': item.lineColor }" :title="`رنگ پیش‌فرض خطوط ${item.group_title}`">
+                      <span class="subCategoryDesignEditor__miniColorPreview" aria-hidden="true"></span>
+                    </label>
+                    <span class="constructionDialog__pill">{{ toPersianDigits(item.parts?.length || 0) }} قطعه</span>
+                  </div>
                   <button
                     type="button"
                     class="constructionDialog__textBtn constructionDialog__textBtn--compact"
@@ -21449,10 +21672,6 @@ onBeforeUnmount(() => {
                     <span v-if="isAddingInteriorGroup(item)" class="constructionDialog__spinner"></span>
                     <span>{{ isAddingInteriorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
                   </button>
-                  <span class="constructionDialog__pill">{{ toPersianDigits(item.parts?.length || 0) }} قطعه</span>
-                  <label class="subCategoryDesignEditor__miniColorBtn subCategoryDesignEditor__miniColorBtn--static" :style="{ '--line-color': item.lineColor }" :title="`رنگ پیش‌فرض خطوط ${item.group_title}`">
-                    <span class="subCategoryDesignEditor__miniColorPreview" aria-hidden="true"></span>
-                  </label>
                 </div>
               </div>
             </div>
@@ -22903,49 +23122,64 @@ onBeforeUnmount(() => {
               @contextmenu.prevent.stop="handleDoorLibraryInstanceCardContextMenu(item, $event)"
             >
               <div class="subCategoryDesignEditor__interiorGroupHead">
-                <span class="subCategoryDesignEditor__partMeta" dir="rtl">
-                  <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
-                  <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
-                </span>
-                <div class="subCategoryDesignEditor__interiorGroupActions">
-                  <button
-                    type="button"
-                    class="constructionDialog__iconBtn"
-                    title="کپی نمونه"
-                    @click.stop
-                    @click="duplicateDoorInstanceInDesign(item)"
-                  >
-                    ⧉
-                  </button>
-                  <button
-                    type="button"
-                    class="constructionDialog__iconBtn"
-                    title="حذف نمونه"
-                    @click.stop
-                    @click="deleteDoorInstanceFromDesign(item)"
-                  >
-                    ×
-                  </button>
-                  <button
-                    type="button"
-                    class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
-                    title="تنظیمات این نمونه"
-                    @click.stop
-                    @click="openDoorInstanceEditor(item)"
-                  >
-                    <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-                  </button>
-                  <label class="subCategoryDesignEditor__miniColorBtn" :style="{ '--line-color': item.lineColor }" :title="`رنگ خطوط ${item.instance_code}`">
-                    <input
-                      :value="item.lineColor"
-                      class="subCategoryDesignEditor__miniColorInput"
-                      type="color"
-                      @click.stop
-                      @input="previewDoorInstanceLineColor(item, $event.target.value)"
-                      @change="applyDoorInstanceLineColor(item, $event.target.value)"
+                <div class="subCategoryDesignEditor__interiorGroupSummary">
+                  <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !item.iconUrl }">
+                    <img
+                      v-if="item.iconUrl"
+                      :key="item.iconUrl"
+                      :src="item.iconUrl"
+                      :alt="item.groupTitle"
+                      class="subCategoryPreview__groupIcon"
+                      @error="handleSubCategoryDefaultIconError"
                     />
-                  </label>
+                    <span v-else class="subCategoryPreview__groupFallback">•</span>
+                  </div>
+                  <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                    <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
+                    <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
+                  </span>
+                </div>
+                <div class="subCategoryDesignEditor__interiorGroupFooter">
                   <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits(item.orderIndex) }}</span>
+                  <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--instance">
+                    <label class="subCategoryDesignEditor__miniColorBtn" :style="{ '--line-color': item.lineColor }" :title="`رنگ خطوط ${item.instance_code}`">
+                      <input
+                        :value="item.lineColor"
+                        class="subCategoryDesignEditor__miniColorInput"
+                        type="color"
+                        @click.stop
+                        @input="previewDoorInstanceLineColor(item, $event.target.value)"
+                        @change="applyDoorInstanceLineColor(item, $event.target.value)"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
+                      title="تنظیمات این نمونه"
+                      @click.stop
+                      @click="openDoorInstanceEditor(item)"
+                    >
+                      <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                    </button>
+                    <button
+                      type="button"
+                      class="constructionDialog__iconBtn"
+                      title="حذف نمونه"
+                      @click.stop
+                      @click="deleteDoorInstanceFromDesign(item)"
+                    >
+                      ×
+                    </button>
+                    <button
+                      type="button"
+                      class="constructionDialog__iconBtn"
+                      title="کپی نمونه"
+                      @click.stop
+                      @click="duplicateDoorInstanceInDesign(item)"
+                    >
+                      ⧉
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -22961,11 +23195,30 @@ onBeforeUnmount(() => {
           <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
             <div v-for="item in doorLibraryGroupCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
               <div class="subCategoryDesignEditor__interiorGroupHead">
-                <span class="subCategoryDesignEditor__partMeta" dir="rtl">
-                  <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
-                  <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
-                </span>
-                <div class="subCategoryDesignEditor__interiorGroupActions">
+                <div class="subCategoryDesignEditor__interiorGroupSummary">
+                  <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !item.iconUrl }">
+                    <img
+                      v-if="item.iconUrl"
+                      :key="item.iconUrl"
+                      :src="item.iconUrl"
+                      :alt="item.group_title"
+                      class="subCategoryPreview__groupIcon"
+                      @error="handleSubCategoryDefaultIconError"
+                    />
+                    <span v-else class="subCategoryPreview__groupFallback">•</span>
+                  </div>
+                  <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                    <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
+                    <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+                  </span>
+                </div>
+                <div class="subCategoryDesignEditor__interiorGroupFooter">
+                  <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--sidebar">
+                    <label class="subCategoryDesignEditor__miniColorBtn subCategoryDesignEditor__miniColorBtn--static" :style="{ '--line-color': item.lineColor }" :title="`رنگ پیش‌فرض خطوط ${item.group_title}`">
+                      <span class="subCategoryDesignEditor__miniColorPreview" aria-hidden="true"></span>
+                    </label>
+                    <span class="constructionDialog__pill">{{ toPersianDigits(item.partsCount || 0) }} قطعه</span>
+                  </div>
                   <button
                     type="button"
                     class="constructionDialog__textBtn constructionDialog__textBtn--compact"
@@ -22976,10 +23229,6 @@ onBeforeUnmount(() => {
                     <span v-if="isAddingDoorGroup(item)" class="constructionDialog__spinner"></span>
                     <span>{{ isAddingDoorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
                   </button>
-                  <span class="constructionDialog__pill">{{ toPersianDigits(item.partsCount || 0) }} قطعه</span>
-                  <label class="subCategoryDesignEditor__miniColorBtn subCategoryDesignEditor__miniColorBtn--static" :style="{ '--line-color': item.lineColor }" :title="`رنگ پیش‌فرض خطوط ${item.group_title}`">
-                    <span class="subCategoryDesignEditor__miniColorPreview" aria-hidden="true"></span>
-                  </label>
                 </div>
               </div>
             </div>

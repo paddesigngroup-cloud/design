@@ -106,6 +106,7 @@ class DoorPartGroupItemResponse(BaseModel):
     group_title: str
     code: str
     title: str
+    icon_path: str | None = None
     line_color: str
     sort_order: int
     is_system: bool
@@ -124,6 +125,7 @@ class DoorPartGroupCreate(BaseModel):
     group_id: int | None = Field(default=None, ge=1)
     group_title: str = Field(min_length=1, max_length=255)
     code: str = Field(min_length=1, max_length=64)
+    icon_path: str | None = Field(default=None, max_length=255)
     line_color: str = Field(default=DEFAULT_DOOR_LINE_COLOR, min_length=7, max_length=7)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
@@ -140,6 +142,7 @@ class DoorPartGroupUpdate(BaseModel):
     group_id: int = Field(ge=1)
     group_title: str = Field(min_length=1, max_length=255)
     code: str = Field(min_length=1, max_length=64)
+    icon_path: str | None = Field(default=None, max_length=255)
     line_color: str = Field(default=DEFAULT_DOOR_LINE_COLOR, min_length=7, max_length=7)
     sort_order: int = Field(ge=0)
     is_system: bool
@@ -287,6 +290,7 @@ def _serialize_group(item: DoorPartGroup, *, include_param_groups: bool = True) 
         group_title=item.group_title,
         code=item.code,
         title=item.title,
+        icon_path=normalize_icon_file_name(getattr(item, "icon_path", None)),
         line_color=_normalize_hex_color(getattr(item, "line_color", DEFAULT_DOOR_LINE_COLOR), DEFAULT_DOOR_LINE_COLOR),
         sort_order=item.sort_order,
         is_system=item.is_system,
@@ -633,6 +637,7 @@ async def create_door_part_group(payload: DoorPartGroupCreate, session: AsyncSes
         group_title=title,
         code=code,
         title=title,
+        icon_path=normalize_icon_file_name(payload.icon_path),
         line_color=_normalize_hex_color(payload.line_color, DEFAULT_DOOR_LINE_COLOR),
         sort_order=payload.sort_order if payload.sort_order is not None else next_group_id,
         is_system=payload.is_system,
@@ -677,6 +682,7 @@ async def update_door_part_group(
     item.group_title = title
     item.code = code
     item.title = title
+    item.icon_path = normalize_icon_file_name(payload.icon_path)
     item.line_color = _normalize_hex_color(payload.line_color, DEFAULT_DOOR_LINE_COLOR)
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system

@@ -364,6 +364,9 @@ async def _build_display_attr_snapshot(
             binary_off_icon_path = ""
         if binary_on_icon_path and not _icon_exists_cached(binary_on_icon_path):
             binary_on_icon_path = ""
+        group_icon_path = normalize_icon_file_name(getattr(group, "icon_path", None) or group.param_group_icon_path)
+        if group_icon_path and not _icon_exists_cached(group_icon_path):
+            group_icon_path = ""
         values[code] = normalized_value
         meta[code] = {
             "label": str(default_row.display_title or param_title_fa or code).strip() or code,
@@ -376,7 +379,7 @@ async def _build_display_attr_snapshot(
             "binary_on_icon_path": binary_on_icon_path or None,
             "group_id": int(group.param_group_id or 0),
             "group_title": str(group.org_param_group_title or group.title or group.param_group_code or "").strip() or None,
-            "group_icon_path": normalize_icon_file_name(group.param_group_icon_path) or None,
+            "group_icon_path": group_icon_path or None,
             "group_ui_order": int(group.ui_order or 0),
             "group_show_in_order_attrs": bool(group.show_in_order_attrs),
             "param_id": int(param_id or 0),

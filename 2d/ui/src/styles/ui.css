@@ -4472,43 +4472,52 @@ option {
 }
 .subCategoryDesignEditor__interiorGroupHead {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+}
+.subCategoryDesignEditor__interiorGroupSummary {
+  display: flex;
   align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+.subCategoryDesignEditor__interiorGroupFooter {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
   gap: 12px;
+  width: 100%;
 }
 .subCategoryDesignEditor__interiorGroupActions {
   display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  flex-wrap: nowrap;
   direction: ltr;
   gap: 8px;
   flex-shrink: 0;
-  margin-inline-start: auto;
   max-width: 100%;
 }
-.subCategoryDesignEditor__panel--interiorInstances .subCategoryDesignEditor__interiorGroupActions {
-  width: 100%;
+.subCategoryDesignEditor__interiorGroupActions--instance {
   justify-content: flex-start;
-  margin-inline-start: 0;
 }
-.subCategoryDesignEditor__panel--interiorSidebar .subCategoryDesignEditor__interiorGroupActions {
-  width: 100%;
+.subCategoryDesignEditor__interiorGroupActions--sidebar {
+  justify-content: flex-start;
 }
-.subCategoryDesignEditor__panel--interiorSidebar .subCategoryDesignEditor__interiorGroupActions > .constructionDialog__textBtn {
-  margin-right: auto;
+.subCategoryDesignEditor__interiorGroupFooter > .constructionDialog__textBtn {
+  flex: 0 0 auto;
 }
 .subCategoryDesignEditor__partItem--interiorCard .subCategoryDesignEditor__partMeta {
-  flex: 1 1 220px;
+  flex: 1 1 auto;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   row-gap: 6px;
 }
 .subCategoryDesignEditor__partItem--interiorCard .subCategoryDesignEditor__partTitle,
 .subCategoryDesignEditor__partItem--interiorCard .subCategoryDesignEditor__partCode {
   min-width: 0;
   overflow-wrap: anywhere;
+  text-align: right;
 }
 .subCategoryDesignEditor__partItem--interiorCard .constructionDialog__pill,
 .subCategoryDesignEditor__partItem--interiorCard .constructionDialog__textBtn,
@@ -4601,7 +4610,18 @@ option {
   line-height: 1;
   text-align: center;
   color: #7f858d;
-  margin-left: auto;
+  margin-left: 0;
+}
+@media (max-width: 900px) {
+  .subCategoryDesignEditor__interiorGroupSummary {
+    gap: 10px;
+  }
+  .subCategoryDesignEditor__interiorGroupFooter {
+    flex-wrap: wrap;
+  }
+  .subCategoryDesignEditor__interiorGroupActions {
+    flex-wrap: wrap;
+  }
 }
 .subCategoryDesignEditor__groupLineSwatch {
   width: 24px;

@@ -112,6 +112,7 @@ class InternalPartGroupItemResponse(BaseModel):
     group_title: str
     code: str
     title: str
+    icon_path: str | None = None
     line_color: str
     sort_order: int
     is_system: bool
@@ -145,6 +146,7 @@ class InternalPartGroupCreate(BaseModel):
     group_id: int | None = Field(default=None, ge=1)
     group_title: str = Field(min_length=1, max_length=255)
     code: str = Field(min_length=1, max_length=64)
+    icon_path: str | None = Field(default=None, max_length=255)
     line_color: str = Field(default=DEFAULT_INTERNAL_LINE_COLOR, min_length=7, max_length=7)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
@@ -161,6 +163,7 @@ class InternalPartGroupUpdate(BaseModel):
     group_id: int = Field(ge=1)
     group_title: str = Field(min_length=1, max_length=255)
     code: str = Field(min_length=1, max_length=64)
+    icon_path: str | None = Field(default=None, max_length=255)
     line_color: str = Field(default=DEFAULT_INTERNAL_LINE_COLOR, min_length=7, max_length=7)
     sort_order: int = Field(ge=0)
     is_system: bool
@@ -303,6 +306,7 @@ def _serialize_group(
         group_title=item.group_title,
         code=item.code,
         title=item.title,
+        icon_path=normalize_icon_file_name(getattr(item, "icon_path", None)),
         line_color=_normalize_hex_color(getattr(item, "line_color", DEFAULT_INTERNAL_LINE_COLOR), DEFAULT_INTERNAL_LINE_COLOR),
         sort_order=item.sort_order,
         is_system=item.is_system,
@@ -691,6 +695,7 @@ async def create_internal_part_group(payload: InternalPartGroupCreate, session: 
         group_title=title,
         code=code,
         title=title,
+        icon_path=normalize_icon_file_name(payload.icon_path),
         line_color=_normalize_hex_color(payload.line_color, DEFAULT_INTERNAL_LINE_COLOR),
         controller_type=None,
         controller_bindings={},
@@ -749,6 +754,7 @@ async def update_internal_part_group(
     item.group_title = title
     item.code = code
     item.title = title
+    item.icon_path = normalize_icon_file_name(payload.icon_path)
     item.line_color = _normalize_hex_color(payload.line_color, DEFAULT_INTERNAL_LINE_COLOR)
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
