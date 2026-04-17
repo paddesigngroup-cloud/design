@@ -2004,7 +2004,11 @@ async def resolve_door_instance_preview(
         ui_order=int(ui_order),
         structural_part_formula_ids=[int(item) for item in structural_part_formula_ids if int(item) > 0],
         dependent_interior_instance_ids=[str(item).strip() for item in list(dependent_interior_instance_ids or []) if str(item).strip()],
-        controller_box_snapshot=dict(controller_box_snapshot or {}) if controller_type and dict(controller_box_snapshot or {}) else next_box_snapshot,
+        controller_box_snapshot=(
+            next_box_snapshot
+            if controller_type and next_box_snapshot
+            else (dict(controller_box_snapshot or {}) if controller_type and dict(controller_box_snapshot or {}) else {})
+        ),
         param_values={str(key): (None if value is None else str(value)) for key, value in persisted_values.items()},
         param_meta={str(key): dict(value or {}) for key, value in merged_meta.items()},
         computed_params=computed_params,
