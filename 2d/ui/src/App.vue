@@ -5575,6 +5575,12 @@ function normalizeInteriorControllerNumericText(value) {
     .replace(/[٫،]/g, ".");
 }
 
+function normalizeBinaryValue(value) {
+  const numeric = Number.parseFloat(normalizeInteriorControllerNumericText(value));
+  if (Number.isFinite(numeric)) return Math.abs(numeric) > 0 ? "1" : "0";
+  return String(value ?? "").trim() === "1" ? "1" : "0";
+}
+
 function parseInteriorControllerMm(value) {
   const numeric = Number.parseFloat(normalizeInteriorControllerNumericText(value));
   return Number.isFinite(numeric) ? numeric : null;
@@ -5629,12 +5635,21 @@ function parseInteriorControllerInputToMm(value, unit = currentEditorDisplayUnit
   return numeric * 10;
 }
 
-function serializeDisplayParamValuesForPayload(paramValues, paramMeta, unit = currentEditorDisplayUnit.value) {
+function serializeDisplayParamValuesForPayload(
+  paramValues,
+  paramMeta,
+  unit = currentEditorDisplayUnit.value,
+  fallbackInputModes = null
+) {
   return Object.fromEntries(
     Object.entries(paramValues || {}).map(([key, value]) => {
-      const inputMode = paramMeta?.[key]?.input_mode === "binary" ? "binary" : "value";
+      const meta = paramMeta?.[key] || {};
+      const fallbackMode = fallbackInputModes?.[key] === "binary" ? "binary" : "value";
+      const inputMode = (meta.input_mode === "binary" || meta.inputMode === "binary" || fallbackMode === "binary")
+        ? "binary"
+        : "value";
       const text = value == null ? null : String(value);
-      return [key, text == null ? null : (inputMode === "binary" ? text : parseParamDisplayValueToStored(text, unit))];
+      return [key, text == null ? null : (inputMode === "binary" ? normalizeBinaryValue(text) : parseParamDisplayValueToStored(text, unit))];
     })
   );
 }
@@ -7554,7 +7569,7 @@ function hasInternalPartGroupDefaultsChanges() {
     const nextValue = String(internalPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
     const prevValue = String(row.param_defaults?.[column.key] ?? "").trim();
     if (override.input_mode === "binary") {
-      return (nextValue === "1" ? "1" : "0") !== (prevValue === "1" ? "1" : "0");
+      return normalizeBinaryValue(nextValue) !== normalizeBinaryValue(prevValue);
     }
     return nextValue !== prevValue;
   });
@@ -8260,7 +8275,7 @@ function setOrderDesignEditorBinaryValue(key, value) {
   if (!normalizedKey || !orderDesignEditorDraft.value) return;
   orderDesignEditorDraft.value.order_attr_values = {
     ...(orderDesignEditorDraft.value.order_attr_values || {}),
-    [normalizedKey]: String(value) === "1" ? "1" : "0",
+    [normalizedKey]: normalizeBinaryValue(value),
   };
 }
 
@@ -8424,7 +8439,7 @@ async function saveOrderDesignEditor() {
       Object.entries(draft.order_attr_values || {}).map(([key, value]) => {
         const inputMode = draft.order_attr_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
         const text = value == null ? "" : String(value);
-        return [key, inputMode === "binary" ? (text === "1" ? "1" : "0") : parseParamDisplayValueToStored(text)];
+        return [key, inputMode === "binary" ? normalizeBinaryValue(text) : parseParamDisplayValueToStored(text)];
       })
     );
     const fresh = await persistOrderDesignRecord({
@@ -9605,7 +9620,7 @@ function openInternalPartGroupDefaultsEditor(item) {
       const value = String(row.param_defaults?.[column.key] ?? "").trim();
       return [
         column.key,
-        override.input_mode === "binary" ? (value === "1" ? "1" : "0") : formatParamValueForDisplay(value),
+        override.input_mode === "binary" ? normalizeBinaryValue(value) : formatParamValueForDisplay(value),
       ];
     })
   );
@@ -9626,7 +9641,7 @@ function setInteriorInstanceBinaryValue(paramCode, value) {
   if (!key || !interiorInstanceEditorDraft.value) return;
   interiorInstanceEditorDraft.value.param_values = {
     ...(interiorInstanceEditorDraft.value.param_values || {}),
-    [key]: String(value) === "1" ? "1" : "0",
+    [key]: normalizeBinaryValue(value),
   };
 }
 
@@ -10103,7 +10118,7 @@ function setDoorInstanceBinaryValue(key, value) {
   if (!normalizedKey || !doorInstanceEditorDraft.value) return;
   doorInstanceEditorDraft.value.param_values = {
     ...(doorInstanceEditorDraft.value.param_values || {}),
-    [normalizedKey]: String(value) === "1" ? "1" : "0",
+    [normalizedKey]: normalizeBinaryValue(value),
   };
 }
 
@@ -10163,13 +10178,18 @@ async function applyDoorInstanceEditor() {
   if (!instance?.id || doorInstanceEditorApplying.value) return;
   doorInstanceEditorApplying.value = true;
   try {
+    const fallbackInputModes = Object.fromEntries(
+      activeDoorInstanceEditorGroups.value
+        .flatMap((group) => Array.isArray(group?.items) ? group.items : [])
+        .map((column) => [column.key, column.inputMode === "binary" ? "binary" : "value"])
+    );
     const requestBody = {
       ui_order: Math.max(0, Number(instance.ui_order) || 0),
       instance_code: String(instance.instance_code || "").trim() || "door",
       line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
       structural_part_formula_ids: Array.isArray(instance.structural_part_formula_ids) ? instance.structural_part_formula_ids : [],
       dependent_interior_instance_ids: Array.isArray(instance.dependent_interior_instance_ids) ? instance.dependent_interior_instance_ids : [],
-      param_values: serializeDisplayParamValuesForPayload(instance.param_values, instance.param_meta),
+      param_values: serializeDisplayParamValuesForPayload(instance.param_values, instance.param_meta, currentEditorDisplayUnit.value, fallbackInputModes),
     };
     if (subCategoryDesignEditorOpen.value) {
       const draft = subCategoryDesignEditorDraft.value;
@@ -10386,6 +10406,11 @@ async function applyInteriorInstanceEditor() {
   const instance = interiorInstanceEditorDraft.value;
   if (!instance?.id || interiorInstanceEditorApplying.value) return;
   interiorInstanceEditorApplying.value = true;
+  const fallbackInputModes = Object.fromEntries(
+    activeInteriorInstanceEditorGroups.value
+      .flatMap((group) => Array.isArray(group?.items) ? group.items : [])
+      .map((column) => [column.key, column.inputMode === "binary" ? "binary" : "value"])
+  );
   if (subCategoryDesignEditorOpen.value) {
     const draft = subCategoryDesignEditorDraft.value;
     if (!draft?.id) {
@@ -10403,7 +10428,7 @@ async function applyInteriorInstanceEditor() {
             ui_order: Math.max(0, Number(instance.ui_order) || 0),
             instance_code: String(instance.instance_code || "").trim() || "interior",
             line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-            param_values: serializeDisplayParamValuesForPayload(instance.param_values, instance.param_meta),
+            param_values: serializeDisplayParamValuesForPayload(instance.param_values, instance.param_meta, currentEditorDisplayUnit.value, fallbackInputModes),
           }),
         }
       );
@@ -10435,7 +10460,7 @@ async function applyInteriorInstanceEditor() {
           ui_order: Math.max(0, Number(instance.ui_order) || 0),
           instance_code: String(instance.instance_code || "").trim() || "interior",
           line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-          param_values: serializeDisplayParamValuesForPayload(instance.param_values, instance.param_meta),
+          param_values: serializeDisplayParamValuesForPayload(instance.param_values, instance.param_meta, currentEditorDisplayUnit.value, fallbackInputModes),
         }),
       }
     );
@@ -11530,7 +11555,7 @@ function ensureInternalPartGroupParamDefaults(item) {
     item.param_overrides[column.key] = currentOverride;
     if (currentOverride.input_mode === "binary") {
       const normalizedBinaryValue = String(item.param_defaults?.[column.key] ?? "").trim();
-      item.param_defaults[column.key] = normalizedBinaryValue === "1" ? "1" : "0";
+      item.param_defaults[column.key] = normalizeBinaryValue(normalizedBinaryValue);
     }
   }
   return item;
@@ -11565,7 +11590,7 @@ function ensureDoorPartGroupParamDefaults(item) {
       item.param_defaults[column.key] = seeded.value;
     }
     if ((seeded?.presentation?.input_mode || "value") === "binary") {
-      item.param_defaults[column.key] = String(item.param_defaults?.[column.key] ?? "").trim() === "1" ? "1" : "0";
+      item.param_defaults[column.key] = normalizeBinaryValue(item.param_defaults?.[column.key]);
     }
   }
   for (const key of Object.keys(item.param_defaults || {})) {
@@ -11957,7 +11982,7 @@ function setDoorPartGroupBinaryDefault(paramCode, value) {
   if (!key) return;
   doorPartGroupDefaultsValues.value = {
     ...doorPartGroupDefaultsValues.value,
-    [key]: String(value) === "1" ? "1" : "0",
+    [key]: normalizeBinaryValue(value),
   };
 }
 
@@ -11998,7 +12023,7 @@ function openSubCategoryDefaultsEditor(item) {
       const rawValue = String(item.param_defaults?.[column.key] ?? "").trim();
       return [
         column.key,
-        override.input_mode === "binary" ? (rawValue === "1" ? "1" : "0") : formatParamValueForDisplay(rawValue),
+        override.input_mode === "binary" ? normalizeBinaryValue(rawValue) : formatParamValueForDisplay(rawValue),
       ];
     })
   );
@@ -12037,7 +12062,7 @@ async function closeSubCategoryDefaultsEditor() {
       const prevOverride = originalOverrides[column.key] || {};
       const nextDraftValue = String(subCategoryDefaultsEditorDraft.value?.[column.key] ?? "").trim();
       const nextStoredValue = String(nextOverride.input_mode || "value") === "binary"
-        ? (nextDraftValue === "1" ? "1" : "0")
+        ? normalizeBinaryValue(nextDraftValue)
         : parseParamDisplayValueToStored(nextDraftValue);
       return String(original[column.key] ?? "").trim() !== nextStoredValue
         || String(prevOverride.display_title || "").trim() !== String(nextOverride.display_title || "").trim()
@@ -12114,7 +12139,7 @@ async function applySubCategoryDefaultsEditor() {
     };
     if (row.param_overrides[column.key].input_mode === "binary") {
       const current = String(row.param_defaults[column.key] ?? "").trim();
-      row.param_defaults[column.key] = current === "1" ? "1" : "0";
+      row.param_defaults[column.key] = normalizeBinaryValue(current);
     }
   }
   markConstructionSubCategoryDirty(row);
@@ -12142,7 +12167,7 @@ function openSubCategoryUserPreview(item) {
       return [
         column.key,
         override.input_mode === "binary"
-          ? (value === "1" ? "1" : "0")
+          ? normalizeBinaryValue(value)
           : formatParamValueForDisplay(value),
       ];
     })
@@ -12159,7 +12184,7 @@ function hasSubCategoryUserPreviewChanges() {
     const nextValue = String(subCategoryUserPreviewValues.value?.[column.key] ?? "").trim();
     const prevValue = String(row.param_defaults?.[column.key] ?? "").trim();
     if (override.input_mode === "binary") {
-      return (nextValue === "1" ? "1" : "0") !== (prevValue === "1" ? "1" : "0");
+      return normalizeBinaryValue(nextValue) !== normalizeBinaryValue(prevValue);
     }
     return parseParamDisplayValueToStored(nextValue) !== prevValue;
   });
@@ -12188,7 +12213,7 @@ async function applySubCategoryUserPreview() {
     const override = row.param_overrides?.[column.key] || {};
     const nextValue = String(subCategoryUserPreviewValues.value?.[column.key] ?? "").trim();
     row.param_defaults[column.key] = override.input_mode === "binary"
-      ? (nextValue === "1" ? "1" : "0")
+      ? normalizeBinaryValue(nextValue)
       : parseParamDisplayValueToStored(nextValue);
   }
   markConstructionSubCategoryDirty(row);
@@ -12208,7 +12233,7 @@ function setSubCategoryUserPreviewBinaryValue(paramCode, value) {
   if (!paramCode) return;
   subCategoryUserPreviewValues.value = {
     ...subCategoryUserPreviewValues.value,
-    [paramCode]: String(value) === "1" ? "1" : "0",
+    [paramCode]: normalizeBinaryValue(value),
   };
 }
 
@@ -12225,7 +12250,7 @@ function setInternalPartGroupBinaryDefault(paramCode, value) {
   if (!key) return;
   internalPartGroupDefaultsValues.value = {
     ...internalPartGroupDefaultsValues.value,
-    [key]: String(value) === "1" ? "1" : "0",
+    [key]: normalizeBinaryValue(value),
   };
 }
 
@@ -12259,7 +12284,7 @@ function hasDoorPartGroupDefaultsChanges() {
     const nextValue = String(doorPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
     const prevValue = String(row.param_defaults?.[column.key] ?? "").trim();
     if (column.inputMode === "binary") {
-      return (nextValue === "1" ? "1" : "0") !== (prevValue === "1" ? "1" : "0");
+      return normalizeBinaryValue(nextValue) !== normalizeBinaryValue(prevValue);
     }
     return parseParamDisplayValueToStored(nextValue) !== prevValue;
   });
@@ -12302,7 +12327,7 @@ function openDoorPartGroupDefaultsEditor(item) {
   doorPartGroupDefaultsValues.value = Object.fromEntries(
     allColumns.map((column) => {
       const rawValue = String(row.param_defaults?.[column.key] ?? "").trim();
-      return [column.key, column.inputMode === "binary" ? (rawValue === "1" ? "1" : "0") : formatParamValueForDisplay(rawValue)];
+      return [column.key, column.inputMode === "binary" ? normalizeBinaryValue(rawValue) : formatParamValueForDisplay(rawValue)];
     })
   );
   doorPartGroupDefaultsActiveGroupId.value = String(row.param_groups?.find((group) => group?.enabled !== false)?.param_group_id || "");
@@ -12321,7 +12346,7 @@ async function applyDoorPartGroupDefaultsEditor() {
   for (const column of allColumns) {
     const nextValue = String(doorPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
     row.param_defaults[column.key] = column.inputMode === "binary"
-      ? (nextValue === "1" ? "1" : "0")
+      ? normalizeBinaryValue(nextValue)
       : parseParamDisplayValueToStored(nextValue);
   }
   try {
@@ -12361,7 +12386,7 @@ async function applyInternalPartGroupDefaultsEditor() {
     const override = row.param_overrides?.[column.key] || {};
     const nextValue = String(internalPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
     row.param_defaults[column.key] = override.input_mode === "binary"
-      ? (nextValue === "1" ? "1" : "0")
+      ? normalizeBinaryValue(nextValue)
       : parseParamDisplayValueToStored(nextValue);
   }
   try {
@@ -12382,14 +12407,14 @@ function setSubCategoryDefaultInputMode(paramCode, mode) {
   subCategoryDefaultsEditorOverridesDraft.value[key].binary_on_label = String(subCategoryDefaultsEditorOverridesDraft.value[key].binary_on_label || "").trim() || "1";
   if (subCategoryDefaultsEditorOverridesDraft.value[key].input_mode === "binary") {
     const current = String(subCategoryDefaultsEditorDraft.value?.[key] ?? "").trim();
-    subCategoryDefaultsEditorDraft.value[key] = current === "1" ? "1" : "0";
+    subCategoryDefaultsEditorDraft.value[key] = normalizeBinaryValue(current);
   }
 }
 
 function setSubCategoryBinaryDefault(paramCode, value) {
   const key = String(paramCode || "").trim();
   if (!key) return;
-  subCategoryDefaultsEditorDraft.value[key] = String(value) === "1" ? "1" : "0";
+  subCategoryDefaultsEditorDraft.value[key] = normalizeBinaryValue(value);
 }
 
 function validateConstructionSubCategories() {
@@ -21797,7 +21822,7 @@ onBeforeUnmount(() => {
                     <button
                       type="button"
                       class="subCategoryPreview__binaryChoice"
-                      :class="{ 'is-active': String(interiorInstanceEditorDraft.param_values?.[column.key] ?? '0') !== '1' }"
+                      :class="{ 'is-active': normalizeBinaryValue(interiorInstanceEditorDraft.param_values?.[column.key] ?? '0') !== '1' }"
                       @click="setInteriorInstanceBinaryValue(column.key, '0')"
                     >
                       <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
@@ -21806,7 +21831,7 @@ onBeforeUnmount(() => {
                     <button
                       type="button"
                       class="subCategoryPreview__binaryChoice"
-                      :class="{ 'is-active': String(interiorInstanceEditorDraft.param_values?.[column.key] ?? '0') === '1' }"
+                      :class="{ 'is-active': normalizeBinaryValue(interiorInstanceEditorDraft.param_values?.[column.key] ?? '0') === '1' }"
                       @click="setInteriorInstanceBinaryValue(column.key, '1')"
                     >
                       <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
@@ -21942,7 +21967,7 @@ onBeforeUnmount(() => {
                     <button
                       type="button"
                       class="subCategoryPreview__binaryChoice"
-                      :class="{ 'is-active': String(doorInstanceEditorDraft.param_values?.[column.key] ?? '0') !== '1' }"
+                      :class="{ 'is-active': normalizeBinaryValue(doorInstanceEditorDraft.param_values?.[column.key] ?? '0') !== '1' }"
                       @click="setDoorInstanceBinaryValue(column.key, '0')"
                     >
                       <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
@@ -21951,7 +21976,7 @@ onBeforeUnmount(() => {
                     <button
                       type="button"
                       class="subCategoryPreview__binaryChoice"
-                      :class="{ 'is-active': String(doorInstanceEditorDraft.param_values?.[column.key] ?? '0') === '1' }"
+                      :class="{ 'is-active': normalizeBinaryValue(doorInstanceEditorDraft.param_values?.[column.key] ?? '0') === '1' }"
                       @click="setDoorInstanceBinaryValue(column.key, '1')"
                     >
                       <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
