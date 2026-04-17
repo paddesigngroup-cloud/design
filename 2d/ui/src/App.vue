@@ -6071,7 +6071,7 @@ const doorLibraryInstanceCards = computed(() =>
     .map((instance, instanceIndex) => {
       const group = constructionDoorPartGroupsById.value.get(String(instance.door_part_group_id));
       const groups = buildDoorInstanceGroups(instance);
-      const iconPath = normalizeIconFileName(groups[0]?.iconPath || group?.icon_path || group?.param_group_icon_path) || "";
+      const iconPath = normalizeIconFileName(group?.icon_path || group?.param_group_icon_path || groups[0]?.iconPath) || "";
       return {
         ...instance,
         groupTitle: String(group?.group_title || group?.title || instance.instance_code || "گروه درب").trim(),
