@@ -290,6 +290,10 @@ function isDoorPartKind(item) {
   return getPartKindScope(item) === "door";
 }
 
+function isSubtractorPartKind(item) {
+  return getPartKindScope(item) === "subtractor";
+}
+
 function getPartScopeLabel(scope) {
   const normalized = normalizePartScope(scope);
   if (normalized === "internal") return "داخلی";
@@ -619,6 +623,7 @@ const editableSubCategories = ref([]);
 const editableSubCategoryDesigns = ref([]);
 const editableInternalPartGroups = ref([]);
 const editableDoorPartGroups = ref([]);
+const editableSubtractorPartGroups = ref([]);
 const editableBaseFormulas = ref([]);
 const editablePartFormulas = ref([]);
 const subCategoryDefaultsEditorOpen = ref(false);
@@ -644,6 +649,8 @@ const subCategoryDesignPreviewRequestSeq = ref(0);
 const subCategoryDesignEditorSaving = ref(false);
 const internalPartGroupEditorOpen = ref(false);
 const internalPartGroupEditorDraft = ref(null);
+const subtractorPartGroupEditorOpen = ref(false);
+const subtractorPartGroupEditorDraft = ref(null);
 const doorPartGroupEditorOpen = ref(false);
 const doorPartGroupEditorDraft = ref(null);
 const doorPartGroupParamGroupsOpen = ref(false);
@@ -654,12 +661,24 @@ const doorPartGroupDefaultsValues = ref({});
 const doorPartGroupDefaultsActiveGroupId = ref("");
 const doorPartGroupDefaultsApplying = ref(false);
 const internalPartGroupParamGroupsOpen = ref(false);
+const subtractorPartGroupParamGroupsOpen = ref(false);
+const subtractorPartGroupDefaultsEditorOpen = ref(false);
+const subtractorPartGroupDefaultsEditorRowId = ref(null);
+const subtractorPartGroupDefaultsEditorGroups = ref([]);
+const subtractorPartGroupDefaultsValues = ref({});
+const subtractorPartGroupDefaultsActiveGroupId = ref("");
+const subtractorPartGroupDefaultsApplying = ref(false);
 const internalPartGroupDefaultsEditorOpen = ref(false);
 const internalPartGroupDefaultsEditorRowId = ref(null);
 const internalPartGroupDefaultsEditorGroups = ref([]);
 const internalPartGroupDefaultsValues = ref({});
 const internalPartGroupDefaultsActiveGroupId = ref("");
 const internalPartGroupDefaultsApplying = ref(false);
+const subtractorPartGroupControllerEditorOpen = ref(false);
+const subtractorPartGroupControllerEditorRowId = ref(null);
+const subtractorPartGroupControllerEditorType = ref("");
+const subtractorPartGroupControllerEditorBindings = ref({});
+const subtractorPartGroupControllerEditorApplying = ref(false);
 const internalPartGroupControllerEditorOpen = ref(false);
 const internalPartGroupControllerEditorRowId = ref(null);
 const internalPartGroupControllerEditorType = ref("");
@@ -2770,17 +2789,21 @@ function isAddingDoorGroup(group) {
 }
 const paramGroupIconInputEl = ref(null);
 const internalPartGroupIconInputEl = ref(null);
+const subtractorPartGroupIconInputEl = ref(null);
 const doorPartGroupIconInputEl = ref(null);
 const constructionImportPreviewRows = ref([]);
 const constructionImportFileName = ref("");
 const constructionImportPreviewKind = ref(null);
 const activeParamGroupIconRowId = ref(null);
 const activeInternalPartGroupIconRowId = ref(null);
+const activeSubtractorPartGroupIconRowId = ref(null);
 const activeDoorPartGroupIconRowId = ref(null);
 const constructionUploadingIconRowId = ref(null);
 const constructionUploadingInternalPartGroupIconRowId = ref(null);
+const constructionUploadingSubtractorPartGroupIconRowId = ref(null);
 const constructionUploadingDoorPartGroupIconRowId = ref(null);
 const INTERNAL_PART_GROUP_EDITOR_ICON_TARGET = "__internal-part-group-editor__";
+const SUBTRACTOR_PART_GROUP_EDITOR_ICON_TARGET = "__subtractor-part-group-editor__";
 const DOOR_PART_GROUP_EDITOR_ICON_TARGET = "__door-part-group-editor__";
 const constructionTables = [
   { id: "templates", title: "تمپلیت‌ها", status: "active" },
@@ -2792,6 +2815,7 @@ const constructionTables = [
   { id: "sub_category_designs", title: "طرح‌های ساب‌کت", status: "active" },
   { id: "internal_part_groups", title: "گروه قطعات داخلی", status: "active" },
   { id: "door_part_groups", title: "گروه قطعات درب", status: "active" },
+  { id: "hidden_handle_part_groups", title: "گروه دستگیره مخفی", status: "active" },
   { id: "base_formulas", title: "فرمول های پایه", status: "active" },
   { id: "part_formulas", title: "فرمول های قطعات", status: "active" },
 ];
@@ -2873,6 +2897,17 @@ const constructionInternalPartGroups = computed(() =>
 );
 const constructionDoorPartGroups = computed(() =>
   editableDoorPartGroups.value
+    .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
+    .slice()
+    .sort((a, b) => {
+      if (!!a.is_system !== !!b.is_system) return a.is_system ? -1 : 1;
+      const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return (Number(a.group_id) || 0) - (Number(b.group_id) || 0);
+    })
+);
+const constructionSubtractorPartGroups = computed(() =>
+  editableSubtractorPartGroups.value
     .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
     .slice()
     .sort((a, b) => {
@@ -3109,6 +3144,18 @@ const activeDoorPartGroupDefaultsGroup = computed(() =>
   || activeDoorPartGroupDefaultsGroups.value[0]
   || null
 );
+const activeSubtractorPartGroupDefaultsRow = computed(() =>
+  editableSubtractorPartGroups.value.find((item) => String(item.id) === String(subtractorPartGroupDefaultsEditorRowId.value)) || null
+);
+const activeSubtractorPartGroupDefaultsGroups = computed(() => subtractorPartGroupDefaultsEditorGroups.value);
+const activeSubtractorPartGroupDefaultsGroup = computed(() =>
+  activeSubtractorPartGroupDefaultsGroups.value.find((group) => String(group.id) === String(subtractorPartGroupDefaultsActiveGroupId.value))
+  || activeSubtractorPartGroupDefaultsGroups.value[0]
+  || null
+);
+const activeSubtractorPartGroupControllerRow = computed(() =>
+  editableSubtractorPartGroups.value.find((item) => String(item.id) === String(subtractorPartGroupControllerEditorRowId.value)) || null
+);
 const activeInternalPartGroupControllerRow = computed(() =>
   editableInternalPartGroups.value.find((item) => String(item.id) === String(internalPartGroupControllerEditorRowId.value)) || null
 );
@@ -3178,6 +3225,22 @@ const constructionDoorPartFormulaOptions = computed(() =>
       };
     })
 );
+const constructionSubtractorPartFormulaOptions = computed(() =>
+  constructionPartFormulas.value
+    .filter((item) => {
+      const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
+      return isSubtractorPartKind(partKind);
+    })
+    .map((item) => {
+      const partKind = constructionPartKindsById.value.get(Number(item.part_kind_id) || 0);
+      return {
+        id: Number(item.part_formula_id),
+        title: String(item.part_title || item.title || item.part_code || "").trim(),
+        code: String(item.part_code || "").trim(),
+        partKindTitle: String(partKind?.org_part_kind_title || partKind?.title || "").trim(),
+      };
+    })
+);
 const constructionInternalParamGroupOptions = computed(() =>
   constructionParamGroups.value
     .map((item) => ({
@@ -3191,6 +3254,7 @@ const constructionInternalParamGroupOptions = computed(() =>
     .sort((a, b) => a.uiOrder - b.uiOrder || a.id - b.id)
 );
 const constructionDoorParamGroupOptions = computed(() => constructionInternalParamGroupOptions.value.map((item) => ({ ...item })));
+const constructionSubtractorParamGroupOptions = computed(() => constructionInternalParamGroupOptions.value.map((item) => ({ ...item })));
 const constructionInternalPartGroupsById = computed(() =>
   new Map(
     constructionInternalPartGroups.value
@@ -3201,6 +3265,13 @@ const constructionInternalPartGroupsById = computed(() =>
 const constructionDoorPartGroupsById = computed(() =>
   new Map(
     constructionDoorPartGroups.value
+      .map((item) => [String(item.id), item])
+      .filter(([id]) => id)
+  )
+);
+const constructionSubtractorPartGroupsById = computed(() =>
+  new Map(
+    constructionSubtractorPartGroups.value
       .map((item) => [String(item.id), item])
       .filter(([id]) => id)
   )
@@ -6307,6 +6378,7 @@ function openConstructionWizard() {
   loadConstructionSubCategoryDesigns();
   loadConstructionInternalPartGroups();
   loadConstructionDoorPartGroups();
+  loadConstructionSubtractorPartGroups();
   loadConstructionBaseFormulas();
   loadConstructionPartFormulas();
   constructionDeletedTemplateIds.value = [];
@@ -6346,6 +6418,7 @@ async function closeConstructionWizard() {
     await loadConstructionSubCategoryDesigns();
     await loadConstructionInternalPartGroups();
     await loadConstructionDoorPartGroups();
+    await loadConstructionSubtractorPartGroups();
     await loadConstructionBaseFormulas();
     await loadConstructionPartFormulas();
   }
@@ -6485,6 +6558,74 @@ function normalizePartKindPayload(item) {
 }
 
 function normalizeInternalPartGroupPayload(item) {
+  const selectedParamGroupIds = new Set(
+    (Array.isArray(item.param_groups) ? item.param_groups : [])
+      .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
+      .map((group) => Number(group.param_group_id))
+  );
+  const allowedParamCodes = new Set(
+    constructionParams.value
+      .filter((param) => selectedParamGroupIds.has(Number(param?.param_group_id)))
+      .map((param) => String(param.param_code || "").trim())
+      .filter(Boolean)
+  );
+  const controllerType = normalizeInternalPartGroupControllerType(item.controller_type);
+  const controllerBindings = normalizeInternalPartGroupControllerBindings(
+    controllerType,
+    item.controller_bindings,
+    allowedParamCodes,
+  );
+  return {
+    admin_id: item.admin_id,
+    group_id: Number(item.group_id),
+    group_title: String(item.group_title || "").trim(),
+    code: String(item.code || "").trim(),
+    icon_path: normalizeIconFileName(item.icon_path) || null,
+    line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+    sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.group_id),
+    is_system: !!item.is_system,
+    parts: (Array.isArray(item.parts) ? item.parts : [])
+      .filter((part) => Number(part?.part_formula_id) > 0)
+      .map((part, index) => ({
+        part_formula_id: Number(part.part_formula_id),
+        enabled: part.enabled !== false,
+        ui_order: Number.isFinite(Number(part.ui_order)) ? Number(part.ui_order) : index,
+      })),
+    param_groups: (Array.isArray(item.param_groups) ? item.param_groups : [])
+      .filter((group) => Number(group?.param_group_id) > 0)
+      .map((group, index) => ({
+        param_group_id: Number(group.param_group_id),
+        enabled: group.enabled !== false,
+        ui_order: Number.isFinite(Number(group.ui_order)) ? Number(group.ui_order) : index,
+      })),
+    param_defaults: Object.fromEntries(
+      Object.entries(item.param_defaults || {})
+        .filter(([key]) => allowedParamCodes.has(String(key || "").trim()))
+        .map(([key, value]) => [String(key || "").trim(), value == null ? null : String(value)])
+    ),
+    param_overrides: Object.fromEntries(
+      Object.entries(item.param_overrides || {})
+        .filter(([key]) => allowedParamCodes.has(String(key || "").trim()))
+        .map(([key, override]) => {
+          const baseLabel = constructionSubCategoryParamMetaByCode.value[String(key || "").trim()]?.label || String(key || "").trim();
+          return [String(key || "").trim(), {
+            display_title: String(override?.display_title || "").trim() || baseLabel,
+            description_text: String(override?.description_text || "").trim(),
+            icon_path: normalizeIconFileName(override?.icon_path) || "",
+            input_mode: override?.input_mode === "binary" ? "binary" : "value",
+            binary_off_label: String(override?.binary_off_label || "").trim() || "0",
+            binary_on_label: String(override?.binary_on_label || "").trim() || "1",
+            binary_off_icon_path: normalizeIconFileName(override?.binary_off_icon_path) || "",
+            binary_on_icon_path: normalizeIconFileName(override?.binary_on_icon_path) || "",
+          }];
+        })
+    ),
+    controller_type: controllerType || null,
+    controller_bindings: controllerBindings,
+  };
+}
+
+function normalizeSubtractorPartGroupPayload(item) {
   const selectedParamGroupIds = new Set(
     (Array.isArray(item.param_groups) ? item.param_groups : [])
       .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
@@ -6723,12 +6864,20 @@ function isUploadingInternalPartGroupIcon(item) {
   return String(constructionUploadingInternalPartGroupIconRowId.value || "") === String(item?.id || "");
 }
 
+function isUploadingSubtractorPartGroupIcon(item) {
+  return String(constructionUploadingSubtractorPartGroupIconRowId.value || "") === String(item?.id || "");
+}
+
 function isUploadingDoorPartGroupIcon(item) {
   return String(constructionUploadingDoorPartGroupIconRowId.value || "") === String(item?.id || "");
 }
 
 function isUploadingInternalPartGroupEditorIcon() {
   return String(constructionUploadingInternalPartGroupIconRowId.value || "") === INTERNAL_PART_GROUP_EDITOR_ICON_TARGET;
+}
+
+function isUploadingSubtractorPartGroupEditorIcon() {
+  return String(constructionUploadingSubtractorPartGroupIconRowId.value || "") === SUBTRACTOR_PART_GROUP_EDITOR_ICON_TARGET;
 }
 
 function isUploadingDoorPartGroupEditorIcon() {
@@ -7546,6 +7695,27 @@ function buildNewInternalPartGroupDraft() {
   });
 }
 
+function buildNewSubtractorPartGroupDraft() {
+  const nextId = editableSubtractorPartGroups.value.reduce((max, item) => Math.max(max, Number(item.group_id) || 0), 0) + 1;
+  return ensureInternalPartGroupControllerConfig({
+    id: null,
+    admin_id: null,
+    group_id: nextId,
+    group_title: `گروه دستگیره مخفی ${toPersianDigits(nextId)}`,
+    code: `subtractor_part_group_${nextId}`,
+    icon_path: "",
+    line_color: DEFAULT_INTERIOR_LINE_COLOR,
+    sort_order: nextId,
+    is_system: true,
+    parts: [],
+    param_groups: [],
+    param_defaults: {},
+    param_overrides: {},
+    controller_type: INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP,
+    controller_bindings: {},
+  });
+}
+
 function buildNewDoorPartGroupDraft() {
   const nextId = editableDoorPartGroups.value.reduce((max, item) => Math.max(max, Number(item.group_id) || 0), 0) + 1;
   return ensureDoorPartGroupControllerConfig({
@@ -7590,6 +7760,15 @@ function closeInternalPartGroupEditor() {
   }
 }
 
+function closeSubtractorPartGroupEditor() {
+  subtractorPartGroupEditorOpen.value = false;
+  subtractorPartGroupEditorDraft.value = null;
+  subtractorPartGroupParamGroupsOpen.value = false;
+  if (activeSubtractorPartGroupIconRowId.value === SUBTRACTOR_PART_GROUP_EDITOR_ICON_TARGET) {
+    activeSubtractorPartGroupIconRowId.value = null;
+  }
+}
+
 function closeDoorPartGroupEditor() {
   doorPartGroupEditorOpen.value = false;
   doorPartGroupEditorDraft.value = null;
@@ -7597,6 +7776,140 @@ function closeDoorPartGroupEditor() {
   if (activeDoorPartGroupIconRowId.value === DOOR_PART_GROUP_EDITOR_ICON_TARGET) {
     activeDoorPartGroupIconRowId.value = null;
   }
+}
+
+function hasSubtractorPartGroupDefaultsChanges() {
+  const row = activeSubtractorPartGroupDefaultsRow.value;
+  if (!row) return false;
+  return getSubtractorPartGroupSelectedParamColumns(row).some((column) => {
+    const override = row.param_overrides?.[column.key] || {};
+    const nextValue = String(subtractorPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
+    const prevValue = String(row.param_defaults?.[column.key] ?? "").trim();
+    if (override.input_mode === "binary") {
+      return normalizeBinaryValue(nextValue) !== normalizeBinaryValue(prevValue);
+    }
+    return nextValue !== prevValue;
+  });
+}
+
+function resetSubtractorPartGroupDefaultsEditorState() {
+  subtractorPartGroupDefaultsEditorOpen.value = false;
+  subtractorPartGroupDefaultsEditorRowId.value = null;
+  subtractorPartGroupDefaultsEditorGroups.value = [];
+  subtractorPartGroupDefaultsValues.value = {};
+  subtractorPartGroupDefaultsActiveGroupId.value = "";
+  subtractorPartGroupDefaultsApplying.value = false;
+}
+
+async function closeSubtractorPartGroupDefaultsEditor(forceClose = false) {
+  if (subtractorPartGroupDefaultsApplying.value) return;
+  if (!forceClose && hasSubtractorPartGroupDefaultsChanges()) {
+    const ok = await showConfirm("تغییرات پیش‌فرض‌های گروه دستگیره مخفی اعمال نشده‌اند. پنجره بسته شود؟", {
+      title: "بستن پیش‌فرض‌ها",
+      confirmText: "بستن",
+      cancelText: "بازگشت",
+    });
+    if (!ok) return;
+  }
+  resetSubtractorPartGroupDefaultsEditorState();
+}
+
+function resetSubtractorPartGroupControllerEditorState() {
+  subtractorPartGroupControllerEditorOpen.value = false;
+  subtractorPartGroupControllerEditorRowId.value = null;
+  subtractorPartGroupControllerEditorType.value = "";
+  subtractorPartGroupControllerEditorBindings.value = {};
+  subtractorPartGroupControllerEditorApplying.value = false;
+}
+
+function getSubtractorPartGroupControllerEditorBindingsNormalized() {
+  const row = activeSubtractorPartGroupControllerRow.value;
+  const allowedCodes = row ? new Set(getSubtractorPartGroupSelectedParamColumns(row).map((column) => column.key)) : new Set();
+  return normalizeInternalPartGroupControllerBindings(
+    subtractorPartGroupControllerEditorType.value,
+    subtractorPartGroupControllerEditorBindings.value,
+    allowedCodes,
+  );
+}
+
+function hasSubtractorPartGroupControllerChanges() {
+  const row = activeSubtractorPartGroupControllerRow.value;
+  if (!row) return false;
+  const currentType = normalizeInternalPartGroupControllerType(row.controller_type);
+  const nextType = normalizeInternalPartGroupControllerType(subtractorPartGroupControllerEditorType.value);
+  if (currentType !== nextType) return true;
+  const currentBindings = normalizeInternalPartGroupControllerBindings(currentType, row.controller_bindings);
+  const nextBindings = getSubtractorPartGroupControllerEditorBindingsNormalized();
+  const keys = new Set([
+    ...Object.keys(currentBindings || {}),
+    ...Object.keys(nextBindings || {}),
+  ]);
+  return Array.from(keys).some((key) =>
+    String(currentBindings?.[key]?.param_code || "").trim() !== String(nextBindings?.[key]?.param_code || "").trim()
+  );
+}
+
+async function closeSubtractorPartGroupControllerEditor() {
+  if (subtractorPartGroupControllerEditorApplying.value) return;
+  if (hasSubtractorPartGroupControllerChanges()) {
+    const ok = await showConfirm("تغییرات کنترلر گروه اعمال نشده‌اند. پنجره بسته شود؟", {
+      title: "بستن کنترلر گروه",
+      confirmText: "بستن",
+      cancelText: "بازگشت",
+    });
+    if (!ok) return;
+  }
+  resetSubtractorPartGroupControllerEditorState();
+}
+
+function syncSubtractorPartGroupControllerEditorBindings() {
+  subtractorPartGroupControllerEditorBindings.value = normalizeInternalPartGroupControllerBindings(
+    subtractorPartGroupControllerEditorType.value,
+    subtractorPartGroupControllerEditorBindings.value,
+  );
+}
+
+function findEditableSubtractorPartGroupById(value) {
+  const id = String(value || "").trim();
+  if (!id) return null;
+  return editableSubtractorPartGroups.value.find((row) => String(row?.id || "").trim() === id) || null;
+}
+
+function openSubtractorPartGroupControllerEditor(item) {
+  const row = findEditableSubtractorPartGroupById(item?.id);
+  if (!row?.id) return;
+  ensureInternalPartGroupParamDefaults(row);
+  ensureInternalPartGroupControllerConfig(row);
+  subtractorPartGroupControllerEditorRowId.value = row.id;
+  subtractorPartGroupControllerEditorType.value = normalizeInternalPartGroupControllerType(row.controller_type);
+  subtractorPartGroupControllerEditorBindings.value = normalizeInternalPartGroupControllerBindings(
+    row.controller_type,
+    row.controller_bindings,
+  );
+  subtractorPartGroupControllerEditorOpen.value = true;
+}
+
+function updateSubtractorPartGroupControllerEditorType(value) {
+  subtractorPartGroupControllerEditorType.value = normalizeInternalPartGroupControllerType(value);
+  syncSubtractorPartGroupControllerEditorBindings();
+}
+
+async function applySubtractorPartGroupControllerEditor() {
+  const row = activeSubtractorPartGroupControllerRow.value;
+  if (!row || subtractorPartGroupControllerEditorApplying.value) return;
+  subtractorPartGroupControllerEditorApplying.value = true;
+  ensureInternalPartGroupParamDefaults(row);
+  ensureInternalPartGroupControllerConfig(row);
+  row.controller_type = normalizeInternalPartGroupControllerType(subtractorPartGroupControllerEditorType.value);
+  row.controller_bindings = getSubtractorPartGroupControllerEditorBindingsNormalized();
+  try {
+    await persistSubtractorPartGroupRow(row);
+  } catch (error) {
+    showAlert(error?.message || "ذخیره کنترلر گروه دستگیره مخفی انجام نشد.", { title: "خطا" });
+    subtractorPartGroupControllerEditorApplying.value = false;
+    return;
+  }
+  resetSubtractorPartGroupControllerEditorState();
 }
 
 function hasInternalPartGroupDefaultsChanges() {
@@ -9551,6 +9864,56 @@ function openInternalPartGroupEditor(item = null) {
   internalPartGroupEditorOpen.value = true;
 }
 
+function openSubtractorPartGroupEditor(item = null) {
+  subtractorPartGroupEditorDraft.value = item
+    ? {
+        id: item.id,
+        admin_id: item.admin_id,
+        group_id: item.group_id,
+        group_title: item.group_title,
+        code: item.code,
+        icon_path: normalizeIconFileName(item.icon_path) || "",
+        line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+        sort_order: item.sort_order,
+        is_system: item.is_system,
+        parts: Array.isArray(item.parts) ? item.parts.map((part) => ({
+          part_formula_id: Number(part.part_formula_id),
+          enabled: part.enabled !== false,
+          ui_order: Number(part.ui_order) || 0,
+        })) : [],
+        param_groups: Array.isArray(item.param_groups) ? item.param_groups.map((group) => ({
+          param_group_id: Number(group.param_group_id),
+          param_group_code: String(group.param_group_code || "").trim(),
+          param_group_title: String(group.param_group_title || "").trim(),
+          param_group_icon_path: normalizeIconFileName(group.param_group_icon_path) || "",
+          enabled: group.enabled !== false,
+          ui_order: Number(group.ui_order) || 0,
+        })) : [],
+        param_defaults: Object.fromEntries(
+          Object.entries(item.param_defaults || {}).map(([key, value]) => [String(key || "").trim(), value == null ? "" : String(value)])
+        ),
+        param_overrides: Object.fromEntries(
+          Object.entries(item.param_overrides || {}).map(([key, override]) => [String(key || "").trim(), {
+            display_title: String(override?.display_title || "").trim(),
+            description_text: String(override?.description_text || "").trim(),
+            icon_path: normalizeIconFileName(override?.icon_path) || "",
+            input_mode: override?.input_mode === "binary" ? "binary" : "value",
+            binary_off_label: String(override?.binary_off_label || "").trim() || "0",
+            binary_on_label: String(override?.binary_on_label || "").trim() || "1",
+            binary_off_icon_path: normalizeIconFileName(override?.binary_off_icon_path) || "",
+            binary_on_icon_path: normalizeIconFileName(override?.binary_on_icon_path) || "",
+          }])
+        ),
+        controller_type: normalizeInternalPartGroupControllerType(item.controller_type),
+        controller_bindings: normalizeInternalPartGroupControllerBindings(item.controller_type, item.controller_bindings),
+      }
+    : buildNewSubtractorPartGroupDraft();
+  ensureInternalPartGroupParamDefaults(subtractorPartGroupEditorDraft.value);
+  ensureInternalPartGroupControllerConfig(subtractorPartGroupEditorDraft.value);
+  subtractorPartGroupParamGroupsOpen.value = false;
+  subtractorPartGroupEditorOpen.value = true;
+}
+
 function openDoorPartGroupEditor(item = null) {
   doorPartGroupEditorDraft.value = item
     ? ensureDoorPartGroupControllerConfig({
@@ -9640,6 +10003,34 @@ function openDoorPartGroupParamGroupsEditor(item = null) {
   }
   if (!doorPartGroupEditorDraft.value) return;
   doorPartGroupParamGroupsOpen.value = true;
+}
+
+function openSubtractorPartGroupDefaultsEditor(item) {
+  const row = findEditableSubtractorPartGroupById(item?.id);
+  if (!row?.id) return;
+  ensureInternalPartGroupParamDefaults(row);
+  const selectedColumns = getSubtractorPartGroupSelectedParamColumns(row);
+  if (!selectedColumns.length) {
+    showAlert("برای این گروه دستگیره مخفی هنوز گروه پارامتری انتخاب نشده است.", { title: "پیش‌فرض گروه دستگیره مخفی" });
+    return;
+  }
+  subtractorPartGroupDefaultsEditorRowId.value = row.id;
+  subtractorPartGroupDefaultsValues.value = Object.fromEntries(
+    selectedColumns.map((column) => {
+      const override = row.param_overrides?.[column.key] || {};
+      const value = String(row.param_defaults?.[column.key] ?? "").trim();
+      return [
+        column.key,
+        override.input_mode === "binary" ? normalizeBinaryValue(value) : formatParamValueForDisplay(value),
+      ];
+    })
+  );
+  subtractorPartGroupDefaultsEditorGroups.value = buildSubtractorPartGroupDefaultsGroups(row);
+  subtractorPartGroupDefaultsActiveGroupId.value = String(row.param_groups?.find((group) => group?.enabled !== false)?.param_group_id || "");
+  if (!subtractorPartGroupDefaultsActiveGroupId.value) {
+    subtractorPartGroupDefaultsActiveGroupId.value = subtractorPartGroupDefaultsEditorGroups.value[0]?.id || "";
+  }
+  subtractorPartGroupDefaultsEditorOpen.value = true;
 }
 
 function openInternalPartGroupDefaultsEditor(item) {
@@ -10937,6 +11328,75 @@ function togglePartFormulaInInternalGroup(partFormulaId) {
   }
 }
 
+async function loadConstructionSubtractorPartGroups() {
+  try {
+    const url = `/api/subtractor-part-groups?admin_id=${encodeURIComponent(currentAdminId.value)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("load-failed");
+    editableSubtractorPartGroups.value = (await res.json()).map((item) =>
+      ensureInternalPartGroupControllerConfig(
+        ensureInternalPartGroupParamDefaults(withConstructionDraftState({
+          ...item,
+          icon_path: normalizeIconFileName(item.icon_path || item.param_group_icon_path) || "",
+          param_group_icon_path: normalizeIconFileName(item.param_group_icon_path || item.icon_path) || "",
+          line_color: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+          param_groups: Array.isArray(item.param_groups) ? item.param_groups.map((group) => ({
+            ...group,
+            param_group_id: Number(group.param_group_id),
+            param_group_code: String(group.param_group_code || "").trim(),
+            param_group_title: String(group.param_group_title || "").trim(),
+            param_group_icon_path: normalizeIconFileName(group.param_group_icon_path) || "",
+            enabled: group.enabled !== false,
+            ui_order: Number(group.ui_order) || 0,
+          })) : [],
+          param_defaults: Object.fromEntries(
+            Object.entries(item.param_defaults || {}).map(([key, value]) => [String(key || "").trim(), value == null ? "" : String(value)])
+          ),
+          param_overrides: Object.fromEntries(
+            Object.entries(item.param_overrides || {}).map(([key, override]) => [String(key || "").trim(), {
+              display_title: String(override?.display_title || "").trim(),
+              description_text: String(override?.description_text || "").trim(),
+              icon_path: normalizeIconFileName(override?.icon_path) || "",
+              input_mode: override?.input_mode === "binary" ? "binary" : "value",
+              binary_off_label: String(override?.binary_off_label || "").trim() || "0",
+              binary_on_label: String(override?.binary_on_label || "").trim() || "1",
+              binary_off_icon_path: normalizeIconFileName(override?.binary_off_icon_path) || "",
+              binary_on_icon_path: normalizeIconFileName(override?.binary_on_icon_path) || "",
+            }])
+          ),
+          controller_type: normalizeInternalPartGroupControllerType(item.controller_type),
+          controller_bindings: normalizeInternalPartGroupControllerBindings(item.controller_type, item.controller_bindings),
+        }))
+      )
+    );
+  } catch (_) {
+    showAlert("خواندن جدول گروه دستگیره مخفی از دیتابیس انجام نشد.", { title: "خطا" });
+  }
+}
+
+function isSubtractorPartFormulaSelectedInGroup(partFormulaId) {
+  return !!subtractorPartGroupEditorDraft.value?.parts?.some((part) => Number(part.part_formula_id) === Number(partFormulaId) && part.enabled !== false);
+}
+
+function togglePartFormulaInSubtractorGroup(partFormulaId) {
+  const draft = subtractorPartGroupEditorDraft.value;
+  if (!draft) return;
+  const existing = draft.parts.find((part) => Number(part.part_formula_id) === Number(partFormulaId));
+  if (existing) {
+    draft.parts = draft.parts.filter((part) => Number(part.part_formula_id) !== Number(partFormulaId));
+  } else {
+    const formula = constructionSubtractorPartFormulaOptions.value.find((item) => Number(item.id) === Number(partFormulaId));
+    draft.parts = [
+      ...draft.parts,
+      {
+        part_formula_id: Number(partFormulaId),
+        enabled: true,
+        ui_order: draft.parts.length || Number(formula?.id) || 0,
+      },
+    ];
+  }
+}
+
 async function saveSubCategoryDesignEditor() {
   const draft = subCategoryDesignEditorDraft.value;
   if (!draft || subCategoryDesignEditorSaving.value) return;
@@ -11141,6 +11601,72 @@ async function deleteConstructionInternalPartGroup(id) {
     await loadConstructionInternalPartGroups();
   } catch (error) {
     showAlert(error?.message || "حذف گروه قطعات داخلی انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function saveSubtractorPartGroupEditor() {
+  const draft = subtractorPartGroupEditorDraft.value;
+  if (!draft) return;
+  const groupId = Number(draft.group_id);
+  const title = String(draft.group_title || "").trim();
+  const code = String(draft.code || "").trim();
+  if (!Number.isInteger(groupId) || groupId < 1) {
+    showAlert("شناسه گروه باید معتبر و بزرگ‌تر از صفر باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!title) {
+    showAlert("عنوان گروه نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!code) {
+    showAlert("کد گروه نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const duplicate = editableSubtractorPartGroups.value.some((item) => Number(item.group_id) === groupId && String(item.id) !== String(draft.id || ""));
+  if (duplicate) {
+    showAlert("شناسه گروه تکراری است.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const duplicateCode = editableSubtractorPartGroups.value.some((item) => String(item.code || "").trim() === code && String(item.id) !== String(draft.id || ""));
+  if (duplicateCode) {
+    showAlert("کد گروه تکراری است.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const payload = normalizeSubtractorPartGroupPayload(draft);
+  try {
+    const res = await fetch(
+      draft.id ? `/api/subtractor-part-groups/${encodeURIComponent(String(draft.id))}` : "/api/subtractor-part-groups",
+      {
+        method: draft.id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره گروه دستگیره مخفی انجام نشد."));
+    await loadConstructionSubtractorPartGroups();
+    closeSubtractorPartGroupEditor();
+    showAlert("گروه دستگیره مخفی با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره گروه دستگیره مخفی انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function deleteConstructionSubtractorPartGroup(id) {
+  const item = editableSubtractorPartGroups.value.find((row) => String(row.id) === String(id));
+  if (!item) return;
+  const ok = await showConfirm(`گروه «${item.group_title || item.title || "بدون عنوان"}» حذف شود؟`, {
+    title: "حذف گروه دستگیره مخفی",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  try {
+    await discardStagedParamGroupIcon(item.icon_path);
+    const res = await fetch(`/api/subtractor-part-groups/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف گروه دستگیره مخفی انجام نشد."));
+    await loadConstructionSubtractorPartGroups();
+  } catch (error) {
+    showAlert(error?.message || "حذف گروه دستگیره مخفی انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -11477,6 +12003,22 @@ function getInternalPartGroupSelectedParamColumns(item) {
       label: String(param.param_title_fa || param.title || param.param_code || "").trim(),
     }))
     .filter((item) => item.key);
+}
+
+function getSubtractorPartGroupSelectedParamColumns(item) {
+  const selectedParamGroupIds = new Set(
+    (Array.isArray(item?.param_groups) ? item.param_groups : [])
+      .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
+      .map((group) => Number(group.param_group_id))
+  );
+  if (!selectedParamGroupIds.size) return [];
+  return constructionParams.value
+    .filter((param) => selectedParamGroupIds.has(Number(param?.param_group_id)))
+    .map((param) => ({
+      key: String(param.param_code || "").trim(),
+      label: String(param.param_title_fa || param.title || param.param_code || "").trim(),
+    }))
+    .filter((row) => row.key);
 }
 
 function getDoorPartGroupSelectedParamColumns(item) {
@@ -11876,9 +12418,20 @@ function getInternalPartGroupControllerParamOptions(row) {
   }));
 }
 
+function getSubtractorPartGroupControllerParamOptions(row) {
+  return getSubtractorPartGroupSelectedParamColumns(row).map((column) => ({
+    value: column.key,
+    label: column.label || column.key,
+  }));
+}
+
 function getInternalPartGroupControllerTypeLabel(value) {
   const normalized = normalizeInternalPartGroupControllerType(value);
   return INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS.find((item) => item.value === normalized)?.label || "";
+}
+
+function getSubtractorPartGroupControllerTypeLabel(value) {
+  return getInternalPartGroupControllerTypeLabel(value);
 }
 
 function getInternalPartGroupControllerSummary(item) {
@@ -11893,6 +12446,23 @@ function getInternalPartGroupControllerSummary(item) {
   return {
     text: `${toPersianDigits(connected)} / ${toPersianDigits(definitions.length)} متصل`,
     detail: getInternalPartGroupControllerTypeLabel(controllerType),
+    connected,
+    total: definitions.length,
+  };
+}
+
+function getSubtractorPartGroupControllerSummary(item) {
+  const controllerType = normalizeInternalPartGroupControllerType(item?.controller_type);
+  if (!controllerType) {
+    return { text: "بدون کنترلر", detail: "", connected: 0, total: 0 };
+  }
+  const definitions = getInternalPartGroupControllerDefinitions(controllerType);
+  const allowedCodes = new Set(getSubtractorPartGroupSelectedParamColumns(item).map((column) => column.key));
+  const bindings = normalizeInternalPartGroupControllerBindings(controllerType, item?.controller_bindings, allowedCodes);
+  const connected = definitions.filter((definition) => String(bindings?.[definition.key]?.param_code || "").trim()).length;
+  return {
+    text: `${toPersianDigits(connected)} / ${toPersianDigits(definitions.length)} متصل`,
+    detail: getSubtractorPartGroupControllerTypeLabel(controllerType),
     connected,
     total: definitions.length,
   };
@@ -11972,6 +12542,41 @@ function buildInternalPartGroupDefaultsGroups(row) {
     .filter((group) => group.items.length > 0);
 }
 
+function buildSubtractorPartGroupDefaultsGroups(row) {
+  if (!row) return [];
+  const selectedParamGroupIds = new Set(
+    (Array.isArray(row.param_groups) ? row.param_groups : [])
+      .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
+      .map((group) => String(Number(group.param_group_id)))
+  );
+  if (!selectedParamGroupIds.size) return [];
+  return constructionSubCategoryParamTree.value
+    .filter((group) => selectedParamGroupIds.has(String(group.id)))
+    .map((group) => ({
+      ...group,
+      iconUrl: group.iconUrl || (group.iconFileName ? getSubCategoryDefaultIconUrl(group.iconFileName) : ""),
+      items: group.items.map((column) => {
+        const baseLabel = column.label || column.key;
+        const override = normalizeInternalPartGroupParamOverride(row.param_overrides?.[column.key], baseLabel);
+        const displayTitle = String(override.display_title || baseLabel).trim() || column.key;
+        const descriptionText = String(override.description_text || "").trim();
+        const inputMode = override.input_mode === "binary" ? "binary" : "value";
+        return {
+          ...column,
+          displayTitle,
+          descriptionText,
+          iconUrl: getSubCategoryDefaultIconUrl(override.icon_path),
+          inputMode,
+          binaryOffLabel: String(override.binary_off_label || "").trim() || "0",
+          binaryOnLabel: String(override.binary_on_label || "").trim() || "1",
+          binaryOffIconUrl: getSubCategoryDefaultIconUrl(override.binary_off_icon_path),
+          binaryOnIconUrl: getSubCategoryDefaultIconUrl(override.binary_on_icon_path),
+        };
+      }),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
 function normalizeInternalPartGroupParamOverride(override, baseLabel) {
   return {
     display_title: String(override?.display_title || "").trim() || baseLabel,
@@ -11987,6 +12592,17 @@ function normalizeInternalPartGroupParamOverride(override, baseLabel) {
 
 function getInternalPartGroupDefaultsSummary(item) {
   const columns = getInternalPartGroupSelectedParamColumns(item);
+  const total = columns.length;
+  const filled = columns.filter((column) => String(item?.param_defaults?.[column.key] ?? "").trim()).length;
+  return {
+    filled,
+    total,
+    text: total ? `${toPersianDigits(filled)} / ${toPersianDigits(total)}` : "بدون پارامتر",
+  };
+}
+
+function getSubtractorPartGroupDefaultsSummary(item) {
+  const columns = getSubtractorPartGroupSelectedParamColumns(item);
   const total = columns.length;
   const filled = columns.filter((column) => String(item?.param_defaults?.[column.key] ?? "").trim()).length;
   return {
@@ -12020,6 +12636,15 @@ function setDoorPartGroupBinaryDefault(paramCode, value) {
   if (!key) return;
   doorPartGroupDefaultsValues.value = {
     ...doorPartGroupDefaultsValues.value,
+    [key]: normalizeBinaryValue(value),
+  };
+}
+
+function setSubtractorPartGroupBinaryDefault(paramCode, value) {
+  const key = String(paramCode || "").trim();
+  if (!key) return;
+  subtractorPartGroupDefaultsValues.value = {
+    ...subtractorPartGroupDefaultsValues.value,
     [key]: normalizeBinaryValue(value),
   };
 }
@@ -12283,6 +12908,10 @@ function selectInternalPartGroupDefaultsGroup(groupId) {
   internalPartGroupDefaultsActiveGroupId.value = String(groupId || "");
 }
 
+function selectSubtractorPartGroupDefaultsGroup(groupId) {
+  subtractorPartGroupDefaultsActiveGroupId.value = String(groupId || "");
+}
+
 function setInternalPartGroupBinaryDefault(paramCode, value) {
   const key = String(paramCode || "").trim();
   if (!key) return;
@@ -12395,6 +13024,46 @@ async function applyDoorPartGroupDefaultsEditor() {
     return;
   }
   resetDoorPartGroupDefaultsEditorState();
+}
+
+async function persistSubtractorPartGroupRow(row) {
+  if (!row?.id) throw new Error("Subtractor part group row is missing.");
+  const payload = normalizeSubtractorPartGroupPayload(row);
+  const res = await fetch(`/api/subtractor-part-groups/${encodeURIComponent(String(row.id))}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(await readApiErrorMessage(res, "ذخیره گروه دستگیره مخفی انجام نشد."));
+  }
+  const savedRow = ensureInternalPartGroupControllerConfig(ensureInternalPartGroupParamDefaults(withConstructionDraftState(await res.json())));
+  editableSubtractorPartGroups.value = editableSubtractorPartGroups.value.map((item) =>
+    String(item.id) === String(savedRow.id) ? savedRow : item
+  );
+  return savedRow;
+}
+
+async function applySubtractorPartGroupDefaultsEditor() {
+  const row = activeSubtractorPartGroupDefaultsRow.value;
+  if (!row || subtractorPartGroupDefaultsApplying.value) return;
+  subtractorPartGroupDefaultsApplying.value = true;
+  ensureInternalPartGroupParamDefaults(row);
+  for (const column of getSubtractorPartGroupSelectedParamColumns(row)) {
+    const override = row.param_overrides?.[column.key] || {};
+    const nextValue = String(subtractorPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
+    row.param_defaults[column.key] = override.input_mode === "binary"
+      ? normalizeBinaryValue(nextValue)
+      : parseParamDisplayValueToStored(nextValue);
+  }
+  try {
+    await persistSubtractorPartGroupRow(row);
+  } catch (error) {
+    showAlert(error?.message || "ذخیره پیش‌فرض‌های گروه دستگیره مخفی انجام نشد.", { title: "خطا" });
+    subtractorPartGroupDefaultsApplying.value = false;
+    return;
+  }
+  resetSubtractorPartGroupDefaultsEditorState();
 }
 
 async function persistInternalPartGroupRow(row) {
@@ -14683,6 +15352,52 @@ async function onInternalPartGroupIconFileChange(event) {
   }
 }
 
+function triggerSubtractorPartGroupIconUpload(item) {
+  if (!item) return;
+  if (item === subtractorPartGroupEditorDraft.value) {
+    if (isUploadingSubtractorPartGroupEditorIcon()) return;
+    activeSubtractorPartGroupIconRowId.value = SUBTRACTOR_PART_GROUP_EDITOR_ICON_TARGET;
+  } else {
+    if (isUploadingSubtractorPartGroupIcon(item)) return;
+    activeSubtractorPartGroupIconRowId.value = String(item.id);
+  }
+  subtractorPartGroupIconInputEl.value?.click?.();
+}
+
+async function onSubtractorPartGroupIconFileChange(event) {
+  const file = event?.target?.files?.[0];
+  const rowId = activeSubtractorPartGroupIconRowId.value;
+  if (!file || !rowId) return;
+  const item = rowId === SUBTRACTOR_PART_GROUP_EDITOR_ICON_TARGET
+    ? subtractorPartGroupEditorDraft.value
+    : editableSubtractorPartGroups.value.find((row) => String(row.id) === rowId);
+  if (!item) return;
+  const previousIconFileName = normalizeIconFileName(item.icon_path);
+  constructionUploadingSubtractorPartGroupIconRowId.value = rowId;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const slugHint = encodeURIComponent(String(item.code || `subtractor-part-group-${item.group_id || "new"}`));
+    const res = await fetch(`/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/param-group-icons?slug_hint=${slugHint}`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) throw new Error("upload-failed");
+    const payload = await res.json();
+    if (isStagedParamGroupIcon(previousIconFileName)) {
+      await discardStagedParamGroupIcon(previousIconFileName);
+    }
+    item.icon_path = normalizeIconFileName(payload.file_name || payload.icon_path);
+    if (item?.id && !item.__isNew) item.__dirty = true;
+  } catch (_) {
+    showAlert("آپلود آیکون انجام نشد. فقط فایل تصویری معتبر با اندازه استاندارد قابل قبول است.", { title: "آیکون گروه دستگیره مخفی" });
+  } finally {
+    constructionUploadingSubtractorPartGroupIconRowId.value = null;
+    activeSubtractorPartGroupIconRowId.value = null;
+    if (subtractorPartGroupIconInputEl.value) subtractorPartGroupIconInputEl.value.value = "";
+  }
+}
+
 function triggerDoorPartGroupIconUpload(item) {
   if (!item) return;
   if (item === doorPartGroupEditorDraft.value) {
@@ -16248,6 +16963,37 @@ function toggleParamGroupInInternalGroup(paramGroupId) {
   ensureInternalPartGroupParamDefaults(draft);
 }
 
+function toggleSubtractorPartGroupParamGroupsPanel() {
+  subtractorPartGroupParamGroupsOpen.value = !subtractorPartGroupParamGroupsOpen.value;
+}
+
+function isParamGroupSelectedInSubtractorGroup(paramGroupId) {
+  return !!subtractorPartGroupEditorDraft.value?.param_groups?.some((group) => Number(group.param_group_id) === Number(paramGroupId) && group.enabled !== false);
+}
+
+function toggleParamGroupInSubtractorGroup(paramGroupId) {
+  const draft = subtractorPartGroupEditorDraft.value;
+  if (!draft) return;
+  const existing = draft.param_groups.find((group) => Number(group.param_group_id) === Number(paramGroupId));
+  if (existing) {
+    draft.param_groups = draft.param_groups.filter((group) => Number(group.param_group_id) !== Number(paramGroupId));
+  } else {
+    const option = constructionSubtractorParamGroupOptions.value.find((item) => Number(item.id) === Number(paramGroupId));
+    draft.param_groups = [
+      ...draft.param_groups,
+      {
+        param_group_id: Number(paramGroupId),
+        param_group_code: String(option?.code || "").trim(),
+        param_group_title: String(option?.title || "").trim(),
+        param_group_icon_path: normalizeIconFileName(option?.iconPath) || "",
+        enabled: true,
+        ui_order: draft.param_groups.length || Number(option?.uiOrder) || 0,
+      },
+    ];
+  }
+  ensureInternalPartGroupParamDefaults(draft);
+}
+
 async function archiveOrder(item) {
   const target = normalizeOrderRecord(item);
   if (!target?.id) return;
@@ -16671,6 +17417,7 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
     loadConstructionParams(),
     loadConstructionSubCategories(),
     loadConstructionInternalPartGroups(),
+    loadConstructionSubtractorPartGroups(),
     loadConstructionSubCategoryDesigns(),
     loadConstructionPartKinds(),
     loadConstructionPartFormulas(),
@@ -16723,6 +17470,7 @@ async function openDoorLibrary(targetOrderDesignId = "") {
   openMode.value = "menu";
   await Promise.allSettled([
     loadConstructionDoorPartGroups(),
+    loadConstructionSubtractorPartGroups(),
     loadConstructionPartKinds(),
     loadConstructionPartFormulas(),
   ]);
@@ -19775,6 +20523,96 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
+          <template v-else-if="constructionStep === 'hidden_handle_part_groups'">
+            <input
+              ref="subtractorPartGroupIconInputEl"
+              class="constructionDialog__fileInput"
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp"
+              @change="onSubtractorPartGroupIconFileChange"
+            />
+            <div class="constructionDialog__toolbar">
+              <div class="constructionDialog__toolbarMain">
+                <div class="constructionDialog__sectionTitle">جدول گروه دستگیره مخفی</div>
+                <div class="constructionDialog__sectionHint">
+                  در این جدول از بین قطعات با دامنه دستگیره مخفی گروه می‌سازید تا به‌صورت مجموعه قابل استفاده باشند.
+                </div>
+              </div>
+              <div class="constructionDialog__toolbarActions">
+                <button type="button" class="constructionDialog__textBtn" @click="openSubtractorPartGroupEditor()">افزودن گروه دستگیره مخفی</button>
+              </div>
+            </div>
+
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionSubtractorPartGroups.length) }}</span>
+                <span class="constructionDialog__summaryLabel">کل گروه‌ها</span>
+              </div>
+            </div>
+
+            <div class="constructionDialog__tableWrap">
+              <table class="constructionDialog__table">
+                <thead>
+                  <tr>
+                    <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">شناسه گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--code">کد گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--title">عنوان گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--outlineColor">رنگ خطوط</th>
+                    <th class="constructionDialog__col constructionDialog__col--defaults">پیش‌فرض‌ها</th>
+                    <th class="constructionDialog__col constructionDialog__col--defaults">کنترلر گروه</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">تعداد قطعات</th>
+                    <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in constructionSubtractorPartGroups" :key="item.id">
+                    <td class="constructionDialog__col constructionDialog__col--owner">
+                      <span
+                        class="constructionDialog__pill constructionDialog__ownerBadge"
+                        :class="getConstructionOwnerBadge(item).tone === 'system' ? 'constructionDialog__ownerBadge--system' : 'constructionDialog__ownerBadge--admin'"
+                      >
+                        {{ getConstructionOwnerBadge(item).text }}
+                      </span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.group_id) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--code">{{ item.code }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--title">{{ item.group_title }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--outlineColor">
+                      <span class="constructionDialog__swatch" :style="{ backgroundColor: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR) }"></span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--defaults">
+                      <div class="constructionDialog__defaultsActions">
+                        <button type="button" class="constructionDialog__defaultsBtn" title="پیش‌فرض پارامترهای گروه دستگیره مخفی" @click="openSubtractorPartGroupDefaultsEditor(item)">
+                          <span class="constructionDialog__defaultsBtnValue">{{ getSubtractorPartGroupDefaultsSummary(item).text }}</span>
+                          <span class="constructionDialog__defaultsBtnLabel">مقادیر</span>
+                        </button>
+                      </div>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--defaults">
+                      <div class="constructionDialog__defaultsActions">
+                        <button type="button" class="constructionDialog__defaultsBtn" title="تنظیم نوع و اتصال کنترلرهای گروه دستگیره مخفی" @click="openSubtractorPartGroupControllerEditor(item)">
+                          <span class="constructionDialog__defaultsBtnValue">{{ getSubtractorPartGroupControllerSummary(item).text }}</span>
+                          <span class="constructionDialog__defaultsBtnLabel">{{ getSubtractorPartGroupControllerSummary(item).detail || "کنترلر" }}</span>
+                        </button>
+                      </div>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.parts?.length || 0) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--actions">
+                      <div class="constructionDialog__actionsCell">
+                        <button type="button" class="constructionDialog__textBtn" @click="openSubtractorPartGroupEditor(item)">ویرایش گروه</button>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionSubtractorPartGroup(item.id)">×</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="!constructionSubtractorPartGroups.length">
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="9">هنوز گروهی برای دستگیره مخفی ثبت نشده است.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
+
           <template v-else-if="constructionStep === 'door_part_groups'">
             <input
               ref="doorPartGroupIconInputEl"
@@ -20486,6 +21324,173 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
+  <div v-if="subtractorPartGroupEditorOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeSubtractorPartGroupEditor"></div>
+    <div class="appDialog__card appDialog__card--subDesign" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش گروه دستگیره مخفی</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeSubtractorPartGroupEditor">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        در این پنجره از بین قطعات scope دستگیره مخفی، گروه می‌سازید و گروه‌های پارامتر قابل اعمال به همین گروه را انتخاب می‌کنید.
+      </div>
+
+      <div v-if="subtractorPartGroupEditorDraft" class="subCategoryDesignEditor">
+        <div class="subCategoryDesignEditor__meta">
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>شناسه گروه</span>
+            <input v-model.number="subtractorPartGroupEditorDraft.group_id" class="constructionDialog__input" type="number" min="1" step="1" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>عنوان گروه</span>
+            <input v-model="subtractorPartGroupEditorDraft.group_title" class="constructionDialog__input" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>کد گروه</span>
+            <input v-model="subtractorPartGroupEditorDraft.code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>آیکون گروه</span>
+            <div class="constructionDialog__iconCell">
+              <button
+                type="button"
+                class="constructionDialog__miniBtn constructionDialog__iconUploadBtn"
+                :class="[hasConstructionItemIcon(subtractorPartGroupEditorDraft) ? 'is-filled' : 'is-empty', isUploadingSubtractorPartGroupEditorIcon() ? 'is-loading' : '']"
+                :title="isUploadingSubtractorPartGroupEditorIcon() ? 'در حال آپلود آیکون...' : getConstructionItemIconTooltip(subtractorPartGroupEditorDraft)"
+                :disabled="isUploadingSubtractorPartGroupEditorIcon()"
+                @click="triggerSubtractorPartGroupIconUpload(subtractorPartGroupEditorDraft)"
+              >
+                <span v-if="isUploadingSubtractorPartGroupEditorIcon()" class="constructionDialog__spinner"></span>
+                <span v-else>↑</span>
+              </button>
+              <span class="constructionDialog__iconFileName">{{ normalizeIconFileName(subtractorPartGroupEditorDraft.icon_path) || "بدون آیکون" }}</span>
+            </div>
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>رنگ پیش‌فرض خطوط</span>
+            <div class="constructionDialog__colorEditor">
+              <input
+                v-model="subtractorPartGroupEditorDraft.line_color"
+                class="constructionDialog__colorInput"
+                type="color"
+                @input="subtractorPartGroupEditorDraft.line_color = normalizeHexColor(subtractorPartGroupEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+              />
+              <input
+                v-model="subtractorPartGroupEditorDraft.line_color"
+                class="constructionDialog__input constructionDialog__input--mono constructionDialog__colorHex"
+                type="text"
+                dir="ltr"
+                maxlength="7"
+                :placeholder="DEFAULT_INTERIOR_LINE_COLOR"
+                @change="subtractorPartGroupEditorDraft.line_color = normalizeHexColor(subtractorPartGroupEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+              />
+            </div>
+          </label>
+          <div class="subCategoryDesignEditor__metaActions">
+            <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': subtractorPartGroupParamGroupsOpen }" title="گروه پارامترها" @click="toggleSubtractorPartGroupParamGroupsPanel">
+              <svg viewBox="0 0 24 24" class="subCategoryDesignEditor__metaIcon subCategoryDesignEditor__metaIcon--glyph" aria-hidden="true">
+                <rect x="3" y="4" width="8" height="6" rx="2" fill="currentColor" opacity="0.9" />
+                <rect x="13" y="4" width="8" height="6" rx="2" fill="currentColor" opacity="0.7" />
+                <rect x="3" y="14" width="8" height="6" rx="2" fill="currentColor" opacity="0.7" />
+                <rect x="13" y="14" width="8" height="6" rx="2" fill="currentColor" opacity="0.9" />
+              </svg>
+              <span>گروه پارامترها</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="subCategoryDesignEditor__layout">
+          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
+            <div class="subCategoryDesignEditor__panelTitle">قطعات دستگیره مخفی قابل انتخاب</div>
+            <div class="subCategoryDesignEditor__partList">
+              <label v-for="item in constructionSubtractorPartFormulaOptions" :key="item.id" class="subCategoryDesignEditor__partItem">
+                <input :checked="isSubtractorPartFormulaSelectedInGroup(item.id)" type="checkbox" @change="togglePartFormulaInSubtractorGroup(item.id)" />
+                <span class="subCategoryDesignEditor__partMeta">
+                  <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
+                  <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
+            <div class="subCategoryDesignEditor__panelTitle">خلاصه گروه</div>
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(subtractorPartGroupEditorDraft.parts?.length || 0) }}</span>
+                <span class="constructionDialog__summaryLabel">قطعه انتخاب‌شده</span>
+              </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ getSubtractorPartGroupDefaultsSummary(subtractorPartGroupEditorDraft).text }}</span>
+                <span class="constructionDialog__summaryLabel">پیش‌فرض‌ها</span>
+              </div>
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ getSubtractorPartGroupControllerSummary(subtractorPartGroupEditorDraft).text }}</span>
+                <span class="constructionDialog__summaryLabel">{{ getSubtractorPartGroupControllerSummary(subtractorPartGroupEditorDraft).detail || "کنترلر" }}</span>
+              </div>
+            </div>
+            <div class="subCategoryDesignEditor__partList">
+              <div v-for="part in subtractorPartGroupEditorDraft.parts" :key="part.part_formula_id" class="subCategoryDesignEditor__partItem is-static">
+                <span class="subCategoryDesignEditor__partMeta">
+                  <span class="subCategoryDesignEditor__partTitle">
+                    {{ constructionSubtractorPartFormulaOptions.find((item) => Number(item.id) === Number(part.part_formula_id))?.title || part.part_formula_id }}
+                  </span>
+                  <span class="subCategoryDesignEditor__partCode">
+                    {{ constructionSubtractorPartFormulaOptions.find((item) => Number(item.id) === Number(part.part_formula_id))?.code || "" }}
+                  </span>
+                </span>
+              </div>
+              <div v-if="!(subtractorPartGroupEditorDraft.parts?.length)" class="designMenu__cabinetState">هنوز قطعه دستگیره مخفی انتخاب نشده است.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closeSubtractorPartGroupEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="saveSubtractorPartGroupEditor">ذخیره گروه</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="subtractorPartGroupEditorOpen && subtractorPartGroupParamGroupsOpen && subtractorPartGroupEditorDraft" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="toggleSubtractorPartGroupParamGroupsPanel"></div>
+    <div class="appDialog__card appDialog__card--paramGroups" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">انتخاب گروه‌های پارامتر دستگیره مخفی</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="toggleSubtractorPartGroupParamGroupsPanel">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        از این پنجره یک یا چند گروه پارامتر را برای این گروه دستگیره مخفی انتخاب کنید.
+      </div>
+      <div class="constructionDialog__summary">
+        <div class="constructionDialog__summaryItem">
+          <span class="constructionDialog__summaryValue">{{ toPersianDigits(subtractorPartGroupEditorDraft.param_groups?.length || 0) }}</span>
+          <span class="constructionDialog__summaryLabel">گروه انتخاب‌شده</span>
+        </div>
+      </div>
+      <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__modalPanel">
+        <div class="subCategoryDesignEditor__panelTitle">گروه‌های پارامتر قابل انتخاب</div>
+        <div class="subCategoryDesignEditor__partList">
+          <label v-for="item in constructionSubtractorParamGroupOptions" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--paramGroup">
+            <span class="subCategoryDesignEditor__partMeta">
+              <img v-if="item.iconPath" :src="getParamGroupOptionIconUrl(item.iconPath)" alt="" class="subCategoryDesignEditor__partIcon" />
+              <span class="subCategoryDesignEditor__partText">
+                <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
+                <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+              </span>
+            </span>
+            <input :checked="isParamGroupSelectedInSubtractorGroup(item.id)" type="checkbox" @change="toggleParamGroupInSubtractorGroup(item.id)" />
+          </label>
+          <div v-if="!constructionSubtractorParamGroupOptions.length" class="designMenu__cabinetState">هنوز گروه پارامتری برای انتخاب ثبت نشده است.</div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="toggleSubtractorPartGroupParamGroupsPanel">بستن</button>
+      </div>
+    </div>
+  </div>
+
   <div v-if="internalPartGroupDefaultsEditorOpen" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeInternalPartGroupDefaultsEditor"></div>
     <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
@@ -20599,6 +21604,124 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__textBtn is-primary" :disabled="internalPartGroupDefaultsApplying" @click="applyInternalPartGroupDefaultsEditor">
           <span v-if="internalPartGroupDefaultsApplying" class="constructionDialog__spinner"></span>
           <span>{{ internalPartGroupDefaultsApplying ? "در حال اعمال..." : "اعمال" }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="subtractorPartGroupDefaultsEditorOpen" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeSubtractorPartGroupDefaultsEditor"></div>
+    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
+      <div class="subCategoryPreview__header">
+        <div>
+          <div class="subCategoryPreview__title">پیش‌فرض‌های گروه دستگیره مخفی</div>
+          <div class="subCategoryPreview__caption">
+            {{ activeSubtractorPartGroupDefaultsRow?.group_title || "گروه دستگیره مخفی" }}
+            <span v-if="activeSubtractorPartGroupDefaultsRow">
+              {{ toPersianDigits(activeSubtractorPartGroupDefaultsRow.group_id) }}
+            </span>
+          </div>
+        </div>
+        <button type="button" class="constructionDialog__textBtn" @click="closeSubtractorPartGroupDefaultsEditor">بستن</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        در این بخش فقط مقدار پیش‌فرض پارامترهای همان گروه دستگیره مخفی ثبت می‌شود.
+      </div>
+      <div class="subCategoryPreview__body">
+        <div class="subCategoryPreview__tree">
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--groups">
+            <div class="subCategoryPreview__selectorList">
+              <button
+                v-for="group in activeSubtractorPartGroupDefaultsGroups"
+                :key="group.id"
+                type="button"
+                class="subCategoryPreview__groupHead"
+                :class="{ 'is-active': String(activeSubtractorPartGroupDefaultsGroup?.id || '') === String(group.id) }"
+                @click="selectSubtractorPartGroupDefaultsGroup(group.id)"
+              >
+                <div class="subCategoryPreview__groupMeta">
+                  <div class="subCategoryPreview__groupTitle">{{ group.title }}</div>
+                  <div class="subCategoryPreview__groupCaption">{{ toPersianDigits(group.items.length) }} پارامتر</div>
+                </div>
+                <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !group.iconUrl }">
+                  <img
+                    v-if="group.iconUrl"
+                    :key="group.iconUrl"
+                    :src="group.iconUrl"
+                    :alt="group.title"
+                    class="subCategoryPreview__groupIcon"
+                    @error="handleSubCategoryDefaultIconError"
+                  />
+                  <span v-else class="subCategoryPreview__groupFallback">{{ toPersianDigits(group.items.length) }}</span>
+                </div>
+                <span class="subCategoryPreview__groupChevron" aria-hidden="true">‹</span>
+              </button>
+            </div>
+          </div>
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
+            <div v-if="activeSubtractorPartGroupDefaultsGroup" class="subCategoryPreview__panelHead">
+              <div class="subCategoryPreview__panelTitle">{{ activeSubtractorPartGroupDefaultsGroup.title }}</div>
+              <div class="subCategoryPreview__panelCaption">{{ toPersianDigits(activeSubtractorPartGroupDefaultsGroup.items.length) }} پارامتر در این گروه</div>
+            </div>
+            <div v-if="activeSubtractorPartGroupDefaultsGroup" class="subCategoryPreview__params">
+              <article v-for="column in activeSubtractorPartGroupDefaultsGroup.items" :key="column.key" class="subCategoryPreview__paramCard">
+                <template v-if="column.inputMode === 'binary'">
+                  <div class="subCategoryPreview__paramMeta">
+                    <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                    <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                  </div>
+                  <div class="subCategoryPreview__binaryChoices">
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': String(subtractorPartGroupDefaultsValues[column.key] ?? '0') !== '1' }"
+                      @click="setSubtractorPartGroupBinaryDefault(column.key, '0')"
+                    >
+                      <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOffLabel }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': String(subtractorPartGroupDefaultsValues[column.key] ?? '0') === '1' }"
+                      @click="setSubtractorPartGroupBinaryDefault(column.key, '1')"
+                    >
+                      <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOnLabel }}</span>
+                    </button>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="subCategoryPreview__valueHead">
+                    <div class="subCategoryPreview__valueIconBox">
+                      <img :src="column.iconUrl" :alt="column.displayTitle" class="subCategoryPreview__valueIcon" @error="handleSubCategoryDefaultIconError" />
+                    </div>
+                    <div class="subCategoryPreview__paramMeta">
+                      <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                      <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                    </div>
+                  </div>
+                  <input
+                    v-model="subtractorPartGroupDefaultsValues[column.key]"
+                    class="constructionDialog__input subCategoryPreview__valueInput"
+                    type="number"
+                    inputmode="numeric"
+                    min="0"
+                    :placeholder="column.displayTitle"
+                  />
+                  <div class="subCategoryPreview__valueUnit">{{ getCurrentParamLengthUnitLabel() }}</div>
+                </template>
+              </article>
+            </div>
+            <div v-else class="designMenu__cabinetState">برای این گروه دستگیره مخفی هنوز پارامتری قابل نمایش نیست.</div>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" :disabled="subtractorPartGroupDefaultsApplying" @click="closeSubtractorPartGroupDefaultsEditor(true)">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" :disabled="subtractorPartGroupDefaultsApplying" @click="applySubtractorPartGroupDefaultsEditor">
+          <span v-if="subtractorPartGroupDefaultsApplying" class="constructionDialog__spinner"></span>
+          <span>{{ subtractorPartGroupDefaultsApplying ? "در حال اعمال..." : "اعمال" }}</span>
         </button>
       </div>
     </div>
@@ -21014,6 +22137,89 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__textBtn is-primary" :disabled="internalPartGroupControllerEditorApplying" @click="applyInternalPartGroupControllerEditor">
           <span v-if="internalPartGroupControllerEditorApplying" class="constructionDialog__spinner"></span>
           <span>{{ internalPartGroupControllerEditorApplying ? "در حال اعمال..." : "اعمال" }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="subtractorPartGroupControllerEditorOpen" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeSubtractorPartGroupControllerEditor"></div>
+    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
+      <div class="subCategoryPreview__header">
+        <div>
+          <div class="subCategoryPreview__title">کنترلر گروه دستگیره مخفی</div>
+          <div class="subCategoryPreview__caption">
+            {{ activeSubtractorPartGroupControllerRow?.group_title || "گروه دستگیره مخفی" }}
+            <span v-if="activeSubtractorPartGroupControllerRow">
+              {{ toPersianDigits(activeSubtractorPartGroupControllerRow.group_id) }}
+            </span>
+          </div>
+        </div>
+        <button type="button" class="constructionDialog__textBtn" @click="closeSubtractorPartGroupControllerEditor">بستن</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        نوع کنترلر گروه و پارامتر متصل به هر دستک در این بخش مشخص می‌شود.
+      </div>
+      <div class="subCategoryPreview__body">
+        <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
+          <div class="subCategoryPreview__panelHead">
+            <div class="subCategoryPreview__panelTitle">نوع کنترلر</div>
+            <div class="subCategoryPreview__panelCaption">کنترلرها از همان مدل گروه داخلی استفاده می‌کنند.</div>
+          </div>
+          <div class="constructionDialog__controllerForm">
+            <label class="constructionDialog__field">
+              <span class="constructionDialog__fieldLabel">نوع کنترلر گروه</span>
+              <select
+                :value="subtractorPartGroupControllerEditorType"
+                class="constructionDialog__input"
+                @change="updateSubtractorPartGroupControllerEditorType($event.target.value)"
+              >
+                <option value="">بدون کنترلر</option>
+                <option v-for="option in INTERNAL_GROUP_CONTROLLER_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+
+            <div v-if="subtractorPartGroupControllerEditorType" class="constructionDialog__controllerCards">
+              <div
+                v-for="definition in getInternalPartGroupControllerDefinitions(subtractorPartGroupControllerEditorType)"
+                :key="definition.key"
+                class="constructionDialog__controllerCard"
+              >
+                <div class="constructionDialog__controllerCardMeta">
+                  <div class="constructionDialog__controllerCardTitle">{{ definition.label }}</div>
+                  <div class="constructionDialog__controllerCardCaption">{{ definition.key }}</div>
+                </div>
+                <select
+                  v-model="subtractorPartGroupControllerEditorBindings[definition.key].param_code"
+                  class="constructionDialog__input"
+                  :disabled="!getSubtractorPartGroupControllerParamOptions(activeSubtractorPartGroupControllerRow).length"
+                >
+                  <option :value="null">بدون اتصال</option>
+                  <option
+                    v-for="option in getSubtractorPartGroupControllerParamOptions(activeSubtractorPartGroupControllerRow)"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div
+              v-if="subtractorPartGroupControllerEditorType && !getSubtractorPartGroupControllerParamOptions(activeSubtractorPartGroupControllerRow).length"
+              class="designMenu__cabinetState"
+            >
+              برای این گروه دستگیره مخفی هنوز پارامتری انتخاب نشده است. ابتدا گروه‌های پارامتری همین گروه را تنظیم کنید.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" :disabled="subtractorPartGroupControllerEditorApplying" @click="closeSubtractorPartGroupControllerEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" :disabled="subtractorPartGroupControllerEditorApplying" @click="applySubtractorPartGroupControllerEditor">
+          <span v-if="subtractorPartGroupControllerEditorApplying" class="constructionDialog__spinner"></span>
+          <span>{{ subtractorPartGroupControllerEditorApplying ? "در حال اعمال..." : "اعمال" }}</span>
         </button>
       </div>
     </div>

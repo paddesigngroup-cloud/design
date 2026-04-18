@@ -59,6 +59,7 @@ class ParamGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMi
     admin: Mapped["Admin | None"] = relationship(back_populates="param_groups")
     params: Mapped[list["Param"]] = relationship(back_populates="param_group")
     internal_part_group_links: Mapped[list["InternalPartGroupParamGroup"]] = relationship(back_populates="param_group")
+    subtractor_part_group_links: Mapped[list["SubtractorPartGroupParamGroup"]] = relationship(back_populates="param_group")
 
 
 class Param(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -88,6 +89,7 @@ class Param(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
     param_group: Mapped["ParamGroup"] = relationship(back_populates="params")
     sub_category_defaults: Mapped[list["SubCategoryParamDefault"]] = relationship(back_populates="param")
     internal_part_group_defaults: Mapped[list["InternalPartGroupParamDefault"]] = relationship(back_populates="param")
+    subtractor_part_group_defaults: Mapped[list["SubtractorPartGroupParamDefault"]] = relationship(back_populates="param")
     door_part_group_defaults: Mapped[list["DoorPartGroupParamDefault"]] = relationship(back_populates="param")
 
 
@@ -568,6 +570,121 @@ class DoorPartGroupParamDefault(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteM
 
     door_part_group: Mapped["DoorPartGroup"] = relationship(back_populates="param_defaults")
     param: Mapped["Param"] = relationship(back_populates="door_part_group_defaults")
+
+
+class SubtractorPartGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "subtractor_part_groups"
+
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    group_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    group_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    line_color: Mapped[str] = mapped_column(String(7), nullable=False, default="#8A98A3", server_default="#8A98A3")
+    controller_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    controller_bindings: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    admin: Mapped["Admin | None"] = relationship()
+    parts: Mapped[list["SubtractorPartGroupItem"]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )
+    param_groups: Mapped[list["SubtractorPartGroupParamGroup"]] = relationship(
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )
+    param_defaults: Mapped[list["SubtractorPartGroupParamDefault"]] = relationship(
+        back_populates="subtractor_part_group",
+        cascade="all, delete-orphan",
+    )
+
+
+class SubtractorPartGroupItem(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "subtractor_part_group_items"
+
+    group_ref_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("subtractor_part_groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_formula_id: Mapped[int] = mapped_column(
+        ForeignKey("part_formulas.part_formula_id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_kind_id: Mapped[int] = mapped_column(
+        ForeignKey("part_kinds.part_kind_id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    part_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+    group: Mapped["SubtractorPartGroup"] = relationship(back_populates="parts")
+    part_formula: Mapped["PartFormula"] = relationship()
+
+
+class SubtractorPartGroupParamGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "subtractor_part_group_param_groups"
+
+    group_ref_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("subtractor_part_groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    param_group_id: Mapped[int] = mapped_column(
+        ForeignKey("param_groups.param_group_id", ondelete="RESTRICT", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    param_group_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    param_group_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    param_group_icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+    group: Mapped["SubtractorPartGroup"] = relationship(back_populates="param_groups")
+    param_group: Mapped["ParamGroup"] = relationship(back_populates="subtractor_part_group_links")
+
+
+class SubtractorPartGroupParamDefault(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "subtractor_part_group_param_defaults"
+
+    subtractor_part_group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("subtractor_part_groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    param_id: Mapped[int] = mapped_column(
+        ForeignKey("params.param_id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    display_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    input_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="value", server_default="value")
+    binary_off_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    binary_on_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    binary_off_icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    binary_on_icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    subtractor_part_group: Mapped["SubtractorPartGroup"] = relationship(back_populates="param_defaults")
+    param: Mapped["Param"] = relationship(back_populates="subtractor_part_group_defaults")
 
 
 class SubCategoryDesignInteriorInstance(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):

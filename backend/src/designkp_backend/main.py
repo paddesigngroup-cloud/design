@@ -11,6 +11,7 @@ from designkp_backend.api.routers.editor_settings import router as editor_settin
 from designkp_backend.api.routers.internal_part_groups import router as internal_part_groups_router
 from designkp_backend.api.routers.orders import router as orders_router
 from designkp_backend.api.routers.order_designs import router as order_designs_router
+from designkp_backend.api.routers.subtractor_part_groups import router as subtractor_part_groups_router
 from designkp_backend.api.routers.part_formulas import router as part_formulas_router
 from designkp_backend.api.routers.params import router as params_router
 from designkp_backend.api.routers.param_groups import router as param_groups_router
@@ -57,3 +58,4 @@ app.include_router(sub_categories_router, prefix="/api")
 app.include_router(sub_category_designs_router, prefix="/api")
 app.include_router(internal_part_groups_router, prefix="/api")
 app.include_router(door_part_groups_router, prefix="/api")
+app.include_router(subtractor_part_groups_router, prefix="/api")
