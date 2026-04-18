@@ -33,7 +33,7 @@
 32,4,13,left_side_left_space_drawer,بدنه کشو چپ فضای چپ,dr_g_d-f61,dr_b_h-f62,le_ri_s_dr_th,dr_g_d-f61,dr_b_h-f62,f63+(le_ri_s_dr_th/2),((dr_g_d-f61)/2)+f64,((dr_b_h-f62)/2)+f65,0,system
 33,4,14,right_side_left_space_drawer,بدنه کشو راست فضای چپ,dr_g_d-f66,dr_b_h-f67,le_ri_s_dr_th,dr_g_d-f66,dr_b_h-f67,f103+(le_ri_s_dr_th/2),((dr_g_d-f66)/2)+f69,((dr_b_h-f67)/2)+f70,0,system
 34,4,15,bottom_left_space_drawer,کف کشو فضای چپ,(dr_w)-f101,dr_g_d-f72,(dr_w)-f101,dr_g_d-f72,bo_dr_th,f73+((dr_w-f101)/2),((dr_g_d-f72)/2)+f74,(bo_dr_th/2)+f75,0,system
-35,6,1,left_vertical_equal_door,درب برابر عمودی چپ,d_h-f104-f111,((d_w-f105)/2)-f110,((d_w-f105)/2)-f110,d_th,d_h-f104,((((d_w-f105)/2)-f110)/2)+f106,f107+(d_th/2),((d_h-f104-f111)/2)+f108+u_f_h,0,system
-36,6,2,right_vertical_equal_door,درب برابر عمودی راست,d_h-f104-f111,((d_w-f105)/2)-f110,((d_w-f105)/2)-f110,d_th,d_h-f104,w-f109-((((d_w-f105)/2)-f110)/2),f107+(d_th/2),((d_h-f104-f111)/2)+f108+u_f_h,0,system
-37,6,3,left_vertical_door,درب عمودی چپ,d_h-f104-f111,d_w-f105-f110,d_w-f105-f110,d_th,d_h-f104-f111,((d_w-f105-f110)/2)+f106,f107+(d_th/2),((d_h-f104-f111)/2)+f108+u_f_h,0,system
-38,6,4,right_vertical_door,درب عمودی راست,d_h-f104-f111,d_w-f105-f110,d_w-f105-f110,d_th,d_h-f104-f111,w-f109-((d_w-f105-f110)/2),f107+(d_th/2),((d_h-f104-f111)/2)+f108+u_f_h,0,system
+35,6,1,left_vertical_equal_door,درب برابر عمودی چپ,(d_h-f104)-f111,((d_w-f105)/2)-f110,((d_w-f105)/2)-f110,d_th,(d_h-f104)-f111,((((d_w-f105)/2)-f110)/2)+f106,f107+(d_th/2),((d_h-f104-f111)/2)+f108+u_f_h,0,system
+36,6,2,right_vertical_equal_door,درب برابر عمودی راست,(d_h-f104)-f111,((d_w-f105)/2)-f110,((d_w-f105)/2)-f110,d_th,(d_h-f104)-f111,w-f109-((((d_w-f105)/2)-f110)/2),f107+(d_th/2),((d_h-f104-f111)/2)+f108+u_f_h,0,system
+37,6,3,left_vertical_door,درب عمودی چپ,(d_h-f104)-f111,d_w-f105-f110,d_w-f105-f110,d_th,(d_h-f104)-f111,((d_w-f105-f110)/2)+f106,f107+(d_th/2),((d_h-f104-f111)/2)+f108+u_f_h,0,system
+38,6,4,right_vertical_door,درب عمودی راست,(d_h-f104)-f111,d_w-f105-f110,d_w-f105-f110,d_th,(d_h-f104)-f111,w-f109-((d_w-f105-f110)/2),f107+(d_th/2),((d_h-f104-f111)/2)+f108+u_f_h,0,system
