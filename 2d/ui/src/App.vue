@@ -11079,6 +11079,31 @@ function previewConstructionDoorPartGroupLineColor(item, lineColor) {
   }
 }
 
+function previewConstructionSubtractorPartGroupLineColor(item, lineColor) {
+  if (!item) return;
+  const normalizedColor = normalizeHexColor(lineColor, DEFAULT_INTERIOR_LINE_COLOR);
+  item.line_color = normalizedColor;
+  if (subtractorPartGroupEditorDraft.value && String(subtractorPartGroupEditorDraft.value.id || "") === String(item.id || "")) {
+    subtractorPartGroupEditorDraft.value.line_color = normalizedColor;
+  }
+}
+
+async function saveConstructionSubtractorPartGroupLineColor(item) {
+  if (!item?.id) return;
+  const saveKey = String(item.id);
+  constructionSavingIds.value = [...new Set([...constructionSavingIds.value, saveKey])];
+  try {
+    const saved = await persistSubtractorPartGroupRow(item);
+    if (subtractorPartGroupEditorDraft.value && String(subtractorPartGroupEditorDraft.value.id || "") === saveKey) {
+      Object.assign(subtractorPartGroupEditorDraft.value, saved);
+    }
+  } catch (error) {
+    showAlert(error?.message || "ذخیره رنگ پیش‌فرض گروه دستگیره مخفی انجام نشد.", { title: "خطا" });
+  } finally {
+    constructionSavingIds.value = constructionSavingIds.value.filter((id) => id !== saveKey);
+  }
+}
+
 async function saveConstructionDoorPartGroupLineColor(item) {
   if (!item?.id) return;
   const payload = normalizeDoorPartGroupPayload(item);
@@ -20579,7 +20604,25 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--code">{{ item.code }}</td>
                     <td class="constructionDialog__col constructionDialog__col--title">{{ item.group_title }}</td>
                     <td class="constructionDialog__col constructionDialog__col--outlineColor">
-                      <span class="constructionDialog__swatch" :style="{ backgroundColor: normalizeHexColor(item.line_color, DEFAULT_INTERIOR_LINE_COLOR) }"></span>
+                      <div class="constructionDialog__colorEditor">
+                        <input
+                          v-model="item.line_color"
+                          class="constructionDialog__colorInput"
+                          type="color"
+                          @input="previewConstructionSubtractorPartGroupLineColor(item, item.line_color)"
+                          @change="saveConstructionSubtractorPartGroupLineColor(item)"
+                        />
+                        <input
+                          v-model="item.line_color"
+                          class="constructionDialog__input constructionDialog__input--mono constructionDialog__colorHex"
+                          type="text"
+                          dir="ltr"
+                          maxlength="7"
+                          :placeholder="DEFAULT_INTERIOR_LINE_COLOR"
+                          @input="previewConstructionSubtractorPartGroupLineColor(item, item.line_color)"
+                          @change="saveConstructionSubtractorPartGroupLineColor(item)"
+                        />
+                      </div>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--defaults">
                       <div class="constructionDialog__defaultsActions">
