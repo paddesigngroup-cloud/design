@@ -3284,6 +3284,13 @@ option {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
+}
+.constructionDialog__iconFileName {
+  font-size: 11px;
+  color: rgba(52, 20, 31, 0.76);
+  font-family: Vazirmatn, sans-serif;
+  direction: ltr;
 }
 .constructionDialog__miniBtn {
   width: 34px;

@@ -2763,6 +2763,8 @@ const activeDoorPartGroupIconRowId = ref(null);
 const constructionUploadingIconRowId = ref(null);
 const constructionUploadingInternalPartGroupIconRowId = ref(null);
 const constructionUploadingDoorPartGroupIconRowId = ref(null);
+const INTERNAL_PART_GROUP_EDITOR_ICON_TARGET = "__internal-part-group-editor__";
+const DOOR_PART_GROUP_EDITOR_ICON_TARGET = "__door-part-group-editor__";
 const constructionTables = [
   { id: "templates", title: "تمپلیت‌ها", status: "active" },
   { id: "categories", title: "دسته‌بندی‌ها", status: "active" },
@@ -6703,6 +6705,14 @@ function isUploadingDoorPartGroupIcon(item) {
   return String(constructionUploadingDoorPartGroupIconRowId.value || "") === String(item?.id || "");
 }
 
+function isUploadingInternalPartGroupEditorIcon() {
+  return String(constructionUploadingInternalPartGroupIconRowId.value || "") === INTERNAL_PART_GROUP_EDITOR_ICON_TARGET;
+}
+
+function isUploadingDoorPartGroupEditorIcon() {
+  return String(constructionUploadingDoorPartGroupIconRowId.value || "") === DOOR_PART_GROUP_EDITOR_ICON_TARGET;
+}
+
 function getSubCategoryDefaultIconUrl(fileName) {
   const normalized = normalizeIconFileName(fileName);
   if (!normalized) return DEFAULT_SUB_CATEGORY_PARAM_ICON;
@@ -7553,12 +7563,18 @@ function closeInternalPartGroupEditor() {
   internalPartGroupEditorOpen.value = false;
   internalPartGroupEditorDraft.value = null;
   internalPartGroupParamGroupsOpen.value = false;
+  if (activeInternalPartGroupIconRowId.value === INTERNAL_PART_GROUP_EDITOR_ICON_TARGET) {
+    activeInternalPartGroupIconRowId.value = null;
+  }
 }
 
 function closeDoorPartGroupEditor() {
   doorPartGroupEditorOpen.value = false;
   doorPartGroupEditorDraft.value = null;
   doorPartGroupParamGroupsOpen.value = false;
+  if (activeDoorPartGroupIconRowId.value === DOOR_PART_GROUP_EDITOR_ICON_TARGET) {
+    activeDoorPartGroupIconRowId.value = null;
+  }
 }
 
 function hasInternalPartGroupDefaultsChanges() {
@@ -14600,8 +14616,14 @@ async function onParamGroupIconFileChange(event) {
 }
 
 function triggerInternalPartGroupIconUpload(item) {
-  if (isUploadingInternalPartGroupIcon(item)) return;
-  activeInternalPartGroupIconRowId.value = String(item.id);
+  if (!item) return;
+  if (item === internalPartGroupEditorDraft.value) {
+    if (isUploadingInternalPartGroupEditorIcon()) return;
+    activeInternalPartGroupIconRowId.value = INTERNAL_PART_GROUP_EDITOR_ICON_TARGET;
+  } else {
+    if (isUploadingInternalPartGroupIcon(item)) return;
+    activeInternalPartGroupIconRowId.value = String(item.id);
+  }
   internalPartGroupIconInputEl.value?.click?.();
 }
 
@@ -14609,7 +14631,9 @@ async function onInternalPartGroupIconFileChange(event) {
   const file = event?.target?.files?.[0];
   const rowId = activeInternalPartGroupIconRowId.value;
   if (!file || !rowId) return;
-  const item = editableInternalPartGroups.value.find((row) => String(row.id) === rowId);
+  const item = rowId === INTERNAL_PART_GROUP_EDITOR_ICON_TARGET
+    ? internalPartGroupEditorDraft.value
+    : editableInternalPartGroups.value.find((row) => String(row.id) === rowId);
   if (!item) return;
   const previousIconFileName = normalizeIconFileName(item.icon_path);
   constructionUploadingInternalPartGroupIconRowId.value = rowId;
@@ -14627,7 +14651,7 @@ async function onInternalPartGroupIconFileChange(event) {
       await discardStagedParamGroupIcon(previousIconFileName);
     }
     item.icon_path = normalizeIconFileName(payload.file_name || payload.icon_path);
-    if (!item.__isNew) item.__dirty = true;
+    if (item?.id && !item.__isNew) item.__dirty = true;
   } catch (_) {
     showAlert("آپلود آیکون انجام نشد. فقط فایل تصویری معتبر با اندازه استاندارد قابل قبول است.", { title: "آیکون گروه داخلی" });
   } finally {
@@ -14638,8 +14662,14 @@ async function onInternalPartGroupIconFileChange(event) {
 }
 
 function triggerDoorPartGroupIconUpload(item) {
-  if (isUploadingDoorPartGroupIcon(item)) return;
-  activeDoorPartGroupIconRowId.value = String(item.id);
+  if (!item) return;
+  if (item === doorPartGroupEditorDraft.value) {
+    if (isUploadingDoorPartGroupEditorIcon()) return;
+    activeDoorPartGroupIconRowId.value = DOOR_PART_GROUP_EDITOR_ICON_TARGET;
+  } else {
+    if (isUploadingDoorPartGroupIcon(item)) return;
+    activeDoorPartGroupIconRowId.value = String(item.id);
+  }
   doorPartGroupIconInputEl.value?.click?.();
 }
 
@@ -14647,7 +14677,9 @@ async function onDoorPartGroupIconFileChange(event) {
   const file = event?.target?.files?.[0];
   const rowId = activeDoorPartGroupIconRowId.value;
   if (!file || !rowId) return;
-  const item = editableDoorPartGroups.value.find((row) => String(row.id) === rowId);
+  const item = rowId === DOOR_PART_GROUP_EDITOR_ICON_TARGET
+    ? doorPartGroupEditorDraft.value
+    : editableDoorPartGroups.value.find((row) => String(row.id) === rowId);
   if (!item) return;
   const previousIconFileName = normalizeIconFileName(item.icon_path);
   constructionUploadingDoorPartGroupIconRowId.value = rowId;
@@ -14665,7 +14697,7 @@ async function onDoorPartGroupIconFileChange(event) {
       await discardStagedParamGroupIcon(previousIconFileName);
     }
     item.icon_path = normalizeIconFileName(payload.file_name || payload.icon_path);
-    if (!item.__isNew) item.__dirty = true;
+    if (item?.id && !item.__isNew) item.__dirty = true;
   } catch (_) {
     showAlert("آپلود آیکون انجام نشد. فقط فایل تصویری معتبر با اندازه استاندارد قابل قبول است.", { title: "آیکون گروه درب" });
   } finally {
@@ -19643,7 +19675,6 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--code">کد گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان گروه</th>
-                    <th class="constructionDialog__col constructionDialog__col--icon">آیکون</th>
                     <th class="constructionDialog__col constructionDialog__col--outlineColor">رنگ خطوط</th>
                     <th class="constructionDialog__col constructionDialog__col--defaults">پیش‌فرض‌ها</th>
                     <th class="constructionDialog__col constructionDialog__col--defaults">کنترلر گروه</th>
@@ -19664,21 +19695,6 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.group_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--code">{{ item.code }}</td>
                     <td class="constructionDialog__col constructionDialog__col--title">{{ item.group_title }}</td>
-                    <td class="constructionDialog__col constructionDialog__col--icon">
-                      <div class="constructionDialog__iconCell">
-                        <button
-                          type="button"
-                          class="constructionDialog__miniBtn constructionDialog__iconUploadBtn"
-                          :class="[hasConstructionItemIcon(item) ? 'is-filled' : 'is-empty', isUploadingInternalPartGroupIcon(item) ? 'is-loading' : '']"
-                          :title="isUploadingInternalPartGroupIcon(item) ? 'در حال آپلود آیکون...' : getConstructionItemIconTooltip(item)"
-                          :disabled="isUploadingInternalPartGroupIcon(item)"
-                          @click="triggerInternalPartGroupIconUpload(item)"
-                        >
-                          <span v-if="isUploadingInternalPartGroupIcon(item)" class="constructionDialog__spinner"></span>
-                          <span v-else>↑</span>
-                        </button>
-                      </div>
-                    </td>
                     <td class="constructionDialog__col constructionDialog__col--outlineColor">
                       <div class="constructionDialog__colorEditor">
                         <input
@@ -19727,7 +19743,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionInternalPartGroups.length">
-                    <td class="constructionDialog__col constructionDialog__col--title" colspan="10">هنوز گروهی برای قطعات داخلی ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="9">هنوز گروهی برای قطعات داخلی ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -19772,7 +19788,6 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--id">شناسه گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--code">کد گروه</th>
                     <th class="constructionDialog__col constructionDialog__col--title">عنوان گروه</th>
-                    <th class="constructionDialog__col constructionDialog__col--icon">آیکون</th>
                     <th class="constructionDialog__col constructionDialog__col--outlineColor">رنگ خطوط</th>
                     <th class="constructionDialog__col constructionDialog__col--defaults">پیش‌فرض‌ها</th>
                     <th class="constructionDialog__col constructionDialog__col--defaults">کنترلر گروه</th>
@@ -19793,21 +19808,6 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.group_id) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--code">{{ item.code }}</td>
                     <td class="constructionDialog__col constructionDialog__col--title">{{ item.group_title }}</td>
-                    <td class="constructionDialog__col constructionDialog__col--icon">
-                      <div class="constructionDialog__iconCell">
-                        <button
-                          type="button"
-                          class="constructionDialog__miniBtn constructionDialog__iconUploadBtn"
-                          :class="[hasConstructionItemIcon(item) ? 'is-filled' : 'is-empty', isUploadingDoorPartGroupIcon(item) ? 'is-loading' : '']"
-                          :title="isUploadingDoorPartGroupIcon(item) ? 'در حال آپلود آیکون...' : getConstructionItemIconTooltip(item)"
-                          :disabled="isUploadingDoorPartGroupIcon(item)"
-                          @click="triggerDoorPartGroupIconUpload(item)"
-                        >
-                          <span v-if="isUploadingDoorPartGroupIcon(item)" class="constructionDialog__spinner"></span>
-                          <span v-else>↑</span>
-                        </button>
-                      </div>
-                    </td>
                     <td class="constructionDialog__col constructionDialog__col--outlineColor">
                       <div class="constructionDialog__colorEditor">
                         <input
@@ -19854,7 +19854,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionDoorPartGroups.length">
-                    <td class="constructionDialog__col constructionDialog__col--title" colspan="10">هنوز گروهی برای قطعات درب ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="9">هنوز گروهی برای قطعات درب ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -20331,6 +20331,23 @@ onBeforeUnmount(() => {
             <input v-model="internalPartGroupEditorDraft.code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
           </label>
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>آیکون گروه</span>
+            <div class="constructionDialog__iconCell">
+              <button
+                type="button"
+                class="constructionDialog__miniBtn constructionDialog__iconUploadBtn"
+                :class="[hasConstructionItemIcon(internalPartGroupEditorDraft) ? 'is-filled' : 'is-empty', isUploadingInternalPartGroupEditorIcon() ? 'is-loading' : '']"
+                :title="isUploadingInternalPartGroupEditorIcon() ? 'در حال آپلود آیکون...' : getConstructionItemIconTooltip(internalPartGroupEditorDraft)"
+                :disabled="isUploadingInternalPartGroupEditorIcon()"
+                @click="triggerInternalPartGroupIconUpload(internalPartGroupEditorDraft)"
+              >
+                <span v-if="isUploadingInternalPartGroupEditorIcon()" class="constructionDialog__spinner"></span>
+                <span v-else>↑</span>
+              </button>
+              <span class="constructionDialog__iconFileName">{{ normalizeIconFileName(internalPartGroupEditorDraft.icon_path) || "بدون آیکون" }}</span>
+            </div>
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
             <span>رنگ پیش‌فرض خطوط</span>
             <div class="constructionDialog__colorEditor">
               <input
@@ -20707,6 +20724,23 @@ onBeforeUnmount(() => {
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
             <span>کد گروه</span>
             <input v-model="doorPartGroupEditorDraft.code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>آیکون گروه</span>
+            <div class="constructionDialog__iconCell">
+              <button
+                type="button"
+                class="constructionDialog__miniBtn constructionDialog__iconUploadBtn"
+                :class="[hasConstructionItemIcon(doorPartGroupEditorDraft) ? 'is-filled' : 'is-empty', isUploadingDoorPartGroupEditorIcon() ? 'is-loading' : '']"
+                :title="isUploadingDoorPartGroupEditorIcon() ? 'در حال آپلود آیکون...' : getConstructionItemIconTooltip(doorPartGroupEditorDraft)"
+                :disabled="isUploadingDoorPartGroupEditorIcon()"
+                @click="triggerDoorPartGroupIconUpload(doorPartGroupEditorDraft)"
+              >
+                <span v-if="isUploadingDoorPartGroupEditorIcon()" class="constructionDialog__spinner"></span>
+                <span v-else>↑</span>
+              </button>
+              <span class="constructionDialog__iconFileName">{{ normalizeIconFileName(doorPartGroupEditorDraft.icon_path) || "بدون آیکون" }}</span>
+            </div>
           </label>
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
             <span>رنگ پیش‌فرض خطوط</span>
