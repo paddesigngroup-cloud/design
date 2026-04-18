@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.catalog import Category, SubCategory, SubCategoryDesign, SubCategoryDesignDoorInstance, SubCategoryDesignInteriorInstance, SubCategoryDesignPart
+from designkp_backend.db.models.catalog import Category, SubCategory, SubCategoryDesign, SubCategoryDesignDoorInstance, SubCategoryDesignInteriorInstance, SubCategoryDesignPart, SubCategoryDesignSubtractorInstance
 from designkp_backend.services.admin_access import require_admin_if_present
 from designkp_backend.services.sub_category_designs import (
     _collect_controller_selection_boxes,
@@ -19,11 +19,13 @@ from designkp_backend.services.sub_category_designs import (
     build_sub_category_param_display_snapshot,
     compose_sub_category_design_preview,
     door_instance_tables_ready,
+    subtractor_instance_tables_ready,
     derive_interior_box_snapshot,
     interior_instance_tables_ready,
     rebuild_design_snapshots,
     require_accessible_door_part_group,
     require_accessible_internal_part_group,
+    require_accessible_subtractor_part_group,
     require_accessible_sub_category,
     resolve_door_instance_preview,
     resolve_internal_instance_preview,
@@ -121,6 +123,7 @@ class SubCategoryDesignPreviewResponse(BaseModel):
     viewer_boxes: list[dict[str, object]]
     parts: list[SubCategoryDesignPartPreviewItem]
     interior_instances: list[SubCategoryDesignInteriorInstancePreviewItem]
+    subtractor_instances: list[dict[str, object]] = Field(default_factory=list)
     door_instances: list[dict[str, object]] = Field(default_factory=list)
 
 
@@ -140,6 +143,7 @@ class SubCategoryDesignItem(BaseModel):
     is_system: bool
     parts: list[SubCategoryDesignPartItem]
     interior_instances: list[SubCategoryDesignInteriorInstanceItem]
+    subtractor_instances: list[dict[str, object]] = Field(default_factory=list)
     door_instances: list[dict[str, object]] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
@@ -155,6 +159,7 @@ class SubCategoryDesignCreate(BaseModel):
     is_system: bool = False
     parts: list[SubCategoryDesignPartSelectionPayload] = Field(default_factory=list)
     interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
+    subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
     door_instances: list["SubCategoryDesignDoorInstanceDraftPayload"] = Field(default_factory=list)
 
 
@@ -168,6 +173,7 @@ class SubCategoryDesignUpdate(BaseModel):
     is_system: bool
     parts: list[SubCategoryDesignPartSelectionPayload] = Field(default_factory=list)
     interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
+    subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
     door_instances: list["SubCategoryDesignDoorInstanceDraftPayload"] = Field(default_factory=list)
 
 
@@ -176,6 +182,7 @@ class SubCategoryDesignPreviewDraftRequest(BaseModel):
     sub_category_id: uuid.UUID
     parts: list[SubCategoryDesignPartSelectionPayload] = Field(default_factory=list)
     interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
+    subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
     door_instances: list["SubCategoryDesignDoorInstanceDraftPayload"] = Field(default_factory=list)
 
 
@@ -187,6 +194,17 @@ class SubCategoryDesignInteriorInstanceDraftPayload(BaseModel):
     ui_order: int = Field(ge=0)
     placement_z: float = 0
     interior_box_snapshot: dict[str, object] = Field(default_factory=dict)
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    param_meta: dict[str, dict[str, object]] = Field(default_factory=dict)
+
+
+class SubCategoryDesignSubtractorInstanceDraftPayload(BaseModel):
+    id: uuid.UUID | None = None
+    subtractor_part_group_id: uuid.UUID
+    instance_code: str = Field(min_length=1, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
+    ui_order: int = Field(ge=0)
+    placement_z: float = 0
     param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
     param_meta: dict[str, dict[str, object]] = Field(default_factory=dict)
 
@@ -217,6 +235,39 @@ class SubCategoryDesignInteriorInstanceCreate(BaseModel):
 
 
 class SubCategoryDesignInteriorInstanceUpdate(BaseModel):
+    placement_z: float
+    ui_order: int = Field(ge=0)
+    instance_code: str = Field(min_length=1, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
+class SubCategoryDesignSubtractorInstanceItem(BaseModel):
+    id: uuid.UUID
+    subtractor_part_group_id: uuid.UUID
+    controller_type: str | None = None
+    controller_bindings: dict[str, dict[str, str | None]] = Field(default_factory=dict)
+    instance_code: str
+    line_color: str | None = None
+    ui_order: int
+    placement_z: float
+    param_values: dict[str, str | None] = Field(default_factory=dict)
+    param_meta: dict[str, dict[str, object]] = Field(default_factory=dict)
+    part_snapshots: list[dict[str, object]] = Field(default_factory=list)
+    viewer_boxes: list[dict[str, object]] = Field(default_factory=list)
+    status: str
+
+
+class SubCategoryDesignSubtractorInstanceCreate(BaseModel):
+    subtractor_part_group_id: uuid.UUID
+    placement_z: float = 0
+    ui_order: int | None = Field(default=None, ge=0)
+    instance_code: str | None = Field(default=None, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
+class SubCategoryDesignSubtractorInstanceUpdate(BaseModel):
     placement_z: float
     ui_order: int = Field(ge=0)
     instance_code: str = Field(min_length=1, max_length=64)
@@ -300,6 +351,7 @@ async def _ensure_unique_design_code(
 
 def _serialize_design(item: SubCategoryDesign, *, include_interior: bool = True, design_outline_color: str = "#7A4A2B") -> SubCategoryDesignItem:
     loaded_door_instances = list(getattr(item, "__dict__", {}).get("door_instances") or [])
+    loaded_subtractor_instances = list(getattr(item, "__dict__", {}).get("subtractor_instances") or [])
     return SubCategoryDesignItem(
         id=item.id,
         admin_id=item.admin_id,
@@ -340,6 +392,24 @@ def _serialize_design(item: SubCategoryDesign, *, include_interior: bool = True,
             ]
             if include_interior else []
         ),
+        subtractor_instances=[
+            {
+                "id": instance.id,
+                "subtractor_part_group_id": instance.subtractor_part_group_id,
+                "controller_type": None,
+                "controller_bindings": {},
+                "instance_code": str(instance.instance_code or "").strip(),
+                "line_color": str(getattr(instance, "line_color", "") or "").strip() or None,
+                "ui_order": int(instance.ui_order or 0),
+                "placement_z": float(getattr(instance, "placement_z", 0) or 0),
+                "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(instance.param_values or {}).items()},
+                "param_meta": {str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()},
+                "part_snapshots": [dict(row or {}) for row in list(instance.part_snapshots or [])],
+                "viewer_boxes": [dict(row or {}) for row in list(instance.viewer_boxes or [])],
+                "status": str(instance.status or "draft").strip() or "draft",
+            }
+            for instance in sorted(loaded_subtractor_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
+        ] if include_interior else [],
         door_instances=[
             {
                 "id": instance.id,
@@ -372,6 +442,7 @@ def _serialize_preview(
     resolved_base_formulas: dict[str, float],
     snapshots: list,
     interior_instances: list,
+    subtractor_instances: list | None = None,
     door_instances: list | None = None,
 ) -> SubCategoryDesignPreviewResponse:
     parts = [
@@ -429,6 +500,25 @@ def _serialize_preview(
         ],
         parts=parts,
         interior_instances=interior_preview_items,
+        subtractor_instances=[
+            {
+                "id": item.instance_id,
+                "subtractor_part_group_id": item.subtractor_part_group_id,
+                "subtractor_part_group_code": item.subtractor_part_group_code,
+                "subtractor_part_group_title": item.subtractor_part_group_title,
+                "controller_type": item.controller_type,
+                "controller_bindings": item.controller_bindings,
+                "instance_code": item.instance_code,
+                "line_color": str(getattr(item, "line_color", "") or "").strip() or None,
+                "ui_order": int(item.ui_order or 0),
+                "placement_z": float(getattr(item, "placement_z", 0) or 0),
+                "param_values": dict(item.param_values or {}),
+                "param_meta": dict(item.param_meta or {}),
+                "part_snapshots": [dict(row or {}) for row in list(getattr(item, "part_snapshots", []) or [])],
+                "viewer_boxes": [dict(row or {}) for row in list(getattr(item, "viewer_boxes", []) or [])],
+            }
+            for item in list(subtractor_instances or [])
+        ],
         door_instances=[
             {
                 "id": item.instance_id,
@@ -473,6 +563,8 @@ async def _load_design(session: AsyncSession, design_uuid: uuid.UUID) -> SubCate
     )
     if await interior_instance_tables_ready(session):
         stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
+    if await subtractor_instance_tables_ready(session):
+        stmt = stmt.options(selectinload(SubCategoryDesign.subtractor_instances))
     if await door_instance_tables_ready(session):
         stmt = stmt.options(selectinload(SubCategoryDesign.door_instances))
     item = await session.scalar(
@@ -547,6 +639,7 @@ async def list_sub_category_designs(
 ) -> list[SubCategoryDesignItem]:
     await require_admin_if_present(session, admin_id)
     include_interior = await interior_instance_tables_ready(session)
+    include_subtractors = await subtractor_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)
     stmt = select(SubCategoryDesign).options(
         selectinload(SubCategoryDesign.parts),
@@ -554,6 +647,8 @@ async def list_sub_category_designs(
     )
     if include_interior:
         stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
+    if include_subtractors:
+        stmt = stmt.options(selectinload(SubCategoryDesign.subtractor_instances))
     if include_doors:
         stmt = stmt.options(selectinload(SubCategoryDesign.door_instances))
     if admin_id is None:
@@ -581,7 +676,7 @@ async def list_sub_category_designs(
     return [
         _serialize_design(
             item,
-            include_interior=(include_interior or include_doors),
+            include_interior=(include_interior or include_subtractors or include_doors),
             design_outline_color=getattr(getattr(item.sub_category, "category", None), "design_outline_color", "#7A4A2B"),
         )
         for item in items
@@ -715,12 +810,13 @@ async def preview_sub_category_design_draft(
 ) -> SubCategoryDesignPreviewResponse:
     await require_admin_if_present(session, payload.admin_id)
     sub_category = await require_accessible_sub_category(session, admin_id=payload.admin_id, sub_category_id=payload.sub_category_id)
-    raw_params, resolved_base_formulas, snapshots, interior_instances, door_instances = await compose_sub_category_design_preview(
+    raw_params, resolved_base_formulas, snapshots, interior_instances, subtractor_instances, door_instances = await compose_sub_category_design_preview(
         session,
         admin_id=payload.admin_id,
         sub_category=sub_category,
         part_selections=[item.model_dump() for item in payload.parts],
         interior_instances=payload.interior_instances,
+        subtractor_instances=payload.subtractor_instances,
         door_instances=[
             SubCategoryDesignDoorInstance(
                 id=item.id or uuid.uuid4(),
@@ -749,6 +845,7 @@ async def preview_sub_category_design_draft(
         resolved_base_formulas=resolved_base_formulas,
         snapshots=snapshots,
         interior_instances=interior_instances,
+        subtractor_instances=subtractor_instances,
         door_instances=door_instances,
     )
 
@@ -765,11 +862,12 @@ async def rebuild_sub_category_design_parts(design_uuid: uuid.UUID, session: Asy
 async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> SubCategoryDesignPreviewResponse:
     item = await _load_design(session, design_uuid)
     include_interior = await interior_instance_tables_ready(session)
+    include_subtractors = await subtractor_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)
     sub_category = await session.get(SubCategory, item.sub_category_id)
     if not sub_category or sub_category.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found for this design.")
-    raw_params, resolved_base_formulas, snapshots, interior_instances, door_instances = await compose_sub_category_design_preview(
+    raw_params, resolved_base_formulas, snapshots, interior_instances, subtractor_instances, door_instances = await compose_sub_category_design_preview(
         session,
         admin_id=item.admin_id,
         sub_category=sub_category,
@@ -782,6 +880,7 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
             for part in list(item.parts or [])
         ],
         interior_instances=list(item.interior_instances or []) if include_interior else [],
+        subtractor_instances=list(getattr(item, "__dict__", {}).get("subtractor_instances") or []) if include_interior else [],
         door_instances=list(getattr(item, "__dict__", {}).get("door_instances") or []) if include_doors else [],
     )
     return _serialize_preview(
@@ -792,6 +891,7 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
         resolved_base_formulas=resolved_base_formulas,
         snapshots=snapshots,
         interior_instances=interior_instances,
+        subtractor_instances=subtractor_instances,
         door_instances=door_instances,
     )
 
@@ -805,6 +905,14 @@ def _normalize_interior_param_values(payload: dict[str, str | int | float | bool
 
 
 def _normalize_door_param_values(payload: dict[str, str | int | float | bool | None]) -> dict[str, str | None]:
+    return {
+        str(key): (None if value is None else str(value))
+        for key, value in dict(payload or {}).items()
+        if str(key or "").strip()
+    }
+
+
+def _normalize_subtractor_param_values(payload: dict[str, str | int | float | bool | None]) -> dict[str, str | None]:
     return {
         str(key): (None if value is None else str(value))
         for key, value in dict(payload or {}).items()
@@ -838,6 +946,25 @@ def _next_generated_door_instance_code(
     fallback_order: int,
 ) -> str:
     prefix = str(group_code or "door").strip() or "door"
+    existing_codes = {
+        str(getattr(item, "instance_code", "") or "").strip()
+        for item in list(existing_instances or [])
+    }
+    suffix = max(1, int(fallback_order) + 1)
+    while True:
+        candidate = f"{prefix}-{suffix:02d}"
+        if candidate not in existing_codes:
+            return candidate
+        suffix += 1
+
+
+def _next_generated_subtractor_instance_code(
+    *,
+    existing_instances: list[object],
+    group_code: str | None,
+    fallback_order: int,
+) -> str:
+    prefix = str(group_code or "subtractor").strip() or "subtractor"
     existing_codes = {
         str(getattr(item, "instance_code", "") or "").strip()
         for item in list(existing_instances or [])
@@ -1239,6 +1366,56 @@ async def _replace_door_instances(
         design = await _load_design(session, design.id)
 
 
+async def _replace_subtractor_instances(
+    session: AsyncSession,
+    *,
+    design: SubCategoryDesign,
+    payloads: list[SubCategoryDesignSubtractorInstanceDraftPayload],
+) -> None:
+    if not await subtractor_instance_tables_ready(session):
+        return
+    existing = {item.id: item for item in list(getattr(design, "subtractor_instances", []) or []) if getattr(item, "id", None) is not None}
+    keep_ids = {item.id for item in list(payloads or []) if item.id is not None}
+    for instance in list(getattr(design, "subtractor_instances", []) or []):
+        if instance.id not in keep_ids:
+            await session.delete(instance)
+    await session.flush()
+    design = await _load_design(session, design.id)
+    for payload in sorted(list(payloads or []), key=lambda row: (int(row.ui_order or 0), str(row.instance_code or ""))):
+        target = existing.get(payload.id) if payload.id is not None else None
+        group = await require_accessible_subtractor_part_group(session, admin_id=design.admin_id, group_id=payload.subtractor_part_group_id)
+        if target is None:
+            existing_instances = list(getattr(design, "subtractor_instances", []) or [])
+            next_order = int(payload.ui_order or 0)
+            next_code = str(payload.instance_code or "").strip() or _next_generated_subtractor_instance_code(
+                existing_instances=existing_instances,
+                group_code=getattr(group, "code", None),
+                fallback_order=next_order,
+            )
+            target = SubCategoryDesignSubtractorInstance(
+                design=design,
+                subtractor_part_group_id=payload.subtractor_part_group_id,
+                instance_code=next_code,
+                line_color=_normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else None,
+                ui_order=next_order,
+                placement_z=float(payload.placement_z or 0),
+                param_values=_normalize_subtractor_param_values(payload.param_values),
+                param_meta={str(key): dict(value or {}) for key, value in dict(payload.param_meta or {}).items()},
+                status="draft",
+            )
+            session.add(target)
+        else:
+            target.subtractor_part_group_id = payload.subtractor_part_group_id
+            target.instance_code = str(payload.instance_code or "").strip()
+            target.line_color = _normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else None
+            target.ui_order = int(payload.ui_order or 0)
+            target.placement_z = float(payload.placement_z or 0)
+            target.param_values = _normalize_subtractor_param_values(payload.param_values)
+            target.param_meta = {str(key): dict(value or {}) for key, value in dict(payload.param_meta or {}).items()}
+            target.status = str(getattr(target, "status", "draft") or "draft")
+        await session.flush()
+
+
 @router.post("/{design_uuid}/interior-instances", response_model=SubCategoryDesignInteriorInstanceItem, status_code=status.HTTP_201_CREATED)
 async def create_sub_category_design_interior_instance(
     design_uuid: uuid.UUID,
@@ -1374,6 +1551,155 @@ async def delete_sub_category_design_interior_instance(
     item = next((row for row in design.interior_instances if row.id == instance_id), None)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design interior instance not found.")
+    await session.delete(item)
+    await session.flush()
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{design_uuid}/subtractor-instances", response_model=SubCategoryDesignSubtractorInstanceItem, status_code=status.HTTP_201_CREATED)
+async def create_sub_category_design_subtractor_instance(
+    design_uuid: uuid.UUID,
+    payload: SubCategoryDesignSubtractorInstanceCreate,
+    session: AsyncSession = Depends(get_db_session),
+) -> SubCategoryDesignSubtractorInstanceItem:
+    if not await subtractor_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subtractor-instance tables are not available yet. Run database migrations first.")
+    design = await _load_design(session, design_uuid)
+    group = await require_accessible_subtractor_part_group(session, admin_id=design.admin_id, group_id=payload.subtractor_part_group_id)
+    existing = list(getattr(design, "subtractor_instances", []) or [])
+    next_order = payload.ui_order if payload.ui_order is not None else (max([int(row.ui_order or 0) for row in existing], default=-1) + 1)
+    next_code = str(payload.instance_code or "").strip() or _next_generated_subtractor_instance_code(existing_instances=existing, group_code=getattr(group, "code", None), fallback_order=next_order)
+    item = SubCategoryDesignSubtractorInstance(
+        design=design,
+        subtractor_part_group_id=payload.subtractor_part_group_id,
+        instance_code=next_code,
+        line_color=_normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else _normalize_hex_color(getattr(group, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR),
+        ui_order=int(next_order),
+        placement_z=float(payload.placement_z or 0),
+        param_values=_normalize_subtractor_param_values(payload.param_values),
+        param_meta={},
+        status="draft",
+    )
+    session.add(item)
+    await session.flush()
+    await session.commit()
+    return SubCategoryDesignSubtractorInstanceItem.model_validate({
+        "id": item.id,
+        "subtractor_part_group_id": item.subtractor_part_group_id,
+        "controller_type": str(getattr(group, "controller_type", "") or "").strip() or None,
+        "controller_bindings": dict(getattr(group, "controller_bindings", {}) or {}),
+        "instance_code": str(item.instance_code or ""),
+        "line_color": str(getattr(item, "line_color", "") or "").strip() or None,
+        "ui_order": int(item.ui_order or 0),
+        "placement_z": float(getattr(item, "placement_z", 0) or 0),
+        "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(item.param_values or {}).items()},
+        "param_meta": {str(key): dict(value or {}) for key, value in dict(item.param_meta or {}).items()},
+        "part_snapshots": [dict(row or {}) for row in list(item.part_snapshots or [])],
+        "viewer_boxes": [dict(row or {}) for row in list(item.viewer_boxes or [])],
+        "status": str(item.status or "draft").strip() or "draft",
+    })
+
+
+@router.patch("/{design_uuid}/subtractor-instances/{instance_id}", response_model=SubCategoryDesignSubtractorInstanceItem)
+async def update_sub_category_design_subtractor_instance(
+    design_uuid: uuid.UUID,
+    instance_id: uuid.UUID,
+    payload: SubCategoryDesignSubtractorInstanceUpdate,
+    session: AsyncSession = Depends(get_db_session),
+) -> SubCategoryDesignSubtractorInstanceItem:
+    if not await subtractor_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subtractor-instance tables are not available yet. Run database migrations first.")
+    design = await _load_design(session, design_uuid)
+    item = next((row for row in getattr(design, "subtractor_instances", []) if row.id == instance_id), None)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design subtractor instance not found.")
+    group = await require_accessible_subtractor_part_group(session, admin_id=design.admin_id, group_id=item.subtractor_part_group_id)
+    item.instance_code = str(payload.instance_code or "").strip()
+    item.line_color = _normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else None
+    item.ui_order = int(payload.ui_order)
+    item.placement_z = float(payload.placement_z or 0)
+    item.param_values = _normalize_subtractor_param_values(payload.param_values)
+    await session.flush()
+    await session.commit()
+    return SubCategoryDesignSubtractorInstanceItem.model_validate({
+        "id": item.id,
+        "subtractor_part_group_id": item.subtractor_part_group_id,
+        "controller_type": str(getattr(group, "controller_type", "") or "").strip() or None,
+        "controller_bindings": dict(getattr(group, "controller_bindings", {}) or {}),
+        "instance_code": str(item.instance_code or ""),
+        "line_color": str(getattr(item, "line_color", "") or "").strip() or None,
+        "ui_order": int(item.ui_order or 0),
+        "placement_z": float(getattr(item, "placement_z", 0) or 0),
+        "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(item.param_values or {}).items()},
+        "param_meta": {str(key): dict(value or {}) for key, value in dict(item.param_meta or {}).items()},
+        "part_snapshots": [dict(row or {}) for row in list(item.part_snapshots or [])],
+        "viewer_boxes": [dict(row or {}) for row in list(item.viewer_boxes or [])],
+        "status": str(item.status or "draft").strip() or "draft",
+    })
+
+
+@router.post("/{design_uuid}/subtractor-instances/{instance_id}/duplicate", response_model=SubCategoryDesignSubtractorInstanceItem, status_code=status.HTTP_201_CREATED)
+async def duplicate_sub_category_design_subtractor_instance(
+    design_uuid: uuid.UUID,
+    instance_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> SubCategoryDesignSubtractorInstanceItem:
+    if not await subtractor_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subtractor-instance tables are not available yet. Run database migrations first.")
+    design = await _load_design(session, design_uuid)
+    source = next((row for row in getattr(design, "subtractor_instances", []) if row.id == instance_id), None)
+    if not source:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design subtractor instance not found.")
+    group = await require_accessible_subtractor_part_group(session, admin_id=design.admin_id, group_id=source.subtractor_part_group_id)
+    next_code = _next_generated_subtractor_instance_code(
+        existing_instances=list(getattr(design, "subtractor_instances", []) or []),
+        group_code=getattr(group, "code", None),
+        fallback_order=max([int(row.ui_order or 0) for row in list(getattr(design, "subtractor_instances", []) or [])], default=-1) + 1,
+    )
+    item = SubCategoryDesignSubtractorInstance(
+        design=design,
+        subtractor_part_group_id=source.subtractor_part_group_id,
+        instance_code=next_code,
+        line_color=str(getattr(source, "line_color", "") or "").strip() or None,
+        ui_order=max([int(row.ui_order or 0) for row in list(getattr(design, "subtractor_instances", []) or [])], default=-1) + 1,
+        placement_z=float(getattr(source, "placement_z", 0) or 0),
+        param_values=dict(getattr(source, "param_values", {}) or {}),
+        param_meta=dict(getattr(source, "param_meta", {}) or {}),
+        status=str(source.status or "draft").strip() or "draft",
+    )
+    session.add(item)
+    await session.flush()
+    await session.commit()
+    return SubCategoryDesignSubtractorInstanceItem.model_validate({
+        "id": item.id,
+        "subtractor_part_group_id": item.subtractor_part_group_id,
+        "controller_type": str(getattr(group, "controller_type", "") or "").strip() or None,
+        "controller_bindings": dict(getattr(group, "controller_bindings", {}) or {}),
+        "instance_code": str(item.instance_code or ""),
+        "line_color": str(getattr(item, "line_color", "") or "").strip() or None,
+        "ui_order": int(item.ui_order or 0),
+        "placement_z": float(getattr(item, "placement_z", 0) or 0),
+        "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(item.param_values or {}).items()},
+        "param_meta": {str(key): dict(value or {}) for key, value in dict(item.param_meta or {}).items()},
+        "part_snapshots": [dict(row or {}) for row in list(item.part_snapshots or [])],
+        "viewer_boxes": [dict(row or {}) for row in list(item.viewer_boxes or [])],
+        "status": str(item.status or "draft").strip() or "draft",
+    })
+
+
+@router.delete("/{design_uuid}/subtractor-instances/{instance_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_sub_category_design_subtractor_instance(
+    design_uuid: uuid.UUID,
+    instance_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    if not await subtractor_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subtractor-instance tables are not available yet. Run database migrations first.")
+    design = await _load_design(session, design_uuid)
+    item = next((row for row in getattr(design, "subtractor_instances", []) if row.id == instance_id), None)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category design subtractor instance not found.")
     await session.delete(item)
     await session.flush()
     await session.commit()

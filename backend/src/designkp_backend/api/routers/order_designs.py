@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.exc import StaleDataError
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.account import OrderDesign, OrderDesignDoorInstance, OrderDesignInteriorInstance
+from designkp_backend.db.models.account import OrderDesign, OrderDesignDoorInstance, OrderDesignInteriorInstance, OrderDesignSubtractorInstance
 from designkp_backend.db.models.catalog import SubCategory, SubCategoryDesign
 from designkp_backend.services.order_designs import (
     SNAPSHOT_META_KEY,
@@ -36,7 +36,7 @@ from designkp_backend.services.order_designs import (
     sync_order_design_snapshot,
     with_order_design_snapshot_checksum,
 )
-from designkp_backend.services.sub_category_designs import require_accessible_door_part_group, require_accessible_internal_part_group
+from designkp_backend.services.sub_category_designs import require_accessible_door_part_group, require_accessible_internal_part_group, require_accessible_subtractor_part_group, subtractor_instance_tables_ready
 
 router = APIRouter(prefix="/order-designs", tags=["order_designs"])
 DEFAULT_INTERIOR_LINE_COLOR = "#8A98A3"
@@ -72,6 +72,7 @@ class OrderDesignItem(BaseModel):
     part_snapshots: list[dict[str, object]]
     viewer_boxes: list[dict[str, object]]
     interior_instances: list[dict[str, object]]
+    subtractor_instances: list[dict[str, object]]
     door_instances: list[dict[str, object]]
     snapshot_checksum: str
 
@@ -121,6 +122,41 @@ class OrderDesignInteriorInstanceItem(BaseModel):
     ui_order: int
     placement_z: float
     interior_box_snapshot: dict[str, object]
+    param_values: dict[str, str | None]
+    param_meta: dict[str, dict[str, object]]
+    part_snapshots: list[dict[str, object]]
+    viewer_boxes: list[dict[str, object]]
+    status: str
+
+    model_config = {"from_attributes": True}
+
+
+class OrderDesignSubtractorInstanceUpdate(BaseModel):
+    placement_z: float
+    ui_order: int = Field(ge=0)
+    instance_code: str = Field(min_length=1, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
+class OrderDesignSubtractorInstanceCreate(BaseModel):
+    subtractor_part_group_id: uuid.UUID
+    placement_z: float = 0
+    ui_order: int | None = Field(default=None, ge=0)
+    instance_code: str | None = Field(default=None, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+
+class OrderDesignSubtractorInstanceItem(BaseModel):
+    id: uuid.UUID
+    subtractor_part_group_id: uuid.UUID
+    controller_type: str | None = None
+    controller_bindings: dict[str, dict[str, str | None]] = Field(default_factory=dict)
+    instance_code: str
+    line_color: str | None = None
+    ui_order: int
+    placement_z: float
     param_values: dict[str, str | None]
     param_meta: dict[str, dict[str, object]]
     part_snapshots: list[dict[str, object]]
@@ -214,9 +250,10 @@ def _box_signature(box: dict[str, object]) -> str:
 def _merge_viewer_boxes(
     root_boxes: list[dict[str, object]] | None,
     interior_payloads: list[dict[str, object]] | None,
+    subtractor_payloads: list[dict[str, object]] | None = None,
     door_payloads: list[dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
-    if not interior_payloads and not door_payloads:
+    if not interior_payloads and not subtractor_payloads and not door_payloads:
         return [dict(box or {}) for box in list(root_boxes or [])]
     merged: list[dict[str, object]] = []
     seen: set[str] = set()
@@ -229,6 +266,14 @@ def _merge_viewer_boxes(
         merged.append(payload)
     for interior in list(interior_payloads or []):
         for box in list(interior.get("viewer_boxes") or []):
+            payload = dict(box or {})
+            signature = _box_signature(payload)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            merged.append(payload)
+    for subtractor in list(subtractor_payloads or []):
+        for box in list(subtractor.get("viewer_boxes") or []):
             payload = dict(box or {})
             signature = _box_signature(payload)
             if signature in seen:
@@ -249,6 +294,7 @@ def _merge_viewer_boxes(
 def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> OrderDesignItem:
     category = getattr(getattr(item.sub_category_design, "sub_category", None), "category", None)
     loaded_door_instances = list(getattr(item, "__dict__", {}).get("door_instances") or [])
+    loaded_subtractor_instances = list(getattr(item, "__dict__", {}).get("subtractor_instances") or [])
     interior_payloads = (
         [
             {
@@ -300,6 +346,27 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
         ]
         if include_interior else []
     )
+    subtractor_payloads = (
+        [
+            {
+                "id": instance.id,
+                "subtractor_part_group_id": instance.subtractor_part_group_id,
+                "controller_type": None,
+                "controller_bindings": {},
+                "instance_code": str(instance.instance_code or "").strip(),
+                "line_color": str(getattr(instance, "line_color", "") or "").strip() or None,
+                "ui_order": int(instance.ui_order or 0),
+                "placement_z": float(getattr(instance, "placement_z", 0) or 0),
+                "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(instance.param_values or {}).items()},
+                "param_meta": {str(key): dict(value or {}) for key, value in dict(instance.param_meta or {}).items()},
+                "part_snapshots": [dict(row or {}) for row in list(instance.part_snapshots or [])],
+                "viewer_boxes": [dict(row or {}) for row in list(instance.viewer_boxes or [])],
+                "status": str(instance.status or "draft").strip() or "draft",
+            }
+            for instance in sorted(loaded_subtractor_instances, key=lambda row: (int(row.ui_order or 0), str(row.instance_code or "")))
+        ]
+        if include_interior else []
+    )
     return OrderDesignItem(
         id=item.id,
         order_id=item.order_id,
@@ -322,8 +389,9 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
             for key, value in strip_snapshot_state_from_meta(dict(item.order_attr_meta or {})).items()
         },
         part_snapshots=[dict(row or {}) for row in list(item.part_snapshots or [])],
-        viewer_boxes=_merge_viewer_boxes(list(item.viewer_boxes or []), interior_payloads, door_payloads),
+        viewer_boxes=_merge_viewer_boxes(list(item.viewer_boxes or []), interior_payloads, subtractor_payloads, door_payloads),
         interior_instances=interior_payloads,
+        subtractor_instances=subtractor_payloads,
         door_instances=door_payloads,
         snapshot_checksum=str(item.snapshot_checksum or "").strip(),
     )
@@ -335,6 +403,8 @@ async def _require_item(session: AsyncSession, item_id: uuid.UUID) -> OrderDesig
     )
     if await interior_instance_tables_ready(session):
         stmt = stmt.options(selectinload(OrderDesign.interior_instances))
+    if await subtractor_instance_tables_ready(session):
+        stmt = stmt.options(selectinload(OrderDesign.subtractor_instances))
     if await door_instance_tables_ready(session):
         stmt = stmt.options(selectinload(OrderDesign.door_instances))
     item = await session.scalar(
@@ -352,6 +422,8 @@ async def _require_item_any_status(session: AsyncSession, item_id: uuid.UUID) ->
     )
     if await interior_instance_tables_ready(session):
         stmt = stmt.options(selectinload(OrderDesign.interior_instances))
+    if await subtractor_instance_tables_ready(session):
+        stmt = stmt.options(selectinload(OrderDesign.subtractor_instances))
     if await door_instance_tables_ready(session):
         stmt = stmt.options(selectinload(OrderDesign.door_instances))
     item = await session.scalar(stmt.where(OrderDesign.id == item_id))
@@ -535,6 +607,25 @@ def _next_generated_door_instance_code(
         suffix += 1
 
 
+def _next_generated_subtractor_instance_code(
+    *,
+    existing_instances: list[object],
+    group_code: str | None,
+    fallback_order: int,
+) -> str:
+    prefix = str(group_code or "subtractor").strip() or "subtractor"
+    existing_codes = {
+        str(getattr(item, "instance_code", "") or "").strip()
+        for item in list(existing_instances or [])
+    }
+    suffix = max(1, int(fallback_order) + 1)
+    while True:
+        candidate = f"{prefix}-{suffix:02d}"
+        if candidate not in existing_codes:
+            return candidate
+        suffix += 1
+
+
 def _serialize_interior_instance_item(instance: OrderDesignInteriorInstance) -> OrderDesignInteriorInstanceItem:
     return OrderDesignInteriorInstanceItem(
         id=instance.id,
@@ -572,6 +663,30 @@ def _serialize_door_instance_item(instance: OrderDesignDoorInstance) -> OrderDes
         structural_part_formula_ids=[int(row) for row in list(instance.structural_part_formula_ids or []) if int(row) > 0],
         dependent_interior_instance_ids=[str(row).strip() for row in list(instance.dependent_interior_instance_ids or []) if str(row).strip()],
         controller_box_snapshot=dict(instance.controller_box_snapshot or {}),
+        param_values={
+            str(key): (None if value is None else str(value))
+            for key, value in dict(instance.param_values or {}).items()
+        },
+        param_meta={
+            str(key): dict(value or {})
+            for key, value in dict(instance.param_meta or {}).items()
+        },
+        part_snapshots=[dict(row or {}) for row in list(instance.part_snapshots or [])],
+        viewer_boxes=[dict(row or {}) for row in list(instance.viewer_boxes or [])],
+        status=str(instance.status or "draft").strip() or "draft",
+    )
+
+
+def _serialize_subtractor_instance_item(instance: OrderDesignSubtractorInstance) -> OrderDesignSubtractorInstanceItem:
+    return OrderDesignSubtractorInstanceItem(
+        id=instance.id,
+        subtractor_part_group_id=instance.subtractor_part_group_id,
+        controller_type=None,
+        controller_bindings={},
+        instance_code=str(instance.instance_code or "").strip(),
+        line_color=str(getattr(instance, "line_color", "") or "").strip() or None,
+        ui_order=int(instance.ui_order or 0),
+        placement_z=float(getattr(instance, "placement_z", 0) or 0),
         param_values={
             str(key): (None if value is None else str(value))
             for key, value in dict(instance.param_values or {}).items()
@@ -1388,6 +1503,123 @@ async def delete_order_design_interior_instance(
         session,
         conflict_detail="نمونه داخلی طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
     )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch("/{item_id}/subtractor-instances/{instance_id}", response_model=OrderDesignSubtractorInstanceItem)
+async def update_order_design_subtractor_instance(
+    item_id: uuid.UUID,
+    instance_id: uuid.UUID,
+    payload: OrderDesignSubtractorInstanceUpdate,
+    session: AsyncSession = Depends(get_db_session),
+) -> OrderDesignSubtractorInstanceItem:
+    if not await subtractor_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subtractor-instance tables are not available yet. Run database migrations first.")
+    item = await _require_item(session, item_id)
+    target = next((instance for instance in getattr(item, "subtractor_instances", []) if instance.id == instance_id), None)
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design subtractor instance not found.")
+    target.instance_code = str(payload.instance_code or "").strip()
+    target.line_color = _normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else None
+    target.ui_order = int(payload.ui_order)
+    target.placement_z = float(payload.placement_z or 0)
+    target.param_values = _normalize_interior_param_values(payload.param_values)
+    await _commit_order_design_changes(session, conflict_detail="نمونه دستگیره مخفی طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.")
+    return _serialize_subtractor_instance_item(target)
+
+
+@router.post("/{item_id}/subtractor-instances", response_model=OrderDesignSubtractorInstanceItem, status_code=status.HTTP_201_CREATED)
+async def create_order_design_subtractor_instance(
+    item_id: uuid.UUID,
+    payload: OrderDesignSubtractorInstanceCreate,
+    session: AsyncSession = Depends(get_db_session),
+) -> OrderDesignSubtractorInstanceItem:
+    if not await subtractor_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subtractor-instance tables are not available yet. Run database migrations first.")
+    item = await _require_item(session, item_id)
+    order = await require_accessible_order(session, order_id=item.order_id)
+    group = await require_accessible_subtractor_part_group(session, admin_id=order.admin_id, group_id=payload.subtractor_part_group_id)
+    existing_instances = list(getattr(item, "subtractor_instances", []) or [])
+    next_order = payload.ui_order if payload.ui_order is not None else (max([int(row.ui_order or 0) for row in existing_instances], default=-1) + 1)
+    next_code = str(payload.instance_code or "").strip() or _next_generated_subtractor_instance_code(existing_instances=existing_instances, group_code=getattr(group, "code", None), fallback_order=next_order)
+    target = OrderDesignSubtractorInstance(
+        order_design_id=item.id,
+        source_instance_id=None,
+        subtractor_part_group_id=group.id,
+        instance_code=next_code,
+        line_color=_normalize_hex_color(payload.line_color, DEFAULT_INTERIOR_LINE_COLOR) if payload.line_color else _normalize_hex_color(getattr(group, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR),
+        ui_order=int(next_order),
+        placement_z=float(payload.placement_z or 0),
+        param_values=_normalize_interior_param_values(payload.param_values),
+        param_meta={},
+        part_snapshots=[],
+        viewer_boxes=[],
+        status="draft",
+    )
+    session.add(target)
+    await session.flush()
+    item = await _require_item(session, item.id)
+    if target not in list(getattr(item, "subtractor_instances", []) or []):
+        item.subtractor_instances = [*list(getattr(item, "subtractor_instances", []) or []), target]
+    await _commit_order_design_changes(session, conflict_detail="نمونه دستگیره مخفی طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.")
+    return _serialize_subtractor_instance_item(target)
+
+
+@router.post("/{item_id}/subtractor-instances/{instance_id}/duplicate", response_model=OrderDesignSubtractorInstanceItem, status_code=status.HTTP_201_CREATED)
+async def duplicate_order_design_subtractor_instance(
+    item_id: uuid.UUID,
+    instance_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> OrderDesignSubtractorInstanceItem:
+    if not await subtractor_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subtractor-instance tables are not available yet. Run database migrations first.")
+    item = await _require_item(session, item_id)
+    source = next((instance for instance in getattr(item, "subtractor_instances", []) if instance.id == instance_id), None)
+    if not source:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design subtractor instance not found.")
+    order = await require_accessible_order(session, order_id=item.order_id)
+    group = await require_accessible_subtractor_part_group(session, admin_id=order.admin_id, group_id=source.subtractor_part_group_id)
+    existing_instances = list(getattr(item, "subtractor_instances", []) or [])
+    next_order = max([int(row.ui_order or 0) for row in existing_instances], default=-1) + 1
+    target = OrderDesignSubtractorInstance(
+        order_design_id=item.id,
+        source_instance_id=source.source_instance_id,
+        subtractor_part_group_id=source.subtractor_part_group_id,
+        instance_code=_next_generated_subtractor_instance_code(existing_instances=existing_instances, group_code=getattr(group, "code", None), fallback_order=next_order),
+        line_color=_normalize_hex_color(getattr(source, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR) if getattr(source, "line_color", None) else _normalize_hex_color(getattr(group, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR),
+        ui_order=int(next_order),
+        placement_z=float(getattr(source, "placement_z", 0) or 0),
+        param_values=_normalize_interior_param_values(dict(getattr(source, "param_values", {}) or {})),
+        param_meta={},
+        part_snapshots=[],
+        viewer_boxes=[],
+        status=str(source.status or "draft").strip() or "draft",
+    )
+    session.add(target)
+    await session.flush()
+    item = await _require_item(session, item.id)
+    if target not in list(getattr(item, "subtractor_instances", []) or []):
+        item.subtractor_instances = [*list(getattr(item, "subtractor_instances", []) or []), target]
+    await _commit_order_design_changes(session, conflict_detail="نمونه دستگیره مخفی طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.")
+    return _serialize_subtractor_instance_item(target)
+
+
+@router.delete("/{item_id}/subtractor-instances/{instance_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_order_design_subtractor_instance(
+    item_id: uuid.UUID,
+    instance_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    if not await subtractor_instance_tables_ready(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subtractor-instance tables are not available yet. Run database migrations first.")
+    item = await _require_item(session, item_id)
+    target = next((instance for instance in getattr(item, "subtractor_instances", []) if instance.id == instance_id), None)
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order design subtractor instance not found.")
+    await session.delete(target)
+    await session.flush()
+    item.subtractor_instances = [instance for instance in list(getattr(item, "subtractor_instances", []) or []) if instance.id != target.id]
+    await _commit_order_design_changes(session, conflict_detail="نمونه دستگیره مخفی طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

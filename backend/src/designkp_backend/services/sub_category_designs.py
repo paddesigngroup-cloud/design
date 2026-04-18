@@ -27,7 +27,10 @@ from designkp_backend.db.models.catalog import (
     SubCategoryDesignInteriorInstance,
     SubCategoryDesignPart,
     SubCategoryDesignPartSnapshot,
+    SubCategoryDesignSubtractorInstance,
     SubCategoryParamDefault,
+    SubtractorPartGroup,
+    SubtractorPartGroupParamDefault,
 )
 from designkp_backend.services.sub_category_defaults import sync_defaults_for_sub_categories
 
@@ -103,6 +106,24 @@ class ResolvedDoorInstanceSnapshot:
     param_values: dict[str, str | None]
     param_meta: dict[str, dict[str, object]]
     computed_params: dict[str, float]
+    part_snapshots: list[dict[str, object]]
+    viewer_boxes: list[dict[str, object]]
+
+
+@dataclass(slots=True)
+class ResolvedSubtractorInstanceSnapshot:
+    instance_id: uuid.UUID | None
+    subtractor_part_group_id: uuid.UUID
+    subtractor_part_group_code: str
+    subtractor_part_group_title: str
+    controller_type: str | None
+    controller_bindings: dict[str, dict[str, str | None]]
+    instance_code: str
+    line_color: str | None
+    ui_order: int
+    placement_z: float
+    param_values: dict[str, str | None]
+    param_meta: dict[str, dict[str, object]]
     part_snapshots: list[dict[str, object]]
     viewer_boxes: list[dict[str, object]]
 
@@ -285,6 +306,17 @@ async def door_instance_tables_ready(session: AsyncSession) -> bool:
         select(
             func.to_regclass("sub_category_design_door_instances"),
             func.to_regclass("order_design_door_instances"),
+        )
+    )
+    subcat_table, order_table = result.one()
+    return bool(subcat_table) and bool(order_table)
+
+
+async def subtractor_instance_tables_ready(session: AsyncSession) -> bool:
+    result = await session.execute(
+        select(
+            func.to_regclass("sub_category_design_subtractor_instances"),
+            func.to_regclass("order_design_subtractor_instances"),
         )
     )
     subcat_table, order_table = result.one()
@@ -739,6 +771,29 @@ async def require_accessible_door_part_group(
     item = await session.scalar(stmt)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Door part group not found for this admin scope.")
+    return item
+
+
+async def require_accessible_subtractor_part_group(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    group_id: uuid.UUID,
+) -> SubtractorPartGroup:
+    stmt = (
+        select(SubtractorPartGroup)
+        .options(
+            selectinload(SubtractorPartGroup.parts),
+            selectinload(SubtractorPartGroup.param_groups),
+            selectinload(SubtractorPartGroup.param_defaults).selectinload(SubtractorPartGroupParamDefault.param),
+        )
+        .where(SubtractorPartGroup.id == group_id)
+    )
+    if admin_id is not None:
+        stmt = stmt.where(or_(SubtractorPartGroup.admin_id.is_(None), SubtractorPartGroup.admin_id == admin_id))
+    item = await session.scalar(stmt)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subtractor part group not found for this admin scope.")
     return item
 
 
@@ -2024,8 +2079,16 @@ async def compose_sub_category_design_preview(
     sub_category: SubCategory,
     part_selections: list[dict[str, object]],
     interior_instances: list[SubCategoryDesignInteriorInstance] | None = None,
+    subtractor_instances: list[SubCategoryDesignSubtractorInstance] | None = None,
     door_instances: list[SubCategoryDesignDoorInstance] | None = None,
-) -> tuple[dict[str, str | None], dict[str, float], list[ResolvedPartSnapshot], list[ResolvedInteriorInstanceSnapshot], list[ResolvedDoorInstanceSnapshot]]:
+) -> tuple[
+    dict[str, str | None],
+    dict[str, float],
+    list[ResolvedPartSnapshot],
+    list[ResolvedInteriorInstanceSnapshot],
+    list[ResolvedSubtractorInstanceSnapshot],
+    list[ResolvedDoorInstanceSnapshot],
+]:
     selected_ids = [int(item["part_formula_id"]) for item in part_selections if int(item.get("part_formula_id") or 0) > 0 and bool(item.get("enabled", True))]
     context = await build_design_execution_context(
         session,
@@ -2158,7 +2221,33 @@ async def compose_sub_category_design_preview(
                 context=context,
             )
         )
-    return raw_params, resolved_base_formulas, snapshots, resolved_interior, resolved_doors
+    resolved_subtractors: list[ResolvedSubtractorInstanceSnapshot] = []
+    for instance in sorted(list(subtractor_instances or []), key=lambda item: (int(item.ui_order or 0), str(item.instance_code or ""))):
+        group = await require_accessible_subtractor_part_group(
+            session,
+            admin_id=admin_id,
+            group_id=instance.subtractor_part_group_id,
+        )
+        resolved_subtractors.append(
+            ResolvedSubtractorInstanceSnapshot(
+                instance_id=instance.id,
+                subtractor_part_group_id=group.id,
+                subtractor_part_group_code=str(group.code or "").strip(),
+                subtractor_part_group_title=str(group.group_title or group.title or "").strip(),
+                controller_type=str(getattr(group, "controller_type", "") or "").strip() or None,
+                controller_bindings=dict(getattr(group, "controller_bindings", {}) or {}),
+                instance_code=str(instance.instance_code or "").strip(),
+                line_color=str(getattr(instance, "line_color", "") or "").strip() or None,
+                ui_order=int(instance.ui_order or 0),
+                placement_z=float(getattr(instance, "placement_z", 0) or 0),
+                param_values={str(key): (None if value is None else str(value)) for key, value in dict(getattr(instance, "param_values", {}) or {}).items()},
+                param_meta={str(key): dict(value or {}) for key, value in dict(getattr(instance, "param_meta", {}) or {}).items()},
+                part_snapshots=[dict(row or {}) for row in list(getattr(instance, "part_snapshots", []) or [])],
+                viewer_boxes=[dict(row or {}) for row in list(getattr(instance, "viewer_boxes", []) or [])],
+            )
+        )
+
+    return raw_params, resolved_base_formulas, snapshots, resolved_interior, resolved_subtractors, resolved_doors
 
 
 async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDesign) -> None:
@@ -2167,6 +2256,8 @@ async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDes
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found for this design.")
     schema_ready = await interior_instance_tables_ready(session)
     interior_instances = list(design.__dict__.get("interior_instances") or []) if schema_ready else []
+    subtractor_schema_ready = await subtractor_instance_tables_ready(session)
+    subtractor_instances = list(design.__dict__.get("subtractor_instances") or []) if subtractor_schema_ready else []
     door_schema_ready = await door_instance_tables_ready(session)
     door_instances = list(design.__dict__.get("door_instances") or []) if door_schema_ready else []
 
@@ -2178,12 +2269,13 @@ async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDes
         }
         for part in design.parts
     ]
-    raw_params, resolved_base_formulas, snapshots, resolved_interior, resolved_doors = await compose_sub_category_design_preview(
+    raw_params, resolved_base_formulas, snapshots, resolved_interior, resolved_subtractors, resolved_doors = await compose_sub_category_design_preview(
         session,
         admin_id=design.admin_id,
         sub_category=sub_category,
         part_selections=part_selections,
         interior_instances=interior_instances,
+        subtractor_instances=subtractor_instances,
         door_instances=door_instances,
     )
 
@@ -2221,6 +2313,17 @@ async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDes
             instance.viewer_boxes = []
             continue
         instance.interior_box_snapshot = computed.interior_box_snapshot
+        instance.param_values = computed.param_values
+        instance.param_meta = computed.param_meta
+        instance.part_snapshots = computed.part_snapshots
+        instance.viewer_boxes = computed.viewer_boxes
+    subtractor_by_id = {item.instance_id: item for item in resolved_subtractors if item.instance_id is not None}
+    for instance in subtractor_instances:
+        computed = subtractor_by_id.get(instance.id)
+        if not computed:
+            instance.part_snapshots = []
+            instance.viewer_boxes = []
+            continue
         instance.param_values = computed.param_values
         instance.param_meta = computed.param_meta
         instance.part_snapshots = computed.part_snapshots

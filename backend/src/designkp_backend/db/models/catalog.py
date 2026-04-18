@@ -11,7 +11,7 @@ from designkp_backend.db.base import Base
 from designkp_backend.db.mixins import SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 if TYPE_CHECKING:
-    from .account import Admin, OrderDesignInteriorInstance
+    from .account import Admin, OrderDesignInteriorInstance, OrderDesignSubtractorInstance
 
 
 class PartKind(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -284,6 +284,10 @@ class SubCategoryDesign(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Ve
         cascade="all, delete-orphan",
     )
     interior_instances: Mapped[list["SubCategoryDesignInteriorInstance"]] = relationship(
+        back_populates="design",
+        cascade="all, delete-orphan",
+    )
+    subtractor_instances: Mapped[list["SubCategoryDesignSubtractorInstance"]] = relationship(
         back_populates="design",
         cascade="all, delete-orphan",
     )
@@ -746,3 +750,32 @@ class SubCategoryDesignDoorInstance(UUIDPrimaryKeyMixin, TimestampMixin, SoftDel
 
     design: Mapped["SubCategoryDesign"] = relationship(back_populates="door_instances")
     door_part_group: Mapped["DoorPartGroup"] = relationship()
+
+
+class SubCategoryDesignSubtractorInstance(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "sub_category_design_subtractor_instances"
+
+    design_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sub_category_designs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    subtractor_part_group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("subtractor_part_groups.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    instance_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    line_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    ui_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    placement_z: Mapped[float] = mapped_column(nullable=False, default=0)
+    param_values: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    param_meta: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    part_snapshots: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
+    viewer_boxes: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", server_default="draft")
+
+    design: Mapped["SubCategoryDesign"] = relationship(back_populates="subtractor_instances")
+    subtractor_part_group: Mapped["SubtractorPartGroup"] = relationship()
