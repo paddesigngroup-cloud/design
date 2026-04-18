@@ -7584,9 +7584,9 @@ function resetInternalPartGroupDefaultsEditorState() {
   internalPartGroupDefaultsApplying.value = false;
 }
 
-async function closeInternalPartGroupDefaultsEditor() {
+async function closeInternalPartGroupDefaultsEditor(forceClose = false) {
   if (internalPartGroupDefaultsApplying.value) return;
-  if (hasInternalPartGroupDefaultsChanges()) {
+  if (!forceClose && hasInternalPartGroupDefaultsChanges()) {
     const ok = await showConfirm("تغییرات پیش‌فرض‌های گروه داخلی اعمال نشده‌اند. پنجره بسته شود؟", {
       title: "بستن پیش‌فرض‌ها",
       confirmText: "بستن",
@@ -12051,7 +12051,7 @@ function selectSubCategoryDefaultsGroup(groupId) {
   subCategoryDefaultsActiveGroupId.value = String(groupId || "");
 }
 
-async function closeSubCategoryDefaultsEditor() {
+async function closeSubCategoryDefaultsEditor(forceClose = false) {
   const row = activeSubCategoryDefaultsRow.value;
   const original = row?.param_defaults || {};
   const originalOverrides = row?.param_overrides || {};
@@ -12077,7 +12077,7 @@ async function closeSubCategoryDefaultsEditor() {
         || String(nextOverride.display_title || "").trim() === "";
     }
   );
-  if (changed) {
+  if (!forceClose && changed) {
     const ok = await showConfirm("تغییرات پیش‌فرض‌ها اعمال نشده‌اند. پنجره بسته شود؟", {
       title: "بستن پیش‌فرض‌ها",
       confirmText: "بستن",
@@ -12190,8 +12190,8 @@ function hasSubCategoryUserPreviewChanges() {
   });
 }
 
-async function closeSubCategoryUserPreview() {
-  if (hasSubCategoryUserPreviewChanges()) {
+async function closeSubCategoryUserPreview(forceClose = false) {
+  if (!forceClose && hasSubCategoryUserPreviewChanges()) {
     const ok = await showConfirm("تغییرات پیش‌فرض‌ها اعمال نشده‌اند. پنجره بسته شود؟", {
       title: "بستن پیش‌فرض‌ها",
       confirmText: "بستن",
@@ -12299,9 +12299,9 @@ function resetDoorPartGroupDefaultsEditorState() {
   doorPartGroupDefaultsApplying.value = false;
 }
 
-async function closeDoorPartGroupDefaultsEditor() {
+async function closeDoorPartGroupDefaultsEditor(forceClose = false) {
   if (doorPartGroupDefaultsApplying.value) return;
-  if (hasDoorPartGroupDefaultsChanges()) {
+  if (!forceClose && hasDoorPartGroupDefaultsChanges()) {
     const ok = await showConfirm("تغییرات پیش‌فرض‌های گروه درب اعمال نشده‌اند. پنجره بسته شود؟", {
       title: "بستن پیش‌فرض‌ها",
       confirmText: "بستن",
@@ -20556,7 +20556,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="appDialog__actions">
-        <button type="button" class="constructionDialog__textBtn" :disabled="internalPartGroupDefaultsApplying" @click="closeInternalPartGroupDefaultsEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn" :disabled="internalPartGroupDefaultsApplying" @click="closeInternalPartGroupDefaultsEditor(true)">انصراف</button>
         <button type="button" class="constructionDialog__textBtn is-primary" :disabled="internalPartGroupDefaultsApplying" @click="applyInternalPartGroupDefaultsEditor">
           <span v-if="internalPartGroupDefaultsApplying" class="constructionDialog__spinner"></span>
           <span>{{ internalPartGroupDefaultsApplying ? "در حال اعمال..." : "اعمال" }}</span>
@@ -20674,7 +20674,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="appDialog__actions">
-        <button type="button" class="constructionDialog__textBtn" :disabled="doorPartGroupDefaultsApplying" @click="closeDoorPartGroupDefaultsEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn" :disabled="doorPartGroupDefaultsApplying" @click="closeDoorPartGroupDefaultsEditor(true)">انصراف</button>
         <button type="button" class="constructionDialog__textBtn is-primary" :disabled="doorPartGroupDefaultsApplying" @click="applyDoorPartGroupDefaultsEditor">
           <span v-if="doorPartGroupDefaultsApplying" class="constructionDialog__spinner"></span>
           <span>{{ doorPartGroupDefaultsApplying ? "در حال اعمال..." : "اعمال" }}</span>
@@ -22392,7 +22392,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="appDialog__actions">
-        <button type="button" class="constructionDialog__textBtn" @click="closeSubCategoryDefaultsEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn" @click="closeSubCategoryDefaultsEditor(true)">انصراف</button>
         <button type="button" class="constructionDialog__textBtn is-primary" @click="applySubCategoryDefaultsEditor">اعمال</button>
       </div>
     </div>
@@ -22506,7 +22506,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="appDialog__actions">
-        <button type="button" class="constructionDialog__textBtn" @click="closeSubCategoryUserPreview">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn" @click="closeSubCategoryUserPreview(true)">انصراف</button>
         <button type="button" class="constructionDialog__textBtn is-primary" @click="applySubCategoryUserPreview">اعمال</button>
       </div>
     </div>
