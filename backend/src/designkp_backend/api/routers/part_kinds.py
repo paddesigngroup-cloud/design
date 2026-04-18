@@ -12,7 +12,7 @@ from designkp_backend.db.models.catalog import PartKind
 from designkp_backend.services.admin_access import require_admin_if_present
 
 router = APIRouter(prefix="/part-kinds", tags=["part_kinds"])
-VALID_PART_SCOPES = {"structural", "internal", "door"}
+VALID_PART_SCOPES = {"structural", "internal", "door", "subtractor"}
 
 
 class PartKindItem(BaseModel):
@@ -36,7 +36,7 @@ class PartKindCreate(BaseModel):
     part_kind_code: str = Field(min_length=1, max_length=64)
     org_part_kind_title: str = Field(min_length=1, max_length=255)
     sort_order: int | None = Field(default=None, ge=0)
-    part_scope: str = Field(default="structural", pattern="^(structural|internal|door)$")
+    part_scope: str = Field(default="structural", pattern="^(structural|internal|door|subtractor)$")
     is_system: bool = False
 
 
@@ -46,7 +46,7 @@ class PartKindUpdate(BaseModel):
     part_kind_code: str = Field(min_length=1, max_length=64)
     org_part_kind_title: str = Field(min_length=1, max_length=255)
     sort_order: int = Field(ge=0)
-    part_scope: str = Field(default="structural", pattern="^(structural|internal|door)$")
+    part_scope: str = Field(default="structural", pattern="^(structural|internal|door|subtractor)$")
     is_system: bool
 
 

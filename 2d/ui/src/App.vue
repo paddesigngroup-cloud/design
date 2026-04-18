@@ -275,7 +275,7 @@ const currentBootstrapUserName = ref(CURRENT_BOOTSTRAP_USER_NAME);
 
 function normalizePartScope(value, fallback = "structural") {
   const normalized = String(value || "").trim().toLowerCase();
-  return ["structural", "internal", "door"].includes(normalized) ? normalized : fallback;
+  return ["structural", "internal", "door", "subtractor"].includes(normalized) ? normalized : fallback;
 }
 
 function getPartKindScope(item, fallback = "structural") {
@@ -294,7 +294,24 @@ function getPartScopeLabel(scope) {
   const normalized = normalizePartScope(scope);
   if (normalized === "internal") return "داخلی";
   if (normalized === "door") return "درب";
+  if (normalized === "subtractor") return "دستگیره مخفی";
   return "سازه";
+}
+
+function getPartScopeTone(scope) {
+  const normalized = normalizePartScope(scope);
+  if (normalized === "internal") return "is-admin";
+  if (normalized === "door") return "is-warning";
+  if (normalized === "subtractor") return "is-warning";
+  return "is-system";
+}
+
+function nextPartScope(scope) {
+  const normalized = normalizePartScope(scope);
+  if (normalized === "structural") return "internal";
+  if (normalized === "internal") return "door";
+  if (normalized === "door") return "subtractor";
+  return "structural";
 }
 const activeOrder = ref(null);
 const ordersCatalog = ref([]);
@@ -6149,6 +6166,11 @@ function getConstructionPartKindInternalLabel(partKindId) {
   const partKind = constructionPartKindsById.value.get(Number(partKindId) || 0);
   return getPartScopeLabel(partKind?.part_scope);
 }
+
+function getConstructionPartKindScopeTone(partKindId) {
+  const partKind = constructionPartKindsById.value.get(Number(partKindId) || 0);
+  return getPartScopeTone(partKind?.part_scope);
+}
 const activeSubCategoryUserPreviewRow = computed(() =>
   editableSubCategories.value.find((item) => String(item.id) === String(subCategoryUserPreviewRowId.value)) || null
 );
@@ -11027,7 +11049,7 @@ async function toggleConstructionPartKindInternalById(partKindId) {
   const target = editablePartKinds.value.find((item) => Number(item.part_kind_id) === Number(partKindId));
   if (!target) return;
   const currentScope = normalizePartScope(target.part_scope);
-  const nextValue = currentScope === "structural" ? "internal" : currentScope === "internal" ? "door" : "structural";
+  const nextValue = nextPartScope(currentScope);
   if (target.__isNew) {
     target.part_scope = nextValue;
     return;
@@ -13154,7 +13176,7 @@ async function onConstructionImportFileChange(event) {
             row.part_kind_id < 1 ||
             !row.part_kind_code ||
             !row.org_part_kind_title ||
-            !["structural", "internal", "door"].includes(normalizePartScope(row.part_scope))
+            !["structural", "internal", "door", "subtractor"].includes(normalizePartScope(row.part_scope))
         );
     if (invalidRow) {
       throw new Error(`invalid-row-${invalidRow.lineNo}`);
@@ -18978,8 +19000,8 @@ onBeforeUnmount(() => {
                       <button
                         type="button"
                         class="constructionDialog__scopeBtn"
-                        :class="getPartKindScope(item) === 'internal' ? 'is-admin' : (getPartKindScope(item) === 'door' ? 'is-warning' : 'is-system')"
-                        @click="item.part_scope = getPartKindScope(item) === 'structural' ? 'internal' : (getPartKindScope(item) === 'internal' ? 'door' : 'structural'); markConstructionPartKindDirty(item)"
+                        :class="getPartScopeTone(item.part_scope)"
+                        @click="item.part_scope = nextPartScope(item.part_scope); markConstructionPartKindDirty(item)"
                       >
                         {{ getPartScopeLabel(item.part_scope) }}
                       </button>
@@ -20124,7 +20146,7 @@ onBeforeUnmount(() => {
                       <button
                         type="button"
                         class="constructionDialog__scopeBtn"
-                        :class="getConstructionPartKindInternalLabel(item.part_kind_id) === 'داخلی' ? 'is-admin' : (getConstructionPartKindInternalLabel(item.part_kind_id) === 'درب' ? 'is-warning' : 'is-system')"
+                        :class="getConstructionPartKindScopeTone(item.part_kind_id)"
                         @click="toggleConstructionPartKindInternalById(item.part_kind_id)"
                       >
                         {{ getConstructionPartKindInternalLabel(item.part_kind_id) }}
@@ -22097,7 +22119,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="constructionDialog__scopeBtn"
-              :class="getConstructionPartKindInternalLabel(baseFormulaBuilderDraft.part_kind_id) === 'داخلی' ? 'is-admin' : (getConstructionPartKindInternalLabel(baseFormulaBuilderDraft.part_kind_id) === 'درب' ? 'is-warning' : 'is-system')"
+              :class="getConstructionPartKindScopeTone(baseFormulaBuilderDraft.part_kind_id)"
               @click="toggleConstructionPartKindInternalById(baseFormulaBuilderDraft.part_kind_id)"
             >
               {{ getConstructionPartKindInternalLabel(baseFormulaBuilderDraft.part_kind_id) }}
