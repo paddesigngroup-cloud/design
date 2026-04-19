@@ -437,6 +437,12 @@ const interiorLibraryOverlapPickerState = ref({
   clientX: 0,
   clientY: 0,
 });
+const doorLibraryOverlapPickerState = ref({
+  visible: false,
+  items: [],
+  clientX: 0,
+  clientY: 0,
+});
 const interiorLibraryInstanceContextMenu = ref({
   visible: false,
   x: 0,
@@ -1481,6 +1487,22 @@ function showInteriorLibraryOverlapPicker(clientX, clientY, items) {
   };
   interiorLibraryPickerPreviewInstanceId.value = "";
 }
+function hideDoorLibraryOverlapPicker() {
+  doorLibraryOverlapPickerState.value = {
+    visible: false,
+    items: [],
+    clientX: 0,
+    clientY: 0,
+  };
+}
+function showDoorLibraryOverlapPicker(clientX, clientY, items) {
+  doorLibraryOverlapPickerState.value = {
+    visible: true,
+    items: Array.isArray(items) ? items.slice() : [],
+    clientX: Number(clientX) || 0,
+    clientY: Number(clientY) || 0,
+  };
+}
 function closeInteriorInstanceContextMenu() {
   interiorLibraryInstanceContextMenu.value = {
     visible: false,
@@ -1562,14 +1584,43 @@ function clearInteriorLibraryOverlapPreview() {
     syncSharedSubtractorPreviewState("");
   }
 }
+function setDoorLibraryOverlapPreview(instanceId) {
+  doorLibraryHoveredInstanceId.value = String(instanceId || "").trim();
+}
+function clearDoorLibraryOverlapPreview() {
+  doorLibraryHoveredInstanceId.value = "";
+}
 function selectInteriorLibraryOverlapItem(hit) {
   const instanceId = String(hit?.id || "").trim();
   if (!instanceId) return;
   selectInteriorLibraryInstance(instanceId);
   hideInteriorLibraryOverlapPicker();
 }
+function selectDoorLibraryOverlapItem(hit) {
+  const instanceId = String(hit?.id || "").trim();
+  if (!instanceId) return;
+  selectDoorLibraryPlacedInstance(instanceId);
+  hideDoorLibraryOverlapPicker();
+}
 const interiorLibraryOverlapPickerStyle = computed(() => {
   const state = interiorLibraryOverlapPickerState.value || {};
+  const menuWidth = 320;
+  const gutter = 8;
+  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
+  const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 0;
+  const estimatedHeight = Math.min(
+    360,
+    52 + ((Array.isArray(state.items) ? state.items.length : 0) * 88)
+  );
+  const left = Math.max(gutter, Math.min((Number(state.clientX) || 0) + 10, viewportWidth - menuWidth - gutter));
+  const top = Math.max(gutter, Math.min((Number(state.clientY) || 0) + 10, viewportHeight - estimatedHeight - gutter));
+  return {
+    left: `${Math.round(left)}px`,
+    top: `${Math.round(top)}px`,
+  };
+});
+const doorLibraryOverlapPickerStyle = computed(() => {
+  const state = doorLibraryOverlapPickerState.value || {};
   const menuWidth = 320;
   const gutter = 8;
   const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
@@ -2710,21 +2761,26 @@ function onInteriorLibraryFrontSvgPointerDown(payload) {
   const rawEvent = payload?.event || payload;
   const rawPoint = payload?.point || getInteriorLibraryFrontSvgPoint(rawEvent);
   if (interiorLibraryPreviewMode.value !== "front2d" || Number(rawEvent?.button) !== 0) return;
+  let controllerRectInstanceId = "";
   if (interiorLibraryControllerState.value.enabled) {
     const controllerHit = hitTestInteriorLibraryController(rawPoint);
     if (controllerHit?.instanceId) {
-      rawEvent?.preventDefault?.();
-      rawEvent?.stopPropagation?.();
       selectInteriorLibraryInstance(controllerHit.instanceId);
-      if (controllerHit.hitType === "rect") {
-        return;
-      }
       if (controllerHit.hitType === "field") {
+        rawEvent?.preventDefault?.();
+        rawEvent?.stopPropagation?.();
         void promptInteriorLibraryControllerEditing(controllerHit.controllerId || controllerHit.id);
         return;
       }
-      beginInteriorLibraryControllerDrag(controllerHit.controllerId || controllerHit.id, payload);
-      return;
+      if (controllerHit.hitType === "handle" || controllerHit.hitType === "metric") {
+        rawEvent?.preventDefault?.();
+        rawEvent?.stopPropagation?.();
+        beginInteriorLibraryControllerDrag(controllerHit.controllerId || controllerHit.id, payload);
+        return;
+      }
+      if (controllerHit.hitType === "rect") {
+        controllerRectInstanceId = controllerHit.instanceId;
+      }
     }
   }
   if (!rawPoint) return;
@@ -2758,6 +2814,14 @@ function onInteriorLibraryFrontSvgPointerDown(payload) {
         return;
       }
       showInteriorLibraryOverlapPicker(rawEvent?.clientX, rawEvent?.clientY, instanceHits);
+      interiorLibraryCurrentSnapPoint.value = null;
+      rawEvent?.preventDefault?.();
+      rawEvent?.stopPropagation?.();
+      return;
+    }
+    if (controllerRectInstanceId) {
+      selectInteriorLibraryInstance(controllerRectInstanceId);
+      hideInteriorLibraryOverlapPicker();
       interiorLibraryCurrentSnapPoint.value = null;
       rawEvent?.preventDefault?.();
       rawEvent?.stopPropagation?.();
@@ -2885,6 +2949,9 @@ function onInteriorLibraryOverlapPickerPointerDown(event) {
 function onInteriorLibraryOverlapPickerLeave() {
   clearInteriorLibraryOverlapPreview();
 }
+function onDoorLibraryOverlapPickerLeave() {
+  clearDoorLibraryOverlapPreview();
+}
 function onInteriorLibraryFrontSvgPointerMove(payload) {
   const rawPoint = payload?.point || getInteriorLibraryFrontSvgPoint(payload?.event || payload);
   if (!rawPoint) return;
@@ -2976,13 +3043,20 @@ function onDoorLibraryFrontSvgPointerDown(payload) {
   if (doorLibraryPreviewMode.value !== "front2d" || Number(rawEvent?.button) !== 0) return;
   const rawPoint = payload?.point || getDoorLibraryFrontSvgPoint(rawEvent);
   if (!rawPoint) return;
+  let controllerRectInstanceId = "";
   if (!isDoorLibraryPendingControllerActive.value) {
     const controllerHit = hitTestDoorLibraryController(rawPoint);
     if (controllerHit?.instanceId) {
-      selectDoorLibraryPlacedInstance(controllerHit.instanceId);
-      rawEvent?.preventDefault?.();
-      rawEvent?.stopPropagation?.();
-      return;
+      if (controllerHit.hitType === "field" || controllerHit.hitType === "handle" || controllerHit.hitType === "metric") {
+        selectDoorLibraryPlacedInstance(controllerHit.instanceId);
+        hideDoorLibraryOverlapPicker();
+        rawEvent?.preventDefault?.();
+        rawEvent?.stopPropagation?.();
+        return;
+      }
+      if (controllerHit.hitType === "rect") {
+        controllerRectInstanceId = controllerHit.instanceId;
+      }
     }
   }
   syncDoorLibraryCursorPoint(rawPoint, doorLibraryCurrentSnapPoint.value);
@@ -3005,10 +3079,11 @@ function onDoorLibraryFrontSvgPointerDown(payload) {
   }
   clearDoorLibraryAnnotationSelection();
   if (doorLibraryAnnotationTool.value !== "dimension") {
-    if (!isDoorLibraryPendingControllerActive.value) {
+    if (!isDoorLibraryPendingControllerActive.value && !controllerRectInstanceId) {
       const overlayHit = hitTestDoorLibraryPlacedOverlay(rawPoint);
       if (overlayHit?.id) {
         selectDoorLibraryPlacedInstance(overlayHit.id);
+        hideDoorLibraryOverlapPicker();
         rawEvent?.preventDefault?.();
         rawEvent?.stopPropagation?.();
         return;
@@ -3016,14 +3091,32 @@ function onDoorLibraryFrontSvgPointerDown(payload) {
     }
     const instanceHits = collectDoorLibraryInstanceHits(rawPoint);
     if (instanceHits.length) {
-      if (isDoorLibraryPendingControllerActive.value) toggleDoorLibraryInstanceSelection(instanceHits[0].id);
-      else selectDoorLibraryPlacedInstance(instanceHits[0].id);
+      if (instanceHits.length === 1) {
+        if (isDoorLibraryPendingControllerActive.value) toggleDoorLibraryInstanceSelection(instanceHits[0].id);
+        else {
+          selectDoorLibraryPlacedInstance(instanceHits[0].id);
+          hideDoorLibraryOverlapPicker();
+        }
+      } else if (!isDoorLibraryPendingControllerActive.value) {
+        showDoorLibraryOverlapPicker(rawEvent?.clientX, rawEvent?.clientY, instanceHits);
+        doorLibraryCurrentSnapPoint.value = null;
+      } else {
+        toggleDoorLibraryInstanceSelection(instanceHits[0].id);
+      }
+      rawEvent?.preventDefault?.();
+      rawEvent?.stopPropagation?.();
+      return;
+    }
+    if (controllerRectInstanceId && !isDoorLibraryPendingControllerActive.value) {
+      selectDoorLibraryPlacedInstance(controllerRectInstanceId);
+      hideDoorLibraryOverlapPicker();
       rawEvent?.preventDefault?.();
       rawEvent?.stopPropagation?.();
       return;
     }
     if (!isDoorLibraryPendingControllerActive.value) {
       clearDoorLibraryPlacedInstanceSelection();
+      hideDoorLibraryOverlapPicker();
     }
     clearDoorLibraryInstanceSelection();
     doorLibraryCurrentSnapPoint.value = null;
@@ -19868,6 +19961,12 @@ onMounted(() => {
       e.stopPropagation();
       return;
     }
+    if (doorLibraryOpen.value && doorLibraryOverlapPickerState.value.visible) {
+      hideDoorLibraryOverlapPicker();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (interiorLibraryOpen.value && (interiorLibraryAnnotationDraft.value || interiorLibraryAnnotationTool.value)) {
       cancelInteriorLibraryAnnotationDrawing();
       e.preventDefault();
@@ -26176,6 +26275,31 @@ onBeforeUnmount(() => {
                   <path d="M2 24 L9 20 V28 Z" class="subCategoryDesignEditor__floatingCursorArrow" />
                   <path d="M46 24 L39 20 V28 Z" class="subCategoryDesignEditor__floatingCursorArrow" />
                 </svg>
+              </div>
+              <div
+                v-if="doorLibraryOverlapPickerState.visible && doorLibraryOverlapPickerState.items.length"
+                class="subCategoryDesignEditor__overlapPicker"
+                :style="doorLibraryOverlapPickerStyle"
+                @pointerdown="onInteriorLibraryOverlapPickerPointerDown"
+                @mouseleave="onDoorLibraryOverlapPickerLeave"
+              >
+                <div class="subCategoryDesignEditor__overlapPickerTitle">آبجکت‌های روی‌هم</div>
+                <button
+                  v-for="item in doorLibraryOverlapPickerState.items"
+                  :key="`door-overlap-${item.id}`"
+                  type="button"
+                  class="subCategoryDesignEditor__overlapPickerItem"
+                  :class="{ 'is-active': String(doorLibrarySelectedPlacedInstanceId || '') === String(item.id || '') }"
+                  @mouseenter="setDoorLibraryOverlapPreview(item.id)"
+                  @focus="setDoorLibraryOverlapPreview(item.id)"
+                  @click="selectDoorLibraryOverlapItem(item)"
+                >
+                  <span class="subCategoryDesignEditor__overlapPickerSwatch" :style="{ '--line-color': item.lineColor || '#7c3f57' }"></span>
+                  <span class="subCategoryDesignEditor__overlapPickerText">
+                    <span class="subCategoryDesignEditor__overlapPickerPrimary">{{ item.title }}</span>
+                    <span v-if="item.instanceCode" class="subCategoryDesignEditor__overlapPickerSecondary">{{ item.instanceCode }}</span>
+                  </span>
+                </button>
               </div>
               <div
                 v-if="doorLibraryPreviewMode === 'front2d' ? !doorLibraryFrontView.inner.length : !activeDoorLibraryModelViewerBoxes.length"
