@@ -593,6 +593,7 @@ const DOOR_GROUP_CONTROLLER_DEFINITIONS = {
 };
 const SUBTRACTOR_GROUP_CONTROLLER_DEFINITIONS = {
   [SUBTRACTOR_GROUP_CONTROLLER_TYPE_HORIZONTAL_HANDLE]: [
+    { key: "handle_width", label: "عرض دستگیره مخفی", hidden: true },
     { key: "left", label: "فاصله از چپ" },
     { key: "top", label: "فاصله از بالا" },
     { key: "right", label: "فاصله از راست" },

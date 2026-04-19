@@ -49,15 +49,15 @@ SUBTRACTOR_GROUP_CONTROLLER_TYPE_LEGACY_ALIASES = {
     SUBTRACTOR_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT,
 }
 SUBTRACTOR_GROUP_CONTROLLER_SLOTS_BY_TYPE = {
-    SUBTRACTOR_GROUP_CONTROLLER_TYPE_HORIZONTAL_HANDLE: ("left", "top", "right", "bottom_offset"),
-    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH: ("left", "top", "right", "bottom_offset"),
-    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT: ("left", "top", "right", "bottom_offset"),
-    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_LEFT: ("left", "top", "right", "bottom_offset"),
-    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP: ("left", "top", "right", "bottom_offset"),
-    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_RIGHT: ("left", "top", "right", "bottom_offset"),
-    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_LEFT: ("left", "top", "right", "bottom_offset"),
-    SUBTRACTOR_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT: ("left", "top", "right", "bottom_offset"),
-    SUBTRACTOR_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT: ("left", "top", "right", "bottom_offset"),
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_HORIZONTAL_HANDLE: ("handle_width", "left", "top", "right", "bottom_offset"),
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH: ("handle_width", "left", "top", "right", "bottom_offset"),
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT: ("handle_width", "left", "top", "right", "bottom_offset"),
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_LEFT: ("handle_width", "left", "top", "right", "bottom_offset"),
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP: ("handle_width", "left", "top", "right", "bottom_offset"),
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_RIGHT: ("handle_width", "left", "top", "right", "bottom_offset"),
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_LEFT: ("handle_width", "left", "top", "right", "bottom_offset"),
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT: ("handle_width", "left", "top", "right", "bottom_offset"),
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT: ("handle_width", "left", "top", "right", "bottom_offset"),
 }
 
 
