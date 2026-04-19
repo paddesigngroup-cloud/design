@@ -4605,10 +4605,7 @@ const activeDoorLibraryModelViewerBoxes = computed(() => {
     : [];
   return sourceBoxes;
 });
-const activeDoorLibraryViewerBoxes = computed(() => [
-  ...activeDoorLibraryStructureViewerBoxes.value,
-  ...getViewerBoxesFromDoorInstances(activeDoorLibraryInstances.value),
-]);
+const activeDoorLibraryViewerBoxes = computed(() => activeDoorLibraryModelViewerBoxes.value || []);
 const isInteriorLibraryFront2dActive = computed(() =>
   (interiorLibraryOpen.value || subtractorLibraryOpen.value) && interiorLibraryPreviewMode.value === "front2d"
 );
@@ -4618,11 +4615,11 @@ const isDoorLibraryFront2dActive = computed(() =>
 const interiorLibraryFrontView = computed(() =>
   isInteriorLibraryFront2dActive.value
     ? buildFrontViewLinesFromBoxes(
-      activeInteriorLibraryStructureViewerBoxes.value || [],
+      activeInteriorLibraryViewerBoxes.value || [],
       subCategoryDesignEditorOpen.value
         ? `interior-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
         : `interior-structure:order:${String((isSharedSubtractorLibraryActive.value ? activeSubtractorLibraryOrderDesign.value?.id : activeInteriorLibraryOrderDesign.value?.id) || (isSharedSubtractorLibraryActive.value ? activeSubtractorLibrarySourceDesign.value?.id : activeInteriorLibrarySourceDesign.value?.id) || "none").trim()}`,
-      activeDoorLibraryStructureViewerBoxes.value || []
+      activeInteriorLibraryViewerBoxes.value || []
     )
     : { outer: [], inner: [], bounds: null }
 );
@@ -4633,7 +4630,7 @@ const doorLibraryFrontView = computed(() =>
       subCategoryDesignEditorOpen.value
         ? `door-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
         : `door-structure:order:${String(activeDoorLibraryOrderDesign.value?.id || activeDoorLibrarySourceDesign.value?.id || "none").trim()}`,
-      activeDoorLibraryStructureViewerBoxes.value || []
+      activeDoorLibraryViewerBoxes.value || []
     )
     : { outer: [], inner: [], bounds: null }
 );
@@ -9050,7 +9047,7 @@ async function refreshSubCategoryDesignPreview() {
     }
     const payload = await res.json();
     if (seq !== subCategoryDesignPreviewRequestSeq.value) return;
-    subCategoryDesignEditorPreview.value = payload;
+    subCategoryDesignEditorPreview.value = normalizeSubCategoryDesignPreviewResponse(payload);
     syncInteriorPreviewInstancesIntoDraft(payload?.interior_instances || []);
     syncDoorPreviewInstancesIntoDraft(payload?.door_instances || []);
     syncSubtractorPreviewInstancesIntoSubCategoryDraft(payload?.subtractor_instances || []);
@@ -9089,6 +9086,73 @@ function normalizeCabinetBox(box) {
     cy: Number(box?.cy) || 0,
     cz: Number(box?.cz) || 0,
     lineColor: String(box?.lineColor || box?.line_color || "").trim() || "",
+  };
+}
+
+function buildBoxSignature(box) {
+  const normalized = normalizeCabinetBox(box);
+  return [
+    Number(normalized.width || 0).toFixed(6),
+    Number(normalized.depth || 0).toFixed(6),
+    Number(normalized.height || 0).toFixed(6),
+    Number(normalized.cx || 0).toFixed(6),
+    Number(normalized.cy || 0).toFixed(6),
+    Number(normalized.cz || 0).toFixed(6),
+  ].join("|");
+}
+
+function normalizeBooleanCollection(rows, keyName = "target_id") {
+  return (Array.isArray(rows) ? rows : []).map((row) => ({
+    ...(row || {}),
+    [keyName]: String(row?.[keyName] || "").trim(),
+    boxes: Array.isArray(row?.boxes) ? row.boxes.map((box) => ({ ...(box || {}) })) : [],
+    box: row?.box && typeof row.box === "object" ? { ...(row.box || {}) } : undefined,
+  }));
+}
+
+function buildRenderedBoxesFromBooleanPayload(viewerBoxes, booleanTargets, booleanCutters, booleanResult) {
+  const normalizedViewerBoxes = (Array.isArray(viewerBoxes) ? viewerBoxes : []).map((box) => ({ ...(box || {}) }));
+  const normalizedTargets = normalizeBooleanCollection(booleanTargets);
+  const normalizedCutters = normalizeBooleanCollection(booleanCutters, "cutter_id");
+  const normalizedResult = normalizeBooleanCollection(booleanResult);
+  if (!normalizedTargets.length || !normalizedResult.length) return normalizedViewerBoxes;
+  const targetSignatures = new Set(
+    normalizedTargets
+      .map((target) => target?.box)
+      .filter((box) => box && typeof box === "object")
+      .map((box) => buildBoxSignature(box))
+  );
+  const cutterSignatures = new Set(
+    normalizedCutters
+      .map((cutter) => cutter?.box)
+      .filter((box) => box && typeof box === "object")
+      .map((box) => buildBoxSignature(box))
+  );
+  const resultBoxes = normalizedResult.flatMap((item) =>
+    (Array.isArray(item?.boxes) ? item.boxes : []).map((box) => ({
+      ...(box || {}),
+      lineColor: String(box?.lineColor || item?.line_color || item?.lineColor || "").trim(),
+    }))
+  );
+  return [
+    ...normalizedViewerBoxes.filter((box) => {
+      const signature = buildBoxSignature(box);
+      return !targetSignatures.has(signature) && !cutterSignatures.has(signature);
+    }),
+    ...resultBoxes,
+  ];
+}
+
+function normalizeBooleanState(item) {
+  const boolean_targets = normalizeBooleanCollection(item?.boolean_targets);
+  const boolean_cutters = normalizeBooleanCollection(item?.boolean_cutters, "cutter_id");
+  const boolean_result = normalizeBooleanCollection(item?.boolean_result);
+  return {
+    boolean_targets,
+    boolean_cutters,
+    boolean_result,
+    raw_viewer_boxes: Array.isArray(item?.viewer_boxes) ? item.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
+    viewer_boxes: buildRenderedBoxesFromBooleanPayload(item?.viewer_boxes, boolean_targets, boolean_cutters, boolean_result),
   };
 }
 
@@ -9220,7 +9284,7 @@ function getCabinetDesignIconWalls(design) {
 async function fetchSubCategoryDesignPreview(designId) {
   const previewRes = await fetch(`/api/sub-category-designs/${encodeURIComponent(String(designId))}/preview`);
   if (!previewRes.ok) throw new Error("preview-failed");
-  return await previewRes.json();
+  return normalizeSubCategoryDesignPreviewResponse(await previewRes.json());
 }
 
 async function enrichDesignWithPreview(item) {
@@ -9244,6 +9308,7 @@ async function enrichDesignWithPreview(item) {
 
 function normalizeOrderDesignRecord(item) {
   if (!item || !item.id) return null;
+  const booleanState = normalizeBooleanState(item);
   return {
     ...item,
     id: String(item.id),
@@ -9264,7 +9329,28 @@ function normalizeOrderDesignRecord(item) {
       Object.entries(item.order_attr_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])
     ),
     part_snapshots: Array.isArray(item.part_snapshots) ? item.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
-    viewer_boxes: Array.isArray(item.viewer_boxes) ? item.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
+    raw_viewer_boxes: booleanState.raw_viewer_boxes,
+    viewer_boxes: booleanState.viewer_boxes,
+    boolean_targets: booleanState.boolean_targets,
+    boolean_cutters: booleanState.boolean_cutters,
+    boolean_result: booleanState.boolean_result,
+    interior_instances: Array.isArray(item.interior_instances) ? item.interior_instances.map(normalizeInteriorInstanceRecord).filter(Boolean) : [],
+    door_instances: Array.isArray(item.door_instances) ? item.door_instances.map(normalizeDoorInstanceRecord).filter(Boolean) : [],
+    subtractor_instances: Array.isArray(item.subtractor_instances) ? item.subtractor_instances.map(normalizeSubtractorInstanceRecord).filter(Boolean) : [],
+  };
+}
+
+function normalizeSubCategoryDesignPreviewResponse(item) {
+  if (!item || !item.sub_category_id) return item || null;
+  const booleanState = normalizeBooleanState(item);
+  return {
+    ...(item || {}),
+    raw_viewer_boxes: booleanState.raw_viewer_boxes,
+    viewer_boxes: booleanState.viewer_boxes,
+    boolean_targets: booleanState.boolean_targets,
+    boolean_cutters: booleanState.boolean_cutters,
+    boolean_result: booleanState.boolean_result,
+    parts: Array.isArray(item.parts) ? item.parts.map((row) => ({ ...(row || {}) })) : [],
     interior_instances: Array.isArray(item.interior_instances) ? item.interior_instances.map(normalizeInteriorInstanceRecord).filter(Boolean) : [],
     door_instances: Array.isArray(item.door_instances) ? item.door_instances.map(normalizeDoorInstanceRecord).filter(Boolean) : [],
     subtractor_instances: Array.isArray(item.subtractor_instances) ? item.subtractor_instances.map(normalizeSubtractorInstanceRecord).filter(Boolean) : [],

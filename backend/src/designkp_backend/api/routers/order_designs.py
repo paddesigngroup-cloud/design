@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
@@ -36,7 +37,13 @@ from designkp_backend.services.order_designs import (
     sync_order_design_snapshot,
     with_order_design_snapshot_checksum,
 )
-from designkp_backend.services.sub_category_designs import require_accessible_door_part_group, require_accessible_internal_part_group, require_accessible_subtractor_part_group, subtractor_instance_tables_ready
+from designkp_backend.services.sub_category_designs import (
+    build_boolean_preview_payload,
+    require_accessible_door_part_group,
+    require_accessible_internal_part_group,
+    require_accessible_subtractor_part_group,
+    subtractor_instance_tables_ready,
+)
 
 router = APIRouter(prefix="/order-designs", tags=["order_designs"])
 DEFAULT_INTERIOR_LINE_COLOR = "#8A98A3"
@@ -71,6 +78,9 @@ class OrderDesignItem(BaseModel):
     order_attr_meta: dict[str, dict[str, object]]
     part_snapshots: list[dict[str, object]]
     viewer_boxes: list[dict[str, object]]
+    boolean_targets: list[dict[str, object]] = Field(default_factory=list)
+    boolean_cutters: list[dict[str, object]] = Field(default_factory=list)
+    boolean_result: list[dict[str, object]] = Field(default_factory=list)
     interior_instances: list[dict[str, object]]
     subtractor_instances: list[dict[str, object]]
     door_instances: list[dict[str, object]]
@@ -367,6 +377,40 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
         ]
         if include_interior else []
     )
+    boolean_payload = build_boolean_preview_payload(
+        context=SimpleNamespace(part_formulas_by_id={}),
+        root_part_snapshots=[dict(row or {}) for row in list(item.part_snapshots or [])],
+        interiors=[
+            SimpleNamespace(
+                instance_id=payload.get("id"),
+                instance_code=payload.get("instance_code"),
+                line_color=payload.get("line_color"),
+                part_snapshots=[dict(row or {}) for row in list(payload.get("part_snapshots") or [])],
+            )
+            for payload in interior_payloads
+        ],
+        subtractors=[
+            SimpleNamespace(
+                instance_id=payload.get("id"),
+                subtractor_part_group_id=payload.get("subtractor_part_group_id"),
+                instance_code=payload.get("instance_code"),
+                ui_order=payload.get("ui_order"),
+                viewer_boxes=[dict(row or {}) for row in list(payload.get("viewer_boxes") or [])],
+            )
+            for payload in subtractor_payloads
+        ],
+        doors=[
+            SimpleNamespace(
+                instance_id=payload.get("id"),
+                instance_code=payload.get("instance_code"),
+                line_color=payload.get("line_color"),
+                structural_part_formula_ids=list(payload.get("structural_part_formula_ids") or []),
+                dependent_interior_instance_ids=list(payload.get("dependent_interior_instance_ids") or []),
+                controller_box_snapshot=dict(payload.get("controller_box_snapshot") or {}),
+            )
+            for payload in door_payloads
+        ],
+    ) if include_interior else SimpleNamespace(boolean_targets=[], boolean_cutters=[], boolean_result=[])
     return OrderDesignItem(
         id=item.id,
         order_id=item.order_id,
@@ -390,6 +434,15 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
         },
         part_snapshots=[dict(row or {}) for row in list(item.part_snapshots or [])],
         viewer_boxes=_merge_viewer_boxes(list(item.viewer_boxes or []), interior_payloads, subtractor_payloads, door_payloads),
+        boolean_targets=[dict(row or {}) for row in list(boolean_payload.boolean_targets or [])],
+        boolean_cutters=[dict(row or {}) for row in list(boolean_payload.boolean_cutters or [])],
+        boolean_result=[
+            {
+                **dict(row or {}),
+                "boxes": [dict(box or {}) for box in list(dict(row or {}).get("boxes") or [])],
+            }
+            for row in list(boolean_payload.boolean_result or [])
+        ],
         interior_instances=interior_payloads,
         subtractor_instances=subtractor_payloads,
         door_instances=door_payloads,
@@ -718,20 +771,24 @@ async def _rebuild_order_design_after_interior_change(
         source_design=source_design,
         override_attr_values=dict(item.order_attr_values or {}),
         interior_instances=list(item.interior_instances or []),
+        subtractor_instances=list(getattr(item, "subtractor_instances", []) or []),
         door_instances=list(getattr(item, "door_instances", []) or []),
     )
     current_interior_instances = list(item.interior_instances or [])
+    current_subtractor_instances = list(getattr(item, "subtractor_instances", []) or [])
     current_door_instances = list(getattr(item, "door_instances", []) or [])
     snapshot_checksum = build_order_design_snapshot_checksum(
         source_design=source_design,
         order_attr_values=dict(item.order_attr_values or {}),
         interior_instances=current_interior_instances,
+        subtractor_instances=current_subtractor_instances,
         door_instances=current_door_instances,
         source_state=dict(snapshot.get("source_state") or {}),
     )
     snapshot_marker = order_design_snapshot_marker(
         source_design=source_design,
         interior_instances=current_interior_instances,
+        subtractor_instances=current_subtractor_instances,
         door_instances=current_door_instances,
     )
     item.part_snapshots = snapshot["part_snapshots"]
@@ -757,6 +814,7 @@ async def _duplicate_order_design_record(
     source_item: OrderDesign,
 ) -> OrderDesign:
     include_interior = await interior_instance_tables_ready(session)
+    include_subtractors = await subtractor_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)
     order = await require_accessible_order(session, order_id=source_item.order_id)
     checksum = (
@@ -770,6 +828,7 @@ async def _duplicate_order_design_record(
             ),
             order_attr_values=dict(source_item.order_attr_values or {}),
             interior_instances=list(source_item.interior_instances or []) if include_interior else [],
+            subtractor_instances=list(getattr(source_item, "subtractor_instances", []) or []) if include_subtractors else [],
             door_instances=list(getattr(source_item, "door_instances", []) or []) if include_doors else [],
         )
     )
@@ -840,6 +899,24 @@ async def _duplicate_order_design_record(
                         status=str(door.status or "draft").strip() or "draft",
                     )
                 )
+        if include_subtractors:
+            for subtractor in list(getattr(source_item, "subtractor_instances", []) or []):
+                session.add(
+                    OrderDesignSubtractorInstance(
+                        order_design_id=duplicated.id,
+                        source_instance_id=subtractor.source_instance_id,
+                        subtractor_part_group_id=subtractor.subtractor_part_group_id,
+                        instance_code=str(subtractor.instance_code or "").strip(),
+                        line_color=_normalize_hex_color(getattr(subtractor, "line_color", None), DEFAULT_INTERIOR_LINE_COLOR) if getattr(subtractor, "line_color", None) else None,
+                        ui_order=int(subtractor.ui_order or 0),
+                        placement_z=float(subtractor.placement_z or 0),
+                        param_values=_clone_order_design_json(dict(subtractor.param_values or {})),
+                        param_meta=_clone_order_design_json(dict(subtractor.param_meta or {})),
+                        part_snapshots=_clone_order_design_json(list(subtractor.part_snapshots or [])),
+                        viewer_boxes=_clone_order_design_json(list(subtractor.viewer_boxes or [])),
+                        status=str(subtractor.status or "draft").strip() or "draft",
+                    )
+                )
         try:
             await session.commit()
             return await _require_item(session, duplicated.id)
@@ -858,10 +935,13 @@ async def list_order_designs(
 ) -> list[OrderDesignItem]:
     order = await require_accessible_order(session, order_id=order_id)
     include_interior = await interior_instance_tables_ready(session)
+    include_subtractors = await subtractor_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)
     base_stmt = select(OrderDesign)
     if include_interior:
         base_stmt = base_stmt.options(selectinload(OrderDesign.interior_instances))
+    if include_subtractors:
+        base_stmt = base_stmt.options(selectinload(OrderDesign.subtractor_instances))
     if include_doors:
         base_stmt = base_stmt.options(selectinload(OrderDesign.door_instances))
     base_stmt = base_stmt.options(
@@ -874,11 +954,15 @@ async def list_order_designs(
             .order_by(OrderDesign.sort_order.asc(), OrderDesign.instance_code.asc())
         )
     ).all()
-    if include_interior:
+    if include_interior or include_subtractors or include_doors:
         changed = False
         source_design_cache: dict[str, SubCategoryDesign] = {}
         for item in items:
-            if not list(item.interior_instances or []):
+            if not (
+                list(item.interior_instances or [])
+                or list(getattr(item, "subtractor_instances", []) or [])
+                or list(getattr(item, "door_instances", []) or [])
+            ):
                 continue
             source_key = str(item.sub_category_design_id)
             source_design = source_design_cache.get(source_key)
@@ -903,13 +987,14 @@ async def list_order_designs(
                     .order_by(OrderDesign.sort_order.asc(), OrderDesign.instance_code.asc())
                 )
             ).all()
-    return [_serialize_item(item, include_interior=(include_interior or include_doors)) for item in items]
+    return [_serialize_item(item, include_interior=(include_interior or include_subtractors or include_doors)) for item in items]
 
 
 @router.post("", response_model=OrderDesignItem, status_code=status.HTTP_201_CREATED)
 async def create_order_design(payload: OrderDesignCreate, session: AsyncSession = Depends(get_db_session)) -> OrderDesignItem:
     order = await require_accessible_order(session, order_id=payload.order_id)
     include_interior = await interior_instance_tables_ready(session)
+    include_subtractors = await subtractor_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)
     source_design = await require_accessible_sub_category_design(
         session,
@@ -922,18 +1007,21 @@ async def create_order_design(payload: OrderDesignCreate, session: AsyncSession 
         source_design=source_design,
         override_attr_values=payload.order_attr_values,
         interior_instances=list(source_design.interior_instances or []) if include_interior else [],
+        subtractor_instances=list(getattr(source_design, "subtractor_instances", []) or []) if include_subtractors else [],
         door_instances=list(getattr(source_design, "door_instances", []) or []) if include_doors else [],
     )
     snapshot_checksum = build_order_design_snapshot_checksum(
         source_design=source_design,
         order_attr_values=snapshot["order_attr_values"],
         interior_instances=list(source_design.interior_instances or []) if include_interior else [],
+        subtractor_instances=list(getattr(source_design, "subtractor_instances", []) or []) if include_subtractors else [],
         door_instances=list(getattr(source_design, "door_instances", []) or []) if include_doors else [],
         source_state=dict(snapshot.get("source_state") or {}),
     )
     snapshot_marker = order_design_snapshot_marker(
         source_design=source_design,
         interior_instances=list(source_design.interior_instances or []) if include_interior else [],
+        subtractor_instances=list(getattr(source_design, "subtractor_instances", []) or []) if include_subtractors else [],
         door_instances=list(getattr(source_design, "door_instances", []) or []) if include_doors else [],
     )
     title = str(payload.design_title or snapshot["design_title"] or "").strip()
@@ -1031,10 +1119,37 @@ async def create_order_design(payload: OrderDesignCreate, session: AsyncSession 
                         status=str(door.get("status") or getattr(source_door, "status", "draft") or "draft").strip() or "draft",
                     )
                 )
+        if include_subtractors:
+            source_subtractors_by_id = {
+                str(subtractor.id): subtractor
+                for subtractor in list(getattr(source_design, "subtractor_instances", []) or [])
+            }
+            for subtractor in list(snapshot["subtractor_instances"] or []):
+                source_subtractor = source_subtractors_by_id.get(str(subtractor.get("id") or ""))
+                session.add(
+                    OrderDesignSubtractorInstance(
+                        order_design_id=item.id,
+                        source_instance_id=getattr(source_subtractor, "id", None),
+                        subtractor_part_group_id=uuid.UUID(str(subtractor.get("subtractor_part_group_id"))),
+                        instance_code=str(subtractor.get("instance_code") or "").strip(),
+                        line_color=(
+                            str(subtractor.get("line_color") or "").strip()
+                            or str(getattr(source_subtractor, "line_color", "") or "").strip()
+                            or None
+                        ),
+                        ui_order=int(subtractor.get("ui_order") or 0),
+                        placement_z=float(subtractor.get("placement_z") or 0),
+                        param_values=dict(subtractor.get("param_values") or {}),
+                        param_meta=dict(subtractor.get("param_meta") or {}),
+                        part_snapshots=list(subtractor.get("part_snapshots") or []),
+                        viewer_boxes=list(subtractor.get("viewer_boxes") or []),
+                        status=str(subtractor.get("status") or getattr(source_subtractor, "status", "draft") or "draft").strip() or "draft",
+                    )
+                )
         try:
             await session.commit()
             item = await _require_item(session, item.id)
-            return _serialize_item(item, include_interior=(include_interior or include_doors))
+            return _serialize_item(item, include_interior=(include_interior or include_subtractors or include_doors))
         except IntegrityError as exc:
             await session.rollback()
             if payload.instance_code or not _is_order_design_unique_conflict(exc):
@@ -1051,6 +1166,7 @@ async def update_order_design(
 ) -> OrderDesignItem:
     item = await _require_item(session, item_id)
     include_interior = await interior_instance_tables_ready(session)
+    include_subtractors = await subtractor_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)
     order = await require_accessible_order(session, order_id=item.order_id)
     source_design = await require_accessible_sub_category_design(
@@ -1072,20 +1188,24 @@ async def update_order_design(
         source_design=source_design,
         override_attr_values=next_attr_values,
         interior_instances=list(item.interior_instances or []) if include_interior else [],
+        subtractor_instances=list(getattr(item, "subtractor_instances", []) or []) if include_subtractors else [],
         door_instances=list(getattr(item, "door_instances", []) or []) if include_doors else [],
     )
     current_interior_instances = list(item.interior_instances or []) if include_interior else []
+    current_subtractor_instances = list(getattr(item, "subtractor_instances", []) or []) if include_subtractors else []
     current_door_instances = list(getattr(item, "door_instances", []) or []) if include_doors else []
     snapshot_checksum = build_order_design_snapshot_checksum(
         source_design=source_design,
         order_attr_values=snapshot["order_attr_values"],
         interior_instances=current_interior_instances,
+        subtractor_instances=current_subtractor_instances,
         door_instances=current_door_instances,
         source_state=dict(snapshot.get("source_state") or {}),
     )
     snapshot_marker = order_design_snapshot_marker(
         source_design=source_design,
         interior_instances=current_interior_instances,
+        subtractor_instances=current_subtractor_instances,
         door_instances=current_door_instances,
     )
     item.design_title = title
@@ -1103,6 +1223,16 @@ async def update_order_design(
     item.viewer_boxes = snapshot["viewer_boxes"]
     if include_interior:
         _apply_resolved_interior_snapshot(item, snapshot=snapshot)
+    if include_subtractors:
+        subtractor_by_id = {str(getattr(instance, "id", "")): instance for instance in list(getattr(item, "subtractor_instances", []) or [])}
+        for resolved in list(snapshot.get("subtractor_instances") or []):
+            instance = subtractor_by_id.get(str(resolved.get("id") or ""))
+            if not instance:
+                continue
+            instance.param_values = dict(resolved.get("param_values") or {})
+            instance.param_meta = dict(resolved.get("param_meta") or {})
+            instance.part_snapshots = list(resolved.get("part_snapshots") or [])
+            instance.viewer_boxes = list(resolved.get("viewer_boxes") or [])
     if include_doors:
         door_by_id = {str(getattr(instance, "id", "")): instance for instance in list(getattr(item, "door_instances", []) or [])}
         for resolved in list(snapshot.get("door_instances") or []):
@@ -1120,7 +1250,7 @@ async def update_order_design(
         conflict_detail="Order design changed in another request. Please reload and try again.",
     )
     item = await _require_item(session, item.id)
-    return _serialize_item(item, include_interior=(include_interior or include_doors))
+    return _serialize_item(item, include_interior=(include_interior or include_subtractors or include_doors))
 
 
 @router.post("/{item_id}/duplicate", response_model=OrderDesignItem, status_code=status.HTTP_201_CREATED)
@@ -1130,12 +1260,13 @@ async def duplicate_order_design(
 ) -> OrderDesignItem:
     source_item = await _require_item(session, item_id)
     include_interior = await interior_instance_tables_ready(session)
+    include_subtractors = await subtractor_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)
     duplicated = await _duplicate_order_design_record(
         session,
         source_item=source_item,
     )
-    return _serialize_item(duplicated, include_interior=(include_interior or include_doors))
+    return _serialize_item(duplicated, include_interior=(include_interior or include_subtractors or include_doors))
 
 
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1157,8 +1288,9 @@ async def restore_order_design(item_id: uuid.UUID, session: AsyncSession = Depen
     item = await _require_item_any_status(session, item_id)
     if item.deleted_at is None:
         include_interior = await interior_instance_tables_ready(session)
+        include_subtractors = await subtractor_instance_tables_ready(session)
         include_doors = await door_instance_tables_ready(session)
-        return _serialize_item(item, include_interior=(include_interior or include_doors))
+        return _serialize_item(item, include_interior=(include_interior or include_subtractors or include_doors))
     instance_code, next_meta = _restore_deleted_instance_code(dict(item.order_attr_meta or {}), str(item.instance_code or "").strip())
     await _ensure_unique_instance_code(session, order_id=item.order_id, instance_code=instance_code, exclude_id=item.id)
     item.instance_code = instance_code
@@ -1170,8 +1302,9 @@ async def restore_order_design(item_id: uuid.UUID, session: AsyncSession = Depen
     )
     item = await _require_item(session, item_id)
     include_interior = await interior_instance_tables_ready(session)
+    include_subtractors = await subtractor_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)
-    return _serialize_item(item, include_interior=(include_interior or include_doors))
+    return _serialize_item(item, include_interior=(include_interior or include_subtractors or include_doors))
 
 
 @router.post("/{item_id}/history-restore", response_model=OrderDesignItem)
@@ -1182,6 +1315,7 @@ async def restore_order_design_history_state(
 ) -> OrderDesignItem:
     item = await _require_item(session, item_id)
     include_interior = await interior_instance_tables_ready(session)
+    include_subtractors = await subtractor_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)
     order = await require_accessible_order(session, order_id=item.order_id)
     source_design = await require_accessible_sub_category_design(
@@ -1297,7 +1431,7 @@ async def restore_order_design_history_state(
         conflict_detail="طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
     )
     item = await _require_item(session, item.id)
-    return _serialize_item(item, include_interior=(include_interior or include_doors))
+    return _serialize_item(item, include_interior=(include_interior or include_subtractors or include_doors))
 
 
 @router.patch("/{item_id}/interior-instances/{instance_id}", response_model=OrderDesignInteriorInstanceItem)
@@ -1863,6 +1997,7 @@ async def recompute_order_design_snapshot(
             conflict_detail="طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
         )
     include_interior = await interior_instance_tables_ready(session)
+    include_subtractors = await subtractor_instance_tables_ready(session)
     include_doors = await door_instance_tables_ready(session)
     item = await _require_item(session, item.id)
-    return _serialize_item(item, include_interior=(include_interior or include_doors))
+    return _serialize_item(item, include_interior=(include_interior or include_subtractors or include_doors))

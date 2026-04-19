@@ -121,11 +121,13 @@ class SubCategoryDesignPreviewResponse(BaseModel):
     resolved_params: dict[str, str | None]
     resolved_base_formulas: dict[str, float]
     viewer_boxes: list[dict[str, object]]
+    boolean_targets: list[dict[str, object]] = Field(default_factory=list)
+    boolean_cutters: list[dict[str, object]] = Field(default_factory=list)
+    boolean_result: list[dict[str, object]] = Field(default_factory=list)
     parts: list[SubCategoryDesignPartPreviewItem]
     interior_instances: list[SubCategoryDesignInteriorInstancePreviewItem]
     subtractor_instances: list[dict[str, object]] = Field(default_factory=list)
     door_instances: list[dict[str, object]] = Field(default_factory=list)
-    subtractor_instances: list[dict[str, object]] = Field(default_factory=list)
 
 
 class SubCategoryDesignItem(BaseModel):
@@ -146,7 +148,6 @@ class SubCategoryDesignItem(BaseModel):
     interior_instances: list[SubCategoryDesignInteriorInstanceItem]
     subtractor_instances: list[dict[str, object]] = Field(default_factory=list)
     door_instances: list[dict[str, object]] = Field(default_factory=list)
-    subtractor_instances: list[dict[str, object]] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -163,7 +164,6 @@ class SubCategoryDesignCreate(BaseModel):
     interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
     subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
     door_instances: list["SubCategoryDesignDoorInstanceDraftPayload"] = Field(default_factory=list)
-    subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
 
 
 class SubCategoryDesignUpdate(BaseModel):
@@ -178,7 +178,6 @@ class SubCategoryDesignUpdate(BaseModel):
     interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
     subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
     door_instances: list["SubCategoryDesignDoorInstanceDraftPayload"] = Field(default_factory=list)
-    subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
 
 
 class SubCategoryDesignPreviewDraftRequest(BaseModel):
@@ -188,7 +187,6 @@ class SubCategoryDesignPreviewDraftRequest(BaseModel):
     interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
     subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
     door_instances: list["SubCategoryDesignDoorInstanceDraftPayload"] = Field(default_factory=list)
-    subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
 
 
 class SubCategoryDesignInteriorInstanceDraftPayload(BaseModel):
@@ -461,6 +459,9 @@ def _serialize_preview(
     interior_instances: list,
     subtractor_instances: list | None = None,
     door_instances: list | None = None,
+    boolean_targets: list[dict[str, object]] | None = None,
+    boolean_cutters: list[dict[str, object]] | None = None,
+    boolean_result: list[dict[str, object]] | None = None,
 ) -> SubCategoryDesignPreviewResponse:
     parts = [
         SubCategoryDesignPartPreviewItem(
@@ -519,6 +520,15 @@ def _serialize_preview(
                 for item in list(door_instances or [])
                 for box in list(getattr(item, "viewer_boxes", []) or [])
             ],
+        ],
+        boolean_targets=[dict(item or {}) for item in list(boolean_targets or [])],
+        boolean_cutters=[dict(item or {}) for item in list(boolean_cutters or [])],
+        boolean_result=[
+            {
+                **dict(item or {}),
+                "boxes": [dict(box or {}) for box in list(dict(item or {}).get("boxes") or [])],
+            }
+            for item in list(boolean_result or [])
         ],
         parts=parts,
         interior_instances=interior_preview_items,
@@ -832,7 +842,7 @@ async def preview_sub_category_design_draft(
 ) -> SubCategoryDesignPreviewResponse:
     await require_admin_if_present(session, payload.admin_id)
     sub_category = await require_accessible_sub_category(session, admin_id=payload.admin_id, sub_category_id=payload.sub_category_id)
-    raw_params, resolved_base_formulas, snapshots, interior_instances, subtractor_instances, door_instances = await compose_sub_category_design_preview(
+    raw_params, resolved_base_formulas, snapshots, interior_instances, subtractor_instances, door_instances, boolean_payload = await compose_sub_category_design_preview(
         session,
         admin_id=payload.admin_id,
         sub_category=sub_category,
@@ -869,6 +879,9 @@ async def preview_sub_category_design_draft(
         interior_instances=interior_instances,
         subtractor_instances=subtractor_instances,
         door_instances=door_instances,
+        boolean_targets=boolean_payload.boolean_targets,
+        boolean_cutters=boolean_payload.boolean_cutters,
+        boolean_result=boolean_payload.boolean_result,
     )
 
 
@@ -889,7 +902,7 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
     sub_category = await session.get(SubCategory, item.sub_category_id)
     if not sub_category or sub_category.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sub-category not found for this design.")
-    raw_params, resolved_base_formulas, snapshots, interior_instances, subtractor_instances, door_instances = await compose_sub_category_design_preview(
+    raw_params, resolved_base_formulas, snapshots, interior_instances, subtractor_instances, door_instances, boolean_payload = await compose_sub_category_design_preview(
         session,
         admin_id=item.admin_id,
         sub_category=sub_category,
@@ -915,6 +928,9 @@ async def preview_sub_category_design(design_uuid: uuid.UUID, session: AsyncSess
         interior_instances=interior_instances,
         subtractor_instances=subtractor_instances,
         door_instances=door_instances,
+        boolean_targets=boolean_payload.boolean_targets,
+        boolean_cutters=boolean_payload.boolean_cutters,
+        boolean_result=boolean_payload.boolean_result,
     )
 
 

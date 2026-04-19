@@ -5,6 +5,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, func, or_, select
@@ -33,6 +34,12 @@ from designkp_backend.db.models.catalog import (
     SubtractorPartGroupParamDefault,
 )
 from designkp_backend.services.sub_category_defaults import sync_defaults_for_sub_categories
+from designkp_backend.services.geometry.box_boolean import (
+    clone_box,
+    dedupe_boxes,
+    has_positive_overlap,
+    subtract_box_many,
+)
 
 
 PART_FORMULA_FIELDS = (
@@ -151,6 +158,13 @@ class DesignExecutionContext:
     parsed_expression_cache: dict[str, ast.Expression]
     expression_name_cache: dict[str, set[str]]
     source_state: dict[str, object]
+
+
+@dataclass(slots=True)
+class BooleanPreviewPayload:
+    boolean_targets: list[dict[str, object]]
+    boolean_cutters: list[dict[str, object]]
+    boolean_result: list[dict[str, object]]
 
 
 def _round_number(value: float | int) -> float:
@@ -1375,6 +1389,7 @@ def serialize_resolved_part_snapshot(item: ResolvedPartSnapshot) -> dict[str, ob
         "part_kind_id": int(item.part_formula.part_kind_id),
         "part_code": item.part_formula.part_code,
         "part_title": item.part_formula.part_title,
+        "door_dependent": bool(getattr(item.part_formula, "door_dependent", False)),
         "enabled": bool(item.enabled),
         "ui_order": int(item.ui_order),
         "resolved_part_formulas": dict(item.resolved_part_formulas),
@@ -1507,6 +1522,7 @@ async def resolve_internal_instance_preview(
                 "part_kind_id": int(formula.part_kind_id),
                 "part_code": formula.part_code,
                 "part_title": formula.part_title,
+                "door_dependent": bool(getattr(formula, "door_dependent", False)),
                 "enabled": True,
                 "ui_order": int(selection.ui_order or 0),
                 "resolved_part_formulas": resolved_part_formulas,
@@ -1967,6 +1983,9 @@ def _collect_controller_selection_boxes(
             if isinstance(direct_box, dict):
                 selected_boxes.append(
                     {
+                        "source_type": source_type,
+                        "source_id": source_id,
+                        "source_snapshot_index": source_snapshot_index,
                         "part_formula_id": part_formula_id,
                         "part_code": part_code,
                         "box": dict(direct_box),
@@ -1989,6 +2008,9 @@ def _collect_controller_selection_boxes(
         if isinstance(box, dict):
             selected_boxes.append(
                 {
+                    "source_type": source_type,
+                    "source_id": source_id,
+                    "source_snapshot_index": source_snapshot_index,
                     "part_formula_id": part_formula_id,
                     "part_code": part_code,
                     "box": dict(box),
@@ -1996,6 +2018,251 @@ def _collect_controller_selection_boxes(
                 }
             )
     return selected_boxes
+
+
+def _boolean_box_signature(box: dict[str, object] | None) -> str:
+    payload = clone_box(box)
+    return "|".join(
+        str(payload[key])
+        for key in ("width", "depth", "height", "cx", "cy", "cz")
+    )
+
+
+def _sorted_subtractor_instances(instances: list[object] | None) -> list[object]:
+    return sorted(
+        list(instances or []),
+        key=lambda item: (
+            int(getattr(item, "ui_order", 0) or 0),
+            str(getattr(item, "instance_code", "") or ""),
+            str(getattr(item, "instance_id", "") or getattr(item, "id", "") or ""),
+        ),
+    )
+
+
+def _part_formula_is_door_dependent(
+    context: DesignExecutionContext,
+    *,
+    part_formula_id: int,
+    part_snapshot: dict[str, object] | None = None,
+) -> bool:
+    if isinstance(part_snapshot, dict) and "door_dependent" in part_snapshot:
+        return bool(part_snapshot.get("door_dependent"))
+    formula = context.part_formulas_by_id.get(int(part_formula_id or 0))
+    return bool(getattr(formula, "door_dependent", False)) if formula is not None else False
+
+
+def _build_boolean_owner_metadata(
+    *,
+    owner_type: str,
+    owner_id: str,
+    owner_instance_code: str,
+    owner_line_color: str | None = None,
+) -> dict[str, object]:
+    return {
+        "owner_type": str(owner_type or "").strip(),
+        "owner_id": str(owner_id or "").strip(),
+        "owner_instance_code": str(owner_instance_code or "").strip(),
+        "line_color": str(owner_line_color or "").strip() or None,
+    }
+
+
+def _append_boolean_target(
+    *,
+    targets: list[dict[str, object]],
+    seen: set[str],
+    owner_type: str,
+    owner_id: str,
+    owner_instance_code: str,
+    owner_line_color: str | None,
+    snapshot_index: int,
+    part_snapshot: dict[str, object],
+    part_formula_id: int,
+    part_code: str | None = None,
+) -> None:
+    box = dict((part_snapshot or {}).get("viewer_payload") or {}).get("box")
+    if not isinstance(box, dict):
+        return
+    target_id = f"{owner_type}:{owner_id}:{part_formula_id}:{snapshot_index}"
+    if target_id in seen:
+        return
+    seen.add(target_id)
+    targets.append(
+        {
+            "target_id": target_id,
+            **_build_boolean_owner_metadata(
+                owner_type=owner_type,
+                owner_id=owner_id,
+                owner_instance_code=owner_instance_code,
+                owner_line_color=owner_line_color,
+            ),
+            "part_formula_id": int(part_formula_id or 0),
+            "part_code": str(part_code or (part_snapshot or {}).get("part_code") or "").strip(),
+            "part_title": str((part_snapshot or {}).get("part_title") or "").strip(),
+            "snapshot_index": int(snapshot_index),
+            "box": clone_box(box),
+        }
+    )
+
+
+def _collect_boolean_targets_for_door(
+    *,
+    context: DesignExecutionContext,
+    door_instance: ResolvedDoorInstanceSnapshot,
+    root_part_snapshots: list[dict[str, object]] | None,
+    interiors: list[ResolvedInteriorInstanceSnapshot] | None,
+) -> list[dict[str, object]]:
+    targets: list[dict[str, object]] = []
+    seen: set[str] = set()
+    allowed_structural_ids = {int(item) for item in list(door_instance.structural_part_formula_ids or []) if int(item) > 0}
+    for index, snapshot in enumerate(list(root_part_snapshots or [])):
+        part_formula_id = int((snapshot or {}).get("part_formula_id") or 0)
+        if part_formula_id <= 0 or part_formula_id not in allowed_structural_ids:
+            continue
+        if not _part_formula_is_door_dependent(context, part_formula_id=part_formula_id, part_snapshot=snapshot):
+            continue
+        _append_boolean_target(
+            targets=targets,
+            seen=seen,
+            owner_type="structural",
+            owner_id="root",
+            owner_instance_code="root",
+            owner_line_color=None,
+            snapshot_index=index,
+            part_snapshot=snapshot,
+            part_formula_id=part_formula_id,
+        )
+    interior_by_id = {
+        str(getattr(instance, "instance_id", "") or ""): instance
+        for instance in list(interiors or [])
+        if str(getattr(instance, "instance_id", "") or "").strip()
+    }
+    for interior_id in list(door_instance.dependent_interior_instance_ids or []):
+        interior = interior_by_id.get(str(interior_id).strip())
+        if interior is None:
+            continue
+        for index, snapshot in enumerate(list(interior.part_snapshots or [])):
+            part_formula_id = int((snapshot or {}).get("part_formula_id") or 0)
+            if part_formula_id <= 0 or not _part_formula_is_door_dependent(context, part_formula_id=part_formula_id, part_snapshot=snapshot):
+                continue
+            _append_boolean_target(
+                targets=targets,
+                seen=seen,
+                owner_type="interior",
+                owner_id=str(interior.instance_id or ""),
+                owner_instance_code=str(interior.instance_code or ""),
+                owner_line_color=interior.line_color,
+                snapshot_index=index,
+                part_snapshot=snapshot,
+                part_formula_id=part_formula_id,
+            )
+    selected_parts = _collect_controller_selection_boxes(
+        controller_box_snapshot=dict(door_instance.controller_box_snapshot or {}),
+        root_part_snapshots=root_part_snapshots,
+        interiors=interiors,
+    )
+    for index, item in enumerate(selected_parts):
+        part_formula_id = int(item.get("part_formula_id") or 0)
+        if part_formula_id <= 0 or not _part_formula_is_door_dependent(context, part_formula_id=part_formula_id):
+            continue
+        box = item.get("box")
+        if not isinstance(box, dict):
+            continue
+        source_type = str(item.get("source_type") or "structural").strip() or "structural"
+        source_id = str(item.get("source_id") or ("root" if source_type == "structural" else "")).strip() or "root"
+        target_id = f"{source_type}:{source_id}:{part_formula_id}:{int(item.get('source_snapshot_index') or index)}"
+        if target_id in seen:
+            continue
+        seen.add(target_id)
+        targets.append(
+            {
+                "target_id": target_id,
+                **_build_boolean_owner_metadata(
+                    owner_type=source_type if source_type in {"structural", "interior"} else "structural",
+                    owner_id=source_id,
+                    owner_instance_code=source_id if source_id != "root" else "root",
+                    owner_line_color=None,
+                ),
+                "part_formula_id": part_formula_id,
+                "part_code": str(item.get("part_code") or "").strip(),
+                "part_title": "",
+                "snapshot_index": int(item.get("source_snapshot_index") or index),
+                "box": clone_box(box),
+            }
+        )
+    return targets
+
+
+def build_boolean_preview_payload(
+    *,
+    context: DesignExecutionContext,
+    root_part_snapshots: list[dict[str, object]] | None,
+    interiors: list[ResolvedInteriorInstanceSnapshot] | None,
+    subtractors: list[ResolvedSubtractorInstanceSnapshot] | None,
+    doors: list[ResolvedDoorInstanceSnapshot] | None,
+) -> BooleanPreviewPayload:
+    boolean_targets: list[dict[str, object]] = []
+    target_seen: set[str] = set()
+    for door in list(doors or []):
+        for target in _collect_boolean_targets_for_door(
+            context=context,
+            door_instance=door,
+            root_part_snapshots=root_part_snapshots,
+            interiors=interiors,
+        ):
+            target_id = str(target.get("target_id") or "").strip()
+            if not target_id or target_id in target_seen:
+                continue
+            target_seen.add(target_id)
+            boolean_targets.append(target)
+
+    boolean_cutters: list[dict[str, object]] = []
+    for subtractor in _sorted_subtractor_instances(subtractors):
+        for box_index, raw_box in enumerate(list(getattr(subtractor, "viewer_boxes", []) or [])):
+            if not isinstance(raw_box, dict):
+                continue
+            boolean_cutters.append(
+                {
+                    "cutter_id": f"{str(getattr(subtractor, 'instance_id', '') or '')}:{box_index}",
+                    "subtractor_instance_id": str(getattr(subtractor, "instance_id", "") or "").strip(),
+                    "subtractor_instance_code": str(getattr(subtractor, "instance_code", "") or "").strip(),
+                    "subtractor_part_group_id": str(getattr(subtractor, "subtractor_part_group_id", "") or "").strip(),
+                    "ui_order": int(getattr(subtractor, "ui_order", 0) or 0),
+                    "box": clone_box(raw_box),
+                }
+            )
+
+    boolean_result: list[dict[str, object]] = []
+    ordered_cutter_boxes = [dict(item.get("box") or {}) for item in boolean_cutters if isinstance(item.get("box"), dict)]
+    for target in boolean_targets:
+        target_box = dict(target.get("box") or {})
+        target_cutter_boxes = [
+            dict(cutter_box)
+            for cutter_box in ordered_cutter_boxes
+            if has_positive_overlap(target_box, cutter_box)
+        ]
+        try:
+            next_boxes = subtract_box_many(target_box, target_cutter_boxes) if target_cutter_boxes else [clone_box(target_box)]
+        except Exception:  # noqa: BLE001
+            next_boxes = [clone_box(target_box)]
+        next_boxes = dedupe_boxes(next_boxes or [clone_box(target_box)])
+        boolean_result.append(
+            {
+                "target_id": str(target.get("target_id") or "").strip(),
+                "owner_type": target.get("owner_type"),
+                "owner_id": target.get("owner_id"),
+                "owner_instance_code": target.get("owner_instance_code"),
+                "line_color": target.get("line_color"),
+                "part_formula_id": int(target.get("part_formula_id") or 0),
+                "part_code": str(target.get("part_code") or "").strip(),
+                "part_title": str(target.get("part_title") or "").strip(),
+                "boxes": next_boxes,
+            }
+        )
+    return BooleanPreviewPayload(
+        boolean_targets=boolean_targets,
+        boolean_cutters=boolean_cutters,
+        boolean_result=boolean_result,
+    )
 
 
 async def resolve_door_instance_preview(
@@ -2143,6 +2410,7 @@ async def resolve_door_instance_preview(
                 "part_kind_id": int(formula.part_kind_id),
                 "part_code": formula.part_code,
                 "part_title": formula.part_title,
+                "door_dependent": bool(getattr(formula, "door_dependent", False)),
                 "enabled": True,
                 "ui_order": int(selection.ui_order or 0),
                 "resolved_part_formulas": resolved_part_formulas,
@@ -2273,6 +2541,7 @@ async def resolve_subtractor_instance_preview(
                 "part_kind_id": int(formula.part_kind_id),
                 "part_code": formula.part_code,
                 "part_title": formula.part_title,
+                "door_dependent": bool(getattr(formula, "door_dependent", False)),
                 "enabled": True,
                 "ui_order": int(selection.ui_order or 0),
                 "resolved_part_formulas": resolved_part_formulas,
@@ -2320,6 +2589,7 @@ async def compose_sub_category_design_preview(
     list[ResolvedInteriorInstanceSnapshot],
     list[ResolvedSubtractorInstanceSnapshot],
     list[ResolvedDoorInstanceSnapshot],
+    BooleanPreviewPayload,
 ]:
     selected_ids = [int(item["part_formula_id"]) for item in part_selections if int(item.get("part_formula_id") or 0) > 0 and bool(item.get("enabled", True))]
     context = await build_design_execution_context(
@@ -2479,7 +2749,15 @@ async def compose_sub_category_design_preview(
             )
         )
 
-    return raw_params, resolved_base_formulas, snapshots, resolved_interior, resolved_subtractors, resolved_doors
+    boolean_payload = build_boolean_preview_payload(
+        context=context,
+        root_part_snapshots=[serialize_resolved_part_snapshot(item) for item in snapshots],
+        interiors=resolved_interior,
+        subtractors=resolved_subtractors,
+        doors=resolved_doors,
+    )
+
+    return raw_params, resolved_base_formulas, snapshots, resolved_interior, resolved_subtractors, resolved_doors, boolean_payload
 
 
 async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDesign) -> None:
@@ -2501,7 +2779,7 @@ async def rebuild_design_snapshots(session: AsyncSession, design: SubCategoryDes
         }
         for part in design.parts
     ]
-    raw_params, resolved_base_formulas, snapshots, resolved_interior, resolved_subtractors, resolved_doors = await compose_sub_category_design_preview(
+    raw_params, resolved_base_formulas, snapshots, resolved_interior, resolved_subtractors, resolved_doors, _boolean_payload = await compose_sub_category_design_preview(
         session,
         admin_id=design.admin_id,
         sub_category=sub_category,
