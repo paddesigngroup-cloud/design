@@ -110,3 +110,7 @@
 109,f109,(ri_p*p_th)+ri_g+ri_n+r_o_do+d_r_r+d_r_g-d_r_a,system
 110,f110,d_l_g+d_r_g,system
 111,f111,d_t_g+d_b_g,system
+112,f112,(c_th)+((to_p)*(p_th))+(to_g)+(c_g)+(ha_t_o),system
+113,f113,((le_p)*(p_th))+(le_g)+(le_n)+(ha_l_o),system
+114,f114,((ri_p)*(p_th))+(ri_g)+(ri_n)+(ha_r_o),system
+115,f115,((d_th_ca)*(d_th))+((f_th_ca)*(f_th))+((fr_p)*(p_th))+(fr_g)+(fr_n)+(p_f_ha),system

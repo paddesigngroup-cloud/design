@@ -29,6 +29,7 @@ from designkp_backend.services.sub_category_defaults import normalize_default_va
 
 router = APIRouter(prefix="/subtractor-part-groups", tags=["subtractor_part_groups"])
 DEFAULT_SUBTRACTOR_LINE_COLOR = "#8A98A3"
+SUBTRACTOR_GROUP_CONTROLLER_TYPE_HORIZONTAL_HANDLE = "subtractor_horizontal_handle"
 SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH = "width_controler_internal_group_parts"
 SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT = "width_controler_internal_group_parts_right"
 SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_LEFT = "width_controler_internal_group_parts_left"
@@ -37,7 +38,18 @@ SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_RIGHT = "width_controller_internal
 SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_LEFT = "width_controller_internal_group_part_left"
 SUBTRACTOR_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT = "height_controller_internal_group_part"
 SUBTRACTOR_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT = "height_controller_internal_group_part_left"
+SUBTRACTOR_GROUP_CONTROLLER_TYPE_LEGACY_ALIASES = {
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH,
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT,
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_LEFT,
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP,
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_RIGHT,
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_NO_TOP_LEFT,
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT,
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT,
+}
 SUBTRACTOR_GROUP_CONTROLLER_SLOTS_BY_TYPE = {
+    SUBTRACTOR_GROUP_CONTROLLER_TYPE_HORIZONTAL_HANDLE: ("left", "top", "right", "bottom_offset"),
     SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH: ("left", "top", "right", "bottom_offset"),
     SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT: ("left", "top", "right", "bottom_offset"),
     SUBTRACTOR_GROUP_CONTROLLER_TYPE_WIDTH_LEFT: ("left", "top", "right", "bottom_offset"),
@@ -208,7 +220,11 @@ async def subtractor_part_group_param_defaults_table_ready(session: AsyncSession
 
 def _normalize_controller_type(value: str | None) -> str | None:
     normalized = str(value or "").strip()
-    return normalized or None
+    if not normalized:
+        return None
+    if normalized in SUBTRACTOR_GROUP_CONTROLLER_TYPE_LEGACY_ALIASES:
+        return SUBTRACTOR_GROUP_CONTROLLER_TYPE_HORIZONTAL_HANDLE
+    return normalized
 
 
 def _normalize_optional_string(value: object) -> str | None:
@@ -225,7 +241,7 @@ def _normalize_controller_bindings_payload(
         return {}
     allowed_slots = SUBTRACTOR_GROUP_CONTROLLER_SLOTS_BY_TYPE.get(normalized_type)
     if not allowed_slots:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported internal group controller type: {normalized_type}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported subtractor group controller type: {normalized_type}")
     raw_bindings = dict(bindings or {})
     invalid_slots = sorted(str(key or "").strip() for key in raw_bindings if str(key or "").strip() not in allowed_slots)
     if invalid_slots:
