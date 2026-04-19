@@ -2397,10 +2397,12 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
   const startValues = state.startValues;
   if (!frame || !startValues || !currentPoint) return;
   const controllerType = activeInteriorLibrarySelectedGroup.value?.controller_type;
+  const isSubtractorController = normalizeSubtractorPartGroupControllerType(controllerType) === SUBTRACTOR_GROUP_CONTROLLER_TYPE_HORIZONTAL_HANDLE;
   const normalizedType = normalizeInternalPartGroupControllerType(controllerType);
   const isHeightController = isHeightInternalGroupControllerType(controllerType);
   const horizontalMode = getInternalGroupControllerHorizontalMode(controllerType, controllerId);
   const startRect = buildInteriorLibraryControllerRectFromFrameValues(frame, startValues, controllerType);
+  if (!startRect) return;
   const pointerToAnchor = state.pointerToAnchor || { x: 0, y: 0 };
   const anchorX = (Number(currentPoint.x) || 0) - (Number(pointerToAnchor.x) || 0);
   const anchorY = (Number(currentPoint.y) || 0) - (Number(pointerToAnchor.y) || 0);
@@ -2419,6 +2421,39 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
     right: Number(startValues.right) || 0,
     bottom_offset: Number(startValues.bottom_offset) || 0,
   };
+  if (isSubtractorController) {
+    const minWidth = 1;
+    const minHeight = 1;
+    if (controllerId === "left") {
+      const leftMm = (snappedX - frame.x) / frame.scale;
+      nextValues.left = Math.min(Math.max(0, leftMm), Math.max(0, frameWidth - nextValues.right - minWidth));
+    } else if (controllerId === "right") {
+      const rightMm = ((frame.x + frame.w) - snappedX) / frame.scale;
+      nextValues.right = Math.min(Math.max(0, rightMm), Math.max(0, frameWidth - nextValues.left - minWidth));
+    } else if (controllerId === "top") {
+      const rawRectY = snappedY;
+      const snappedRectY = snapInteriorControllerRectY(rawRectY, Number(startRect.h) || 0, ignoreAxisValues);
+      const clampedRectY = Math.max(frame.y, Math.min(snappedRectY, (frame.y + frame.h) - (Number(startRect.h) || 0)));
+      nextValues.top = Math.min(
+        Math.max(0, (clampedRectY - frame.y) / frame.scale),
+        Math.max(0, frameHeight - nextValues.bottom_offset)
+      );
+    } else if (controllerId === "bottom_offset") {
+      const heightMm = (snappedY - (Number(startRect.y) || frame.y)) / frame.scale;
+      nextValues.bottom_offset = Math.min(
+        Math.max(minHeight, heightMm),
+        Math.max(minHeight, frameHeight - nextValues.top)
+      );
+    } else {
+      return;
+    }
+    interiorLibraryControllerDraftValues.value = nextValues;
+    interiorLibraryControllerPointerState.value = {
+      ...state,
+      dirty: true,
+    };
+    return;
+  }
   if (controllerId === "left") {
     if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_LEFT) {
       const totalLeft = (snappedX - frame.x) / frame.scale;
