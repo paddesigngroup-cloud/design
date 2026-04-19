@@ -4229,7 +4229,7 @@ const activeDoorLibraryViewerBoxes = computed(() => [
   ...getViewerBoxesFromDoorInstances(activeDoorLibraryInstances.value),
 ]);
 const isInteriorLibraryFront2dActive = computed(() =>
-  interiorLibraryOpen.value && interiorLibraryPreviewMode.value === "front2d"
+  (interiorLibraryOpen.value || subtractorLibraryOpen.value) && interiorLibraryPreviewMode.value === "front2d"
 );
 const isDoorLibraryFront2dActive = computed(() =>
   doorLibraryOpen.value && doorLibraryPreviewMode.value === "front2d"
@@ -5343,6 +5343,15 @@ watch(interiorLibraryOpen, (open) => {
     stopInteriorLibraryPointerProcessing();
     enable2dInput();
     closeInteriorInstanceContextMenu();
+    return;
+  }
+  disable2dInput();
+});
+watch(subtractorLibraryOpen, (open) => {
+  if (!open) {
+    stopInteriorLibraryPointerProcessing();
+    enable2dInput();
+    closeSubtractorInstanceContextMenu();
     return;
   }
   disable2dInput();
@@ -10626,6 +10635,28 @@ async function ensureOrderDesignDoorParamMetaLoaded(orderDesignId) {
   }
 }
 
+async function ensureOrderDesignSubtractorParamMetaLoaded(orderDesignId) {
+  const key = String(orderDesignId || "").trim();
+  if (!key) return;
+  const item = orderDesignCatalog.value.find((row) => String(row.id) === key);
+  const subtractors = Array.isArray(item?.subtractor_instances) ? item.subtractor_instances : [];
+  if (!subtractors.length) return;
+  const needsRefresh = subtractors.some((instance) => {
+    const metaCount = Object.keys(instance?.param_meta || {}).length;
+    const sourceGroup = constructionSubtractorPartGroupsById.value.get(String(instance?.subtractor_part_group_id || "").trim());
+    const expectedMetaCount = sourceGroup
+      ? buildSubtractorPartGroupDefaultsGroups(sourceGroup).reduce((sum, group) => sum + group.items.length, 0)
+      : Object.keys(instance?.param_values || {}).length;
+    return expectedMetaCount > 0 && metaCount < expectedMetaCount;
+  });
+  if (!needsRefresh) return;
+  try {
+    await refreshOrderDesignGeometryFromServer(key, { updateStage: false });
+  } catch (_) {
+    // Silent: failing to refresh should not block opening the library.
+  }
+}
+
 async function loadConstructionDoorPartGroups() {
   try {
     const url = `/api/door-part-groups?admin_id=${encodeURIComponent(currentAdminId.value)}`;
@@ -10837,9 +10868,28 @@ function syncSubtractorInstanceInOrderDesignCollection(orderDesignId, instance) 
       const nextItems = existingIndex === -1
         ? [...items, normalized]
         : items.map((row, index) => index === existingIndex ? normalized : row);
-      return { ...item, subtractor_instances: nextItems };
+      return {
+        ...item,
+        subtractor_instances: nextItems
+          .slice()
+          .sort((a, b) => {
+            const orderDelta = (Number(a.ui_order) || 0) - (Number(b.ui_order) || 0);
+            if (orderDelta !== 0) return orderDelta;
+            return String(a.instance_code || "").localeCompare(String(b.instance_code || ""), "fa");
+          }),
+      };
     })
   );
+  if (String(orderDesignEditorDraft.value?.id || "") === targetId) {
+    const items = Array.isArray(orderDesignEditorDraft.value?.subtractor_instances) ? orderDesignEditorDraft.value.subtractor_instances : [];
+    const existingIndex = items.findIndex((row) => String(row.id) === String(normalized.id));
+    orderDesignEditorDraft.value = {
+      ...orderDesignEditorDraft.value,
+      subtractor_instances: existingIndex === -1
+        ? [...items, normalized]
+        : items.map((row, index) => index === existingIndex ? normalized : row),
+    };
+  }
   return normalized;
 }
 
@@ -10854,6 +10904,12 @@ function removeSubtractorInstanceFromOrderDesignCollection(orderDesignId, instan
         : item
     )
   );
+  if (String(orderDesignEditorDraft.value?.id || "") === targetId) {
+    orderDesignEditorDraft.value = {
+      ...orderDesignEditorDraft.value,
+      subtractor_instances: (orderDesignEditorDraft.value?.subtractor_instances || []).filter((row) => String(row.id) !== instanceKey),
+    };
+  }
 }
 
 async function addSubtractorGroupToDesign(group) {
@@ -11064,6 +11120,45 @@ async function openDoorInstanceEditor(instance) {
   doorInstanceEditorOpen.value = true;
 }
 
+async function openSubtractorInstanceEditor(instance) {
+  const normalized = normalizeSubtractorInstanceRecord(instance);
+  if (!normalized) return;
+  subtractorLibrarySelectedInstanceId.value = String(normalized.id || "");
+  if (!subCategoryDesignEditorOpen.value) {
+    await ensureOrderDesignSubtractorParamMetaLoaded(activeSubtractorLibraryOrderDesign.value?.id);
+    const refreshed = activeSubtractorLibraryInstances.value.find(
+      (row) => String(row?.id || "").trim() === String(normalized.id || "").trim()
+    );
+    if (refreshed) {
+      const updated = normalizeSubtractorInstanceRecord(refreshed);
+      if (updated) Object.assign(normalized, updated);
+    }
+  }
+  const previewGroups = buildSubtractorInstanceGroups(normalized);
+  const effectiveParamValues = Object.fromEntries(
+    previewGroups
+      .flatMap((group) => Array.isArray(group?.items) ? group.items : [])
+      .map((column) => [column.key, column.inputMode === "binary" ? (column.value == null ? "" : String(column.value)) : formatParamValueForDisplay(column.value)])
+  );
+  subtractorInstanceEditorDraft.value = {
+    ...normalized,
+    line_color: normalized.line_color || normalizeHexColor(normalized.line_color, DEFAULT_INTERIOR_LINE_COLOR),
+    interior_box_snapshot: { ...(normalized.interior_box_snapshot || {}) },
+    param_values: {
+      ...effectiveParamValues,
+      ...Object.fromEntries(Object.entries(normalized.param_values || {}).map(([key, value]) => {
+        const inputMode = normalized.param_meta?.[key]?.input_mode === "binary" ? "binary" : "value";
+        return [key, inputMode === "binary" ? String(value ?? "") : formatParamValueForDisplay(value)];
+      })),
+    },
+    param_meta: Object.fromEntries(Object.entries(normalized.param_meta || {}).map(([key, value]) => [key, { ...(value || {}) }])),
+    part_snapshots: Array.isArray(normalized.part_snapshots) ? normalized.part_snapshots.map((row) => ({ ...(row || {}) })) : [],
+    viewer_boxes: Array.isArray(normalized.viewer_boxes) ? normalized.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
+  };
+  subtractorInstanceEditorActiveGroupId.value = previewGroups[0]?.id || "";
+  subtractorInstanceEditorOpen.value = true;
+}
+
 function resetDoorInstanceEditorState() {
   doorInstanceEditorOpen.value = false;
   doorInstanceEditorDraft.value = null;
@@ -11071,9 +11166,21 @@ function resetDoorInstanceEditorState() {
   doorInstanceEditorApplying.value = false;
 }
 
+function resetSubtractorInstanceEditorState() {
+  subtractorInstanceEditorOpen.value = false;
+  subtractorInstanceEditorDraft.value = null;
+  subtractorInstanceEditorActiveGroupId.value = "";
+  subtractorInstanceEditorApplying.value = false;
+}
+
 function closeDoorInstanceEditor() {
   if (doorInstanceEditorApplying.value) return;
   resetDoorInstanceEditorState();
+}
+
+function closeSubtractorInstanceEditor() {
+  if (subtractorInstanceEditorApplying.value) return;
+  resetSubtractorInstanceEditorState();
 }
 
 async function applyDoorInstanceEditor() {
@@ -11129,6 +11236,62 @@ async function applyDoorInstanceEditor() {
     showAlert(error?.message || "ذخیره تنظیمات نمونه درب انجام نشد.", { title: "خطا" });
   } finally {
     doorInstanceEditorApplying.value = false;
+  }
+}
+
+async function applySubtractorInstanceEditor() {
+  const instance = subtractorInstanceEditorDraft.value;
+  if (!instance?.id || subtractorInstanceEditorApplying.value) return;
+  subtractorInstanceEditorApplying.value = true;
+  try {
+    const fallbackInputModes = Object.fromEntries(
+      activeSubtractorInstanceEditorGroups.value
+        .flatMap((group) => Array.isArray(group?.items) ? group.items : [])
+        .map((column) => [column.key, column.inputMode === "binary" ? "binary" : "value"])
+    );
+    const requestBody = {
+      placement_z: Number(instance.placement_z) || 0,
+      ui_order: Math.max(0, Number(instance.ui_order) || 0),
+      instance_code: String(instance.instance_code || "").trim() || "subtractor",
+      line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+      param_values: serializeDisplayParamValuesForPayload(instance.param_values, instance.param_meta, currentEditorDisplayUnit.value, fallbackInputModes),
+    };
+    if (subCategoryDesignEditorOpen.value) {
+      const draft = subCategoryDesignEditorDraft.value;
+      if (!draft?.id) return;
+      const res = await fetch(
+        `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/subtractor-instances/${encodeURIComponent(String(instance.id))}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه دستگیره مخفی انجام نشد."));
+      syncSubtractorInstanceInDraft(await res.json());
+      syncOpenSubCategoryDesignDraftToCollection();
+      resetSubtractorInstanceEditorState();
+      await refreshSubCategoryDesignPreview();
+      return;
+    }
+    const orderDesign = activeSubtractorLibraryOrderDesign.value;
+    if (!orderDesign?.id) return;
+    const res = await fetch(
+      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/subtractor-instances/${encodeURIComponent(String(instance.id))}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه دستگیره مخفی طرح ثبت‌شده انجام نشد."));
+    syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
+    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    resetSubtractorInstanceEditorState();
+  } catch (error) {
+    showAlert(error?.message || "ذخیره تنظیمات نمونه دستگیره مخفی انجام نشد.", { title: "خطا" });
+  } finally {
+    subtractorInstanceEditorApplying.value = false;
   }
 }
 
@@ -11800,6 +11963,98 @@ async function editSubtractorInstanceInDesign(instance, patch = {}) {
   await refreshOrderDesignGeometryFromServer(orderDesign.id);
 }
 
+async function applySubtractorInstanceLineColor(instance, lineColor) {
+  const normalized = normalizeSubtractorInstanceRecord({
+    ...(instance || {}),
+    line_color: lineColor ? normalizeHexColor(lineColor, DEFAULT_INTERIOR_LINE_COLOR) : "",
+  });
+  if (!normalized?.id) return;
+  const requestBody = {
+    placement_z: Number(normalized.placement_z) || 0,
+    ui_order: Math.max(0, Number(normalized.ui_order) || 0),
+    instance_code: String(normalized.instance_code || "").trim() || "subtractor",
+    line_color: normalized.line_color ? normalizeHexColor(normalized.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+    param_values: serializeStoredParamValuesForPayload(normalized.param_values),
+  };
+  if (subCategoryDesignEditorOpen.value) {
+    const draft = subCategoryDesignEditorDraft.value;
+    if (!draft?.id) return;
+    try {
+      const res = await fetch(
+        `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/subtractor-instances/${encodeURIComponent(String(normalized.id))}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه دستگیره مخفی انجام نشد."));
+      syncSubtractorInstanceInDraft(await res.json());
+      syncOpenSubCategoryDesignDraftToCollection();
+      await refreshSubCategoryDesignPreview();
+    } catch (error) {
+      showAlert(error?.message || "ذخیره رنگ خطوط نمونه دستگیره مخفی انجام نشد.", { title: "خطا" });
+    }
+    return;
+  }
+  const orderDesign = activeSubtractorLibraryOrderDesign.value;
+  if (!orderDesign?.id) return;
+  try {
+    const res = await fetch(
+      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/subtractor-instances/${encodeURIComponent(String(normalized.id))}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه دستگیره مخفی انجام نشد."));
+    syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
+    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+  } catch (error) {
+    showAlert(error?.message || "ذخیره رنگ خطوط نمونه دستگیره مخفی انجام نشد.", { title: "خطا" });
+  }
+}
+
+function previewSubtractorInstanceLineColor(instance, lineColor) {
+  const normalizedColor = lineColor ? normalizeHexColor(lineColor, DEFAULT_INTERIOR_LINE_COLOR) : "";
+  const instanceId = String(instance?.id || "").trim();
+  if (!instanceId) return;
+  if (subCategoryDesignEditorOpen.value) {
+    const draft = subCategoryDesignEditorDraft.value;
+    if (!draft) return;
+    draft.subtractor_instances = (draft.subtractor_instances || []).map((row) =>
+      String(row?.id || "") === instanceId
+        ? {
+            ...row,
+            line_color: normalizedColor,
+          }
+        : row
+    );
+    syncOpenSubCategoryDesignDraftToCollection();
+    return;
+  }
+  const orderDesignId = String(activeSubtractorLibraryOrderDesign.value?.id || "").trim();
+  if (!orderDesignId) return;
+  orderDesignCatalog.value = sortOrderDesignCatalogRecords(
+    orderDesignCatalog.value.map((design) =>
+      String(design?.id || "") === orderDesignId
+        ? {
+            ...design,
+            subtractor_instances: (design.subtractor_instances || []).map((row) =>
+              String(row?.id || "") === instanceId
+                ? {
+                    ...row,
+                    line_color: normalizedColor,
+                  }
+                : row
+            ),
+          }
+        : design
+    )
+  );
+}
+
 async function duplicateSubtractorInstanceInDesign(instance) {
   const normalized = normalizeSubtractorInstanceRecord(instance);
   if (!normalized?.id) return null;
@@ -11849,7 +12104,16 @@ async function deleteSubtractorInstanceFromDesign(instance) {
     );
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه دستگیره مخفی انجام نشد."));
     draft.subtractor_instances = (draft.subtractor_instances || []).filter((row) => String(row.id) !== String(instance.id));
+    if (String(subtractorLibrarySelectedInstanceId.value || "") === String(instance.id || "")) {
+      subtractorLibrarySelectedInstanceId.value = "";
+    }
+    if (String(subtractorLibraryInstanceContextMenu.value?.instanceId || "") === String(instance.id || "")) {
+      closeSubtractorInstanceContextMenu();
+    }
     syncOpenSubCategoryDesignDraftToCollection();
+    if (String(subtractorInstanceEditorDraft.value?.id || "") === String(instance.id || "")) {
+      closeSubtractorInstanceEditor();
+    }
     await refreshSubCategoryDesignPreview();
     return;
   }
@@ -11861,7 +12125,16 @@ async function deleteSubtractorInstanceFromDesign(instance) {
   );
   if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه دستگیره مخفی انجام نشد."));
   removeSubtractorInstanceFromOrderDesignCollection(orderDesign.id, instance.id);
+  if (String(subtractorLibrarySelectedInstanceId.value || "") === String(instance.id || "")) {
+    subtractorLibrarySelectedInstanceId.value = "";
+  }
+  if (String(subtractorLibraryInstanceContextMenu.value?.instanceId || "") === String(instance.id || "")) {
+    closeSubtractorInstanceContextMenu();
+  }
   await refreshOrderDesignGeometryFromServer(orderDesign.id);
+  if (String(subtractorInstanceEditorDraft.value?.id || "") === String(instance.id || "")) {
+    closeSubtractorInstanceEditor();
+  }
 }
 
 async function duplicateSubtractorInstanceFromContextMenu() {
@@ -18131,8 +18404,10 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
       return;
     }
     subtractorLibraryForcedOrderDesignId.value = resolvedTargetId;
+    interiorLibraryForcedOrderDesignId.value = resolvedTargetId;
   } else {
     subtractorLibraryForcedOrderDesignId.value = "";
+    interiorLibraryForcedOrderDesignId.value = "";
   }
   if (!subCategoryDesignEditorOpen.value && !activeSubtractorLibraryOrderDesign.value?.id) {
     showAlert("ابتدا یک طرح ثبت‌شده را انتخاب کنید.", { title: "دستگیره مخفی" });
@@ -18143,12 +18418,19 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
   activeSubRail.value = null;
   openMode.value = "menu";
   await Promise.allSettled([
+    loadConstructionParamGroups(),
+    loadConstructionParams(),
+    loadConstructionSubCategories(),
     loadConstructionSubtractorPartGroups(),
     loadConstructionPartKinds(),
     loadConstructionPartFormulas(),
   ]);
   if (!subCategoryDesignEditorOpen.value && activeOrder.value?.id) {
     await loadOrderDesignCatalog(true);
+    const currentOrderDesignId = String(activeSubtractorLibraryOrderDesign.value?.id || "").trim();
+    if (currentOrderDesignId) {
+      await ensureOrderDesignSubtractorParamMetaLoaded(currentOrderDesignId);
+    }
   }
   if (subCategoryDesignEditorOpen.value && !subCategoryDesignPreviewLoading.value) {
     await refreshSubCategoryDesignPreview();
@@ -18206,6 +18488,7 @@ function closeDoorLibrary() {
 function closeSubtractorLibrary() {
   subtractorLibraryOpen.value = false;
   subtractorLibraryForcedOrderDesignId.value = "";
+  interiorLibraryForcedOrderDesignId.value = "";
   subtractorLibraryPartKindFilter.value = "";
   subtractorLibraryPreviewMode.value = "front2d";
   subtractorLibrarySelectedInstanceId.value = "";
@@ -18213,6 +18496,7 @@ function closeSubtractorLibrary() {
   subtractorLibraryPickerPreviewInstanceId.value = "";
   subtractorLibraryHoverMode.value = null;
   closeSubtractorInstanceContextMenu();
+  closeSubtractorInstanceEditor();
 }
 
 
@@ -21817,22 +22101,12 @@ onBeforeUnmount(() => {
               <img src="/icons/enternal.png" alt="" class="subCategoryDesignEditor__metaIcon" />
               <span>داخلی</span>
             </button>
-            <button
-              type="button"
-              class="subCategoryDesignEditor__settingsBtn"
-              :class="{ 'is-active': subtractorPartGroupEditorOpen || subtractorPartGroupDefaultsEditorOpen || subtractorPartGroupControllerEditorOpen }"
-              title="دستگیره مخفی"
-              @click="openSubtractorLibrary"
-            >
-              <img src="/icons/hidden_wall.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-              <span>دستگیره مخفی</span>
-            </button>
             <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': doorLibraryOpen }" title="قطعات درب" @click="openDoorLibrary">
               <img src="/icons/door_styles.png" alt="" class="subCategoryDesignEditor__metaIcon" />
               <span>درب</span>
             </button>
             <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': subtractorLibraryOpen }" title="دستگیره مخفی" @click="openSubtractorLibrary">
-              <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+              <img src="/icons/handless.png" alt="" class="subCategoryDesignEditor__metaIcon" />
               <span>دستگیره مخفی</span>
             </button>
             <button type="button" class="subCategoryDesignEditor__settingsBtn" title="پیش‌فرض ادمین" @click="openSubCategoryAdminDefaultsFromDesignEditor">
@@ -23863,6 +24137,151 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
+  <div v-if="subtractorInstanceEditorOpen && subtractorInstanceEditorDraft" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeSubtractorInstanceEditor"></div>
+    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
+      <div class="subCategoryPreview__header">
+        <div>
+          <div class="subCategoryPreview__title">تنظیمات نمونه دستگیره مخفی</div>
+          <div class="subCategoryPreview__caption">
+            {{ constructionSubtractorPartGroupsById.get(String(subtractorInstanceEditorDraft.subtractor_part_group_id))?.group_title || subtractorInstanceEditorDraft.instance_code }}
+          </div>
+        </div>
+        <button type="button" class="constructionDialog__textBtn" @click="closeSubtractorInstanceEditor">بستن</button>
+      </div>
+      <div class="subCategoryDesignEditor__meta subCategoryDesignEditor__meta--interiorInstance">
+        <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+          <span>کد نمونه</span>
+          <input v-model="subtractorInstanceEditorDraft.instance_code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+        </label>
+        <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+          <span>ترتیب</span>
+          <input v-model.number="subtractorInstanceEditorDraft.ui_order" class="constructionDialog__input" type="number" min="0" step="1" />
+        </label>
+        <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+          <span>رنگ خطوط این نمونه</span>
+          <div class="constructionDialog__colorEditor">
+            <input
+              v-model="subtractorInstanceEditorDraft.line_color"
+              class="constructionDialog__colorInput"
+              type="color"
+              @input="subtractorInstanceEditorDraft.line_color = normalizeHexColor(subtractorInstanceEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+            />
+            <input
+              v-model="subtractorInstanceEditorDraft.line_color"
+              class="constructionDialog__input constructionDialog__input--mono constructionDialog__colorHex"
+              type="text"
+              dir="ltr"
+              maxlength="7"
+              :placeholder="normalizeHexColor(subtractorInstanceEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+              @change="subtractorInstanceEditorDraft.line_color = normalizeHexColor(subtractorInstanceEditorDraft.line_color, DEFAULT_INTERIOR_LINE_COLOR)"
+            />
+          </div>
+        </label>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        تغییرات این پنجره فقط روی همین نمونه دستگیره مخفی اعمال می‌شود و روی پیش‌فرض گروه مادر اثری ندارد.
+      </div>
+      <div class="subCategoryPreview__body">
+        <div class="subCategoryPreview__tree">
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--groups">
+            <div class="subCategoryPreview__selectorList">
+              <button
+                v-for="group in activeSubtractorInstanceEditorGroups"
+                :key="group.id"
+                type="button"
+                class="subCategoryPreview__groupHead"
+                :class="{ 'is-active': String(activeSubtractorInstanceEditorGroup?.id || '') === String(group.id) }"
+                @click="selectSubtractorInstanceEditorGroup(group.id)"
+              >
+                <div class="subCategoryPreview__groupMeta">
+                  <div class="subCategoryPreview__groupTitle">{{ group.title }}</div>
+                  <div class="subCategoryPreview__groupCaption">{{ toPersianDigits(group.items.length) }} پارامتر</div>
+                </div>
+                <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !group.iconUrl }">
+                  <img
+                    v-if="group.iconUrl"
+                    :key="group.iconUrl"
+                    :src="group.iconUrl"
+                    :alt="group.title"
+                    class="subCategoryPreview__groupIcon"
+                    @error="handleSubCategoryDefaultIconError"
+                  />
+                  <span v-else class="subCategoryPreview__groupFallback">{{ toPersianDigits(group.items.length) }}</span>
+                </div>
+                <span class="subCategoryPreview__groupChevron" aria-hidden="true">‹</span>
+              </button>
+            </div>
+          </div>
+          <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
+            <div v-if="activeSubtractorInstanceEditorGroup" class="subCategoryPreview__panelHead">
+              <div class="subCategoryPreview__panelTitle">{{ activeSubtractorInstanceEditorGroup.title }}</div>
+              <div class="subCategoryPreview__panelCaption">{{ toPersianDigits(activeSubtractorInstanceEditorGroup.items.length) }} پارامتر در این گروه</div>
+            </div>
+            <div v-if="activeSubtractorInstanceEditorGroup" class="subCategoryPreview__params">
+              <article v-for="column in activeSubtractorInstanceEditorGroup.items" :key="column.key" class="subCategoryPreview__paramCard">
+                <template v-if="column.inputMode === 'binary'">
+                  <div class="subCategoryPreview__paramMeta">
+                    <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                    <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                  </div>
+                  <div class="subCategoryPreview__binaryChoices">
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': normalizeBinaryValue(subtractorInstanceEditorDraft.param_values?.[column.key] ?? '0') !== '1' }"
+                      @click="setSubtractorInstanceBinaryValue(column.key, '0')"
+                    >
+                      <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOffLabel }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="subCategoryPreview__binaryChoice"
+                      :class="{ 'is-active': normalizeBinaryValue(subtractorInstanceEditorDraft.param_values?.[column.key] ?? '0') === '1' }"
+                      @click="setSubtractorInstanceBinaryValue(column.key, '1')"
+                    >
+                      <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                      <span class="subCategoryPreview__binaryLabel">{{ column.binaryOnLabel }}</span>
+                    </button>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="subCategoryPreview__valueHead">
+                    <div class="subCategoryPreview__valueIconBox">
+                      <img :src="column.iconUrl" :alt="column.displayTitle" class="subCategoryPreview__valueIcon" @error="handleSubCategoryDefaultIconError" />
+                    </div>
+                    <div class="subCategoryPreview__paramMeta">
+                      <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                      <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                    </div>
+                  </div>
+                  <input
+                    v-model="subtractorInstanceEditorDraft.param_values[column.key]"
+                    class="constructionDialog__input subCategoryPreview__valueInput"
+                    type="number"
+                    inputmode="numeric"
+                    min="0"
+                    :placeholder="column.displayTitle"
+                  />
+                  <div class="subCategoryPreview__valueUnit">{{ getCurrentParamLengthUnitLabel() }}</div>
+                </template>
+              </article>
+            </div>
+            <div v-else class="designMenu__cabinetState">برای این نمونه دستگیره مخفی هنوز پارامتری قابل نمایش نیست.</div>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" :disabled="subtractorInstanceEditorApplying" @click="closeSubtractorInstanceEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" :disabled="subtractorInstanceEditorApplying" @click="applySubtractorInstanceEditor">
+          <span v-if="subtractorInstanceEditorApplying" class="constructionDialog__spinner"></span>
+          <span>{{ subtractorInstanceEditorApplying ? "در حال اعمال..." : "اعمال" }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div v-if="doorInstanceEditorOpen && doorInstanceEditorDraft" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeDoorInstanceEditor"></div>
     <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
@@ -25262,27 +25681,151 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeSubtractorLibrary">×</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        کتابخانه دستگیره مخفی برای طرح فعال. می‌توانید نمونه‌ها را اضافه، ویرایش، کپی و حذف کنید.
+        در این مرحله، سمت راست گروه‌های دستگیره مخفی، ستون میانی نمونه‌های اضافه‌شده به همین طرح، و سمت چپ پیش‌نمایش دوبعدی یا سه‌بعدی همان طرح دیده می‌شود.
       </div>
       <div class="subCategoryDesignEditor__layout subCategoryDesignEditor__layout--interiorLibrary">
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview subCategoryDesignEditor__panel--interiorPreview">
-          <div class="subCategoryDesignEditor__panelTitle">پیش‌نمایش طرح</div>
-          <div class="subCategoryDesignEditor__previewBody">
-            <GlbViewerWidget
-              src="/models/1_z1.glb"
-              :walls2d="widgetPreviewWalls2d"
-              :placeholder-outline-color="activeInteriorLibraryOutlineColor"
-              :placeholder-boxes="activeInteriorLibraryModelViewerBoxes"
-              :display-unit="currentEditorDisplayUnit"
-              :show-attrs-panel="false"
-              :embedded="true"
-              :preview-only="true"
-              :preview-active="subtractorLibraryOpen"
-            />
+          <div class="subCategoryDesignEditor__panelHead subCategoryDesignEditor__panelHead--interiorPreview">
+            <div class="subCategoryDesignEditor__panelTitle">{{ interiorLibraryPreviewPanelTitle }}</div>
+            <div class="subCategoryDesignEditor__previewActions">
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': interiorLibraryPreviewMode === 'front2d' }"
+                title="نمای داخلی دوبعدی"
+                @click="setInteriorLibraryPreviewMode('front2d')"
+              >
+                <img src="/icons/enternal.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': interiorLibraryPreviewMode === 'model3d' }"
+                title="نمای سه بعدی طرح"
+                @click="setInteriorLibraryPreviewMode('model3d')"
+              >
+                <img src="/icons/3d_viewer.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': interiorLibraryShowDimensions }"
+                title="نمایش اندازه گذاری"
+                aria-label="نمایش اندازه گذاری"
+                @click="toggleInteriorLibraryDimensionsVisibility"
+              >
+                <img src="/icons/turn_dim.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': interiorLibraryAnnotationTool === 'dimension' }"
+                title="رسم اندازه گذاری"
+                aria-label="رسم اندازه گذاری"
+                @click="toggleInteriorLibraryDimensionTool"
+              >
+                <img src="/icons/drawing_dimension.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                :class="{ 'is-active': interiorLibraryShowInnerLines }"
+                title="نمایش خطوط داخلی"
+                aria-label="نمایش خطوط داخلی"
+                @click="toggleInteriorLibraryGuideTool"
+              >
+                <img src="/icons/drawing_wall.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                title="بزرگنمایی نمای دوبعدی"
+                @click="zoomInteriorLibraryFrontIn"
+              >
+                <img src="/icons/zoom-in.png" alt="" />
+              </button>
+              <button
+                type="button"
+                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                title="کوچکنمایی نمای دوبعدی"
+                @click="zoomInteriorLibraryFrontOut"
+              >
+                <img src="/icons/zoom-out.png" alt="" />
+              </button>
+            </div>
+          </div>
+          <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
+            <div
+              ref="interiorLibraryViewerWrapEl"
+              class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior"
+              :class="[
+                interiorLibraryFrontCursorClass,
+                {
+                  'is-panning': interiorLibraryFrontPanning && interiorLibraryPreviewMode === 'front2d',
+                  'is-front2d-mode': interiorLibraryPreviewMode === 'front2d',
+                }
+              ]"
+              @wheel.prevent="handleInteriorLibraryPreviewWheel"
+              @pointermove="onInteriorLibraryViewerPointerMove"
+              @pointerleave="onInteriorLibraryViewerPointerLeave"
+              @pointerdown="onInteriorLibraryViewerPointerDown"
+              @dblclick.prevent="interiorLibraryPreviewMode === 'model3d' ? focusInteriorLibraryPreviewCloser() : null"
+            >
+              <div v-if="interiorLibraryPreviewMode === 'model3d'" class="subCategoryDesignEditor__previewOpacity subCategoryDesignEditor__previewOpacity--overlay">
+                <span class="subCategoryDesignEditor__previewOpacityValue">0</span>
+                <input
+                  :value="interiorLibraryPreviewOpacity"
+                  class="subCategoryDesignEditor__previewOpacitySlider"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  @input="setInteriorLibraryPreviewOpacity($event.target.value)"
+                />
+                <span class="subCategoryDesignEditor__previewOpacityValue">100</span>
+              </div>
+              <GlbViewerWidget
+                v-if="interiorLibraryPreviewMode === 'model3d' && activeInteriorLibraryViewerBoxes.length"
+                ref="interiorLibraryPreview3dRef"
+                src="/models/1_z1.glb"
+                :walls2d="widgetPreviewWalls2d"
+                :placeholder-outline-color="activeInteriorLibraryOutlineColor"
+                :placeholder-boxes="activeInteriorLibraryViewerBoxes"
+                :display-unit="currentEditorDisplayUnit"
+                :show-attrs-panel="false"
+                :embedded="true"
+                :preview-only="true"
+                :preview-active="subtractorLibraryOpen"
+              />
+              <FrontViewCanvas
+                v-else-if="interiorLibraryPreviewMode === 'front2d' && interiorLibraryPreviewSvgLines.outer.length"
+                ref="interiorLibraryFrontSvgEl"
+                class="subCategoryDesignEditor__frontCanvas"
+                :scene="interiorLibraryFrontCanvasScene"
+                :cursor-class="interiorLibraryFrontCursorClass"
+                @canvas-wheel="handleInteriorLibraryPreviewWheel($event.event)"
+                @pointerdown="onInteriorLibraryFrontSvgPointerDown"
+                @pointermove="onInteriorLibraryFrontSvgPointerMove"
+                @pointerup="onInteriorLibraryFrontSvgPointerUp"
+                @pointercancel="onInteriorLibraryFrontSvgPointerCancel"
+                @pointerleave="onInteriorLibraryFrontSvgPointerLeave"
+                @contextmenu="onInteriorLibraryFrontSvgContextMenu"
+                @dblclick="onInteriorLibraryFrontSvgDoubleClick"
+              />
+              <div v-if="!interiorLibraryPreviewSvgLines.outer.length" class="designMenu__cabinetState">
+                {{ interiorLibraryPreviewMode === "model3d"
+                  ? "برای این طرح هنوز preview سه بعدی قابل نمایش نیست."
+                  : "برای این طرح هنوز preview خطی قابل نمایش نیست." }}
+              </div>
+            </div>
           </div>
         </div>
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances">
           <div class="subCategoryDesignEditor__panelTitle">نمونه‌های دستگیره مخفی این طرح</div>
+          <select v-model="subtractorLibraryPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+            <option value="">همه انواع دستگیره مخفی</option>
+            <option v-for="option in constructionSubtractorPartKindOptions" :key="`subtractor-instance-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+          </select>
           <div v-if="!activeSubtractorLibraryTargetId" class="designMenu__cabinetState">برای افزودن نمونه دستگیره مخفی، ابتدا یک طرح معتبر را باز یا انتخاب کنید.</div>
           <div v-else-if="!subtractorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز نمونه‌ای از دستگیره مخفی به این طرح اضافه نشده است.</div>
           <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
@@ -25305,12 +25848,31 @@ onBeforeUnmount(() => {
                     <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
                   </span>
                 </div>
-                <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--instance">
-                  <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini" title="ذخیره سریع" @click.stop="editSubtractorInstanceInDesign(item)">
-                    <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-                  </button>
-                  <button type="button" class="constructionDialog__iconBtn" title="حذف نمونه" @click.stop="deleteSubtractorInstanceFromDesign(item)">×</button>
-                  <button type="button" class="constructionDialog__iconBtn" title="کپی نمونه" @click.stop="duplicateSubtractorInstanceInDesign(item)">⧉</button>
+                <div class="subCategoryDesignEditor__interiorGroupFooter">
+                  <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits(item.orderIndex) }}</span>
+                  <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--instance">
+                    <label class="subCategoryDesignEditor__miniColorBtn" :style="{ '--line-color': item.lineColor }" :title="`رنگ خطوط ${item.instance_code}`">
+                      <input
+                        :value="item.lineColor"
+                        class="subCategoryDesignEditor__miniColorInput"
+                        type="color"
+                        @click.stop
+                        @input="previewSubtractorInstanceLineColor(item, $event.target.value)"
+                        @change="applySubtractorInstanceLineColor(item, $event.target.value)"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini"
+                      title="تنظیمات این نمونه"
+                      @click.stop
+                      @click="openSubtractorInstanceEditor(item)"
+                    >
+                      <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                    </button>
+                    <button type="button" class="constructionDialog__iconBtn" title="حذف نمونه" @click.stop="deleteSubtractorInstanceFromDesign(item)">×</button>
+                    <button type="button" class="constructionDialog__iconBtn" title="کپی نمونه" @click.stop="duplicateSubtractorInstanceInDesign(item)">⧉</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -25327,15 +25889,34 @@ onBeforeUnmount(() => {
             <div v-for="item in subtractorLibraryGroupCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
               <div class="subCategoryDesignEditor__interiorGroupHead">
                 <div class="subCategoryDesignEditor__interiorGroupSummary">
+                  <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !item.iconUrl }">
+                    <img
+                      v-if="item.iconUrl"
+                      :key="item.iconUrl"
+                      :src="item.iconUrl"
+                      :alt="item.group_title"
+                      class="subCategoryPreview__groupIcon"
+                      @error="handleSubCategoryDefaultIconError"
+                    />
+                    <span v-else class="subCategoryPreview__groupFallback">•</span>
+                  </div>
                   <span class="subCategoryDesignEditor__partMeta" dir="rtl">
                     <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
                     <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
                   </span>
                 </div>
-                <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" :disabled="isAddingSubtractorGroup(item)" @click="addSubtractorGroupToDesign(item)">
-                  <span v-if="isAddingSubtractorGroup(item)" class="constructionDialog__spinner"></span>
-                  <span>{{ isAddingSubtractorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
-                </button>
+                <div class="subCategoryDesignEditor__interiorGroupFooter">
+                  <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--sidebar">
+                    <label class="subCategoryDesignEditor__miniColorBtn subCategoryDesignEditor__miniColorBtn--static" :style="{ '--line-color': item.lineColor }" :title="`رنگ پیش‌فرض خطوط ${item.group_title}`">
+                      <span class="subCategoryDesignEditor__miniColorPreview" aria-hidden="true"></span>
+                    </label>
+                    <span class="constructionDialog__pill">{{ toPersianDigits(item.partsCount || 0) }} قطعه</span>
+                  </div>
+                  <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" :disabled="isAddingSubtractorGroup(item)" @click="addSubtractorGroupToDesign(item)">
+                    <span v-if="isAddingSubtractorGroup(item)" class="constructionDialog__spinner"></span>
+                    <span>{{ isAddingSubtractorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
