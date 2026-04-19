@@ -26584,6 +26584,31 @@ onBeforeUnmount(() => {
                 @contextmenu="onInteriorLibraryFrontSvgContextMenu"
                 @dblclick="onInteriorLibraryFrontSvgDoubleClick"
               />
+              <div
+                v-if="interiorLibraryOverlapPickerState.visible && interiorLibraryOverlapPickerState.items.length"
+                class="subCategoryDesignEditor__overlapPicker"
+                :style="interiorLibraryOverlapPickerStyle"
+                @pointerdown="onInteriorLibraryOverlapPickerPointerDown"
+                @mouseleave="onInteriorLibraryOverlapPickerLeave"
+              >
+                <div class="subCategoryDesignEditor__overlapPickerTitle">آبجکت‌های روی‌هم</div>
+                <button
+                  v-for="item in interiorLibraryOverlapPickerState.items"
+                  :key="`subtractor-overlap-${item.id}`"
+                  type="button"
+                  class="subCategoryDesignEditor__overlapPickerItem"
+                  :class="{ 'is-active': String(subtractorLibrarySelectedInstanceId || '') === String(item.id || '') }"
+                  @mouseenter="setInteriorLibraryOverlapPreview(item.id)"
+                  @focus="setInteriorLibraryOverlapPreview(item.id)"
+                  @click="selectInteriorLibraryOverlapItem(item)"
+                >
+                  <span class="subCategoryDesignEditor__overlapPickerSwatch" :style="{ '--line-color': item.lineColor || '#7c3f57' }"></span>
+                  <span class="subCategoryDesignEditor__overlapPickerText">
+                    <span class="subCategoryDesignEditor__overlapPickerPrimary">{{ item.title }}</span>
+                    <span v-if="item.instanceCode" class="subCategoryDesignEditor__overlapPickerSecondary">{{ item.instanceCode }}</span>
+                  </span>
+                </button>
+              </div>
               <div v-if="!interiorLibraryPreviewSvgLines.outer.length" class="designMenu__cabinetState">
                 {{ interiorLibraryPreviewMode === "model3d"
                   ? "برای این طرح هنوز preview سه بعدی قابل نمایش نیست."
