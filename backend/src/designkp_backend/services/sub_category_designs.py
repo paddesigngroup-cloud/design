@@ -373,6 +373,30 @@ async def require_accessible_door_part_formulas(
     return items
 
 
+async def require_accessible_subtractor_part_formulas(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    part_formula_ids: list[int],
+) -> list[PartFormula]:
+    if not part_formula_ids:
+        return []
+    stmt = (
+        select(PartFormula)
+        .join(PartKind, PartKind.part_kind_id == PartFormula.part_kind_id)
+        .where(PartFormula.part_formula_id.in_(part_formula_ids))
+        .where(PartKind.part_scope == "subtractor")
+    )
+    if admin_id is not None:
+        stmt = stmt.where(or_(PartFormula.admin_id.is_(None), PartFormula.admin_id == admin_id))
+    items = (await session.scalars(stmt.order_by(PartFormula.sort_order.asc(), PartFormula.part_formula_id.asc()))).all()
+    found_ids = {int(item.part_formula_id) for item in items}
+    missing = [str(item) for item in part_formula_ids if int(item) not in found_ids]
+    if missing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown subtractor part formulas for this admin scope: {', '.join(missing)}")
+    return items
+
+
 async def get_sub_category_resolved_params(
     session: AsyncSession,
     sub_category: SubCategory,
@@ -867,6 +891,87 @@ async def build_door_group_param_display_snapshot(
             "param_id": int(param.param_id or 0),
             "param_ui_order": int(param.ui_order or 0),
             "input_mode": "value",
+        }
+    return values, meta
+
+
+async def collect_subtractor_group_selected_param_codes(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    group: SubtractorPartGroup,
+) -> set[str]:
+    selected_param_group_ids = {
+        int(item.param_group_id)
+        for item in list(group.__dict__.get("param_groups") or [])
+        if bool(item.enabled) and int(item.param_group_id or 0) > 0
+    }
+    if not selected_param_group_ids:
+        return set()
+    stmt = select(Param).where(Param.param_group_id.in_(sorted(selected_param_group_ids)))
+    if admin_id is not None:
+        stmt = stmt.where(or_(Param.admin_id.is_(None), Param.admin_id == admin_id))
+    params = (await session.scalars(stmt.order_by(Param.ui_order.asc(), Param.param_id.asc()))).all()
+    return {
+        str(item.param_code).strip()
+        for item in params
+        if str(item.param_code or "").strip()
+    }
+
+
+async def build_subtractor_group_param_display_snapshot(
+    session: AsyncSession,
+    *,
+    group: SubtractorPartGroup,
+    codes: set[str] | None = None,
+    admin_id: uuid.UUID | None = None,
+) -> tuple[dict[str, str | None], dict[str, dict[str, object]]]:
+    selected_param_group_ids = {
+        int(item.param_group_id)
+        for item in list(group.__dict__.get("param_groups") or [])
+        if bool(item.enabled) and int(item.param_group_id or 0) > 0
+    }
+    if not selected_param_group_ids:
+        return {}, {}
+    defaults_by_code = {
+        str(getattr(getattr(row, "param", None), "param_code", "")).strip(): row
+        for row in list(group.__dict__.get("param_defaults") or [])
+        if str(getattr(getattr(row, "param", None), "param_code", "")).strip()
+    }
+    stmt = (
+        select(Param, ParamGroup)
+        .join(ParamGroup, ParamGroup.param_group_id == Param.param_group_id)
+        .where(Param.param_group_id.in_(sorted(selected_param_group_ids)))
+        .order_by(ParamGroup.ui_order.asc(), Param.ui_order.asc(), Param.param_id.asc())
+    )
+    if admin_id is not None:
+        stmt = stmt.where(or_(Param.admin_id.is_(None), Param.admin_id == admin_id))
+    rows = (await session.execute(stmt)).all()
+    filter_codes = {str(item).strip() for item in (codes or set()) if str(item).strip()} if codes else None
+    values: dict[str, str | None] = {}
+    meta: dict[str, dict[str, object]] = {}
+    for param, group_row in rows:
+        code = str(param.param_code or "").strip()
+        if not code or (filter_codes is not None and code not in filter_codes):
+            continue
+        default_row = defaults_by_code.get(code)
+        values[code] = getattr(default_row, "default_value", None)
+        meta[code] = {
+            "label": str(getattr(default_row, "display_title", None) or param.param_title_fa or code).strip() or code,
+            "description_text": str(getattr(default_row, "description_text", "") or "").strip() or None,
+            "icon_path": str(getattr(default_row, "icon_path", "") or "").strip() or None,
+            "input_mode": "binary" if str(getattr(default_row, "input_mode", "") or "").strip() == "binary" else "value",
+            "binary_off_label": str(getattr(default_row, "binary_off_label", None) or "0").strip() or "0",
+            "binary_on_label": str(getattr(default_row, "binary_on_label", None) or "1").strip() or "1",
+            "binary_off_icon_path": str(getattr(default_row, "binary_off_icon_path", "") or "").strip() or None,
+            "binary_on_icon_path": str(getattr(default_row, "binary_on_icon_path", "") or "").strip() or None,
+            "group_id": int(group_row.param_group_id or 0),
+            "group_title": str(group_row.org_param_group_title or group_row.title or group_row.param_group_code or "").strip() or None,
+            "group_icon_path": str(group_row.param_group_icon_path or "").strip() or None,
+            "group_ui_order": int(group_row.ui_order or 0),
+            "group_show_in_order_attrs": bool(group_row.show_in_order_attrs),
+            "param_id": int(param.param_id or 0),
+            "param_ui_order": int(param.ui_order or 0),
         }
     return values, meta
 
@@ -2072,6 +2177,133 @@ async def resolve_door_instance_preview(
     )
 
 
+async def resolve_subtractor_instance_preview(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    sub_category: SubCategory,
+    subtractor_part_group: SubtractorPartGroup,
+    instance_id: uuid.UUID | None,
+    instance_code: str,
+    line_color: str | None,
+    ui_order: int,
+    placement_z: float,
+    param_values: dict[str, object] | None = None,
+    param_meta: dict[str, dict[str, object]] | None = None,
+    base_raw_values: dict[str, str | None] | None = None,
+    base_numeric_params: dict[str, float] | None = None,
+    context: DesignExecutionContext | None = None,
+) -> ResolvedSubtractorInstanceSnapshot:
+    resolved_context = context or await build_design_execution_context(
+        session,
+        admin_id=admin_id,
+        sub_category=sub_category,
+        part_formula_ids=set(),
+        include_sub_category_display=True,
+    )
+    selected_param_codes = await collect_subtractor_group_selected_param_codes(
+        session,
+        admin_id=admin_id,
+        group=subtractor_part_group,
+    )
+    copied_meta_values, copied_meta = await build_sub_category_param_display_snapshot(
+        session,
+        sub_category=sub_category,
+        codes=selected_param_codes,
+        context=resolved_context,
+    )
+    group_values, group_meta = await build_subtractor_group_param_display_snapshot(
+        session,
+        group=subtractor_part_group,
+        codes=selected_param_codes,
+        admin_id=admin_id,
+    )
+    raw_base_values = _normalize_raw_param_values(base_raw_values or resolved_context.sub_category_raw_params)
+    normalized_input_values = {
+        code: value
+        for code, value in _normalize_raw_param_values(param_values).items()
+        if code in selected_param_codes
+    }
+    inherited_values = _merge_param_value_layers(
+        {code: raw_base_values.get(code) for code in selected_param_codes if code in raw_base_values},
+        group_values,
+    )
+    persisted_values = strip_inherited_param_values(
+        inherited_values=inherited_values,
+        param_values=normalized_input_values,
+    )
+    merged_meta = _merge_param_meta_layers(copied_meta, group_meta, _normalize_param_meta(param_meta))
+    effective_numeric_params = {
+        str(key): float(value)
+        for key, value in dict(base_numeric_params or resolved_context.sub_category_numeric_params).items()
+    }
+    effective_values = _merge_param_value_layers(copied_meta_values, group_values, persisted_values)
+    for code, value in effective_values.items():
+        effective_numeric_params[code] = _round_number(_coerce_numeric(value))
+    resolved_base_formulas = resolve_base_formula_values_with_context(resolved_context, params=effective_numeric_params)
+    subtractor_formula_ids = [
+        int(item.part_formula_id)
+        for item in sorted(list(subtractor_part_group.__dict__.get("parts") or []), key=lambda row: (int(row.ui_order or 0), int(row.part_formula_id or 0)))
+        if bool(item.enabled) and int(item.part_formula_id or 0) > 0
+    ]
+    formulas = await require_accessible_subtractor_part_formulas(
+        session,
+        admin_id=admin_id,
+        part_formula_ids=subtractor_formula_ids,
+    )
+    formulas_by_id = {int(item.part_formula_id): item for item in formulas}
+    part_snapshots: list[dict[str, object]] = []
+    viewer_boxes: list[dict[str, object]] = []
+    for selection in sorted(list(subtractor_part_group.__dict__.get("parts") or []), key=lambda row: (int(row.ui_order or 0), int(row.part_formula_id or 0))):
+        if not bool(selection.enabled):
+            continue
+        formula = formulas_by_id.get(int(selection.part_formula_id or 0))
+        if formula is None:
+            continue
+        resolved_part_formulas = resolve_part_formula_values(
+            formula,
+            params=effective_numeric_params,
+            base_formulas=resolved_base_formulas,
+            context=resolved_context,
+        )
+        viewer_payload = build_part_viewer_payload(formula, resolved_part_formulas)
+        part_snapshots.append(
+            {
+                "part_formula_id": int(formula.part_formula_id),
+                "part_kind_id": int(formula.part_kind_id),
+                "part_code": formula.part_code,
+                "part_title": formula.part_title,
+                "enabled": True,
+                "ui_order": int(selection.ui_order or 0),
+                "resolved_part_formulas": resolved_part_formulas,
+                "viewer_payload": viewer_payload,
+            }
+        )
+        box = viewer_payload.get("box")
+        if isinstance(box, dict):
+            viewer_boxes.append(dict(box))
+    return ResolvedSubtractorInstanceSnapshot(
+        instance_id=instance_id,
+        subtractor_part_group_id=subtractor_part_group.id,
+        subtractor_part_group_code=str(subtractor_part_group.code or "").strip(),
+        subtractor_part_group_title=str(subtractor_part_group.group_title or subtractor_part_group.title or "").strip(),
+        controller_type=str(getattr(subtractor_part_group, "controller_type", "") or "").strip() or None,
+        controller_bindings={
+            str(slot): {"param_code": (str((binding or {}).get("param_code") or "").strip() or None)}
+            for slot, binding in dict(getattr(subtractor_part_group, "controller_bindings", {}) or {}).items()
+            if str(slot).strip()
+        },
+        instance_code=str(instance_code or "").strip(),
+        line_color=str(line_color or getattr(subtractor_part_group, "line_color", "") or "").strip() or None,
+        ui_order=int(ui_order),
+        placement_z=_round_number(placement_z),
+        param_values={str(key): (None if value is None else str(value)) for key, value in persisted_values.items()},
+        param_meta={str(key): dict(value or {}) for key, value in merged_meta.items()},
+        part_snapshots=part_snapshots,
+        viewer_boxes=viewer_boxes,
+    )
+
+
 async def compose_sub_category_design_preview(
     session: AsyncSession,
     *,
@@ -2229,21 +2461,21 @@ async def compose_sub_category_design_preview(
             group_id=instance.subtractor_part_group_id,
         )
         resolved_subtractors.append(
-            ResolvedSubtractorInstanceSnapshot(
+            await resolve_subtractor_instance_preview(
+                session,
+                admin_id=admin_id,
+                sub_category=sub_category,
+                subtractor_part_group=group,
                 instance_id=instance.id,
-                subtractor_part_group_id=group.id,
-                subtractor_part_group_code=str(group.code or "").strip(),
-                subtractor_part_group_title=str(group.group_title or group.title or "").strip(),
-                controller_type=str(getattr(group, "controller_type", "") or "").strip() or None,
-                controller_bindings=dict(getattr(group, "controller_bindings", {}) or {}),
                 instance_code=str(instance.instance_code or "").strip(),
                 line_color=str(getattr(instance, "line_color", "") or "").strip() or None,
                 ui_order=int(instance.ui_order or 0),
                 placement_z=float(getattr(instance, "placement_z", 0) or 0),
-                param_values={str(key): (None if value is None else str(value)) for key, value in dict(getattr(instance, "param_values", {}) or {}).items()},
+                param_values=dict(getattr(instance, "param_values", {}) or {}),
                 param_meta={str(key): dict(value or {}) for key, value in dict(getattr(instance, "param_meta", {}) or {}).items()},
-                part_snapshots=[dict(row or {}) for row in list(getattr(instance, "part_snapshots", []) or [])],
-                viewer_boxes=[dict(row or {}) for row in list(getattr(instance, "viewer_boxes", []) or [])],
+                base_raw_values=raw_params,
+                base_numeric_params=numeric_params,
+                context=context,
             )
         )
 

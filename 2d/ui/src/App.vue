@@ -2024,7 +2024,7 @@ async function promptInteriorLibraryControllerEditing(controllerId) {
   const nextValue = await showPrompt(
     `مقدار جدید ${controllerId}:`,
     formatInteriorControllerRawValue(interiorLibraryControllerParamValues.value?.[controllerId]),
-    { title: "ویرایش کنترلر نمونه داخلی" }
+    { title: isSharedSubtractorLibraryActive.value ? "ویرایش کنترلر نمونه دستگیره مخفی" : "ویرایش کنترلر نمونه داخلی" }
   );
   if (nextValue == null) return;
   const nextValueMm = parseInteriorControllerInputToMm(nextValue);
@@ -2032,7 +2032,7 @@ async function promptInteriorLibraryControllerEditing(controllerId) {
   const applied = applyInteriorLibraryControllerInput(controllerId, nextValueMm);
   if (!applied) return;
   persistActiveInteriorLibraryControllerInstance().catch((error) => {
-    showAlert(error?.message || "ذخیره کنترلر نمونه داخلی انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || (isSharedSubtractorLibraryActive.value ? "ذخیره کنترلر نمونه دستگیره مخفی انجام نشد." : "ذخیره کنترلر نمونه داخلی انجام نشد."), { title: "خطا" });
   });
 }
 
@@ -2050,12 +2050,24 @@ function updateInteriorInstanceFromControllerValues(nextValues) {
     if (!paramCode) continue;
     nextParamValues[paramCode] = String(Math.round(Math.max(0, Number(valueMm) || 0)));
   }
-  const nextInstance = normalizeInteriorInstanceRecord({
-    ...instance,
-    param_values: nextParamValues,
-  });
+  const nextInstance = isSharedSubtractorLibraryActive.value
+    ? normalizeSubtractorInstanceRecord({
+      ...instance,
+      param_values: nextParamValues,
+    })
+    : normalizeInteriorInstanceRecord({
+      ...instance,
+      param_values: nextParamValues,
+    });
   if (!nextInstance) return null;
-  if (subCategoryDesignEditorOpen.value) {
+  if (isSharedSubtractorLibraryActive.value) {
+    if (subCategoryDesignEditorOpen.value) {
+      syncSubtractorInstanceInDraft(nextInstance);
+      syncOpenSubCategoryDesignDraftToCollection();
+    } else {
+      syncSubtractorInstanceInOrderDesignCollection(activeSubtractorLibraryOrderDesign.value?.id, nextInstance);
+    }
+  } else if (subCategoryDesignEditorOpen.value) {
     syncInteriorInstanceInDraft(nextInstance);
     syncOpenSubCategoryDesignDraftToCollection();
   } else {
@@ -2124,6 +2136,29 @@ async function persistActiveInteriorLibraryControllerInstance() {
   if (!instance?.id) return;
   interiorLibraryControllerApplying.value = true;
   try {
+    if (isSharedSubtractorLibraryActive.value && subCategoryDesignEditorOpen.value) {
+      const draft = subCategoryDesignEditorDraft.value;
+      if (!draft?.id) return;
+      const res = await fetch(
+        `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}/subtractor-instances/${encodeURIComponent(String(instance.id))}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            placement_z: Number(instance.placement_z) || 0,
+            ui_order: Math.max(0, Number(instance.ui_order) || 0),
+            instance_code: String(instance.instance_code || "").trim() || "subtractor",
+            line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+            param_values: serializeStoredParamValuesForPayload(instance.param_values),
+          }),
+        }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره کنترلر نمونه دستگیره مخفی انجام نشد."));
+      syncSubtractorInstanceInDraft(await res.json());
+      syncOpenSubCategoryDesignDraftToCollection();
+      await refreshSubCategoryDesignPreview();
+      return;
+    }
     if (subCategoryDesignEditorOpen.value) {
       const draft = subCategoryDesignEditorDraft.value;
       if (!draft?.id) return;
@@ -2145,6 +2180,28 @@ async function persistActiveInteriorLibraryControllerInstance() {
       syncInteriorInstanceInDraft(await res.json());
       syncOpenSubCategoryDesignDraftToCollection();
       await refreshSubCategoryDesignPreview();
+      return;
+    }
+    if (isSharedSubtractorLibraryActive.value) {
+      const orderDesign = activeSubtractorLibraryOrderDesign.value;
+      if (!orderDesign?.id) return;
+      const res = await fetch(
+        `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/subtractor-instances/${encodeURIComponent(String(instance.id))}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            placement_z: Number(instance.placement_z) || 0,
+            ui_order: Math.max(0, Number(instance.ui_order) || 0),
+            instance_code: String(instance.instance_code || "").trim() || "subtractor",
+            line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+            param_values: serializeStoredParamValuesForPayload(instance.param_values),
+          }),
+        }
+      );
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره کنترلر نمونه دستگیره مخفی طرح ثبت‌شده انجام نشد."));
+      syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
+      await refreshOrderDesignGeometryFromServer(orderDesign.id);
       return;
     }
     const orderDesign = activeInteriorLibraryOrderDesign.value;
@@ -2183,7 +2240,7 @@ function commitInteriorLibraryControllerEditing() {
   clearInteriorLibraryControllerEditing();
   if (!applied) return;
   persistActiveInteriorLibraryControllerInstance().catch((error) => {
-    showAlert(error?.message || "ذخیره کنترلر نمونه داخلی انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || (isSharedSubtractorLibraryActive.value ? "ذخیره کنترلر نمونه دستگیره مخفی انجام نشد." : "ذخیره کنترلر نمونه داخلی انجام نشد."), { title: "خطا" });
   });
 }
 
@@ -3895,6 +3952,10 @@ const activeSubtractorLibraryInstances = computed(() =>
     ? (subCategoryDesignEditorDraft.value?.subtractor_instances || [])
     : (activeSubtractorLibraryOrderDesign.value?.subtractor_instances || [])
 );
+const isSharedSubtractorLibraryActive = computed(() => subtractorLibraryOpen.value && !interiorLibraryOpen.value);
+const activeSharedInteriorPreviewInstances = computed(() =>
+  isSharedSubtractorLibraryActive.value ? activeSubtractorLibraryInstances.value : activeInteriorLibraryInstances.value
+);
 const activeSubtractorLibrarySubCategory = computed(() => {
   const subCategoryId = subCategoryDesignEditorOpen.value
     ? String(subCategoryDesignEditorDraft.value?.sub_category_id || "").trim()
@@ -4153,14 +4214,20 @@ const activeInteriorLibraryViewerBoxes = computed(() => {
   if (subCategoryDesignEditorOpen.value) {
     return subCategoryDesignEditorPreview.value?.viewer_boxes || [];
   }
-  const mergedBoxes = Array.isArray(activeInteriorLibraryOrderDesign.value?.viewer_boxes)
-    ? activeInteriorLibraryOrderDesign.value.viewer_boxes
+  const activeOrderDesign = isSharedSubtractorLibraryActive.value
+    ? activeSubtractorLibraryOrderDesign.value
+    : activeInteriorLibraryOrderDesign.value;
+  const activeSourceDesign = isSharedSubtractorLibraryActive.value
+    ? activeSubtractorLibrarySourceDesign.value
+    : activeInteriorLibrarySourceDesign.value;
+  const mergedBoxes = Array.isArray(activeOrderDesign?.viewer_boxes)
+    ? activeOrderDesign.viewer_boxes
     : [];
   if (mergedBoxes.length) return mergedBoxes;
-  const rootBoxes = getViewerBoxesFromPartSnapshots(activeInteriorLibraryOrderDesign.value?.part_snapshots || []);
+  const rootBoxes = getViewerBoxesFromPartSnapshots(activeOrderDesign?.part_snapshots || []);
   if (rootBoxes.length) return rootBoxes;
-  const sourceBoxes = Array.isArray(activeInteriorLibrarySourceDesign.value?.preview?.viewer_boxes)
-    ? activeInteriorLibrarySourceDesign.value.preview.viewer_boxes
+  const sourceBoxes = Array.isArray(activeSourceDesign?.preview?.viewer_boxes)
+    ? activeSourceDesign.preview.viewer_boxes
     : [];
   return sourceBoxes;
 });
@@ -4168,9 +4235,15 @@ const activeInteriorLibraryStructureViewerBoxes = computed(() => {
   if (subCategoryDesignEditorOpen.value) {
     return getViewerBoxesFromPreviewParts(subCategoryDesignEditorPreview.value?.parts || []);
   }
-  const rootBoxes = getViewerBoxesFromPartSnapshots(activeInteriorLibraryOrderDesign.value?.part_snapshots || []);
+  const activeOrderDesign = isSharedSubtractorLibraryActive.value
+    ? activeSubtractorLibraryOrderDesign.value
+    : activeInteriorLibraryOrderDesign.value;
+  const activeSourceDesign = isSharedSubtractorLibraryActive.value
+    ? activeSubtractorLibrarySourceDesign.value
+    : activeInteriorLibrarySourceDesign.value;
+  const rootBoxes = getViewerBoxesFromPartSnapshots(activeOrderDesign?.part_snapshots || []);
   if (rootBoxes.length) return rootBoxes;
-  const sourceBoxes = getViewerBoxesFromPreviewParts(activeInteriorLibrarySourceDesign.value?.preview?.parts || []);
+  const sourceBoxes = getViewerBoxesFromPreviewParts(activeSourceDesign?.preview?.parts || []);
   if (sourceBoxes.length) return sourceBoxes;
   return [];
 });
@@ -4240,7 +4313,7 @@ const interiorLibraryFrontView = computed(() =>
       activeInteriorLibraryStructureViewerBoxes.value || [],
       subCategoryDesignEditorOpen.value
         ? `interior-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
-        : `interior-structure:order:${String(activeInteriorLibraryOrderDesign.value?.id || activeInteriorLibrarySourceDesign.value?.id || "none").trim()}`,
+        : `interior-structure:order:${String((isSharedSubtractorLibraryActive.value ? activeSubtractorLibraryOrderDesign.value?.id : activeInteriorLibraryOrderDesign.value?.id) || (isSharedSubtractorLibraryActive.value ? activeSubtractorLibrarySourceDesign.value?.id : activeInteriorLibrarySourceDesign.value?.id) || "none").trim()}`,
       activeDoorLibraryStructureViewerBoxes.value || []
     )
     : { outer: [], inner: [], bounds: null }
@@ -4626,19 +4699,32 @@ function resolveInteriorInstanceLineColor(instance) {
     DEFAULT_INTERIOR_LINE_COLOR
   );
 }
+function resolveSubtractorInstanceLineColor(instance) {
+  const group = constructionSubtractorPartGroupsById.value.get(String(instance?.subtractor_part_group_id || "").trim());
+  return normalizeHexColor(
+    instance?.line_color
+    || group?.line_color
+    || DEFAULT_INTERIOR_LINE_COLOR,
+    DEFAULT_INTERIOR_LINE_COLOR
+  );
+}
 const interiorLibraryPreviewInstanceGeometry = computed(() =>
-  (isInteriorLibraryFront2dActive.value ? activeInteriorLibraryInstances.value : [])
+  (isInteriorLibraryFront2dActive.value
+    ? (isSharedSubtractorLibraryActive.value ? activeSubtractorLibraryInstances.value : activeInteriorLibraryInstances.value)
+    : [])
     .slice()
     .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
     .map((instance, index) => {
       const data = getCachedInteriorInstanceFrontGeometry(instance);
       if (!data?.bounds) return null;
-      const group = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || ""));
+      const group = isSharedSubtractorLibraryActive.value
+        ? constructionSubtractorPartGroupsById.value.get(String(instance?.subtractor_part_group_id || ""))
+        : constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || ""));
       return {
         id: String(instance?.id || "").trim(),
         instanceCode: String(instance?.instance_code || "").trim(),
-        groupTitle: String(group?.group_title || group?.title || instance?.instance_code || "قطعه داخلی").trim(),
-        lineColor: resolveInteriorInstanceLineColor(instance),
+        groupTitle: String(group?.group_title || group?.title || instance?.instance_code || (isSharedSubtractorLibraryActive.value ? "دستگیره مخفی" : "قطعه داخلی")).trim(),
+        lineColor: isSharedSubtractorLibraryActive.value ? resolveSubtractorInstanceLineColor(instance) : resolveInteriorInstanceLineColor(instance),
         visualOrder: index,
         geometry: data,
       };
@@ -4826,10 +4912,15 @@ const interiorLibraryControllerVisualScale = computed(() => {
   return 1 / zoom;
 });
 const activeInteriorLibrarySelectedInstance = computed(() =>
-  activeInteriorLibraryInstances.value.find((item) => String(item?.id || "").trim() === String(interiorLibrarySelectedInstanceId.value || "").trim()) || null
+  (isSharedSubtractorLibraryActive.value ? activeSubtractorLibraryInstances.value : activeInteriorLibraryInstances.value)
+    .find((item) => String(item?.id || "").trim() === String(interiorLibrarySelectedInstanceId.value || "").trim()) || null
 );
 const activeInteriorLibrarySelectedGroup = computed(() =>
-  constructionInternalPartGroupsById.value.get(String(activeInteriorLibrarySelectedInstance.value?.internal_part_group_id || "").trim()) || null
+  (
+    isSharedSubtractorLibraryActive.value
+      ? constructionSubtractorPartGroupsById.value.get(String(activeInteriorLibrarySelectedInstance.value?.subtractor_part_group_id || "").trim())
+      : constructionInternalPartGroupsById.value.get(String(activeInteriorLibrarySelectedInstance.value?.internal_part_group_id || "").trim())
+  ) || null
 );
 const interiorLibraryControllerDefinitions = computed(() =>
   getInternalPartGroupControllerDefinitions(activeInteriorLibrarySelectedGroup.value?.controller_type)
@@ -4837,7 +4928,12 @@ const interiorLibraryControllerDefinitions = computed(() =>
 const interiorLibraryControllerBindingMap = computed(() => {
   const group = activeInteriorLibrarySelectedGroup.value;
   if (!group) return {};
-  const allowedCodes = new Set(getInternalPartGroupSelectedParamColumns(group).map((column) => column.key));
+  const allowedCodes = new Set(
+    (isSharedSubtractorLibraryActive.value
+      ? getSubtractorPartGroupSelectedParamColumns(group)
+      : getInternalPartGroupSelectedParamColumns(group)
+    ).map((column) => column.key)
+  );
   return normalizeInternalPartGroupControllerBindings(group.controller_type, group.controller_bindings, allowedCodes);
 });
 const interiorLibraryControllerFrameRect = computed(() => {
@@ -4862,8 +4958,8 @@ const interiorLibraryControllerFrameRect = computed(() => {
 });
 const interiorLibraryControllerOverlays = computed(() => {
   const frame = interiorLibraryControllerFrameRect.value;
-  if (!frame || interiorLibraryPreviewMode.value !== "front2d") return [];
-  return activeInteriorLibraryInstances.value
+  if (!frame || !isInteriorLibraryFront2dActive.value) return [];
+  return (isSharedSubtractorLibraryActive.value ? activeSubtractorLibraryInstances.value : activeInteriorLibraryInstances.value)
     .map((instance) => buildInteriorLibraryControllerOverlayForInstance(instance, frame))
     .filter(Boolean);
 });
@@ -4883,12 +4979,16 @@ const interiorLibraryControllerRect = computed(() =>
 const interiorLibraryControllerState = computed(() => {
   const group = activeInteriorLibrarySelectedGroup.value;
   const instance = activeInteriorLibrarySelectedInstance.value;
-  const enabled = interiorLibraryPreviewMode.value === "front2d" && !!interiorLibrarySelectedControllerOverlay.value;
+  const enabled = isInteriorLibraryFront2dActive.value && !!interiorLibrarySelectedControllerOverlay.value;
   const hasAllBindings = interiorLibraryControllerDefinitions.value.length > 0
     && interiorLibraryControllerDefinitions.value.every((definition) => String(interiorLibraryControllerBindingMap.value?.[definition.key]?.param_code || "").trim());
   let message = "";
-  if (!instance) message = "برای نمایش کنترلرها، ابتدا یک نمونه داخلی را انتخاب کنید.";
-  else if (!group || !normalizeInternalPartGroupControllerType(group?.controller_type)) message = "برای این نمونه، کنترلر روی گروه داخلی تنظیم نشده است.";
+  if (!instance) message = isSharedSubtractorLibraryActive.value
+    ? "برای نمایش کنترلرها، ابتدا یک نمونه دستگیره مخفی را انتخاب کنید."
+    : "برای نمایش کنترلرها، ابتدا یک نمونه داخلی را انتخاب کنید.";
+  else if (!group || !normalizeInternalPartGroupControllerType(group?.controller_type)) message = isSharedSubtractorLibraryActive.value
+    ? "برای این نمونه، کنترلر روی گروه دستگیره مخفی تنظیم نشده است."
+    : "برای این نمونه، کنترلر روی گروه داخلی تنظیم نشده است.";
   else if (!hasAllBindings) message = `اتصال هر ${toPersianDigits(interiorLibraryControllerDefinitions.value.length)} پارامتر کنترلر برای این گروه کامل نیست.`;
   else if (!interiorLibrarySelectedControllerOverlay.value?.rect) message = "مقادیر کنترلرهای این نمونه قابل محاسبه نیست.";
   return { enabled, message };
@@ -5394,7 +5494,7 @@ watch(interiorLibraryViewerWrapEl, (el) => {
     syncInteriorLibraryFrontViewport();
   });
 }, { flush: "post" });
-watch(activeInteriorLibraryInstances, (items) => {
+watch(activeSharedInteriorPreviewInstances, (items) => {
   const ids = new Set((Array.isArray(items) ? items : []).map((item) => String(item?.id || "").trim()).filter(Boolean));
   if (interiorLibrarySelectedInstanceId.value && !ids.has(String(interiorLibrarySelectedInstanceId.value))) {
     interiorLibrarySelectedInstanceId.value = "";
@@ -5415,6 +5515,14 @@ watch(activeInteriorLibraryInstances, (items) => {
     closeInteriorInstanceContextMenu();
   }
 }, { immediate: true });
+watch(
+  [subtractorLibraryOpen, subtractorLibrarySelectedInstanceId],
+  ([open, selectedId]) => {
+    if (!open) return;
+    interiorLibrarySelectedInstanceId.value = String(selectedId || "").trim();
+  },
+  { immediate: true }
+);
 watch(activeDoorLibrarySelectableParts, (items) => {
   const ids = new Set((Array.isArray(items) ? items : []).map((item) => String(item?.id || "").trim()).filter(Boolean));
   doorLibrarySelectedInstanceIds.value = (Array.isArray(doorLibrarySelectedInstanceIds.value) ? doorLibrarySelectedInstanceIds.value : [])
@@ -6131,18 +6239,28 @@ function deriveInteriorLibraryControllerValuesFromGeometry(instance, frame, cont
 }
 
 function buildInteriorLibraryControllerOverlayForInstance(instance, frame) {
-  const group = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
+  const isSubtractorInstance = !!String(instance?.subtractor_part_group_id || "").trim();
+  const group = isSubtractorInstance
+    ? constructionSubtractorPartGroupsById.value.get(String(instance?.subtractor_part_group_id || "").trim())
+    : constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
   if (!group || !normalizeInternalPartGroupControllerType(group.controller_type)) return null;
   const definitions = getInternalPartGroupControllerDefinitions(group.controller_type);
   if (!definitions.length) return null;
-  const allowedCodes = new Set(getInternalPartGroupSelectedParamColumns(group).map((column) => column.key));
+  const allowedCodes = new Set(
+    (isSubtractorInstance
+      ? getSubtractorPartGroupSelectedParamColumns(group)
+      : getInternalPartGroupSelectedParamColumns(group)
+    ).map((column) => column.key)
+  );
   const bindings = normalizeInternalPartGroupControllerBindings(group.controller_type, group.controller_bindings, allowedCodes);
   if (!definitions.every((definition) => String(bindings?.[definition.key]?.param_code || "").trim())) return null;
   const geometryValues = deriveInteriorLibraryControllerValuesFromGeometry(instance, frame, group?.controller_type) || {};
   const values = Object.fromEntries(
     definitions.map((definition) => {
       const paramCode = String(bindings?.[definition.key]?.param_code || "").trim();
-      const rawValue = paramCode ? getInteriorInstanceEffectiveValue(instance, paramCode) : "";
+      const rawValue = paramCode
+        ? (isSubtractorInstance ? getSubtractorInstanceEffectiveValue(instance, paramCode) : getInteriorInstanceEffectiveValue(instance, paramCode))
+        : "";
       const parsedValue = parseInteriorControllerMm(rawValue);
       return [definition.key, Number.isFinite(parsedValue) ? parsedValue : geometryValues[definition.key]];
     })
@@ -6158,7 +6276,7 @@ function buildInteriorLibraryControllerOverlayForInstance(instance, frame) {
     groupId: String(group?.id || "").trim(),
     groupCode: String(group?.code || "").trim(),
     groupTitle: String(group?.group_title || group?.title || "").trim(),
-    lineColor: resolveInteriorInstanceLineColor(instance),
+    lineColor: isSubtractorInstance ? resolveSubtractorInstanceLineColor(instance) : resolveInteriorInstanceLineColor(instance),
     bindings,
     values: displayValues,
     rect,
@@ -6484,10 +6602,16 @@ const activeInteriorLibraryOutlineColor = computed(() => {
   if (subCategoryDesignEditorOpen.value) {
     return normalizeHexColor(subCategoryDesignEditorPreview.value?.design_outline_color);
   }
+  const activeOrderDesign = isSharedSubtractorLibraryActive.value
+    ? activeSubtractorLibraryOrderDesign.value
+    : activeInteriorLibraryOrderDesign.value;
+  const activeSourceDesign = isSharedSubtractorLibraryActive.value
+    ? activeSubtractorLibrarySourceDesign.value
+    : activeInteriorLibrarySourceDesign.value;
   return normalizeHexColor(
-    activeInteriorLibraryOrderDesign.value?.design_outline_color
-    || activeInteriorLibrarySourceDesign.value?.design_outline_color
-    || activeInteriorLibrarySourceDesign.value?.preview?.design_outline_color
+    activeOrderDesign?.design_outline_color
+    || activeSourceDesign?.design_outline_color
+    || activeSourceDesign?.preview?.design_outline_color
   );
 });
 const activeDoorLibraryOutlineColor = computed(() => {

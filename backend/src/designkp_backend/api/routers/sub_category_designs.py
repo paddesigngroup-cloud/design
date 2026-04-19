@@ -511,6 +511,11 @@ def _serialize_preview(
             ],
             *[
                 dict(box or {})
+                for item in list(subtractor_instances or [])
+                for box in list(getattr(item, "viewer_boxes", []) or [])
+            ],
+            *[
+                dict(box or {})
                 for item in list(door_instances or [])
                 for box in list(getattr(item, "viewer_boxes", []) or [])
             ],
@@ -1600,21 +1605,25 @@ async def create_sub_category_design_subtractor_instance(
     )
     session.add(item)
     await session.flush()
+    design = await _load_design(session, design.id)
+    await rebuild_design_snapshots(session, design)
     await session.commit()
+    design = await _load_design(session, design.id)
+    target = next(instance for instance in design.subtractor_instances if instance.id == item.id)
     return SubCategoryDesignSubtractorInstanceItem.model_validate({
-        "id": item.id,
-        "subtractor_part_group_id": item.subtractor_part_group_id,
+        "id": target.id,
+        "subtractor_part_group_id": target.subtractor_part_group_id,
         "controller_type": str(getattr(group, "controller_type", "") or "").strip() or None,
         "controller_bindings": dict(getattr(group, "controller_bindings", {}) or {}),
-        "instance_code": str(item.instance_code or ""),
-        "line_color": str(getattr(item, "line_color", "") or "").strip() or None,
-        "ui_order": int(item.ui_order or 0),
-        "placement_z": float(getattr(item, "placement_z", 0) or 0),
-        "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(item.param_values or {}).items()},
-        "param_meta": {str(key): dict(value or {}) for key, value in dict(item.param_meta or {}).items()},
-        "part_snapshots": [dict(row or {}) for row in list(item.part_snapshots or [])],
-        "viewer_boxes": [dict(row or {}) for row in list(item.viewer_boxes or [])],
-        "status": str(item.status or "draft").strip() or "draft",
+        "instance_code": str(target.instance_code or ""),
+        "line_color": str(getattr(target, "line_color", "") or "").strip() or None,
+        "ui_order": int(target.ui_order or 0),
+        "placement_z": float(getattr(target, "placement_z", 0) or 0),
+        "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(target.param_values or {}).items()},
+        "param_meta": {str(key): dict(value or {}) for key, value in dict(target.param_meta or {}).items()},
+        "part_snapshots": [dict(row or {}) for row in list(target.part_snapshots or [])],
+        "viewer_boxes": [dict(row or {}) for row in list(target.viewer_boxes or [])],
+        "status": str(target.status or "draft").strip() or "draft",
     })
 
 
@@ -1638,21 +1647,25 @@ async def update_sub_category_design_subtractor_instance(
     item.placement_z = float(payload.placement_z or 0)
     item.param_values = _normalize_subtractor_param_values(payload.param_values)
     await session.flush()
+    design = await _load_design(session, design.id)
+    await rebuild_design_snapshots(session, design)
     await session.commit()
+    design = await _load_design(session, design.id)
+    target = next(instance for instance in design.subtractor_instances if instance.id == item.id)
     return SubCategoryDesignSubtractorInstanceItem.model_validate({
-        "id": item.id,
-        "subtractor_part_group_id": item.subtractor_part_group_id,
+        "id": target.id,
+        "subtractor_part_group_id": target.subtractor_part_group_id,
         "controller_type": str(getattr(group, "controller_type", "") or "").strip() or None,
         "controller_bindings": dict(getattr(group, "controller_bindings", {}) or {}),
-        "instance_code": str(item.instance_code or ""),
-        "line_color": str(getattr(item, "line_color", "") or "").strip() or None,
-        "ui_order": int(item.ui_order or 0),
-        "placement_z": float(getattr(item, "placement_z", 0) or 0),
-        "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(item.param_values or {}).items()},
-        "param_meta": {str(key): dict(value or {}) for key, value in dict(item.param_meta or {}).items()},
-        "part_snapshots": [dict(row or {}) for row in list(item.part_snapshots or [])],
-        "viewer_boxes": [dict(row or {}) for row in list(item.viewer_boxes or [])],
-        "status": str(item.status or "draft").strip() or "draft",
+        "instance_code": str(target.instance_code or ""),
+        "line_color": str(getattr(target, "line_color", "") or "").strip() or None,
+        "ui_order": int(target.ui_order or 0),
+        "placement_z": float(getattr(target, "placement_z", 0) or 0),
+        "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(target.param_values or {}).items()},
+        "param_meta": {str(key): dict(value or {}) for key, value in dict(target.param_meta or {}).items()},
+        "part_snapshots": [dict(row or {}) for row in list(target.part_snapshots or [])],
+        "viewer_boxes": [dict(row or {}) for row in list(target.viewer_boxes or [])],
+        "status": str(target.status or "draft").strip() or "draft",
     })
 
 
@@ -1687,21 +1700,25 @@ async def duplicate_sub_category_design_subtractor_instance(
     )
     session.add(item)
     await session.flush()
+    design = await _load_design(session, design.id)
+    await rebuild_design_snapshots(session, design)
     await session.commit()
+    design = await _load_design(session, design.id)
+    target = next(instance for instance in design.subtractor_instances if instance.id == item.id)
     return SubCategoryDesignSubtractorInstanceItem.model_validate({
-        "id": item.id,
-        "subtractor_part_group_id": item.subtractor_part_group_id,
+        "id": target.id,
+        "subtractor_part_group_id": target.subtractor_part_group_id,
         "controller_type": str(getattr(group, "controller_type", "") or "").strip() or None,
         "controller_bindings": dict(getattr(group, "controller_bindings", {}) or {}),
-        "instance_code": str(item.instance_code or ""),
-        "line_color": str(getattr(item, "line_color", "") or "").strip() or None,
-        "ui_order": int(item.ui_order or 0),
-        "placement_z": float(getattr(item, "placement_z", 0) or 0),
-        "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(item.param_values or {}).items()},
-        "param_meta": {str(key): dict(value or {}) for key, value in dict(item.param_meta or {}).items()},
-        "part_snapshots": [dict(row or {}) for row in list(item.part_snapshots or [])],
-        "viewer_boxes": [dict(row or {}) for row in list(item.viewer_boxes or [])],
-        "status": str(item.status or "draft").strip() or "draft",
+        "instance_code": str(target.instance_code or ""),
+        "line_color": str(getattr(target, "line_color", "") or "").strip() or None,
+        "ui_order": int(target.ui_order or 0),
+        "placement_z": float(getattr(target, "placement_z", 0) or 0),
+        "param_values": {str(key): (None if value is None else str(value)) for key, value in dict(target.param_values or {}).items()},
+        "param_meta": {str(key): dict(value or {}) for key, value in dict(target.param_meta or {}).items()},
+        "part_snapshots": [dict(row or {}) for row in list(target.part_snapshots or [])],
+        "viewer_boxes": [dict(row or {}) for row in list(target.viewer_boxes or [])],
+        "status": str(target.status or "draft").strip() or "draft",
     })
 
 
