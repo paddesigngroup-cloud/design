@@ -125,6 +125,7 @@ class SubCategoryDesignPreviewResponse(BaseModel):
     interior_instances: list[SubCategoryDesignInteriorInstancePreviewItem]
     subtractor_instances: list[dict[str, object]] = Field(default_factory=list)
     door_instances: list[dict[str, object]] = Field(default_factory=list)
+    subtractor_instances: list[dict[str, object]] = Field(default_factory=list)
 
 
 class SubCategoryDesignItem(BaseModel):
@@ -145,6 +146,7 @@ class SubCategoryDesignItem(BaseModel):
     interior_instances: list[SubCategoryDesignInteriorInstanceItem]
     subtractor_instances: list[dict[str, object]] = Field(default_factory=list)
     door_instances: list[dict[str, object]] = Field(default_factory=list)
+    subtractor_instances: list[dict[str, object]] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -161,6 +163,7 @@ class SubCategoryDesignCreate(BaseModel):
     interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
     subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
     door_instances: list["SubCategoryDesignDoorInstanceDraftPayload"] = Field(default_factory=list)
+    subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
 
 
 class SubCategoryDesignUpdate(BaseModel):
@@ -175,6 +178,7 @@ class SubCategoryDesignUpdate(BaseModel):
     interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
     subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
     door_instances: list["SubCategoryDesignDoorInstanceDraftPayload"] = Field(default_factory=list)
+    subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
 
 
 class SubCategoryDesignPreviewDraftRequest(BaseModel):
@@ -184,6 +188,7 @@ class SubCategoryDesignPreviewDraftRequest(BaseModel):
     interior_instances: list["SubCategoryDesignInteriorInstanceDraftPayload"] = Field(default_factory=list)
     subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
     door_instances: list["SubCategoryDesignDoorInstanceDraftPayload"] = Field(default_factory=list)
+    subtractor_instances: list["SubCategoryDesignSubtractorInstanceDraftPayload"] = Field(default_factory=list)
 
 
 class SubCategoryDesignInteriorInstanceDraftPayload(BaseModel):
@@ -218,6 +223,18 @@ class SubCategoryDesignDoorInstanceDraftPayload(BaseModel):
     structural_part_formula_ids: list[int] = Field(default_factory=list)
     dependent_interior_instance_ids: list[uuid.UUID | str] = Field(default_factory=list)
     controller_box_snapshot: dict[str, object] = Field(default_factory=dict)
+    param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    param_meta: dict[str, dict[str, object]] = Field(default_factory=dict)
+
+
+class SubCategoryDesignSubtractorInstanceDraftPayload(BaseModel):
+    id: uuid.UUID | None = None
+    subtractor_part_group_id: uuid.UUID
+    instance_code: str = Field(min_length=1, max_length=64)
+    line_color: str | None = Field(default=None, min_length=7, max_length=7)
+    ui_order: int = Field(ge=0)
+    placement_z: float = 0
+    interior_box_snapshot: dict[str, object] = Field(default_factory=dict)
     param_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
     param_meta: dict[str, dict[str, object]] = Field(default_factory=dict)
 
