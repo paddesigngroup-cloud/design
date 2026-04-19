@@ -7273,6 +7273,17 @@ function normalizeSubtractorPartGroupPayload(item) {
       .map((param) => String(param.param_code || "").trim())
       .filter(Boolean)
   );
+  for (const column of getSubtractorPartGroupSelectedParamColumns(item)) {
+    if (column?.key) {
+      allowedParamCodes.add(String(column.key).trim());
+    }
+  }
+  for (const binding of Object.values(item?.controller_bindings || {})) {
+    const paramCode = String(binding?.param_code || "").trim();
+    if (paramCode) {
+      allowedParamCodes.add(paramCode);
+    }
+  }
   const controllerType = normalizeSubtractorPartGroupControllerType(item.controller_type);
   const controllerBindings = normalizeSubtractorPartGroupControllerBindings(
     controllerType,
@@ -12559,8 +12570,8 @@ async function loadConstructionSubtractorPartGroups() {
     const res = await fetch(url);
     if (!res.ok) throw new Error("load-failed");
     editableSubtractorPartGroups.value = (await res.json()).map((item) =>
-      ensureInternalPartGroupControllerConfig(
-        ensureInternalPartGroupParamDefaults(withConstructionDraftState({
+      ensureSubtractorPartGroupControllerConfig(
+        ensureSubtractorPartGroupParamDefaults(withConstructionDraftState({
           ...item,
           icon_path: normalizeIconFileName(item.icon_path || item.param_group_icon_path) || "",
           param_group_icon_path: normalizeIconFileName(item.param_group_icon_path || item.icon_path) || "",
@@ -13236,7 +13247,16 @@ function getSubtractorPartGroupSelectedParamColumns(item) {
       .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
       .map((group) => Number(group.param_group_id))
   );
-  if (!selectedParamGroupIds.size) return [];
+  if (!selectedParamGroupIds.size) {
+    const boundParamCodes = Object.values(item?.controller_bindings || {})
+      .map((binding) => String(binding?.param_code || "").trim())
+      .filter(Boolean);
+    if (!boundParamCodes.length) return [];
+    return [...new Set(boundParamCodes)].map((code) => ({
+      key: code,
+      label: String(constructionSubCategoryParamMetaByCode.value?.[code]?.label || code).trim(),
+    }));
+  }
   return constructionParams.value
     .filter((param) => selectedParamGroupIds.has(Number(param?.param_group_id)))
     .map((param) => ({
@@ -14346,7 +14366,7 @@ async function persistSubtractorPartGroupRow(row) {
   if (!res.ok) {
     throw new Error(await readApiErrorMessage(res, "ذخیره گروه دستگیره مخفی انجام نشد."));
   }
-  const savedRow = ensureInternalPartGroupControllerConfig(ensureInternalPartGroupParamDefaults(withConstructionDraftState(await res.json())));
+  const savedRow = ensureSubtractorPartGroupControllerConfig(ensureSubtractorPartGroupParamDefaults(withConstructionDraftState(await res.json())));
   editableSubtractorPartGroups.value = editableSubtractorPartGroups.value.map((item) =>
     String(item.id) === String(savedRow.id) ? savedRow : item
   );
@@ -14357,7 +14377,7 @@ async function applySubtractorPartGroupDefaultsEditor() {
   const row = activeSubtractorPartGroupDefaultsRow.value;
   if (!row || subtractorPartGroupDefaultsApplying.value) return;
   subtractorPartGroupDefaultsApplying.value = true;
-  ensureInternalPartGroupParamDefaults(row);
+  ensureSubtractorPartGroupParamDefaults(row);
   for (const column of getSubtractorPartGroupSelectedParamColumns(row)) {
     const override = row.param_overrides?.[column.key] || {};
     const nextValue = String(subtractorPartGroupDefaultsValues.value?.[column.key] ?? "").trim();
