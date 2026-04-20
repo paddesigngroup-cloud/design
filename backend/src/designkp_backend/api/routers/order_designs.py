@@ -322,6 +322,7 @@ def _apply_boolean_preview_to_viewer_boxes(
         {
             **dict(box or {}),
             "lineColor": str(dict(box or {}).get("lineColor") or item.get("line_color") or item.get("lineColor") or "").strip(),
+            "targetId": str(item.get("target_id") or "").strip(),
         }
         for item in list(boolean_result or [])
         if isinstance(item, dict)

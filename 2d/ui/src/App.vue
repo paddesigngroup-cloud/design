@@ -9131,6 +9131,7 @@ function buildRenderedBoxesFromBooleanPayload(viewerBoxes, booleanTargets, boole
     (Array.isArray(item?.boxes) ? item.boxes : []).map((box) => ({
       ...(box || {}),
       lineColor: String(box?.lineColor || item?.line_color || item?.lineColor || "").trim(),
+      targetId: String(item?.target_id || "").trim(),
     }))
   );
   const shouldReplaceTargets = normalizedTargets.length > 0 && normalizedResult.length > 0;

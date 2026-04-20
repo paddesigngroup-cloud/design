@@ -1396,6 +1396,7 @@ function buildPlaceholderSignature() {
       Number(box?.cx) || 0,
       Number(box?.cy) || 0,
       Number(box?.cz) || 0,
+      String(box?.targetId || ""),
     ]),
     outlineColor: String(props.placeholderOutlineColor || ""),
   });
@@ -1463,6 +1464,155 @@ function buildPlaceholderPalette(outlineColor) {
 function cloneColor(color, fallback = "#FFFFFF") {
   if (color?.isColor) return color.clone();
   return new THREE.Color(color || fallback);
+}
+
+function roundCoordKey(value) {
+  return Number(Number(value || 0).toFixed(6));
+}
+
+function buildUnionGeometryFromBoxes(specs) {
+  const items = (Array.isArray(specs) ? specs : [])
+    .map((spec) => {
+      const width = Math.max(0.001, Number(spec?.width) || 0);
+      const depth = Math.max(0.001, Number(spec?.depth) || 0);
+      const height = Math.max(0.001, Number(spec?.height) || 0);
+      const cx = Number(spec?.cx) || 0;
+      const cy = Number(spec?.cy) || 0;
+      const cz = Number(spec?.cz) || 0;
+      return {
+        minX: roundCoordKey(cx - (width * 0.5)),
+        maxX: roundCoordKey(cx + (width * 0.5)),
+        minY: roundCoordKey(cy - (depth * 0.5)),
+        maxY: roundCoordKey(cy + (depth * 0.5)),
+        minZ: roundCoordKey(cz - (height * 0.5)),
+        maxZ: roundCoordKey(cz + (height * 0.5)),
+      };
+    })
+    .filter((item) =>
+      item.maxX > item.minX
+      && item.maxY > item.minY
+      && item.maxZ > item.minZ
+    );
+  if (!items.length) return null;
+
+  const xCoords = [...new Set(items.flatMap((item) => [item.minX, item.maxX]))].sort((a, b) => a - b);
+  const yCoords = [...new Set(items.flatMap((item) => [item.minY, item.maxY]))].sort((a, b) => a - b);
+  const zCoords = [...new Set(items.flatMap((item) => [item.minZ, item.maxZ]))].sort((a, b) => a - b);
+  if (xCoords.length < 2 || yCoords.length < 2 || zCoords.length < 2) return null;
+
+  const occupied = new Set();
+  for (let xi = 0; xi < xCoords.length - 1; xi += 1) {
+    const x1 = xCoords[xi];
+    const x2 = xCoords[xi + 1];
+    const cx = (x1 + x2) * 0.5;
+    for (let yi = 0; yi < yCoords.length - 1; yi += 1) {
+      const y1 = yCoords[yi];
+      const y2 = yCoords[yi + 1];
+      const cy = (y1 + y2) * 0.5;
+      for (let zi = 0; zi < zCoords.length - 1; zi += 1) {
+        const z1 = zCoords[zi];
+        const z2 = zCoords[zi + 1];
+        const cz = (z1 + z2) * 0.5;
+        const inside = items.some((item) =>
+          cx > item.minX && cx < item.maxX
+          && cy > item.minY && cy < item.maxY
+          && cz > item.minZ && cz < item.maxZ
+        );
+        if (inside) occupied.add(`${xi}|${yi}|${zi}`);
+      }
+    }
+  }
+  if (!occupied.size) return null;
+
+  const positions = [];
+  const indices = [];
+  let vertexIndex = 0;
+  const toThreePoint = (x, y, z) => [x * 0.001, z * 0.001, -y * 0.001];
+  const pushQuad = (a, b, c, d) => {
+    positions.push(...a, ...b, ...c, ...d);
+    indices.push(
+      vertexIndex,
+      vertexIndex + 1,
+      vertexIndex + 2,
+      vertexIndex,
+      vertexIndex + 2,
+      vertexIndex + 3,
+    );
+    vertexIndex += 4;
+  };
+  const hasCell = (xi, yi, zi) => occupied.has(`${xi}|${yi}|${zi}`);
+
+  for (let xi = 0; xi < xCoords.length - 1; xi += 1) {
+    const x1 = xCoords[xi];
+    const x2 = xCoords[xi + 1];
+    for (let yi = 0; yi < yCoords.length - 1; yi += 1) {
+      const y1 = yCoords[yi];
+      const y2 = yCoords[yi + 1];
+      for (let zi = 0; zi < zCoords.length - 1; zi += 1) {
+        const z1 = zCoords[zi];
+        const z2 = zCoords[zi + 1];
+        if (!hasCell(xi, yi, zi)) continue;
+
+        if (!hasCell(xi - 1, yi, zi)) {
+          pushQuad(
+            toThreePoint(x1, y1, z1),
+            toThreePoint(x1, y2, z1),
+            toThreePoint(x1, y2, z2),
+            toThreePoint(x1, y1, z2),
+          );
+        }
+        if (!hasCell(xi + 1, yi, zi)) {
+          pushQuad(
+            toThreePoint(x2, y1, z1),
+            toThreePoint(x2, y1, z2),
+            toThreePoint(x2, y2, z2),
+            toThreePoint(x2, y2, z1),
+          );
+        }
+        if (!hasCell(xi, yi - 1, zi)) {
+          pushQuad(
+            toThreePoint(x1, y1, z1),
+            toThreePoint(x1, y1, z2),
+            toThreePoint(x2, y1, z2),
+            toThreePoint(x2, y1, z1),
+          );
+        }
+        if (!hasCell(xi, yi + 1, zi)) {
+          pushQuad(
+            toThreePoint(x1, y2, z1),
+            toThreePoint(x2, y2, z1),
+            toThreePoint(x2, y2, z2),
+            toThreePoint(x1, y2, z2),
+          );
+        }
+        if (!hasCell(xi, yi, zi - 1)) {
+          pushQuad(
+            toThreePoint(x1, y1, z1),
+            toThreePoint(x2, y1, z1),
+            toThreePoint(x2, y2, z1),
+            toThreePoint(x1, y2, z1),
+          );
+        }
+        if (!hasCell(xi, yi, zi + 1)) {
+          pushQuad(
+            toThreePoint(x1, y1, z2),
+            toThreePoint(x1, y2, z2),
+            toThreePoint(x2, y2, z2),
+            toThreePoint(x2, y1, z2),
+          );
+        }
+      }
+    }
+  }
+
+  if (!positions.length || !indices.length) return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 function applyPlaceholderInstanceVisualState(instanceRoot, state = "default") {
@@ -1562,6 +1712,8 @@ function rebuildPlaceholderBoxes() {
     instanceRoot.rotation.y = rotRad;
 
     for (const spec of specs) {
+      const targetId = String(spec?.targetId || "").trim();
+      if (targetId) continue;
       const widthM = Math.max(0.001, Number(spec.width) * 0.001);
       const depthM = Math.max(0.001, Number(spec.depth) * 0.001);
       const heightM = Math.max(0.001, Number(spec.height) * 0.001);
@@ -1597,6 +1749,46 @@ function rebuildPlaceholderBoxes() {
 
       mesh.position.set(cxM, czM, -cyM);
       edgeLines.position.copy(mesh.position);
+      instanceRoot.add(mesh);
+      instanceRoot.add(edgeLines);
+    }
+
+    const compoundGroups = new Map();
+    specs.forEach((spec, index) => {
+      const targetId = String(spec?.targetId || "").trim();
+      if (!targetId) return;
+      const key = `target:${targetId}`;
+      if (!compoundGroups.has(key)) compoundGroups.set(key, []);
+      compoundGroups.get(key).push({ ...(spec || {}), _index: index });
+    });
+    for (const groupedSpecs of compoundGroups.values()) {
+      const geometry = buildUnionGeometryFromBoxes(groupedSpecs);
+      if (!geometry) continue;
+      const material = new THREE.MeshStandardMaterial({
+        color: palette.fill.clone(),
+        roughness: 0.82,
+        metalness: 0.04,
+        transparent: true,
+        opacity: 1,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.userData.isPlaceholderSolid = true;
+      mesh.userData.basePlaceholderColor = palette.fill.clone();
+      mesh.userData.basePlaceholderOpacity = 1;
+      const edges = new THREE.EdgesGeometry(geometry);
+      const edgeLines = new THREE.LineSegments(
+        edges,
+        new THREE.LineBasicMaterial({
+          color: palette.edge.clone(),
+          transparent: true,
+          opacity: 0.95,
+          depthTest: true,
+          depthWrite: false,
+        })
+      );
+      edgeLines.userData.isPlaceholderEdge = true;
+      edgeLines.userData.basePlaceholderEdgeColor = palette.edge.clone();
       instanceRoot.add(mesh);
       instanceRoot.add(edgeLines);
     }
