@@ -4,8 +4,9 @@ setlocal EnableExtensions
 set "ROOT=C:\DesignKP"
 set "BACKEND_DIR=%ROOT%\backend"
 set "UI_DIR=%ROOT%\2d\ui"
-set "PYTHON_EXE=%ROOT%\.venv\Scripts\python.exe"
+set "PYTHON_EXE=%ROOT%\.venv314\Scripts\python.exe"
 set "NPM_CMD=C:\Program Files\nodejs\npm.cmd"
+set "PATH=C:\Program Files\nodejs;%PATH%"
 
 echo ==========================================
 echo DesignKP Launcher
@@ -47,11 +48,11 @@ echo [INFO] Starting backend...
 start "DesignKP Backend" cmd /k cd /d "%BACKEND_DIR%" ^& "%PYTHON_EXE%" -m uvicorn designkp_backend.main:app --host 127.0.0.1 --port 8000
 
 echo [INFO] Starting frontend...
-start "DesignKP Frontend" cmd /k cd /d "%UI_DIR%" ^& call "%NPM_CMD%" run dev -- --port 5174
+start "DesignKP Frontend" cmd /k cd /d "%UI_DIR%" ^& call "%NPM_CMD%" run dev -- --host 127.0.0.1 --port 5174
 
 echo [INFO] Waiting for frontend...
 timeout /t 6 /nobreak >nul
-start "" "http://127.0.0.1:5174"
+start "" "http://localhost:5174"
 
 echo [OK] Backend and frontend start commands were sent.
 echo If a window closes, read the error in that window.
@@ -62,3 +63,6 @@ echo.
 echo [FAILED] DesignKP did not start.
 pause
 exit /b 1
+
+
+
