@@ -91,3 +91,75 @@ def test_build_boolean_preview_payload_restores_original_box_when_no_overlap() -
     )
 
     assert payload.boolean_result[0]["boxes"] == [target_box]
+
+
+def test_build_boolean_preview_payload_targets_all_root_door_dependent_parts() -> None:
+    target_box = {"width": 100, "depth": 20, "height": 200, "cx": 50, "cy": 10, "cz": 100}
+    payload = build_boolean_preview_payload(
+        context=SimpleNamespace(part_formulas_by_id={}),
+        root_part_snapshots=[
+            _snapshot(101, door_dependent=True, box=target_box),
+            _snapshot(102, door_dependent=False, box={"width": 40, "depth": 20, "height": 40, "cx": 150, "cy": 10, "cz": 40}),
+        ],
+        interiors=[],
+        subtractors=[
+            SimpleNamespace(
+                instance_id=uuid4(),
+                subtractor_part_group_id=uuid4(),
+                instance_code="sub-1",
+                ui_order=0,
+                viewer_boxes=[{"width": 20, "depth": 20, "height": 40, "cx": 50, "cy": 10, "cz": 100}],
+            )
+        ],
+        doors=[
+            SimpleNamespace(
+                instance_id=uuid4(),
+                instance_code="door-1",
+                line_color="#222222",
+                structural_part_formula_ids=[],
+                dependent_interior_instance_ids=[],
+                controller_box_snapshot={},
+            )
+        ],
+    )
+
+    assert len(payload.boolean_targets) == 1
+    assert payload.boolean_targets[0]["part_formula_id"] == 101
+    assert payload.boolean_result[0]["part_formula_id"] == 101
+    assert payload.boolean_result[0]["boxes"] != [target_box]
+
+
+def test_build_boolean_preview_payload_supports_resolved_part_snapshot_objects() -> None:
+    target_box = {"width": 100, "depth": 20, "height": 200, "cx": 50, "cy": 10, "cz": 100}
+    root_snapshot = SimpleNamespace(
+        part_formula=SimpleNamespace(part_formula_id=101, door_dependent=True),
+        viewer_payload={"box": dict(target_box)},
+    )
+    payload = build_boolean_preview_payload(
+        context=SimpleNamespace(part_formulas_by_id={101: SimpleNamespace(door_dependent=True)}),
+        root_part_snapshots=[root_snapshot],
+        interiors=[],
+        subtractors=[
+            SimpleNamespace(
+                instance_id=uuid4(),
+                subtractor_part_group_id=uuid4(),
+                instance_code="sub-1",
+                ui_order=0,
+                viewer_boxes=[{"width": 20, "depth": 20, "height": 40, "cx": 50, "cy": 10, "cz": 100}],
+            )
+        ],
+        doors=[
+            SimpleNamespace(
+                instance_id=uuid4(),
+                instance_code="door-1",
+                line_color="#222222",
+                structural_part_formula_ids=[],
+                dependent_interior_instance_ids=[],
+                controller_box_snapshot={},
+            )
+        ],
+    )
+
+    assert len(payload.boolean_targets) == 1
+    assert payload.boolean_targets[0]["part_formula_id"] == 101
+    assert payload.boolean_result[0]["boxes"] != [target_box]

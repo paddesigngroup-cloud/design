@@ -2066,6 +2066,20 @@ def _build_boolean_owner_metadata(
     }
 
 
+def _part_snapshot_field(part_snapshot: object, field_name: str, default: object = None) -> object:
+    if isinstance(part_snapshot, dict):
+        return part_snapshot.get(field_name, default)
+    return getattr(part_snapshot, field_name, default)
+
+
+def _part_snapshot_box(part_snapshot: object) -> dict[str, object] | None:
+    viewer_payload = _part_snapshot_field(part_snapshot, "viewer_payload")
+    if not isinstance(viewer_payload, dict):
+        return None
+    box = viewer_payload.get("box")
+    return dict(box) if isinstance(box, dict) else None
+
+
 def _append_boolean_target(
     *,
     targets: list[dict[str, object]],
@@ -2075,11 +2089,11 @@ def _append_boolean_target(
     owner_instance_code: str,
     owner_line_color: str | None,
     snapshot_index: int,
-    part_snapshot: dict[str, object],
+    part_snapshot: object,
     part_formula_id: int,
     part_code: str | None = None,
 ) -> None:
-    box = dict((part_snapshot or {}).get("viewer_payload") or {}).get("box")
+    box = _part_snapshot_box(part_snapshot)
     if not isinstance(box, dict):
         return
     target_id = f"{owner_type}:{owner_id}:{part_formula_id}:{snapshot_index}"
@@ -2096,8 +2110,8 @@ def _append_boolean_target(
                 owner_line_color=owner_line_color,
             ),
             "part_formula_id": int(part_formula_id or 0),
-            "part_code": str(part_code or (part_snapshot or {}).get("part_code") or "").strip(),
-            "part_title": str((part_snapshot or {}).get("part_title") or "").strip(),
+            "part_code": str(part_code or _part_snapshot_field(part_snapshot, "part_code", "") or "").strip(),
+            "part_title": str(_part_snapshot_field(part_snapshot, "part_title", "") or "").strip(),
             "snapshot_index": int(snapshot_index),
             "box": clone_box(box),
         }
@@ -2113,10 +2127,14 @@ def _collect_boolean_targets_for_door(
 ) -> list[dict[str, object]]:
     targets: list[dict[str, object]] = []
     seen: set[str] = set()
-    allowed_structural_ids = {int(item) for item in list(door_instance.structural_part_formula_ids or []) if int(item) > 0}
     for index, snapshot in enumerate(list(root_part_snapshots or [])):
-        part_formula_id = int((snapshot or {}).get("part_formula_id") or 0)
-        if part_formula_id <= 0 or part_formula_id not in allowed_structural_ids:
+        part_formula = _part_snapshot_field(snapshot, "part_formula")
+        part_formula_id = int(
+            _part_snapshot_field(snapshot, "part_formula_id")
+            or getattr(part_formula, "part_formula_id", 0)
+            or 0
+        )
+        if part_formula_id <= 0:
             continue
         if not _part_formula_is_door_dependent(context, part_formula_id=part_formula_id, part_snapshot=snapshot):
             continue

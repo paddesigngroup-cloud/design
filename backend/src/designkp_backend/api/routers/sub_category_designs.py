@@ -46,6 +46,51 @@ def _normalize_hex_color(value: str | None, fallback: str = DEFAULT_INTERIOR_LIN
     return normalized.upper()
 
 
+def _box_signature(box: dict[str, object]) -> str:
+    return "|".join(
+        str(round(float(box.get(key) or 0), 6))
+        for key in ("width", "depth", "height", "cx", "cy", "cz")
+    )
+
+
+def _apply_boolean_preview_to_viewer_boxes(
+    viewer_boxes: list[dict[str, object]] | None,
+    boolean_targets: list[dict[str, object]] | None,
+    boolean_cutters: list[dict[str, object]] | None,
+    boolean_result: list[dict[str, object]] | None,
+) -> list[dict[str, object]]:
+    normalized_viewer_boxes = [dict(box or {}) for box in list(viewer_boxes or [])]
+    target_signatures = {
+        _box_signature(dict(item.get("box") or {}))
+        for item in list(boolean_targets or [])
+        if isinstance(item, dict) and isinstance(item.get("box"), dict)
+    }
+    cutter_signatures = {
+        _box_signature(dict(item.get("box") or {}))
+        for item in list(boolean_cutters or [])
+        if isinstance(item, dict) and isinstance(item.get("box"), dict)
+    }
+    result_boxes = [
+        {
+            **dict(box or {}),
+            "lineColor": str(dict(box or {}).get("lineColor") or item.get("line_color") or item.get("lineColor") or "").strip(),
+        }
+        for item in list(boolean_result or [])
+        if isinstance(item, dict)
+        for box in list(item.get("boxes") or [])
+        if isinstance(box, dict)
+    ]
+    if not target_signatures and not cutter_signatures:
+        return normalized_viewer_boxes
+    return [
+        *[
+            box for box in normalized_viewer_boxes
+            if _box_signature(box) not in target_signatures and _box_signature(box) not in cutter_signatures
+        ],
+        *result_boxes,
+    ]
+
+
 class SubCategoryDesignPartSelectionPayload(BaseModel):
     part_formula_id: int = Field(ge=1)
     enabled: bool = True
@@ -497,39 +542,48 @@ def _serialize_preview(
         )
         for item in interior_instances
     ]
+    raw_viewer_boxes = [
+        *[item.viewer_payload["box"] for item in snapshots],
+        *[
+            dict(box or {})
+            for item in interior_preview_items
+            for box in list(item.viewer_boxes or [])
+        ],
+        *[
+            dict(box or {})
+            for item in list(subtractor_instances or [])
+            for box in list(getattr(item, "viewer_boxes", []) or [])
+        ],
+        *[
+            dict(box or {})
+            for item in list(door_instances or [])
+            for box in list(getattr(item, "viewer_boxes", []) or [])
+        ],
+    ]
+    normalized_boolean_targets = [dict(item or {}) for item in list(boolean_targets or [])]
+    normalized_boolean_cutters = [dict(item or {}) for item in list(boolean_cutters or [])]
+    normalized_boolean_result = [
+        {
+            **dict(item or {}),
+            "boxes": [dict(box or {}) for box in list(dict(item or {}).get("boxes") or [])],
+        }
+        for item in list(boolean_result or [])
+    ]
     return SubCategoryDesignPreviewResponse(
         design_id=design_id,
         sub_category_id=sub_category_id,
         design_outline_color=str(design_outline_color or "#7A4A2B").strip() or "#7A4A2B",
         resolved_params=raw_params,
         resolved_base_formulas=resolved_base_formulas,
-        viewer_boxes=[
-            *[item.viewer_payload["box"] for item in snapshots],
-            *[
-                dict(box or {})
-                for item in interior_preview_items
-                for box in list(item.viewer_boxes or [])
-            ],
-            *[
-                dict(box or {})
-                for item in list(subtractor_instances or [])
-                for box in list(getattr(item, "viewer_boxes", []) or [])
-            ],
-            *[
-                dict(box or {})
-                for item in list(door_instances or [])
-                for box in list(getattr(item, "viewer_boxes", []) or [])
-            ],
-        ],
-        boolean_targets=[dict(item or {}) for item in list(boolean_targets or [])],
-        boolean_cutters=[dict(item or {}) for item in list(boolean_cutters or [])],
-        boolean_result=[
-            {
-                **dict(item or {}),
-                "boxes": [dict(box or {}) for box in list(dict(item or {}).get("boxes") or [])],
-            }
-            for item in list(boolean_result or [])
-        ],
+        viewer_boxes=_apply_boolean_preview_to_viewer_boxes(
+            raw_viewer_boxes,
+            normalized_boolean_targets,
+            normalized_boolean_cutters,
+            normalized_boolean_result,
+        ),
+        boolean_targets=normalized_boolean_targets,
+        boolean_cutters=normalized_boolean_cutters,
+        boolean_result=normalized_boolean_result,
         parts=parts,
         interior_instances=interior_preview_items,
         subtractor_instances=[

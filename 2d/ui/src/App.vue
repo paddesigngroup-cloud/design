@@ -9115,7 +9115,6 @@ function buildRenderedBoxesFromBooleanPayload(viewerBoxes, booleanTargets, boole
   const normalizedTargets = normalizeBooleanCollection(booleanTargets);
   const normalizedCutters = normalizeBooleanCollection(booleanCutters, "cutter_id");
   const normalizedResult = normalizeBooleanCollection(booleanResult);
-  if (!normalizedTargets.length || !normalizedResult.length) return normalizedViewerBoxes;
   const targetSignatures = new Set(
     normalizedTargets
       .map((target) => target?.box)
@@ -9134,12 +9133,23 @@ function buildRenderedBoxesFromBooleanPayload(viewerBoxes, booleanTargets, boole
       lineColor: String(box?.lineColor || item?.line_color || item?.lineColor || "").trim(),
     }))
   );
+  const shouldReplaceTargets = normalizedTargets.length > 0 && normalizedResult.length > 0;
+  const viewerSignatures = new Set(normalizedViewerBoxes.map((box) => buildBoxSignature(box)));
+  const resultSignatures = new Set(resultBoxes.map((box) => buildBoxSignature(box)));
+  const hasTargetOrCutterInViewer =
+    [...targetSignatures].some((signature) => viewerSignatures.has(signature))
+    || [...cutterSignatures].some((signature) => viewerSignatures.has(signature));
+  const hasRenderedResultInViewer = [...resultSignatures].some((signature) => viewerSignatures.has(signature));
+  if (shouldReplaceTargets && !hasTargetOrCutterInViewer && hasRenderedResultInViewer) return normalizedViewerBoxes;
+  if (!cutterSignatures.size && !shouldReplaceTargets) return normalizedViewerBoxes;
   return [
     ...normalizedViewerBoxes.filter((box) => {
       const signature = buildBoxSignature(box);
-      return !targetSignatures.has(signature) && !cutterSignatures.has(signature);
+      if (cutterSignatures.has(signature)) return false;
+      if (shouldReplaceTargets && targetSignatures.has(signature)) return false;
+      return true;
     }),
-    ...resultBoxes,
+    ...(shouldReplaceTargets ? resultBoxes : []),
   ];
 }
 

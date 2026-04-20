@@ -301,6 +301,44 @@ def _merge_viewer_boxes(
     return merged
 
 
+def _apply_boolean_preview_to_viewer_boxes(
+    viewer_boxes: list[dict[str, object]] | None,
+    boolean_targets: list[dict[str, object]] | None,
+    boolean_cutters: list[dict[str, object]] | None,
+    boolean_result: list[dict[str, object]] | None,
+) -> list[dict[str, object]]:
+    normalized_viewer_boxes = [dict(box or {}) for box in list(viewer_boxes or [])]
+    target_signatures = {
+        _box_signature(dict(item.get("box") or {}))
+        for item in list(boolean_targets or [])
+        if isinstance(item, dict) and isinstance(item.get("box"), dict)
+    }
+    cutter_signatures = {
+        _box_signature(dict(item.get("box") or {}))
+        for item in list(boolean_cutters or [])
+        if isinstance(item, dict) and isinstance(item.get("box"), dict)
+    }
+    result_boxes = [
+        {
+            **dict(box or {}),
+            "lineColor": str(dict(box or {}).get("lineColor") or item.get("line_color") or item.get("lineColor") or "").strip(),
+        }
+        for item in list(boolean_result or [])
+        if isinstance(item, dict)
+        for box in list(item.get("boxes") or [])
+        if isinstance(box, dict)
+    ]
+    if not target_signatures and not cutter_signatures:
+        return normalized_viewer_boxes
+    return [
+        *[
+            box for box in normalized_viewer_boxes
+            if _box_signature(box) not in target_signatures and _box_signature(box) not in cutter_signatures
+        ],
+        *result_boxes,
+    ]
+
+
 def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> OrderDesignItem:
     category = getattr(getattr(item.sub_category_design, "sub_category", None), "category", None)
     loaded_door_instances = list(getattr(item, "__dict__", {}).get("door_instances") or [])
@@ -411,6 +449,16 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
             for payload in door_payloads
         ],
     ) if include_interior else SimpleNamespace(boolean_targets=[], boolean_cutters=[], boolean_result=[])
+    raw_viewer_boxes = _merge_viewer_boxes(list(item.viewer_boxes or []), interior_payloads, subtractor_payloads, door_payloads)
+    normalized_boolean_targets = [dict(row or {}) for row in list(boolean_payload.boolean_targets or [])]
+    normalized_boolean_cutters = [dict(row or {}) for row in list(boolean_payload.boolean_cutters or [])]
+    normalized_boolean_result = [
+        {
+            **dict(row or {}),
+            "boxes": [dict(box or {}) for box in list(dict(row or {}).get("boxes") or [])],
+        }
+        for row in list(boolean_payload.boolean_result or [])
+    ]
     return OrderDesignItem(
         id=item.id,
         order_id=item.order_id,
@@ -433,16 +481,15 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
             for key, value in strip_snapshot_state_from_meta(dict(item.order_attr_meta or {})).items()
         },
         part_snapshots=[dict(row or {}) for row in list(item.part_snapshots or [])],
-        viewer_boxes=_merge_viewer_boxes(list(item.viewer_boxes or []), interior_payloads, subtractor_payloads, door_payloads),
-        boolean_targets=[dict(row or {}) for row in list(boolean_payload.boolean_targets or [])],
-        boolean_cutters=[dict(row or {}) for row in list(boolean_payload.boolean_cutters or [])],
-        boolean_result=[
-            {
-                **dict(row or {}),
-                "boxes": [dict(box or {}) for box in list(dict(row or {}).get("boxes") or [])],
-            }
-            for row in list(boolean_payload.boolean_result or [])
-        ],
+        viewer_boxes=_apply_boolean_preview_to_viewer_boxes(
+            raw_viewer_boxes,
+            normalized_boolean_targets,
+            normalized_boolean_cutters,
+            normalized_boolean_result,
+        ),
+        boolean_targets=normalized_boolean_targets,
+        boolean_cutters=normalized_boolean_cutters,
+        boolean_result=normalized_boolean_result,
         interior_instances=interior_payloads,
         subtractor_instances=subtractor_payloads,
         door_instances=door_payloads,
