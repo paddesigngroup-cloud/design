@@ -4,7 +4,9 @@ setlocal EnableExtensions
 set "ROOT=C:\DesignKP"
 set "BACKEND_DIR=%ROOT%\backend"
 set "UI_DIR=%ROOT%\2d\ui"
-set "PYTHON_EXE=%ROOT%\.venv314\Scripts\python.exe"
+set "PYTHON_EXE=%ROOT%\.venv_local\Scripts\python.exe"
+if not exist "%PYTHON_EXE%" set "PYTHON_EXE=%ROOT%\.venv314\Scripts\python.exe"
+if not exist "%PYTHON_EXE%" set "PYTHON_EXE=%ROOT%\.venv\Scripts\python.exe"
 set "NPM_CMD=C:\Program Files\nodejs\npm.cmd"
 set "PATH=C:\Program Files\nodejs;%PATH%"
 
