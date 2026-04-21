@@ -322,6 +322,8 @@ async def require_accessible_sub_category_design(
     )
     if await interior_instance_tables_ready(session):
         stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
+    if await subtractor_instance_tables_ready(session):
+        stmt = stmt.options(selectinload(SubCategoryDesign.subtractor_instances))
     if await door_instance_tables_ready(session):
         stmt = stmt.options(selectinload(SubCategoryDesign.door_instances))
     item = await session.scalar(
