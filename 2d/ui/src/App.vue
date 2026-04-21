@@ -4344,6 +4344,22 @@ function getViewerBoxesFromPreviewParts(parts) {
     .map((box) => ({ ...(box || {}) }));
 }
 
+function getPartRowScope(row) {
+  const formula = constructionPartFormulasById.value.get(Number(row?.part_formula_id) || 0);
+  const partKind = constructionPartKindsById.value.get(Number(row?.part_kind_id || formula?.part_kind_id) || 0);
+  return getPartKindScope(partKind);
+}
+
+function getViewerBoxesFromPartRowsByScopes(parts, scopes = []) {
+  const allowedScopes = new Set((Array.isArray(scopes) ? scopes : []).map((item) => normalizePartScope(item)).filter(Boolean));
+  if (!allowedScopes.size) return [];
+  return (Array.isArray(parts) ? parts : [])
+    .filter((row) => allowedScopes.has(getPartRowScope(row)))
+    .map((row) => row?.viewer_payload?.box)
+    .filter((box) => box && typeof box === "object")
+    .map((box) => ({ ...(box || {}) }));
+}
+
 function getViewerBoxesFromInteriorInstance(instance) {
   const directBoxes = (Array.isArray(instance?.viewer_boxes) ? instance.viewer_boxes : [])
     .filter((box) => box && typeof box === "object")
@@ -4476,6 +4492,22 @@ function buildFrontViewBoundsFromBoxes(boxes) {
   return { minX, maxX, minZ, maxZ };
 }
 
+function buildBoundingViewerBoxFromBoxes(boxes, lineColor = "") {
+  const bounds = buildFrontViewBoundsFromBoxes(boxes);
+  if (!bounds) return null;
+  const width = Math.max(1, Number(bounds.maxX) - Number(bounds.minX));
+  const height = Math.max(1, Number(bounds.maxZ) - Number(bounds.minZ));
+  return {
+    cx: (Number(bounds.minX) + Number(bounds.maxX)) * 0.5,
+    cy: 0,
+    cz: (Number(bounds.minZ) + Number(bounds.maxZ)) * 0.5,
+    width,
+    depth: 1,
+    height,
+    lineColor: String(lineColor || "").trim(),
+  };
+}
+
 function buildFrontViewLinesFromBoxesUncached(boxes, outerBoxes = null) {
   const normalized = Array.isArray(boxes) ? boxes.map(normalizeCabinetBox).filter(Boolean) : [];
   if (!normalized.length) {
@@ -4518,6 +4550,26 @@ function buildFrontViewLinesFromBoxes(boxes, cacheKey = "", outerBoxes = null) {
   return getCachedFrontViewLines(normalizedKey, boxes, outerBoxes);
 }
 
+function buildProjectedRectOutlineLines(rect, strokeWidth, inset = 0) {
+  const normalizedRect = normalizeInteriorRect(rect);
+  if (!normalizedRect) return [];
+  const maxInset = Math.max(0, Math.min(normalizedRect.w, normalizedRect.h) * 0.5 - 1.5);
+  const safeInset = Math.max(0, Math.min(Number(inset) || 0, maxInset));
+  const x1 = normalizedRect.x + safeInset;
+  const y1 = normalizedRect.y + safeInset;
+  const x2 = normalizedRect.x + normalizedRect.w - safeInset;
+  const y2 = normalizedRect.y + normalizedRect.h - safeInset;
+  if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2) || x2 <= x1 || y2 <= y1) {
+    return [];
+  }
+  return [
+    { x1, y1, x2, y2: y1, sw: strokeWidth },
+    { x1: x2, y1, x2, y2, sw: strokeWidth },
+    { x1: x2, y1: y2, x2: x1, y2, sw: strokeWidth },
+    { x1, y1: y2, x2: x1, y2: y1, sw: strokeWidth },
+  ];
+}
+
 const activeInteriorLibraryViewerBoxes = computed(() => {
   if (subCategoryDesignEditorOpen.value) {
     return subCategoryDesignEditorPreview.value?.viewer_boxes || [];
@@ -4554,6 +4606,68 @@ const activeInteriorLibraryStructureViewerBoxes = computed(() => {
   const sourceBoxes = getViewerBoxesFromPreviewParts(activeSourceDesign?.preview?.parts || []);
   if (sourceBoxes.length) return sourceBoxes;
   return [];
+});
+const activeSubtractorFrontVisibleViewerBoxes = computed(() => {
+  if (!isSharedSubtractorLibraryActive.value) return [];
+  if (subCategoryDesignEditorOpen.value) {
+    return [
+      ...getViewerBoxesFromPartRowsByScopes(subCategoryDesignEditorPreview.value?.parts || [], ["internal", "door"]),
+      ...(Array.isArray(subCategoryDesignEditorPreview.value?.interior_instances) ? subCategoryDesignEditorPreview.value.interior_instances : [])
+        .flatMap((instance) => getViewerBoxesFromInteriorInstance(instance)),
+      getViewerBoxesFromDoorInstances(subCategoryDesignEditorPreview.value?.door_instances || []),
+    ].flat();
+  }
+  const activeOrderDesign = activeSubtractorLibraryOrderDesign.value;
+  const activeSourceDesign = activeSubtractorLibrarySourceDesign.value;
+  const orderBoxes = [
+    ...getViewerBoxesFromPartRowsByScopes(activeOrderDesign?.part_snapshots || [], ["internal", "door"]),
+    ...(Array.isArray(activeOrderDesign?.interior_instances) ? activeOrderDesign.interior_instances : [])
+      .flatMap((instance) => getViewerBoxesFromInteriorInstance(instance)),
+    getViewerBoxesFromDoorInstances(activeOrderDesign?.door_instances || []),
+  ].flat();
+  if (orderBoxes.length) return orderBoxes;
+  return [
+    ...getViewerBoxesFromPartRowsByScopes(activeSourceDesign?.preview?.parts || [], ["internal", "door"]),
+    ...(Array.isArray(activeSourceDesign?.preview?.interior_instances) ? activeSourceDesign.preview.interior_instances : [])
+      .flatMap((instance) => getViewerBoxesFromInteriorInstance(instance)),
+    getViewerBoxesFromDoorInstances(activeSourceDesign?.preview?.door_instances || []),
+  ].flat();
+});
+const activeSubtractorFrontFrameBoxes = computed(() => {
+  if (!isSharedSubtractorLibraryActive.value) return [];
+  const sourceBoxes = activeInteriorLibraryViewerBoxes.value || [];
+  const frameBox = buildBoundingViewerBoxFromBoxes(sourceBoxes);
+  return frameBox ? [frameBox] : [];
+});
+const activeSubtractorSupportInteriorInstances = computed(() => {
+  if (!isSharedSubtractorLibraryActive.value) return [];
+  if (subCategoryDesignEditorOpen.value) {
+    return Array.isArray(subCategoryDesignEditorPreview.value?.interior_instances)
+      ? subCategoryDesignEditorPreview.value.interior_instances
+      : (subCategoryDesignEditorDraft.value?.interior_instances || []);
+  }
+  const orderItems = Array.isArray(activeSubtractorLibraryOrderDesign.value?.interior_instances)
+    ? activeSubtractorLibraryOrderDesign.value.interior_instances
+    : [];
+  if (orderItems.length) return orderItems;
+  return Array.isArray(activeSubtractorLibrarySourceDesign.value?.preview?.interior_instances)
+    ? activeSubtractorLibrarySourceDesign.value.preview.interior_instances
+    : [];
+});
+const activeSubtractorSupportDoorInstances = computed(() => {
+  if (!isSharedSubtractorLibraryActive.value) return [];
+  if (subCategoryDesignEditorOpen.value) {
+    return Array.isArray(subCategoryDesignEditorPreview.value?.door_instances)
+      ? subCategoryDesignEditorPreview.value.door_instances
+      : (subCategoryDesignEditorDraft.value?.door_instances || []);
+  }
+  const orderItems = Array.isArray(activeSubtractorLibraryOrderDesign.value?.door_instances)
+    ? activeSubtractorLibraryOrderDesign.value.door_instances
+    : [];
+  if (orderItems.length) return orderItems;
+  return Array.isArray(activeSubtractorLibrarySourceDesign.value?.preview?.door_instances)
+    ? activeSubtractorLibrarySourceDesign.value.preview.door_instances
+    : [];
 });
 const activeDoorLibrarySelectableParts = computed(() => {
   if (subCategoryDesignEditorOpen.value) {
@@ -4615,11 +4729,13 @@ const isDoorLibraryFront2dActive = computed(() =>
 const interiorLibraryFrontView = computed(() =>
   isInteriorLibraryFront2dActive.value
     ? buildFrontViewLinesFromBoxes(
-      activeInteriorLibraryViewerBoxes.value || [],
+      (isSharedSubtractorLibraryActive.value
+        ? activeSubtractorFrontFrameBoxes.value
+        : activeInteriorLibraryViewerBoxes.value) || [],
       subCategoryDesignEditorOpen.value
         ? `interior-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
         : `interior-structure:order:${String((isSharedSubtractorLibraryActive.value ? activeSubtractorLibraryOrderDesign.value?.id : activeInteriorLibraryOrderDesign.value?.id) || (isSharedSubtractorLibraryActive.value ? activeSubtractorLibrarySourceDesign.value?.id : activeInteriorLibrarySourceDesign.value?.id) || "none").trim()}`,
-      activeInteriorLibraryViewerBoxes.value || []
+      (isSharedSubtractorLibraryActive.value ? activeSubtractorFrontFrameBoxes.value : activeInteriorLibraryViewerBoxes.value) || []
     )
     : { outer: [], inner: [], bounds: null }
 );
@@ -4802,7 +4918,11 @@ const doorLibraryFrontCanvasEntityStateById = computed(() =>
   }))
 );
 const interiorLibraryFrontCanvasEntitiesBase = computed(() =>
-  (isInteriorLibraryFront2dActive.value ? interiorLibraryPreviewInstances2d.value : []).map((instance) => ({
+  (isInteriorLibraryFront2dActive.value
+    ? (isSharedSubtractorLibraryActive.value
+      ? [...subtractorSupportPreviewInstances2d.value, ...interiorLibraryPreviewInstances2d.value]
+      : interiorLibraryPreviewInstances2d.value)
+    : []).map((instance) => ({
     id: instance.id,
     boundsRect: instance.boundsRect,
     outerLines: instance.outerLines || [],
@@ -4994,7 +5114,7 @@ const interiorLibraryPreviewSvgLines = computed(() => {
   if (!data?.bounds || !projection) return { outer: [], inner: [] };
   return {
     outer: (data.outer || []).map((line) => projection.project(line, 2.2, false)),
-    inner: (data.inner || []).map((line) => projection.project(line, 1.2, true)),
+    inner: isSharedSubtractorLibraryActive.value ? [] : (data.inner || []).map((line) => projection.project(line, 1.2, true)),
   };
 });
 function resolveInteriorInstanceLineColor(instance) {
@@ -5054,12 +5174,24 @@ const interiorLibraryPreviewInstances2d = computed(() => {
   if (!projection) return [];
   return interiorLibraryPreviewInstanceGeometry.value.map((instance) => {
     const data = instance.geometry;
-    const outerLines = (data.outer || []).map((line) => projection.project(line, 1.8, false));
-    const innerLines = (data.inner || []).map((line) => projection.project(line, 1.15, true));
     const x1 = projection.project({ ax: data.bounds.minX, az: data.bounds.minZ, bx: data.bounds.minX, bz: data.bounds.minZ }, 1, false).x1;
     const y1 = projection.project({ ax: data.bounds.minX, az: data.bounds.maxZ, bx: data.bounds.minX, bz: data.bounds.maxZ }, 1, false).y1;
     const x2 = projection.project({ ax: data.bounds.maxX, az: data.bounds.minZ, bx: data.bounds.maxX, bz: data.bounds.minZ }, 1, false).x1;
     const y2 = projection.project({ ax: data.bounds.minX, az: data.bounds.minZ, bx: data.bounds.minX, bz: data.bounds.minZ }, 1, false).y1;
+    const boundsRect = {
+      x: Math.min(x1, x2),
+      y: Math.min(y1, y2),
+      w: Math.abs(x2 - x1),
+      h: Math.abs(y2 - y1),
+    };
+    const isHiddenHandlePreview = isSharedSubtractorLibraryActive.value;
+    const overlapInset = isHiddenHandlePreview ? Math.max(0, instance.visualOrder || 0) * 2.4 : 0;
+    const outerLines = isHiddenHandlePreview
+      ? buildProjectedRectOutlineLines(boundsRect, 1.8, overlapInset)
+      : (data.outer || []).map((line) => projection.project(line, 1.8, false));
+    const innerLines = isHiddenHandlePreview
+      ? buildProjectedRectOutlineLines(boundsRect, 1.15, overlapInset)
+      : (data.inner || []).map((line) => projection.project(line, 1.15, true));
     return {
       id: instance.id,
       instanceCode: instance.instanceCode,
@@ -5068,12 +5200,78 @@ const interiorLibraryPreviewInstances2d = computed(() => {
       visualOrder: instance.visualOrder,
       outerLines,
       innerLines,
-      boundsRect: {
-        x: Math.min(x1, x2),
-        y: Math.min(y1, y2),
-        w: Math.abs(x2 - x1),
-        h: Math.abs(y2 - y1),
-      },
+      boundsRect,
+    };
+  });
+});
+const subtractorSupportPreviewInstanceGeometry = computed(() => {
+  if (!isSharedSubtractorLibraryActive.value) return [];
+  const interiorItems = activeSubtractorSupportInteriorInstances.value
+    .slice()
+    .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
+    .map((instance, index) => {
+      const data = getCachedInteriorInstanceFrontGeometry(instance);
+      if (!data?.bounds) return null;
+      const group = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
+      return {
+        id: `support-interior:${String(instance?.id || instance?.instance_code || index).trim()}`,
+        instanceCode: String(instance?.instance_code || "").trim(),
+        groupTitle: String(group?.group_title || group?.title || instance?.instance_code || "قطعه داخلی").trim(),
+        lineColor: resolveInteriorInstanceLineColor(instance),
+        visualOrder: index,
+        geometry: data,
+      };
+    })
+    .filter(Boolean);
+  const doorOffset = interiorItems.length;
+  const doorItems = activeSubtractorSupportDoorInstances.value
+    .slice()
+    .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
+    .map((instance, index) => {
+      const lineColor = resolveDoorInstanceLineColor(instance);
+      const boxes = getViewerBoxesFromDoorInstance(instance)
+        .map((box) => ({ ...(box || {}), lineColor }))
+        .filter((box) => box && typeof box === "object");
+      const data = buildFrontViewLinesFromBoxes(boxes);
+      if (!data?.bounds) return null;
+      const group = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
+      return {
+        id: `support-door:${String(instance?.id || instance?.instance_code || index).trim()}`,
+        instanceCode: String(instance?.instance_code || "").trim(),
+        groupTitle: String(group?.group_title || group?.title || instance?.instance_code || "درب").trim(),
+        lineColor,
+        visualOrder: doorOffset + index,
+        geometry: data,
+      };
+    })
+    .filter(Boolean);
+  return [...interiorItems, ...doorItems];
+});
+const subtractorSupportPreviewInstances2d = computed(() => {
+  const projection = interiorLibraryPreviewProjection.value;
+  if (!projection) return [];
+  return subtractorSupportPreviewInstanceGeometry.value.map((instance) => {
+    const data = instance.geometry;
+    const x1 = projection.project({ ax: data.bounds.minX, az: data.bounds.minZ, bx: data.bounds.minX, bz: data.bounds.minZ }, 1, false).x1;
+    const y1 = projection.project({ ax: data.bounds.minX, az: data.bounds.maxZ, bx: data.bounds.minX, bz: data.bounds.maxZ }, 1, false).y1;
+    const x2 = projection.project({ ax: data.bounds.maxX, az: data.bounds.minZ, bx: data.bounds.maxX, bz: data.bounds.minZ }, 1, false).x1;
+    const y2 = projection.project({ ax: data.bounds.minX, az: data.bounds.minZ, bx: data.bounds.minX, bz: data.bounds.minZ }, 1, false).y1;
+    const boundsRect = {
+      x: Math.min(x1, x2),
+      y: Math.min(y1, y2),
+      w: Math.abs(x2 - x1),
+      h: Math.abs(y2 - y1),
+    };
+    const outlineLines = buildProjectedRectOutlineLines(boundsRect, 1.15, Math.max(0, instance.visualOrder || 0) * 1.6);
+    return {
+      id: instance.id,
+      instanceCode: instance.instanceCode,
+      groupTitle: instance.groupTitle,
+      lineColor: instance.lineColor,
+      visualOrder: instance.visualOrder,
+      outerLines: [],
+      innerLines: outlineLines,
+      boundsRect,
     };
   });
 });
