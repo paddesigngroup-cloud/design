@@ -1848,11 +1848,10 @@ def _collect_dependent_interior_boxes_by_formula_id(
         for item in list(dependent_interior_instance_ids or [])
         if str(item).strip()
     }
-    if not allowed_ids:
-        return {}
     boxes_by_formula_id: dict[int, dict[str, object]] = {}
     for interior in list(interiors or []):
-        if str(getattr(interior, "id", "") or "").strip() not in allowed_ids:
+        interior_id = str(getattr(interior, "id", "") or getattr(interior, "instance_id", "") or "").strip()
+        if allowed_ids and interior_id not in allowed_ids:
             continue
         boxes_by_formula_id.update(
             _collect_part_snapshot_boxes_by_formula_id(
@@ -2149,15 +2148,7 @@ def _collect_boolean_targets_for_door(
             part_snapshot=snapshot,
             part_formula_id=part_formula_id,
         )
-    interior_by_id = {
-        str(getattr(instance, "instance_id", "") or ""): instance
-        for instance in list(interiors or [])
-        if str(getattr(instance, "instance_id", "") or "").strip()
-    }
-    for interior_id in list(door_instance.dependent_interior_instance_ids or []):
-        interior = interior_by_id.get(str(interior_id).strip())
-        if interior is None:
-            continue
+    for interior in list(interiors or []):
         for index, snapshot in enumerate(list(interior.part_snapshots or [])):
             part_formula_id = int((snapshot or {}).get("part_formula_id") or 0)
             if part_formula_id <= 0 or not _part_formula_is_door_dependent(context, part_formula_id=part_formula_id, part_snapshot=snapshot):

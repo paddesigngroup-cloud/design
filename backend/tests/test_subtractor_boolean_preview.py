@@ -63,6 +63,39 @@ def test_build_boolean_preview_payload_targets_only_door_dependent_parts() -> No
     assert len(payload.boolean_result) == 2
 
 
+def test_build_boolean_preview_payload_targets_door_dependent_interiors_without_explicit_dependency() -> None:
+    interior_id = uuid4()
+    interior_target = _snapshot(201, door_dependent=True, box={"width": 60, "depth": 20, "height": 120, "cx": 30, "cy": 10, "cz": 60})
+
+    payload = build_boolean_preview_payload(
+        context=SimpleNamespace(part_formulas_by_id={}),
+        root_part_snapshots=[],
+        interiors=[
+            SimpleNamespace(
+                instance_id=interior_id,
+                instance_code="inner-1",
+                line_color="#111111",
+                part_snapshots=[interior_target],
+            )
+        ],
+        subtractors=[],
+        doors=[
+            SimpleNamespace(
+                instance_id=uuid4(),
+                instance_code="door-1",
+                line_color="#222222",
+                structural_part_formula_ids=[],
+                dependent_interior_instance_ids=[],
+                controller_box_snapshot={},
+            )
+        ],
+    )
+
+    assert len(payload.boolean_targets) == 1
+    assert payload.boolean_targets[0]["owner_type"] == "interior"
+    assert payload.boolean_targets[0]["part_formula_id"] == 201
+
+
 def test_build_boolean_preview_payload_restores_original_box_when_no_overlap() -> None:
     target_box = {"width": 100, "depth": 20, "height": 200, "cx": 50, "cy": 10, "cz": 100}
     payload = build_boolean_preview_payload(
