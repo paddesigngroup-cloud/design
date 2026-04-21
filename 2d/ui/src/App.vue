@@ -4344,17 +4344,17 @@ function getViewerBoxesFromPreviewParts(parts) {
     .map((box) => ({ ...(box || {}) }));
 }
 
-function getPartRowScope(row) {
+function getPartScopeFromSnapshotRow(row) {
   const formula = constructionPartFormulasById.value.get(Number(row?.part_formula_id) || 0);
   const partKind = constructionPartKindsById.value.get(Number(row?.part_kind_id || formula?.part_kind_id) || 0);
   return getPartKindScope(partKind);
 }
 
-function getViewerBoxesFromPartRowsByScopes(parts, scopes = []) {
+function getViewerBoxesFromScopedPartSnapshots(partSnapshots, scopes = []) {
   const allowedScopes = new Set((Array.isArray(scopes) ? scopes : []).map((item) => normalizePartScope(item)).filter(Boolean));
   if (!allowedScopes.size) return [];
-  return (Array.isArray(parts) ? parts : [])
-    .filter((row) => allowedScopes.has(getPartRowScope(row)))
+  return (Array.isArray(partSnapshots) ? partSnapshots : [])
+    .filter((row) => allowedScopes.has(getPartScopeFromSnapshotRow(row)))
     .map((row) => row?.viewer_payload?.box)
     .filter((box) => box && typeof box === "object")
     .map((box) => ({ ...(box || {}) }));
@@ -4508,6 +4508,14 @@ function buildBoundingViewerBoxFromBoxes(boxes, lineColor = "") {
   };
 }
 
+function buildFrontViewLinesFromSingleOutlineBox(box, lineColor = "") {
+  const normalizedBox = box && typeof box === "object"
+    ? { ...(box || {}), lineColor: String(lineColor || box?.lineColor || box?.line_color || "").trim() }
+    : null;
+  if (!normalizedBox) return { outer: [], inner: [], bounds: null };
+  return buildFrontViewLinesFromBoxes([normalizedBox]);
+}
+
 function buildFrontViewLinesFromBoxesUncached(boxes, outerBoxes = null) {
   const normalized = Array.isArray(boxes) ? boxes.map(normalizeCabinetBox).filter(Boolean) : [];
   if (!normalized.length) {
@@ -4606,32 +4614,6 @@ const activeInteriorLibraryStructureViewerBoxes = computed(() => {
   const sourceBoxes = getViewerBoxesFromPreviewParts(activeSourceDesign?.preview?.parts || []);
   if (sourceBoxes.length) return sourceBoxes;
   return [];
-});
-const activeSubtractorFrontVisibleViewerBoxes = computed(() => {
-  if (!isSharedSubtractorLibraryActive.value) return [];
-  if (subCategoryDesignEditorOpen.value) {
-    return [
-      ...getViewerBoxesFromPartRowsByScopes(subCategoryDesignEditorPreview.value?.parts || [], ["internal", "door"]),
-      ...(Array.isArray(subCategoryDesignEditorPreview.value?.interior_instances) ? subCategoryDesignEditorPreview.value.interior_instances : [])
-        .flatMap((instance) => getViewerBoxesFromInteriorInstance(instance)),
-      getViewerBoxesFromDoorInstances(subCategoryDesignEditorPreview.value?.door_instances || []),
-    ].flat();
-  }
-  const activeOrderDesign = activeSubtractorLibraryOrderDesign.value;
-  const activeSourceDesign = activeSubtractorLibrarySourceDesign.value;
-  const orderBoxes = [
-    ...getViewerBoxesFromPartRowsByScopes(activeOrderDesign?.part_snapshots || [], ["internal", "door"]),
-    ...(Array.isArray(activeOrderDesign?.interior_instances) ? activeOrderDesign.interior_instances : [])
-      .flatMap((instance) => getViewerBoxesFromInteriorInstance(instance)),
-    getViewerBoxesFromDoorInstances(activeOrderDesign?.door_instances || []),
-  ].flat();
-  if (orderBoxes.length) return orderBoxes;
-  return [
-    ...getViewerBoxesFromPartRowsByScopes(activeSourceDesign?.preview?.parts || [], ["internal", "door"]),
-    ...(Array.isArray(activeSourceDesign?.preview?.interior_instances) ? activeSourceDesign.preview.interior_instances : [])
-      .flatMap((instance) => getViewerBoxesFromInteriorInstance(instance)),
-    getViewerBoxesFromDoorInstances(activeSourceDesign?.preview?.door_instances || []),
-  ].flat();
 });
 const activeSubtractorFrontFrameBoxes = computed(() => {
   if (!isSharedSubtractorLibraryActive.value) return [];
@@ -4742,11 +4724,11 @@ const interiorLibraryFrontView = computed(() =>
 const doorLibraryFrontView = computed(() =>
   isDoorLibraryFront2dActive.value
     ? buildFrontViewLinesFromBoxes(
-      activeDoorLibraryViewerBoxes.value || [],
+      activeDoorLibraryStructureViewerBoxes.value || [],
       subCategoryDesignEditorOpen.value
         ? `door-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
         : `door-structure:order:${String(activeDoorLibraryOrderDesign.value?.id || activeDoorLibrarySourceDesign.value?.id || "none").trim()}`,
-      activeDoorLibraryViewerBoxes.value || []
+      activeDoorLibraryStructureViewerBoxes.value || []
     )
     : { outer: [], inner: [], bounds: null }
 );
@@ -5021,7 +5003,15 @@ const doorLibraryFrontCanvasScene = computed(() => {
   },
   viewBox: { ...doorLibraryFrontSvgViewBoxRect.value },
   structure: {
-    outerLines: [],
+    outerLines: (doorLibraryFrontView.value?.outer || []).map((line) => ({
+      x1: Number(line?.ax) || 0,
+      y1: -(Number(line?.az) || 0),
+      x2: Number(line?.bx) || 0,
+      y2: -(Number(line?.bz) || 0),
+      color: activeDoorLibraryOutlineColor.value || "#4f4144",
+      strokeWidth: 2.2,
+      opacity: 1,
+    })),
     innerLines: (doorLibraryFrontView.value?.inner || []).map((line) => ({
       x1: Number(line?.ax) || 0,
       y1: -(Number(line?.az) || 0),
@@ -5210,14 +5200,22 @@ const subtractorSupportPreviewInstanceGeometry = computed(() => {
     .slice()
     .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
     .map((instance, index) => {
-      const data = getCachedInteriorInstanceFrontGeometry(instance);
+      const lineColor = resolveInteriorInstanceLineColor(instance);
+      const fallbackBox = buildBoundingViewerBoxFromBoxes(
+        getViewerBoxesFromScopedPartSnapshots(instance?.part_snapshots || [], ["internal"]),
+        lineColor
+      );
+      const outlineBox = (instance?.interior_box_snapshot && typeof instance.interior_box_snapshot === "object" && Object.keys(instance.interior_box_snapshot).length)
+        ? { ...(instance.interior_box_snapshot || {}), lineColor }
+        : fallbackBox;
+      const data = buildFrontViewLinesFromSingleOutlineBox(outlineBox, lineColor);
       if (!data?.bounds) return null;
       const group = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
       return {
         id: `support-interior:${String(instance?.id || instance?.instance_code || index).trim()}`,
         instanceCode: String(instance?.instance_code || "").trim(),
         groupTitle: String(group?.group_title || group?.title || instance?.instance_code || "قطعه داخلی").trim(),
-        lineColor: resolveInteriorInstanceLineColor(instance),
+        lineColor,
         visualOrder: index,
         geometry: data,
       };
@@ -5229,10 +5227,14 @@ const subtractorSupportPreviewInstanceGeometry = computed(() => {
     .sort((a, b) => (Number(a?.ui_order) || 0) - (Number(b?.ui_order) || 0) || String(a?.instance_code || "").localeCompare(String(b?.instance_code || ""), "fa"))
     .map((instance, index) => {
       const lineColor = resolveDoorInstanceLineColor(instance);
-      const boxes = getViewerBoxesFromDoorInstance(instance)
-        .map((box) => ({ ...(box || {}), lineColor }))
-        .filter((box) => box && typeof box === "object");
-      const data = buildFrontViewLinesFromBoxes(boxes);
+      const fallbackBox = buildBoundingViewerBoxFromBoxes(
+        getViewerBoxesFromScopedPartSnapshots(instance?.part_snapshots || [], ["door"]),
+        lineColor
+      );
+      const outlineBox = (instance?.controller_box_snapshot && typeof instance.controller_box_snapshot === "object" && Object.keys(instance.controller_box_snapshot).length)
+        ? { ...(instance.controller_box_snapshot || {}), lineColor }
+        : fallbackBox;
+      const data = buildFrontViewLinesFromSingleOutlineBox(outlineBox, lineColor);
       if (!data?.bounds) return null;
       const group = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
       return {
@@ -5976,7 +5978,7 @@ const interiorLibraryFrontCanvasScene = computed(() => {
         y1: Number(line?.y1) || 0,
         x2: Number(line?.x2) || 0,
         y2: Number(line?.y2) || 0,
-        color: "#4f4144",
+        color: activeInteriorLibraryOutlineColor.value || "#4f4144",
         strokeWidth: Number(line?.sw) || 2.2,
       })),
       innerLines: [
