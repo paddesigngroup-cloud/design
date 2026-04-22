@@ -27003,11 +27003,21 @@ onBeforeUnmount(() => {
                   ? 'برای این طرح هنوز قطعه‌ای با وابستگی درب = بله برای نمایش سه بعدی پیدا نشد.'
                   : 'برای این طرح هنوز قطعه‌ای با وابستگی درب = بله برای نمایش در نمای روبرو پیدا نشد.' }}
               </div>
+              <div
+                v-if="doorLibraryPreviewMode === 'front2d' && !doorLibrarySelectedPlacedInstanceId && !isDoorLibraryPendingControllerActive"
+                class="subCategoryDesignEditor__controllerHint"
+              >
+                برای نمایش کنترلرها، ابتدا یک نمونه درب را انتخاب کنید.
+              </div>
             </div>
           </div>
         </div>
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances">
           <div class="subCategoryDesignEditor__panelTitle">نمونه‌های درب این طرح</div>
+          <select v-model="doorLibraryPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+            <option value="">همه انواع درب</option>
+            <option v-for="option in constructionDoorPartKindOptions" :key="`door-instance-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+          </select>
           <div v-if="!activeDoorLibraryTargetId" class="designMenu__cabinetState">برای افزودن نمونه درب، ابتدا یک طرح معتبر را باز یا انتخاب کنید.</div>
           <div v-else-if="!doorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز هیچ گروه دربی به این طرح اضافه نشده است.</div>
           <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
@@ -27310,6 +27320,12 @@ onBeforeUnmount(() => {
                 {{ interiorLibraryPreviewMode === "model3d"
                   ? "برای این طرح هنوز preview سه بعدی قابل نمایش نیست."
                   : "برای این طرح هنوز preview خطی قابل نمایش نیست." }}
+              </div>
+              <div
+                v-if="interiorLibraryPreviewMode === 'front2d' && interiorLibraryControllerState.message"
+                class="subCategoryDesignEditor__controllerHint"
+              >
+                {{ interiorLibraryControllerState.message }}
               </div>
             </div>
           </div>
