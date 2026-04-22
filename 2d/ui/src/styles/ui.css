@@ -3769,7 +3769,7 @@ option {
 .subCategoryDesignEditor {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 23px;
   flex: 1 1 auto;
   min-height: 0;
 }
