@@ -4913,23 +4913,40 @@ const interiorLibraryFrontCanvasEntitiesBase = computed(() =>
     highlightColor: instance.lineColor,
   }))
 );
-const interiorLibraryFrontCanvasEntityStateById = computed(() =>
-  Object.fromEntries((isInteriorLibraryFront2dActive.value ? interiorLibraryPreviewInstances2d.value : []).map((instance) => {
-    const hovered = String(interiorLibraryHoveredInstanceId.value || "") === String(instance.id || "")
-      || String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || "");
-    const preview = String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || "");
-    const selected = String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || "");
-    return [String(instance.id || ""), {
-      hovered,
-      preview,
-      selected,
-      outerStrokeWidth: selected ? 1.08 : (hovered ? 0.66 : 0),
-      outerOpacity: selected ? 0.92 : (hovered ? 0.88 : 0.78),
-      innerStrokeWidth: 1.4,
-      innerOpacity: 1,
-    }];
-  }))
-);
+const interiorLibraryFrontCanvasEntityStateById = computed(() => {
+  const entries = [];
+  if (isInteriorLibraryFront2dActive.value) {
+    for (const instance of interiorLibraryPreviewInstances2d.value || []) {
+      const hovered = String(interiorLibraryHoveredInstanceId.value || "") === String(instance.id || "")
+        || String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || "");
+      const preview = String(interiorLibraryPickerPreviewInstanceId.value || "") === String(instance.id || "");
+      const selected = String(interiorLibrarySelectedInstanceId.value || "") === String(instance.id || "");
+      entries.push([String(instance.id || ""), {
+        hovered,
+        preview,
+        selected,
+        outerStrokeWidth: selected ? 1.08 : (hovered ? 0.66 : 0),
+        outerOpacity: selected ? 0.92 : (hovered ? 0.88 : 0.78),
+        innerStrokeWidth: 1.4,
+        innerOpacity: isSharedSubtractorLibraryActive.value ? 0 : 1,
+      }]);
+    }
+    if (isSharedSubtractorLibraryActive.value) {
+      for (const instance of subtractorSupportPreviewInstances2d.value || []) {
+        entries.push([String(instance.id || ""), {
+          hovered: false,
+          preview: false,
+          selected: false,
+          outerStrokeWidth: 0,
+          outerOpacity: 1,
+          innerStrokeWidth: 0,
+          innerOpacity: 0,
+        }]);
+      }
+    }
+  }
+  return Object.fromEntries(entries);
+});
 const doorLibraryFrontCanvasScene = computed(() => {
   if (!isDoorLibraryFront2dActive.value) {
     return {
@@ -5175,12 +5192,11 @@ const interiorLibraryPreviewInstances2d = computed(() => {
       h: Math.abs(y2 - y1),
     };
     const isHiddenHandlePreview = isSharedSubtractorLibraryActive.value;
-    const overlapInset = isHiddenHandlePreview ? Math.max(0, instance.visualOrder || 0) * 2.4 : 0;
     const outerLines = isHiddenHandlePreview
-      ? buildProjectedRectOutlineLines(boundsRect, 1.8, overlapInset)
+      ? buildProjectedRectOutlineLines(boundsRect, 1.8, 0)
       : (data.outer || []).map((line) => projection.project(line, 1.8, false));
     const innerLines = isHiddenHandlePreview
-      ? buildProjectedRectOutlineLines(boundsRect, 1.15, overlapInset)
+      ? []
       : (data.inner || []).map((line) => projection.project(line, 1.15, true));
     return {
       id: instance.id,
@@ -5264,15 +5280,15 @@ const subtractorSupportPreviewInstances2d = computed(() => {
       w: Math.abs(x2 - x1),
       h: Math.abs(y2 - y1),
     };
-    const outlineLines = buildProjectedRectOutlineLines(boundsRect, 1.15, Math.max(0, instance.visualOrder || 0) * 1.6);
+    const outlineLines = buildProjectedRectOutlineLines(boundsRect, 1.4, 0);
     return {
       id: instance.id,
       instanceCode: instance.instanceCode,
       groupTitle: instance.groupTitle,
       lineColor: instance.lineColor,
       visualOrder: instance.visualOrder,
-      outerLines: [],
-      innerLines: outlineLines,
+      outerLines: outlineLines,
+      innerLines: [],
       boundsRect,
     };
   });
@@ -5982,7 +5998,7 @@ const interiorLibraryFrontCanvasScene = computed(() => {
         strokeWidth: Number(line?.sw) || 2.2,
       })),
       innerLines: [
-        ...((interiorLibraryShowInnerLines.value ? (interiorLibraryPreviewSvgLines.value?.inner || []) : []).map((line) => ({
+        ...((interiorLibraryShowInnerLines.value && !isSharedSubtractorLibraryActive.value ? (interiorLibraryPreviewSvgLines.value?.inner || []) : []).map((line) => ({
           x1: Number(line?.x1) || 0,
           y1: Number(line?.y1) || 0,
           x2: Number(line?.x2) || 0,
@@ -24859,7 +24875,10 @@ onBeforeUnmount(() => {
                   </span>
                 </button>
               </div>
-              <div v-if="!interiorLibraryPreviewSvgLines.outer.length" class="designMenu__cabinetState">
+              <div
+                v-if="interiorLibraryPreviewMode !== 'model3d' && !interiorLibraryPreviewSvgLines.outer.length"
+                class="designMenu__cabinetState"
+              >
                 {{ interiorLibraryPreviewMode === "model3d"
                   ? "برای این طرح هنوز preview سه بعدی قابل نمایش نیست."
                   : "برای این طرح هنوز preview خطی قابل نمایش نیست." }}
@@ -26906,7 +26925,10 @@ onBeforeUnmount(() => {
                   </span>
                 </button>
               </div>
-              <div v-if="!interiorLibraryPreviewSvgLines.outer.length" class="designMenu__cabinetState">
+              <div
+                v-if="interiorLibraryPreviewMode !== 'model3d' && !interiorLibraryPreviewSvgLines.outer.length"
+                class="designMenu__cabinetState"
+              >
                 {{ interiorLibraryPreviewMode === "model3d"
                   ? "برای این طرح هنوز preview سه بعدی قابل نمایش نیست."
                   : "برای این طرح هنوز preview خطی قابل نمایش نیست." }}
