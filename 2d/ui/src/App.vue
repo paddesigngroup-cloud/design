@@ -24605,7 +24605,7 @@ onBeforeUnmount(() => {
                 :show-attrs-panel="false"
                 :embedded="true"
                 :preview-only="true"
-                :preview-active="interiorLibraryOpen"
+                :preview-active="false"
               />
               <FrontViewCanvas
                 v-else-if="interiorLibraryPreviewMode === 'front2d' && interiorLibraryPreviewSvgLines.outer.length"
@@ -26467,7 +26467,7 @@ onBeforeUnmount(() => {
                 :show-attrs-panel="false"
                 :embedded="true"
                 :preview-only="true"
-                :preview-active="doorLibraryOpen"
+                :preview-active="false"
               />
               <FrontViewCanvas
                 v-else-if="doorLibraryPreviewMode === 'front2d' && doorLibraryFrontView.inner.length"
@@ -27091,7 +27091,7 @@ onBeforeUnmount(() => {
                 :show-attrs-panel="false"
                 :embedded="true"
                 :preview-only="true"
-                :preview-active="subtractorLibraryOpen"
+                :preview-active="false"
               />
               <FrontViewCanvas
                 v-else-if="interiorLibraryPreviewMode === 'front2d' && interiorLibraryPreviewSvgLines.outer.length"
