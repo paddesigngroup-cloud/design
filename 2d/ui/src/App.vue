@@ -691,6 +691,7 @@ const subCategoryUserPreviewActiveGroupId = ref("");
 const subCategoryDesignEditorOpen = ref(false);
 const subCategoryDesignEditorDraft = ref(null);
 const subCategoryDesignEditorPreview = ref(null);
+const subCategoryDesignEditorActiveTab = ref("structural");
 const subCategoryDesignPreviewLoading = ref(false);
 const subCategoryDesignPreviewError = ref("");
 const subCategoryDesignPreviewRequestSeq = ref(0);
@@ -3752,6 +3753,35 @@ const constructionSubCategoryDesignPartFormulaOptions = computed(() =>
       partKindId: Number(item.part_kind_id) || 0,
       uiOrder: Number(item.sort_order) || Number(item.part_formula_id) || 0,
     }))
+);
+const selectedSubCategoryStructuralPartCards = computed(() => {
+  const draft = subCategoryDesignEditorDraft.value;
+  if (!draft) return [];
+  return (Array.isArray(draft.parts) ? draft.parts : [])
+    .filter((part) => part?.enabled !== false && Number(part?.part_formula_id) > 0)
+    .map((part, index) => {
+      const formulaId = Number(part.part_formula_id) || 0;
+      const formula = constructionPartFormulasById.value.get(formulaId);
+      const partKindId = Number(formula?.part_kind_id) || 0;
+      return {
+        id: formulaId,
+        title: String(formula?.part_title || formula?.title || formula?.part_code || `part_${formulaId}`).trim(),
+        code: String(formula?.part_code || "").trim(),
+        partKindId,
+        partKindLabel: getConstructionPartKindInternalLabel(partKindId),
+        orderIndex: index + 1,
+      };
+    })
+    .sort((a, b) => a.orderIndex - b.orderIndex || a.title.localeCompare(b.title, "fa"));
+});
+const availableSubCategoryStructuralPartCards = computed(() =>
+  constructionSubCategoryDesignPartFormulaOptions.value
+    .map((item) => ({
+      ...item,
+      partKindLabel: getConstructionPartKindInternalLabel(item.partKindId),
+      selected: isPartFormulaSelectedInDesign(item.id),
+    }))
+    .sort((a, b) => Number(a.uiOrder || 0) - Number(b.uiOrder || 0) || String(a.title || "").localeCompare(String(b.title || ""), "fa"))
 );
 const constructionInteriorPartFormulaOptions = computed(() =>
   constructionPartFormulas.value
@@ -9088,9 +9118,13 @@ function buildNewDoorPartGroupDraft() {
 }
 
 function resetSubCategoryDesignEditorState() {
+  closeInteriorLibrary();
+  closeDoorLibrary();
+  closeSubtractorLibrary();
   subCategoryDesignEditorOpen.value = false;
   subCategoryDesignEditorDraft.value = null;
   subCategoryDesignEditorPreview.value = null;
+  subCategoryDesignEditorActiveTab.value = "structural";
   subCategoryDesignPreviewLoading.value = false;
   subCategoryDesignPreviewError.value = "";
   subCategoryDesignEditorSaving.value = false;
@@ -11289,6 +11323,7 @@ async function openSubCategoryDesignEditor(item = null) {
   subCategoryDesignEditorDraft.value = draft;
   subCategoryDesignEditorPreview.value = null;
   subCategoryDesignPreviewError.value = "";
+  subCategoryDesignEditorActiveTab.value = "structural";
   subCategoryDesignEditorOpen.value = true;
   await refreshSubCategoryDesignPreview();
 }
@@ -13296,6 +13331,16 @@ function openSubCategoryAdminDefaultsFromDesignEditor() {
   openSubCategoryUserPreview(target);
 }
 
+function activateSubCategoryDesignEditorTab(tab) {
+  const nextTab = String(tab || "").trim() || "structural";
+  subCategoryDesignEditorActiveTab.value = nextTab;
+  if (nextTab === "structural") {
+    closeInteriorLibrary();
+    closeDoorLibrary();
+    closeSubtractorLibrary();
+  }
+}
+
 function isPartFormulaSelectedInDesign(partFormulaId) {
   return !!subCategoryDesignEditorDraft.value?.parts?.some((part) => Number(part.part_formula_id) === Number(partFormulaId) && part.enabled !== false);
 }
@@ -13318,6 +13363,16 @@ function togglePartFormulaInDesign(partFormulaId) {
     ];
   }
   refreshSubCategoryDesignPreview();
+}
+
+function addStructuralPartFormulaToDesign(partFormulaId) {
+  if (isPartFormulaSelectedInDesign(partFormulaId)) return;
+  togglePartFormulaInDesign(partFormulaId);
+}
+
+function removeStructuralPartFormulaFromDesign(partFormulaId) {
+  if (!isPartFormulaSelectedInDesign(partFormulaId)) return;
+  togglePartFormulaInDesign(partFormulaId);
 }
 
 function isInternalPartFormulaSelectedInGroup(partFormulaId) {
@@ -19489,10 +19544,29 @@ function closeMenuPanel() {
 }
 
 async function openInteriorLibrary(targetOrderDesignId = "") {
+  if (subCategoryDesignEditorOpen.value) {
+    subCategoryDesignEditorActiveTab.value = "internal";
+    doorLibraryOpen.value = false;
+    subtractorLibraryOpen.value = false;
+    interiorLibraryOpen.value = true;
+    await Promise.allSettled([
+      loadConstructionParamGroups(),
+      loadConstructionParams(),
+      loadConstructionSubCategories(),
+      loadConstructionInternalPartGroups(),
+      loadConstructionSubtractorPartGroups(),
+      loadConstructionPartKinds(),
+      loadConstructionPartFormulas(),
+    ]);
+    if (!subCategoryDesignPreviewLoading.value) {
+      await refreshSubCategoryDesignPreview();
+    }
+    return;
+  }
   closeSubtractorLibrary();
   const nextTargetOrderDesignId = String(targetOrderDesignId || "").trim();
   const currentTargetOrderDesignId = String(activeInteriorLibraryOrderDesignId.value || "").trim();
-  if (interiorLibraryOpen.value && (!nextTargetOrderDesignId || nextTargetOrderDesignId === currentTargetOrderDesignId)) {
+  if (!subCategoryDesignEditorOpen.value && interiorLibraryOpen.value && (!nextTargetOrderDesignId || nextTargetOrderDesignId === currentTargetOrderDesignId)) {
     closeInteriorLibrary();
     return;
   }
@@ -19551,10 +19625,26 @@ function openInteriorLibraryForDesign(orderDesignId) {
 }
 
 async function openDoorLibrary(targetOrderDesignId = "") {
+  if (subCategoryDesignEditorOpen.value) {
+    subCategoryDesignEditorActiveTab.value = "door";
+    interiorLibraryOpen.value = false;
+    subtractorLibraryOpen.value = false;
+    doorLibraryOpen.value = true;
+    await Promise.allSettled([
+      loadConstructionDoorPartGroups(),
+      loadConstructionSubtractorPartGroups(),
+      loadConstructionPartKinds(),
+      loadConstructionPartFormulas(),
+    ]);
+    if (!subCategoryDesignPreviewLoading.value) {
+      await refreshSubCategoryDesignPreview();
+    }
+    return;
+  }
   closeSubtractorLibrary();
   const nextTargetOrderDesignId = String(targetOrderDesignId || "").trim();
   const currentTargetOrderDesignId = String(activeDoorLibraryOrderDesignId.value || "").trim();
-  if (doorLibraryOpen.value && (!nextTargetOrderDesignId || nextTargetOrderDesignId === currentTargetOrderDesignId)) {
+  if (!subCategoryDesignEditorOpen.value && doorLibraryOpen.value && (!nextTargetOrderDesignId || nextTargetOrderDesignId === currentTargetOrderDesignId)) {
     closeDoorLibrary();
     return;
   }
@@ -19603,11 +19693,29 @@ function openDoorLibraryForDesign(orderDesignId) {
 }
 
 async function openSubtractorLibrary(targetOrderDesignId = "") {
+  if (subCategoryDesignEditorOpen.value) {
+    subCategoryDesignEditorActiveTab.value = "subtractor";
+    interiorLibraryOpen.value = false;
+    doorLibraryOpen.value = false;
+    subtractorLibraryOpen.value = true;
+    await Promise.allSettled([
+      loadConstructionParamGroups(),
+      loadConstructionParams(),
+      loadConstructionSubCategories(),
+      loadConstructionSubtractorPartGroups(),
+      loadConstructionPartKinds(),
+      loadConstructionPartFormulas(),
+    ]);
+    if (!subCategoryDesignPreviewLoading.value) {
+      await refreshSubCategoryDesignPreview();
+    }
+    return;
+  }
   closeInteriorLibrary();
   closeDoorLibrary();
   const nextTargetOrderDesignId = String(targetOrderDesignId || "").trim();
   const currentTargetOrderDesignId = String(activeSubtractorLibraryOrderDesignId.value || "").trim();
-  if (subtractorLibraryOpen.value && (!nextTargetOrderDesignId || nextTargetOrderDesignId === currentTargetOrderDesignId)) {
+  if (!subCategoryDesignEditorOpen.value && subtractorLibraryOpen.value && (!nextTargetOrderDesignId || nextTargetOrderDesignId === currentTargetOrderDesignId)) {
     closeSubtractorLibrary();
     return;
   }
@@ -23364,16 +23472,20 @@ onBeforeUnmount(() => {
             <span>کد طرح</span>
             <input v-model="subCategoryDesignEditorDraft.code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
           </label>
-          <div class="subCategoryDesignEditor__metaActions">
-            <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': interiorLibraryOpen }" title="قطعات داخلی" @click="openInteriorLibrary">
+          <div class="subCategoryDesignEditor__metaActions subCategoryDesignEditor__metaActions--tabs">
+            <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__tabBtn" :class="{ 'is-active': subCategoryDesignEditorActiveTab === 'structural' }" title="سازه" @click="activateSubCategoryDesignEditorTab('structural')">
+              <img src="/icons/vertical_piece.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+              <span>سازه</span>
+            </button>
+            <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__tabBtn" :class="{ 'is-active': subCategoryDesignEditorActiveTab === 'internal' }" title="داخلی" @click="openInteriorLibrary()">
               <img src="/icons/enternal.png" alt="" class="subCategoryDesignEditor__metaIcon" />
               <span>داخلی</span>
             </button>
-            <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': doorLibraryOpen }" title="قطعات درب" @click="openDoorLibrary">
+            <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__tabBtn" :class="{ 'is-active': subCategoryDesignEditorActiveTab === 'door' }" title="درب" @click="openDoorLibrary()">
               <img src="/icons/door_styles.png" alt="" class="subCategoryDesignEditor__metaIcon" />
               <span>درب</span>
             </button>
-            <button type="button" class="subCategoryDesignEditor__settingsBtn" :class="{ 'is-active': subtractorLibraryOpen }" title="دستگیره مخفی" @click="openSubtractorLibrary">
+            <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__tabBtn" :class="{ 'is-active': subCategoryDesignEditorActiveTab === 'subtractor' }" title="دستگیره مخفی" @click="openSubtractorLibrary()">
               <img src="/icons/handless.png" alt="" class="subCategoryDesignEditor__metaIcon" />
               <span>دستگیره مخفی</span>
             </button>
@@ -23384,22 +23496,25 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="subCategoryDesignEditor__layout">
+        <div v-if="subCategoryDesignEditorActiveTab === 'structural'" class="subCategoryDesignEditor__layout subCategoryDesignEditor__layout--interiorLibrary subCategoryDesignEditor__layout--structuralLibrary">
           <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts">
-            <div class="subCategoryDesignEditor__panelTitle">قطعات قابل افزودن</div>
+            <div class="subCategoryDesignEditor__panelTitle">قطعات قابل افزودن به سازه</div>
             <div class="subCategoryDesignEditor__partList">
-              <label v-for="item in constructionSubCategoryDesignPartFormulaOptions" :key="item.id" class="subCategoryDesignEditor__partItem">
+              <label v-for="item in availableSubCategoryStructuralPartCards" :key="item.id" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--structuralCard">
                 <input :checked="isPartFormulaSelectedInDesign(item.id)" type="checkbox" @change="togglePartFormulaInDesign(item.id)" />
                 <span class="subCategoryDesignEditor__partMeta">
-                  <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
-                  <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+                  <span class="subCategoryDesignEditor__partText">
+                    <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
+                    <span class="subCategoryDesignEditor__partCode">{{ item.code || `PF-${item.id}` }}</span>
+                  </span>
+                  <span class="constructionDialog__pill">{{ item.partKindLabel }}</span>
                 </span>
               </label>
             </div>
           </div>
 
           <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview">
-            <div class="subCategoryDesignEditor__panelTitle">پیش‌نمایش طرح</div>
+            <div class="subCategoryDesignEditor__panelTitle">پیش‌نمایش سازه</div>
             <div v-if="subCategoryDesignEditorPreview" class="subCategoryDesignEditor__previewBody">
               <div class="subCategoryDesignEditor__viewerWrap">
                 <GlbViewerWidget
@@ -23420,6 +23535,47 @@ onBeforeUnmount(() => {
             <div v-else-if="subCategoryDesignPreviewLoading" class="constructionDialog__loading">در حال بازسازی preview طرح...</div>
             <div v-else-if="subCategoryDesignPreviewError" class="formulaBuilder__error">{{ subCategoryDesignPreviewError }}</div>
           </div>
+
+          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances">
+            <div class="subCategoryDesignEditor__panelTitle">قطعات سازه این طرح</div>
+            <div v-if="!selectedSubCategoryStructuralPartCards.length" class="designMenu__cabinetState">هنوز قطعه‌ای برای سازه این طرح انتخاب نشده است.</div>
+            <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
+              <div v-for="item in selectedSubCategoryStructuralPartCards" :key="`selected-structural-${item.id}`" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard subCategoryDesignEditor__partItem--structuralCard">
+                <div class="subCategoryDesignEditor__interiorGroupHead">
+                  <div class="subCategoryDesignEditor__interiorGroupSummary">
+                    <div class="subCategoryPreview__groupBadge">
+                      <span class="subCategoryPreview__groupFallback">{{ toPersianDigits(item.orderIndex) }}</span>
+                    </div>
+                    <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                      <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
+                      <span class="subCategoryDesignEditor__partCode">{{ item.code || `PF-${item.id}` }}</span>
+                    </span>
+                  </div>
+                  <div class="subCategoryDesignEditor__interiorGroupFooter">
+                    <span class="constructionDialog__pill">{{ item.partKindLabel }}</span>
+                    <button type="button" class="constructionDialog__iconBtn" title="حذف از سازه" @click="removeStructuralPartFormulaFromDesign(item.id)">×</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-else class="subCategoryDesignEditor__tabPlaceholder">
+          <div
+            id="subcat-internal-tab-panel"
+            class="subCategoryDesignEditor__tabPanelHost"
+            v-show="subCategoryDesignEditorActiveTab === 'internal'"
+          ></div>
+          <div
+            id="subcat-door-tab-panel"
+            class="subCategoryDesignEditor__tabPanelHost"
+            v-show="subCategoryDesignEditorActiveTab === 'door'"
+          ></div>
+          <div
+            id="subcat-subtractor-tab-panel"
+            class="subCategoryDesignEditor__tabPanelHost"
+            v-show="subCategoryDesignEditorActiveTab === 'subtractor'"
+          ></div>
         </div>
       </div>
 
@@ -24493,9 +24649,9 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="interiorLibraryOpen" class="appDialog" role="dialog" aria-modal="true">
-    <div class="appDialog__backdrop" @click="closeInteriorLibrary"></div>
-    <div class="appDialog__card appDialog__card--subDesign" dir="rtl">
+  <div v-if="interiorLibraryOpen" :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
+    <div v-if="!subCategoryDesignEditorOpen" class="appDialog__backdrop" @click="closeInteriorLibrary"></div>
+    <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen }" dir="rtl">
       <div v-if="interiorLibraryControllerApplying" class="interiorLibraryLoadingPopup" role="status" aria-live="polite" aria-busy="true">
         <span class="interiorLibraryLoadingPopup__spinner" aria-hidden="true"></span>
         <span class="interiorLibraryLoadingPopup__text">در حال اعمال تغییرات کنترلر...</span>
@@ -25244,7 +25400,7 @@ onBeforeUnmount(() => {
   </div>
 
   <div
-    v-if="interiorLibraryOpen && interiorLibraryInstanceContextMenu.visible && activeInteriorLibraryContextMenuInstance"
+    v-if="interiorLibraryOpen && !subCategoryDesignEditorOpen && interiorLibraryInstanceContextMenu.visible && activeInteriorLibraryContextMenuInstance"
     class="subCategoryDesignEditor__contextMenu"
     :style="interiorLibraryInstanceContextMenuStyle"
     @pointerdown.stop
@@ -25254,7 +25410,7 @@ onBeforeUnmount(() => {
   </div>
 
   <div
-    v-if="doorLibraryOpen && doorLibraryInstanceContextMenu.visible && activeDoorLibraryContextMenuInstance"
+    v-if="doorLibraryOpen && !subCategoryDesignEditorOpen && doorLibraryInstanceContextMenu.visible && activeDoorLibraryContextMenuInstance"
     class="subCategoryDesignEditor__contextMenu"
     :style="doorLibraryInstanceContextMenuStyle"
     @pointerdown.stop
@@ -26356,9 +26512,9 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="doorLibraryOpen" class="appDialog" role="dialog" aria-modal="true">
-    <div class="appDialog__backdrop" @click="closeDoorLibrary"></div>
-    <div class="appDialog__card appDialog__card--subDesign" dir="rtl">
+  <div v-if="doorLibraryOpen" :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
+    <div v-if="!subCategoryDesignEditorOpen" class="appDialog__backdrop" @click="closeDoorLibrary"></div>
+    <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen }" dir="rtl">
       <div class="formulaBuilder__head">
         <div class="constructionDialog__sectionTitle formulaBuilder__title">قطعات درب</div>
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeDoorLibrary">×</button>
@@ -26983,9 +27139,9 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="subtractorLibraryOpen" class="appDialog" role="dialog" aria-modal="true">
-    <div class="appDialog__backdrop" @click="closeSubtractorLibrary"></div>
-    <div class="appDialog__card appDialog__card--subDesign" dir="rtl">
+  <div v-if="subtractorLibraryOpen" :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
+    <div v-if="!subCategoryDesignEditorOpen" class="appDialog__backdrop" @click="closeSubtractorLibrary"></div>
+    <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen }" dir="rtl">
       <div class="formulaBuilder__head">
         <div class="constructionDialog__sectionTitle formulaBuilder__title">دستگیره مخفی</div>
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeSubtractorLibrary">×</button>
@@ -27267,7 +27423,7 @@ onBeforeUnmount(() => {
   </div>
 
   <div
-    v-if="subtractorLibraryOpen && subtractorLibraryInstanceContextMenu.visible && activeSubtractorLibraryContextMenuInstance"
+    v-if="subtractorLibraryOpen && !subCategoryDesignEditorOpen && subtractorLibraryInstanceContextMenu.visible && activeSubtractorLibraryContextMenuInstance"
     class="subCategoryDesignEditor__contextMenu"
     :style="subtractorLibraryInstanceContextMenuStyle"
     dir="rtl"
@@ -27393,7 +27549,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="dialogState.open" class="appDialog" role="dialog" aria-modal="true">
+  <div v-if="dialogState.open" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="dialogState.mode === 'alert' ? closeDialog() : null"></div>
     <div class="appDialog__card" dir="rtl">
       <div v-if="dialogState.title" class="appDialog__title">{{ dialogState.title }}</div>

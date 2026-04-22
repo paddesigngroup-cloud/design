@@ -524,6 +524,7 @@ option {
 .designMenu__cabinetHint,
 .designMenu__cabinetState {
   padding: 10px 12px;
+  margin-top: 10px;
   border-radius: 14px;
   border: 1px dashed rgba(52, 20, 31, 0.16);
   background: rgba(255, 255, 255, 0.2);
@@ -3803,6 +3804,18 @@ option {
   gap: 10px;
   margin-inline-start: auto;
 }
+.subCategoryDesignEditor__metaActions--tabs {
+  width: 100%;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 10px;
+}
+.subCategoryDesignEditor__tabBtn {
+  min-width: 132px;
+}
+.subCategoryDesignEditor__metaActions--tabs > .subCategoryDesignEditor__settingsBtn:last-child {
+  margin-inline-start: auto;
+}
 .subCategoryDesignEditor__settingsBtn {
   display: inline-flex;
   align-items: center;
@@ -4012,7 +4025,6 @@ option {
 .subCategoryDesignEditor__panel--preview {
   display: flex;
   flex-direction: column;
-  gap: 12px;
   min-height: 0;
   overflow: hidden;
 }
@@ -4021,6 +4033,61 @@ option {
   grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.62fr) minmax(340px, 0.8fr);
   gap: 16px;
   height: 100%;
+}
+.subCategoryDesignEditor__layout--structuralLibrary {
+  min-height: 620px;
+}
+.subCategoryDesignEditor__partItem--structuralCard {
+  grid-template-columns: 18px minmax(0, 1fr);
+}
+.subCategoryDesignEditor__partItem--structuralCard .subCategoryDesignEditor__partMeta {
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.subCategoryDesignEditor__tabPlaceholder {
+  min-height: 320px;
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+}
+.subCategoryDesignEditor__tabPanelHost {
+  width: 100%;
+  min-height: 620px;
+}
+.subCategoryDesignEditor__embeddedShell {
+  position: fixed;
+  inset: 14px 12px 14px;
+  z-index: 4050;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  pointer-events: none;
+}
+.subCategoryDesignEditor__embeddedCard {
+  position: relative;
+  top: auto;
+  left: auto;
+  transform: none;
+  width: min(1440px, calc(100vw - 24px));
+  height: calc(100vh - 254px);
+  max-height: calc(100vh - 290px);
+  margin: 212px 0 0;
+  border-radius: 20px;
+  box-shadow: none;
+  background: transparent;
+  border: 0;
+  pointer-events: auto;
+  min-height: 320px;
+}
+.subCategoryDesignEditor__embeddedCard > .formulaBuilder__head,
+.subCategoryDesignEditor__embeddedCard > .constructionDialog__sectionHint,
+.subCategoryDesignEditor__embeddedCard > .appDialog__actions {
+  display: none;
+}
+.subCategoryDesignEditor__embeddedCard > .subCategoryDesignEditor__layout {
+  height: 100%;
+  min-height: 0;
 }
 .subCategoryDesignEditor__layout--interiorLibrary > * {
   direction: rtl;
@@ -4056,7 +4123,7 @@ option {
   display: flex;
   align-items: stretch;
   justify-content: stretch;
-  min-height: 580px;
+  min-height: 500px;
   padding: 20px;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,245,244,0.95)),
@@ -4156,7 +4223,7 @@ option {
   flex: 1 1 auto;
   width: 100%;
   height: 100%;
-  min-height: 560px;
+  min-height: 500px;
   touch-action: none;
   cursor: none;
 }
@@ -4279,8 +4346,8 @@ option {
 }
 .subCategoryDesignEditor__controllerHint {
   position: absolute;
-  left: 20px;
-  bottom: 20px;
+  left: 0;
+  bottom: 0;
   z-index: 4;
   max-width: min(480px, calc(100% - 40px));
   padding: 10px 14px;
