@@ -342,9 +342,14 @@ const subtractorLibraryOpen = ref(false);
 const interiorLibraryForcedOrderDesignId = ref("");
 const doorLibraryForcedOrderDesignId = ref("");
 const subtractorLibraryForcedOrderDesignId = ref("");
-const interiorLibraryPartKindFilter = ref("");
-const doorLibraryPartKindFilter = ref("");
-const subtractorLibraryPartKindFilter = ref("");
+const structuralLibraryAvailablePartKindFilter = ref("");
+const structuralLibrarySelectedPartKindFilter = ref("");
+const interiorLibraryInstancePartKindFilter = ref("");
+const interiorLibraryGroupPartKindFilter = ref("");
+const doorLibraryInstancePartKindFilter = ref("");
+const doorLibraryGroupPartKindFilter = ref("");
+const subtractorLibraryInstancePartKindFilter = ref("");
+const subtractorLibraryGroupPartKindFilter = ref("");
 const subtractorLibraryPreviewMode = ref("front2d");
 const subtractorLibrarySelectedInstanceId = ref("");
 const subtractorLibraryHoveredInstanceId = ref("");
@@ -3587,6 +3592,14 @@ const constructionInternalPartKindOptions = computed(() =>
       label: String(item.org_part_kind_title || item.title || "").trim(),
     }))
 );
+const constructionStructuralPartKindOptions = computed(() =>
+  constructionPartKinds.value
+    .filter((item) => getPartKindScope(item) === "structural")
+    .map((item) => ({
+      value: Number(item.part_kind_id) || 0,
+      label: String(item.org_part_kind_title || item.title || "").trim(),
+    }))
+);
 const constructionDoorPartKindOptions = computed(() =>
   constructionPartKinds.value
     .filter((item) => isDoorPartKind(item))
@@ -3876,6 +3889,7 @@ const selectedSubCategoryStructuralPartCards = computed(() => {
         orderIndex: index + 1,
       };
     })
+    .filter((item) => matchesStructuralLibraryPartKindFilter(item.partKindId, structuralLibrarySelectedPartKindFilter.value))
     .sort((a, b) => a.orderIndex - b.orderIndex || a.title.localeCompare(b.title, "fa"));
 });
 const availableSubCategoryStructuralPartCards = computed(() =>
@@ -3885,6 +3899,7 @@ const availableSubCategoryStructuralPartCards = computed(() =>
       partKindLabel: getConstructionPartKindInternalLabel(item.partKindId),
       selected: isPartFormulaSelectedInDesign(item.id),
     }))
+    .filter((item) => matchesStructuralLibraryPartKindFilter(item.partKindId, structuralLibraryAvailablePartKindFilter.value))
     .sort((a, b) => Number(a.uiOrder || 0) - Number(b.uiOrder || 0) || String(a.title || "").localeCompare(String(b.title || ""), "fa"))
 );
 const constructionInteriorPartFormulaOptions = computed(() =>
@@ -4429,7 +4444,7 @@ function buildDoorLibraryControllerOverlayForInstance(instance) {
 const doorLibraryGroupCards = computed(() =>
   constructionDoorPartGroups.value
     .filter((group) => {
-      const filter = String(doorLibraryPartKindFilter.value || "").trim();
+      const filter = String(doorLibraryGroupPartKindFilter.value || "").trim();
       if (!filter) return true;
       return (group.parts || []).some((part) => String(part.part_kind_id) === filter);
     })
@@ -6602,9 +6617,20 @@ function collectInternalGroupParamCodesLocal(group) {
   return Array.from(resolved);
 }
 
-function getInteriorLibrarySelectedPartKindId() {
-  const parsed = Number(String(interiorLibraryPartKindFilter.value || "").trim());
+function getInteriorLibrarySelectedPartKindId(filterValue) {
+  const parsed = Number(String(filterValue || "").trim());
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function getStructuralLibrarySelectedPartKindId(filterValue) {
+  const parsed = Number(String(filterValue || "").trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function matchesStructuralLibraryPartKindFilter(partKindId, filterValue) {
+  const selectedPartKindId = getStructuralLibrarySelectedPartKindId(filterValue);
+  if (!selectedPartKindId) return true;
+  return Number(partKindId) === selectedPartKindId;
 }
 
 function getInternalPartGroupPartKindIds(group) {
@@ -6617,8 +6643,8 @@ function getInternalPartGroupPartKindIds(group) {
   return partKindIds;
 }
 
-function matchesInteriorLibraryPartKindFilter(group) {
-  const selectedPartKindId = getInteriorLibrarySelectedPartKindId();
+function matchesInteriorLibraryPartKindFilter(group, filterValue) {
+  const selectedPartKindId = getInteriorLibrarySelectedPartKindId(filterValue);
   if (!selectedPartKindId) return true;
   return getInternalPartGroupPartKindIds(group).has(selectedPartKindId);
 }
@@ -7561,7 +7587,7 @@ function buildInteriorControllerVerticalArrowPath(direction, x, y, width, height
 const interiorLibraryGroupCards = computed(() => {
   const groups = constructionInternalPartGroups.value;
   return groups
-    .filter((group) => matchesInteriorLibraryPartKindFilter(group))
+    .filter((group) => matchesInteriorLibraryPartKindFilter(group, interiorLibraryGroupPartKindFilter.value))
     .map((group) => {
       const groupTree = buildInternalGroupDefaultsTree(group);
       const iconPath = normalizeIconFileName(group.icon_path || group.param_group_icon_path) || "";
@@ -7595,8 +7621,8 @@ const interiorLibraryInstanceCards = computed(() =>
       };
     })
     .filter((instance) => {
-        const group = constructionInternalPartGroupsById.value.get(String(instance.internal_part_group_id || "").trim());
-      return matchesInteriorLibraryPartKindFilter(group);
+      const group = constructionInternalPartGroupsById.value.get(String(instance.internal_part_group_id || "").trim());
+      return matchesInteriorLibraryPartKindFilter(group, interiorLibraryInstancePartKindFilter.value);
     })
 );
 const doorLibraryInstanceCards = computed(() =>
@@ -7620,7 +7646,7 @@ const doorLibraryInstanceCards = computed(() =>
       };
     })
     .filter((instance) => {
-      const filter = String(doorLibraryPartKindFilter.value || "").trim();
+      const filter = String(doorLibraryInstancePartKindFilter.value || "").trim();
       if (!filter) return true;
       const group = constructionDoorPartGroupsById.value.get(String(instance.door_part_group_id || "").trim());
       return Array.isArray(group?.parts) && group.parts.some((part) => String(part?.part_kind_id || "") === filter);
@@ -7629,7 +7655,7 @@ const doorLibraryInstanceCards = computed(() =>
 const subtractorLibraryGroupCards = computed(() =>
   constructionSubtractorPartGroups.value
     .filter((group) => {
-      const filter = String(subtractorLibraryPartKindFilter.value || "").trim();
+      const filter = String(subtractorLibraryGroupPartKindFilter.value || "").trim();
       if (!filter) return true;
       return (group.parts || []).some((part) => String(part.part_kind_id) === filter);
     })
@@ -7664,7 +7690,7 @@ const subtractorLibraryInstanceCards = computed(() =>
       };
     })
     .filter((instance) => {
-      const filter = String(subtractorLibraryPartKindFilter.value || "").trim();
+      const filter = String(subtractorLibraryInstancePartKindFilter.value || "").trim();
       if (!filter) return true;
       const group = constructionSubtractorPartGroupsById.value.get(String(instance.subtractor_part_group_id || "").trim());
       return Array.isArray(group?.parts) && group.parts.some((part) => String(part?.part_kind_id || "") === filter);
@@ -19970,7 +19996,8 @@ function closeSubtractorLibrary() {
   subtractorLibraryOpen.value = false;
   subtractorLibraryForcedOrderDesignId.value = "";
   interiorLibraryForcedOrderDesignId.value = "";
-  subtractorLibraryPartKindFilter.value = "";
+  subtractorLibraryInstancePartKindFilter.value = "";
+  subtractorLibraryGroupPartKindFilter.value = "";
   subtractorLibraryPreviewMode.value = "front2d";
   subtractorLibrarySelectedInstanceId.value = "";
   subtractorLibraryHoveredInstanceId.value = "";
@@ -23694,6 +23721,10 @@ onBeforeUnmount(() => {
         <div v-if="subCategoryDesignEditorActiveTab === 'structural'" class="subCategoryDesignEditor__layout subCategoryDesignEditor__layout--interiorLibrary subCategoryDesignEditor__layout--structuralLibrary">
           <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorSidebar subCategoryDesignEditor__panel--structuralAvailable">
             <div class="subCategoryDesignEditor__panelTitle">قطعات قابل افزودن به سازه</div>
+            <select v-model="structuralLibraryAvailablePartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+              <option value="">همه انواع قطعات سازه</option>
+              <option v-for="option in constructionStructuralPartKindOptions" :key="`structural-available-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+            </select>
             <div class="subCategoryDesignEditor__partList interiorLibraryPartList">
               <div
                 v-for="item in availableSubCategoryStructuralPartCards"
@@ -23754,6 +23785,10 @@ onBeforeUnmount(() => {
 
           <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances subCategoryDesignEditor__panel--structuralSelected">
             <div class="subCategoryDesignEditor__panelTitle">قطعات سازه این طرح</div>
+            <select v-model="structuralLibrarySelectedPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+              <option value="">همه انواع قطعات سازه</option>
+              <option v-for="option in constructionStructuralPartKindOptions" :key="`structural-selected-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+            </select>
             <div v-if="!selectedSubCategoryStructuralPartCards.length" class="designMenu__cabinetState">هنوز قطعه‌ای برای سازه این طرح انتخاب نشده است.</div>
             <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
               <div v-for="item in selectedSubCategoryStructuralPartCards" :key="`selected-structural-${item.id}`" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard subCategoryDesignEditor__partItem--structuralCard">
@@ -25479,7 +25514,7 @@ onBeforeUnmount(() => {
 
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances">
           <div class="subCategoryDesignEditor__panelTitle">نمونه‌های داخلی این طرح</div>
-          <select v-model="interiorLibraryPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+          <select v-model="interiorLibraryInstancePartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
             <option value="">همه انواع قطعات داخلی</option>
             <option v-for="option in constructionInternalPartKindOptions" :key="`interior-instance-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
           </select>
@@ -25549,7 +25584,7 @@ onBeforeUnmount(() => {
 
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorSidebar">
           <div class="subCategoryDesignEditor__panelTitle">گروه‌های قطعات داخلی</div>
-          <select v-model="interiorLibraryPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+          <select v-model="interiorLibraryGroupPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
             <option value="">همه انواع قطعات داخلی</option>
             <option v-for="option in constructionInternalPartKindOptions" :key="`interior-group-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
           </select>
@@ -27220,7 +27255,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances">
           <div class="subCategoryDesignEditor__panelTitle">نمونه‌های درب این طرح</div>
-          <select v-model="doorLibraryPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+          <select v-model="doorLibraryInstancePartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
             <option value="">همه انواع درب</option>
             <option v-for="option in constructionDoorPartKindOptions" :key="`door-instance-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
           </select>
@@ -27301,7 +27336,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorSidebar">
           <div class="subCategoryDesignEditor__panelTitle">گروه‌های قطعات درب</div>
-          <select v-model="doorLibraryPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+          <select v-model="doorLibraryGroupPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
             <option value="">همه انواع قطعات درب</option>
             <option v-for="option in constructionDoorPartKindOptions" :key="option.value" :value="String(option.value)">{{ option.label }}</option>
           </select>
@@ -27508,7 +27543,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances">
           <div class="subCategoryDesignEditor__panelTitle">نمونه‌های دستگیره مخفی این طرح</div>
-          <select v-model="subtractorLibraryPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+          <select v-model="subtractorLibraryInstancePartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
             <option value="">همه انواع دستگیره مخفی</option>
             <option v-for="option in constructionSubtractorPartKindOptions" :key="`subtractor-instance-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
           </select>
@@ -27566,7 +27601,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorSidebar">
           <div class="subCategoryDesignEditor__panelTitle">گروه‌های دستگیره مخفی</div>
-          <select v-model="subtractorLibraryPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+          <select v-model="subtractorLibraryGroupPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
             <option value="">همه انواع دستگیره مخفی</option>
             <option v-for="option in constructionSubtractorPartKindOptions" :key="option.value" :value="String(option.value)">{{ option.label }}</option>
           </select>
