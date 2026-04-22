@@ -2105,13 +2105,23 @@ function updateDoorLibraryHoverState(point) {
 function hitTestInteriorLibraryController(point) {
   if (!point) return null;
   const target = { x: Number(point.x) || 0, y: Number(point.y) || 0 };
-  const overlays = interiorLibraryControllerOverlays.value.map((overlay) => ({
-    ...overlay,
-    visuals: String(interiorLibrarySelectedInstanceId.value || "") === String(overlay?.instanceId || "")
-      ? interiorLibraryControllerVisuals.value
-      : [],
-    metrics: [],
-  }));
+  const selectedInstanceId = String(interiorLibrarySelectedInstanceId.value || "").trim();
+  const overlays = [
+    ...interiorLibraryControllerOverlays.value
+      .filter((overlay) => String(overlay?.instanceId || "").trim() !== selectedInstanceId)
+      .map((overlay) => ({
+        ...overlay,
+        visuals: [],
+        metrics: [],
+      })),
+    ...interiorLibraryControllerOverlays.value
+      .filter((overlay) => String(overlay?.instanceId || "").trim() === selectedInstanceId)
+      .map((overlay) => ({
+        ...overlay,
+        visuals: interiorLibraryControllerVisuals.value,
+        metrics: [],
+      })),
+  ];
   const result = hitTestControllerOverlay(target, overlays, {
     includeRect: true,
     instanceIdKey: "instanceId",
