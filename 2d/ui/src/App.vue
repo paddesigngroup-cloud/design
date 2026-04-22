@@ -2452,6 +2452,7 @@ function stopInteriorLibraryControllerDrag() {
     dirty: false,
   };
   interiorLibraryHoveredControllerId.value = activeControllerId;
+  interiorLibraryCurrentSnapPoint.value = null;
   clearInteriorLibraryControllerDraftValues();
   if (!dirty) return;
   if (!draftValues || !updateInteriorInstanceFromControllerValues(draftValues)) return;
@@ -2475,6 +2476,7 @@ function cancelInteriorLibraryControllerInteraction() {
     pointerToAnchor: null,
     dirty: false,
   };
+  interiorLibraryCurrentSnapPoint.value = null;
   clearInteriorLibraryControllerDraftValues();
 }
 
@@ -2496,8 +2498,10 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
   const ignoreAxisValues = controllerId === "left" || controllerId === "right"
     ? [Number(startRect?.x), Number(startRect?.x) + Number(startRect?.w || 0)]
     : [Number(startRect?.y), Number(startRect?.y) + Number(startRect?.h || 0)];
-  const snappedX = snapInteriorControllerAxis(controllerId, anchorX, ignoreAxisValues);
-  const snappedY = snapInteriorControllerAxis(controllerId, anchorY, ignoreAxisValues);
+  const snappedXResult = snapInteriorControllerAxisWithMeta(controllerId, anchorX, ignoreAxisValues);
+  const snappedYResult = snapInteriorControllerAxisWithMeta(controllerId, anchorY, ignoreAxisValues);
+  const snappedX = snappedXResult.value;
+  const snappedY = snappedYResult.value;
   const frameWidth = Math.max(0, frame.maxX - frame.minX);
   const frameHeight = Math.max(0, frame.maxZ - frame.minZ);
   const minWidth = isHeightController ? 0 : 240;
@@ -2508,32 +2512,69 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
     right: Number(startValues.right) || 0,
     bottom_offset: Number(startValues.bottom_offset) || 0,
   };
+  let activeSnapPoint = null;
   if (isSubtractorController) {
     const minWidth = 1;
     const minHeight = 1;
     if (controllerId === "left") {
       const leftMm = (snappedX - frame.x) / frame.scale;
       nextValues.left = Math.min(Math.max(0, leftMm), Math.max(0, frameWidth - nextValues.right - minWidth));
+      if (snappedXResult.kind) {
+        activeSnapPoint = {
+          x: Number(snappedXResult.pointValue ?? snappedX) || 0,
+          y: Number(anchorY) || 0,
+          kind: snappedXResult.kind,
+        };
+      }
     } else if (controllerId === "right") {
       const rightMm = ((frame.x + frame.w) - snappedX) / frame.scale;
       nextValues.right = Math.min(Math.max(0, rightMm), Math.max(0, frameWidth - nextValues.left - minWidth));
+      if (snappedXResult.kind) {
+        activeSnapPoint = {
+          x: Number(snappedXResult.pointValue ?? snappedX) || 0,
+          y: Number(anchorY) || 0,
+          kind: snappedXResult.kind,
+        };
+      }
     } else if (controllerId === "top") {
       const rawRectY = snappedY;
-      const snappedRectY = snapInteriorControllerRectY(rawRectY, Number(startRect.h) || 0, ignoreAxisValues);
+      const snappedRectYResult = snapInteriorControllerRectYWithMeta(rawRectY, Number(startRect.h) || 0, ignoreAxisValues);
+      const snappedRectY = snappedRectYResult.value;
       const clampedRectY = Math.max(frame.y, Math.min(snappedRectY, (frame.y + frame.h) - (Number(startRect.h) || 0)));
       nextValues.top = Math.min(
         Math.max(0, (clampedRectY - frame.y) / frame.scale),
         Math.max(0, frameHeight - nextValues.bottom_offset)
       );
+      if (snappedRectYResult.kind) {
+        activeSnapPoint = {
+          x: Number(startRect.x + (startRect.w * 0.5)) || 0,
+          y: Number(snappedRectYResult.pointValue ?? clampedRectY) || 0,
+          kind: snappedRectYResult.kind,
+        };
+      } else if (snappedYResult.kind) {
+        activeSnapPoint = {
+          x: Number(startRect.x + (startRect.w * 0.5)) || 0,
+          y: Number(snappedYResult.pointValue ?? snappedY) || 0,
+          kind: snappedYResult.kind,
+        };
+      }
     } else if (controllerId === "bottom_offset") {
       const heightMm = (snappedY - (Number(startRect.y) || frame.y)) / frame.scale;
       nextValues.bottom_offset = Math.min(
         Math.max(minHeight, heightMm),
         Math.max(minHeight, frameHeight - nextValues.top)
       );
+      if (snappedYResult.kind) {
+        activeSnapPoint = {
+          x: Number(startRect.x + (startRect.w * 0.5)) || 0,
+          y: Number(snappedYResult.pointValue ?? snappedY) || 0,
+          kind: snappedYResult.kind,
+        };
+      }
     } else {
       return;
     }
+    interiorLibraryCurrentSnapPoint.value = activeSnapPoint;
     interiorLibraryControllerDraftValues.value = nextValues;
     interiorLibraryControllerPointerState.value = {
       ...state,
@@ -2554,6 +2595,13 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
       const leftMm = (snappedX - frame.x) / frame.scale;
       nextValues.left = Math.min(Math.max(0, leftMm), Math.max(0, frameWidth - nextValues.right - minWidth));
     }
+    if (snappedXResult.kind) {
+      activeSnapPoint = {
+        x: Number(snappedXResult.pointValue ?? snappedX) || 0,
+        y: Number(anchorY) || 0,
+        kind: snappedXResult.kind,
+      };
+    }
   } else if (controllerId === "right") {
     if (normalizedType === INTERNAL_GROUP_CONTROLLER_TYPE_HEIGHT_RIGHT) {
       const widthMm = ((frame.x + frame.w) - snappedX) / frame.scale;
@@ -2567,6 +2615,13 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
       const rightMm = ((frame.x + frame.w) - snappedX) / frame.scale;
       nextValues.right = Math.min(Math.max(0, rightMm), Math.max(0, frameWidth - nextValues.left - minWidth));
     }
+    if (snappedXResult.kind) {
+      activeSnapPoint = {
+        x: Number(snappedXResult.pointValue ?? snappedX) || 0,
+        y: Number(anchorY) || 0,
+        kind: snappedXResult.kind,
+      };
+    }
   } else if (controllerId === "top") {
     if (isHeightController) {
       const topInset = (snappedY - frame.y) / frame.scale;
@@ -2574,10 +2629,24 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
         Math.max(0, topInset),
         Math.max(0, frameHeight - nextValues.bottom_offset - minHeight)
       );
+      if (snappedYResult.kind) {
+        activeSnapPoint = {
+          x: Number(startRect.x + (startRect.w * 0.5)) || 0,
+          y: Number(snappedYResult.pointValue ?? snappedY) || 0,
+          kind: snappedYResult.kind,
+        };
+      }
     } else {
       const bottomY = (Number(startRect?.y) || frame.y) + (Number(startRect?.h) || 0);
       const topMm = (bottomY - snappedY) / frame.scale;
       nextValues.top = Math.min(Math.max(minHeight, topMm), Math.max(minHeight, frameHeight - nextValues.bottom_offset));
+      if (snappedYResult.kind) {
+        activeSnapPoint = {
+          x: Number(startRect.x + (startRect.w * 0.5)) || 0,
+          y: Number(snappedYResult.pointValue ?? snappedY) || 0,
+          kind: snappedYResult.kind,
+        };
+      }
     }
   } else if (controllerId === "bottom_offset") {
     if (isHeightController) {
@@ -2586,15 +2655,40 @@ function applyInteriorLibraryControllerDrag(controllerId, currentPoint) {
         Math.max(0, bottomInset),
         Math.max(0, frameHeight - nextValues.top - minHeight)
       );
+      if (snappedYResult.kind) {
+        activeSnapPoint = {
+          x: Number(startRect.x + (startRect.w * 0.5)) || 0,
+          y: Number(snappedYResult.pointValue ?? snappedY) || 0,
+          kind: snappedYResult.kind,
+        };
+      }
     } else {
       const startAnchorY = (Number(state.startPoint?.y) || frame.y) - (Number(pointerToAnchor.y) || 0);
       const rawRectY = (Number(startRect?.y) || frame.y) + (snappedY - startAnchorY);
-      const snappedRectY = snapInteriorControllerRectY(rawRectY, Number(startRect?.h) || 0, ignoreAxisValues);
+      const snappedRectYResult = snapInteriorControllerRectYWithMeta(rawRectY, Number(startRect?.h) || 0, ignoreAxisValues);
+      const snappedRectY = snappedRectYResult.value;
       const clampedRectY = Math.max(frame.y, Math.min(snappedRectY, (frame.y + frame.h) - (Number(startRect?.h) || 0)));
       const bottomOffsetMm = ((frame.y + frame.h) - (clampedRectY + (Number(startRect?.h) || 0))) / frame.scale;
       nextValues.bottom_offset = Math.min(Math.max(0, bottomOffsetMm), Math.max(0, frameHeight - nextValues.top));
+      if (snappedRectYResult.kind) {
+        const snapY = snappedRectYResult.matchedEdge === "bottom"
+          ? Number(snappedRectYResult.pointValue)
+          : Number(snappedRectYResult.pointValue ?? clampedRectY);
+        activeSnapPoint = {
+          x: Number(startRect.x + (startRect.w * 0.5)) || 0,
+          y: Number.isFinite(snapY) ? snapY : Number(clampedRectY + (Number(startRect?.h) || 0)) || 0,
+          kind: snappedRectYResult.kind,
+        };
+      } else if (snappedYResult.kind) {
+        activeSnapPoint = {
+          x: Number(startRect.x + (startRect.w * 0.5)) || 0,
+          y: Number(snappedYResult.pointValue ?? snappedY) || 0,
+          kind: snappedYResult.kind,
+        };
+      }
     }
   }
+  interiorLibraryCurrentSnapPoint.value = activeSnapPoint;
   interiorLibraryControllerDraftValues.value = nextValues;
   interiorLibraryControllerPointerState.value = {
     ...state,
@@ -4621,6 +4715,41 @@ const activeSubtractorFrontFrameBoxes = computed(() => {
   const frameBox = buildBoundingViewerBoxFromBoxes(sourceBoxes);
   return frameBox ? [frameBox] : [];
 });
+function getSupportInstanceMergeKeys(instance) {
+  if (!instance || typeof instance !== "object") return [];
+  return [
+    String(instance?.id || "").trim(),
+    String(instance?.source_instance_id || "").trim(),
+    String(instance?.instance_code || "").trim(),
+  ].filter(Boolean);
+}
+function mergeSupportInstances(orderItems, sourceItems, kind = "interior") {
+  const sourceList = Array.isArray(sourceItems) ? sourceItems : [];
+  const orderList = Array.isArray(orderItems) ? orderItems : [];
+  const sourceByKey = new Map();
+  for (const item of sourceList) {
+    for (const key of getSupportInstanceMergeKeys(item)) {
+      if (!sourceByKey.has(key)) sourceByKey.set(key, item);
+    }
+  }
+  const merged = orderList.map((item) => {
+    const source = getSupportInstanceMergeKeys(item).map((key) => sourceByKey.get(key)).find(Boolean) || null;
+    if (!source) return item;
+    const fallbackBoxKey = kind === "door" ? "controller_box_snapshot" : "interior_box_snapshot";
+    const hasViewerBoxes = Array.isArray(item?.viewer_boxes) && item.viewer_boxes.length > 0;
+    const hasPartSnapshots = Array.isArray(item?.part_snapshots) && item.part_snapshots.length > 0;
+    const hasFallbackBox = item?.[fallbackBoxKey] && typeof item[fallbackBoxKey] === "object" && Object.keys(item[fallbackBoxKey]).length > 0;
+    return {
+      ...source,
+      ...item,
+      viewer_boxes: hasViewerBoxes ? item.viewer_boxes : (Array.isArray(source?.viewer_boxes) ? source.viewer_boxes.map((row) => ({ ...(row || {}) })) : []),
+      part_snapshots: hasPartSnapshots ? item.part_snapshots : (Array.isArray(source?.part_snapshots) ? source.part_snapshots.map((row) => ({ ...(row || {}) })) : []),
+      [fallbackBoxKey]: hasFallbackBox ? { ...(item[fallbackBoxKey] || {}) } : { ...(source?.[fallbackBoxKey] || {}) },
+    };
+  });
+  if (merged.length) return merged;
+  return sourceList;
+}
 const activeSubtractorSupportInteriorInstances = computed(() => {
   if (!isSharedSubtractorLibraryActive.value) return [];
   if (subCategoryDesignEditorOpen.value) {
@@ -4631,10 +4760,10 @@ const activeSubtractorSupportInteriorInstances = computed(() => {
   const orderItems = Array.isArray(activeSubtractorLibraryOrderDesign.value?.interior_instances)
     ? activeSubtractorLibraryOrderDesign.value.interior_instances
     : [];
-  if (orderItems.length) return orderItems;
-  return Array.isArray(activeSubtractorLibrarySourceDesign.value?.preview?.interior_instances)
+  const sourceItems = Array.isArray(activeSubtractorLibrarySourceDesign.value?.preview?.interior_instances)
     ? activeSubtractorLibrarySourceDesign.value.preview.interior_instances
     : [];
+  return mergeSupportInstances(orderItems, sourceItems, "interior");
 });
 const activeSubtractorSupportDoorInstances = computed(() => {
   if (!isSharedSubtractorLibraryActive.value) return [];
@@ -4646,10 +4775,10 @@ const activeSubtractorSupportDoorInstances = computed(() => {
   const orderItems = Array.isArray(activeSubtractorLibraryOrderDesign.value?.door_instances)
     ? activeSubtractorLibraryOrderDesign.value.door_instances
     : [];
-  if (orderItems.length) return orderItems;
-  return Array.isArray(activeSubtractorLibrarySourceDesign.value?.preview?.door_instances)
+  const sourceItems = Array.isArray(activeSubtractorLibrarySourceDesign.value?.preview?.door_instances)
     ? activeSubtractorLibrarySourceDesign.value.preview.door_instances
     : [];
+  return mergeSupportInstances(orderItems, sourceItems, "door");
 });
 const activeDoorLibrarySelectableParts = computed(() => {
   if (subCategoryDesignEditorOpen.value) {
@@ -4937,8 +5066,8 @@ const interiorLibraryFrontCanvasEntityStateById = computed(() => {
           hovered: false,
           preview: false,
           selected: false,
-          outerStrokeWidth: 0,
-          outerOpacity: 1,
+          outerStrokeWidth: 1.35,
+          outerOpacity: 0.98,
           innerStrokeWidth: 0,
           innerOpacity: 0,
         }]);
@@ -5218,12 +5347,13 @@ const subtractorSupportPreviewInstanceGeometry = computed(() => {
     .map((instance, index) => {
       const lineColor = resolveInteriorInstanceLineColor(instance);
       const fallbackBox = buildBoundingViewerBoxFromBoxes(
-        getViewerBoxesFromScopedPartSnapshots(instance?.part_snapshots || [], ["internal"]),
+        getViewerBoxesFromInteriorInstance(instance),
         lineColor
       );
-      const outlineBox = (instance?.interior_box_snapshot && typeof instance.interior_box_snapshot === "object" && Object.keys(instance.interior_box_snapshot).length)
-        ? { ...(instance.interior_box_snapshot || {}), lineColor }
-        : fallbackBox;
+      const outlineBox = fallbackBox
+        || ((instance?.interior_box_snapshot && typeof instance.interior_box_snapshot === "object" && Object.keys(instance.interior_box_snapshot).length)
+          ? { ...(instance.interior_box_snapshot || {}), lineColor }
+          : null);
       const data = buildFrontViewLinesFromSingleOutlineBox(outlineBox, lineColor);
       if (!data?.bounds) return null;
       const group = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
@@ -5244,12 +5374,13 @@ const subtractorSupportPreviewInstanceGeometry = computed(() => {
     .map((instance, index) => {
       const lineColor = resolveDoorInstanceLineColor(instance);
       const fallbackBox = buildBoundingViewerBoxFromBoxes(
-        getViewerBoxesFromScopedPartSnapshots(instance?.part_snapshots || [], ["door"]),
+        getViewerBoxesFromDoorInstance(instance),
         lineColor
       );
-      const outlineBox = (instance?.controller_box_snapshot && typeof instance.controller_box_snapshot === "object" && Object.keys(instance.controller_box_snapshot).length)
-        ? { ...(instance.controller_box_snapshot || {}), lineColor }
-        : fallbackBox;
+      const outlineBox = fallbackBox
+        || ((instance?.controller_box_snapshot && typeof instance.controller_box_snapshot === "object" && Object.keys(instance.controller_box_snapshot).length)
+          ? { ...(instance.controller_box_snapshot || {}), lineColor }
+          : null);
       const data = buildFrontViewLinesFromSingleOutlineBox(outlineBox, lineColor);
       if (!data?.bounds) return null;
       const group = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
@@ -5932,9 +6063,12 @@ const interiorLibraryFrontCanvasScene = computed(() => {
     buildFront2dProjectedLineFingerprint(interiorLibraryPreviewSvgLines.value?.inner),
     interiorLibraryShowInnerLines.value ? "inner-on" : "inner-off",
   ].join("|");
+  const frontRenderInstances = isSharedSubtractorLibraryActive.value
+    ? [...subtractorSupportPreviewInstances2d.value, ...interiorLibraryPreviewInstances2d.value]
+    : interiorLibraryPreviewInstances2d.value;
   const entitiesFingerprint = [
-    Number(interiorLibraryPreviewInstances2d.value?.length || 0),
-    ...interiorLibraryPreviewInstances2d.value.map((instance) => buildInteriorLibraryFrontInstanceRenderFingerprint(instance)),
+    Number(frontRenderInstances?.length || 0),
+    ...frontRenderInstances.map((instance) => buildInteriorLibraryFrontInstanceRenderFingerprint(instance)),
   ].join("|");
   return {
     renderToken: [
@@ -7036,7 +7170,7 @@ function getInteriorControllerHotspots(controller) {
   ];
 }
 
-function snapInteriorControllerAxis(controllerId, axisValue, ignoreValues = []) {
+function snapInteriorControllerAxisWithMeta(controllerId, axisValue, ignoreValues = []) {
   const tolerance = Math.max(
     Number(interiorLibraryFrontSnapTolerance.value) || 0,
     6 * (Number(interiorLibraryControllerVisualScale.value) || 1),
@@ -7048,15 +7182,37 @@ function snapInteriorControllerAxis(controllerId, axisValue, ignoreValues = []) 
     .filter((value) => Number.isFinite(value));
   let bestValue = Number(axisValue) || 0;
   let bestDistance = tolerance + 0.0001;
-  for (const candidate of [...lineCandidates, ...pointCandidates]) {
+  let bestKind = "";
+  let bestPointValue = null;
+  for (const candidate of lineCandidates) {
     if (ignored.some((value) => Math.abs(candidate - value) <= 0.75)) continue;
     const distance = Math.abs(candidate - axisValue);
     if (distance <= tolerance && distance < bestDistance) {
       bestDistance = distance;
       bestValue = candidate;
+      bestKind = "edge";
+      bestPointValue = candidate;
     }
   }
-  return bestValue;
+  for (const candidate of pointCandidates) {
+    if (ignored.some((value) => Math.abs(candidate - value) <= 0.75)) continue;
+    const distance = Math.abs(candidate - axisValue);
+    if (distance <= tolerance && distance < bestDistance) {
+      bestDistance = distance;
+      bestValue = candidate;
+      bestKind = "corner";
+      bestPointValue = candidate;
+    }
+  }
+  return {
+    value: bestValue,
+    kind: bestKind,
+    pointValue: bestPointValue,
+  };
+}
+
+function snapInteriorControllerAxis(controllerId, axisValue, ignoreValues = []) {
+  return snapInteriorControllerAxisWithMeta(controllerId, axisValue, ignoreValues).value;
 }
 
 function getInteriorControllerAxisCandidates(isHorizontalAxis, tolerance) {
@@ -7099,7 +7255,7 @@ function getInteriorControllerAxisCandidates(isHorizontalAxis, tolerance) {
   };
 }
 
-function snapInteriorControllerRectY(rectY, rectHeight, ignoreValues = []) {
+function snapInteriorControllerRectYWithMeta(rectY, rectHeight, ignoreValues = []) {
   const tolerance = Math.max(
     Number(interiorLibraryFrontSnapTolerance.value) || 0,
     6 * (Number(interiorLibraryControllerVisualScale.value) || 1),
@@ -7114,20 +7270,57 @@ function snapInteriorControllerRectY(rectY, rectHeight, ignoreValues = []) {
   const rawBottom = safeRectY + safeRectHeight;
   let bestRectY = safeRectY;
   let bestDistance = tolerance + 0.0001;
-  for (const candidate of [...lineCandidates, ...pointCandidates]) {
+  let bestKind = "";
+  let bestPointValue = null;
+  let bestMatchedEdge = "";
+  for (const candidate of lineCandidates) {
     if (ignored.some((value) => Math.abs(candidate - value) <= 0.75)) continue;
     const topDistance = Math.abs(candidate - rawTop);
     if (topDistance <= tolerance && topDistance < bestDistance) {
       bestDistance = topDistance;
       bestRectY = candidate;
+      bestKind = "edge";
+      bestPointValue = candidate;
+      bestMatchedEdge = "top";
     }
     const bottomDistance = Math.abs(candidate - rawBottom);
     if (bottomDistance <= tolerance && bottomDistance < bestDistance) {
       bestDistance = bottomDistance;
       bestRectY = candidate - safeRectHeight;
+      bestKind = "edge";
+      bestPointValue = candidate;
+      bestMatchedEdge = "bottom";
     }
   }
-  return bestRectY;
+  for (const candidate of pointCandidates) {
+    if (ignored.some((value) => Math.abs(candidate - value) <= 0.75)) continue;
+    const topDistance = Math.abs(candidate - rawTop);
+    if (topDistance <= tolerance && topDistance < bestDistance) {
+      bestDistance = topDistance;
+      bestRectY = candidate;
+      bestKind = "corner";
+      bestPointValue = candidate;
+      bestMatchedEdge = "top";
+    }
+    const bottomDistance = Math.abs(candidate - rawBottom);
+    if (bottomDistance <= tolerance && bottomDistance < bestDistance) {
+      bestDistance = bottomDistance;
+      bestRectY = candidate - safeRectHeight;
+      bestKind = "corner";
+      bestPointValue = candidate;
+      bestMatchedEdge = "bottom";
+    }
+  }
+  return {
+    value: bestRectY,
+    kind: bestKind,
+    pointValue: bestPointValue,
+    matchedEdge: bestMatchedEdge,
+  };
+}
+
+function snapInteriorControllerRectY(rectY, rectHeight, ignoreValues = []) {
+  return snapInteriorControllerRectYWithMeta(rectY, rectHeight, ignoreValues).value;
 }
 
 function buildInteriorControllerHorizontalArrowPath(direction, x, y, width, height) {
@@ -19441,7 +19634,12 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
     await loadOrderDesignCatalog(true);
     const currentOrderDesignId = String(activeSubtractorLibraryOrderDesign.value?.id || "").trim();
     if (currentOrderDesignId) {
-      await ensureOrderDesignSubtractorParamMetaLoaded(currentOrderDesignId);
+      await refreshOrderDesignGeometryFromServer(currentOrderDesignId, { updateStage: false });
+      await Promise.allSettled([
+        ensureOrderDesignInteriorParamMetaLoaded(currentOrderDesignId),
+        ensureOrderDesignDoorParamMetaLoaded(currentOrderDesignId),
+        ensureOrderDesignSubtractorParamMetaLoaded(currentOrderDesignId),
+      ]);
     }
   }
   if (subCategoryDesignEditorOpen.value && !subCategoryDesignPreviewLoading.value) {
