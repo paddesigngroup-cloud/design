@@ -107,6 +107,7 @@ const mainEl = ref(null);
 const stageEl = ref(null);
 const stageCardEl = ref(null);
 const stageGlbViewerRef = ref(null);
+const structuralPreview3dRef = ref(null);
 const interiorLibraryFrontSvgEl = ref(null);
 const doorLibraryFrontSvgEl = ref(null);
 const homeBtnEl = ref(null);
@@ -993,12 +994,9 @@ function focusInteriorLibraryPreviewCloser() {
   if (shouldBlockInteriorLibraryFrontZoom()) return;
   if (interiorLibraryPreviewMode.value === "model3d") {
     interiorLibraryPreview3dRef.value?.fitCameraToAll?.();
-    interiorLibraryPreview3dRef.value?.zoomByFactor?.(INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR);
     return;
   }
-  interiorLibraryFrontZoom.value = INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR;
-  interiorLibraryFrontPan.value = { x: 0, y: 0 };
-  stopInteriorLibraryFrontPan();
+  resetInteriorLibraryPreviewView();
 }
 function setInteriorLibraryPreviewOpacity(value) {
   const nextValue = Math.max(0, Math.min(100, Number(value) || 0));
@@ -1083,7 +1081,7 @@ function startDoorLibraryFrontPan(event) {
   if (now - doorLibraryFrontLastMiddleClickMs <= 300) {
     doorLibraryFrontLastMiddleClickMs = 0;
     event.preventDefault();
-    resetDoorLibraryPreviewView(true);
+    resetDoorLibraryPreviewView();
     return;
   }
   doorLibraryFrontLastMiddleClickMs = now;
@@ -1104,13 +1102,13 @@ function startDoorLibraryFrontPan(event) {
   window.addEventListener("pointermove", onDoorLibraryFrontPanMove);
   window.addEventListener("pointerup", onDoorLibraryFrontPanUp, { once: true });
 }
-function resetDoorLibraryPreviewView(zoomIn = false) {
+function resetDoorLibraryPreviewView() {
   if (doorLibraryPreviewMode.value === "model3d") {
     doorLibraryModelPanning.value = false;
     doorLibraryPreview3dRef.value?.fitCameraToAll?.();
     return;
   }
-  doorLibraryFrontZoom.value = zoomIn ? INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR : 1;
+  doorLibraryFrontZoom.value = 1;
   doorLibraryFrontPan.value = { x: 0, y: 0 };
   stopDoorLibraryFrontPan();
 }
@@ -3200,18 +3198,7 @@ function onInteriorLibraryFrontSvgPointerUp() {
 
 async function onInteriorLibraryFrontSvgDoubleClick(payload) {
   if ((isSharedSubtractorLibraryActive.value ? subtractorLibraryPreviewMode.value : interiorLibraryPreviewMode.value) !== "front2d") return;
-  const controllerHit = hitTestInteriorLibraryController(payload?.point || getInteriorLibraryFrontSvgPoint(payload?.event || payload));
-  if (controllerHit?.instanceId) {
-    selectInteriorLibraryInstance(controllerHit.instanceId);
-  }
-  if (controllerHit?.hitType === "field" || controllerHit?.hitType === "handle") {
-    await promptInteriorLibraryControllerEditing(controllerHit.controllerId || controllerHit.id);
-    return;
-  }
-  if (controllerHit?.hitType === "rect") {
-    return;
-  }
-  focusInteriorLibraryPreviewCloser();
+  resetInteriorLibraryPreviewView();
 }
 
 function onInteriorLibraryFrontSvgPointerCancel() {
@@ -3350,14 +3337,13 @@ function onDoorLibraryFrontSvgPointerDown(payload) {
 async function handleDoorLibraryPreviewDoubleClick() {
   if (doorLibraryPreviewMode.value === "model3d") {
     doorLibraryPreview3dRef.value?.fitCameraToAll?.();
-    doorLibraryPreview3dRef.value?.zoomByFactor?.(INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR);
     return;
   }
   if (isDoorLibraryPendingControllerActive.value && doorLibraryControllerSelectionSummary.value?.eligible) {
     await finalizePendingDoorController();
     return;
   }
-  resetDoorLibraryPreviewView(true);
+  resetDoorLibraryPreviewView();
 }
 function onDoorLibraryFrontSvgPointerMove(payload) {
   const rawPoint = payload?.point || getDoorLibraryFrontSvgPoint(payload?.event || payload);
@@ -3375,20 +3361,19 @@ function onDoorLibraryFrontSvgPointerLeave() {
   stopDoorLibraryPointerProcessing();
 }
 async function onDoorLibraryFrontSvgDoubleClick(payload) {
-  if (doorLibraryPreviewMode.value === "front2d" && !isDoorLibraryPendingControllerActive.value) {
-    const rawPoint = payload?.point || getDoorLibraryFrontSvgPoint(payload?.event || payload);
-    const controllerHit = hitTestDoorLibraryController(rawPoint);
-    if (controllerHit?.instanceId) {
-      selectDoorLibraryPlacedInstance(controllerHit.instanceId);
+  if (doorLibraryPreviewMode.value === "front2d") {
+    if (isDoorLibraryPendingControllerActive.value && doorLibraryControllerSelectionSummary.value?.eligible) {
+      await finalizePendingDoorController();
       return;
     }
-    const instanceHits = collectDoorLibraryInstanceHits(rawPoint);
-    if (instanceHits.length) {
-      selectDoorLibraryPlacedInstance(instanceHits[0].id);
-      return;
-    }
+    resetDoorLibraryPreviewView();
+    return;
   }
   await handleDoorLibraryPreviewDoubleClick();
+}
+
+function handleStructuralPreviewDoubleClick() {
+  structuralPreview3dRef.value?.fitCameraToAll?.();
 }
 function onDoorLibraryViewerPointerMove(event) {
   if (doorLibraryPreviewMode.value === "model3d") {
@@ -5195,10 +5180,10 @@ const doorLibraryFrontCanvasEntityStateById = computed(() =>
       hovered,
       selected,
       preview: false,
-      outerStrokeWidth: selected ? 7.6 : (hovered ? 6.4 : 0),
+      outerStrokeWidth: selected ? 1.08 : (hovered ? 0.66 : 0),
       outerOpacity: selected ? 0.98 : (hovered ? 0.9 : 0),
-      innerStrokeWidth: selected ? 7.2 : 6.2,
-      innerOpacity: selected ? 1 : 0,
+      innerStrokeWidth: 1.4,
+      innerOpacity: selected ? 1 : 0.96,
     }];
   }))
 );
@@ -5663,6 +5648,7 @@ const doorLibraryPreviewInstances2d = computed(() =>
       y1: -(Number(line?.az) || 0),
       x2: Number(line?.bx) || 0,
       y2: -(Number(line?.bz) || 0),
+      dashed: true,
     }));
     const minX = Number(data?.bounds?.minX) || 0;
     const maxX = Number(data?.bounds?.maxX) || 0;
@@ -23763,8 +23749,9 @@ onBeforeUnmount(() => {
               <div class="subCategoryDesignEditor__panelTitle">پیش‌نمایش سازه</div>
             </div>
             <div v-if="subCategoryDesignEditorPreview" class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
-              <div class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior">
+              <div class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior" @dblclick.prevent="handleStructuralPreviewDoubleClick">
                 <GlbViewerWidget
+                  ref="structuralPreview3dRef"
                   src="/models/1_z1.glb"
                   :walls2d="widgetPreviewWalls2d"
                   :placeholder-outline-color="normalizeHexColor(subCategoryDesignEditorPreview?.design_outline_color)"
