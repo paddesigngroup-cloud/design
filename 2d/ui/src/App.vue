@@ -20588,6 +20588,20 @@ onMounted(() => {
         }
       }
     }
+    if (subtractorLibraryOpen.value) {
+      const selectedSubtractorId = String(subtractorLibrarySelectedInstanceId.value || "").trim();
+      if (selectedSubtractorId) {
+        const targetSubtractorInstance = activeSubtractorLibraryInstances.value.find(
+          (item) => String(item?.id || "").trim() === selectedSubtractorId
+        );
+        if (targetSubtractorInstance) {
+          void deleteSubtractorInstanceFromDesign(targetSubtractorInstance);
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+      }
+    }
     if (!interiorLibraryOpen.value || interiorLibraryPreviewMode.value !== "front2d") return;
     if (interiorLibrarySelectedAnnotation.value) {
       removeSelectedInteriorLibraryAnnotation();
