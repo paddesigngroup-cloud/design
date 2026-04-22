@@ -350,7 +350,7 @@ const subtractorLibrarySelectedInstanceId = ref("");
 const subtractorLibraryHoveredInstanceId = ref("");
 const subtractorLibraryPickerPreviewInstanceId = ref("");
 const subtractorLibraryHoverMode = ref(null);
-const subtractorLibraryShowDimensions = ref(true);
+const subtractorLibraryShowDimensions = ref(false);
 const subtractorLibraryAnnotationTool = ref(null);
 const subtractorLibraryAnnotations = ref(createEmptyInteriorLibraryAnnotations());
 const subtractorLibraryAnnotationDraft = ref(null);
@@ -444,9 +444,9 @@ const interiorLibraryHoveredInstanceId = ref("");
 const interiorLibraryPickerPreviewInstanceId = ref("");
 const interiorLibraryHoverMode = ref(null);
 const activeSharedLibraryShowDimensions = computed({
-  get: () => (isSharedSubtractorLibraryActive.value ? subtractorLibraryShowDimensions.value : interiorLibraryShowDimensions.value),
+  get: () => (isSharedSubtractorLibraryActive.value ? false : interiorLibraryShowDimensions.value),
   set: (value) => {
-    if (isSharedSubtractorLibraryActive.value) subtractorLibraryShowDimensions.value = !!value;
+    if (isSharedSubtractorLibraryActive.value) subtractorLibraryShowDimensions.value = false;
     else interiorLibraryShowDimensions.value = !!value;
   },
 });
@@ -459,9 +459,9 @@ const activeSharedLibraryPreviewMode = computed({
   },
 });
 const activeSharedLibraryAnnotationTool = computed({
-  get: () => (isSharedSubtractorLibraryActive.value ? subtractorLibraryAnnotationTool.value : interiorLibraryAnnotationTool.value),
+  get: () => (isSharedSubtractorLibraryActive.value ? null : interiorLibraryAnnotationTool.value),
   set: (value) => {
-    if (isSharedSubtractorLibraryActive.value) subtractorLibraryAnnotationTool.value = value;
+    if (isSharedSubtractorLibraryActive.value) subtractorLibraryAnnotationTool.value = null;
     else interiorLibraryAnnotationTool.value = value;
   },
 });
@@ -1204,12 +1204,14 @@ function stopDoorLibraryModelPanCursor() {
   window.removeEventListener("pointercancel", stopDoorLibraryModelPanCursor);
 }
 function toggleInteriorLibraryDimensionsVisibility() {
+  if (isSharedSubtractorLibraryActive.value) return;
   activeSharedLibraryShowDimensions.value = !activeSharedLibraryShowDimensions.value;
 }
 function toggleDoorLibraryDimensionsVisibility() {
   doorLibraryShowDimensions.value = !doorLibraryShowDimensions.value;
 }
 function toggleInteriorLibraryDimensionTool() {
+  if (isSharedSubtractorLibraryActive.value) return;
   activeSharedLibraryAnnotationTool.value = activeSharedLibraryAnnotationTool.value === "dimension" ? null : "dimension";
   activeSharedLibrarySelectedAnnotation.value = null;
   activeSharedLibraryAnnotationDraft.value = null;
@@ -1232,7 +1234,7 @@ function resetSubtractorLibraryAnnotations() {
   subtractorLibraryAnnotationDraft.value = null;
   subtractorLibrarySelectedAnnotation.value = null;
   subtractorLibraryAnnotationTool.value = null;
-  subtractorLibraryShowDimensions.value = true;
+  subtractorLibraryShowDimensions.value = false;
   subtractorLibraryCurrentSnapPoint.value = null;
   subtractorLibraryCursorPoint.value = null;
   subtractorLibraryAnnotationHitCache.value = {
@@ -1456,9 +1458,10 @@ function buildDoorLibraryAnnotationRecord(type, startPoint, currentPoint) {
   return record;
 }
 function updateInteriorLibraryAnnotationDraft(point) {
-  if (!interiorLibraryAnnotationDraft.value) return;
-  interiorLibraryAnnotationDraft.value = {
-    ...interiorLibraryAnnotationDraft.value,
+  const draft = activeSharedLibraryAnnotationDraft.value;
+  if (!draft) return;
+  activeSharedLibraryAnnotationDraft.value = {
+    ...draft,
     currentPoint: { x: Number(point?.x) || 0, y: Number(point?.y) || 0 },
   };
 }
@@ -5057,6 +5060,20 @@ const doorLibraryFrontSnapLines = computed(() => ([
     x2: Number(line?.bx) || 0,
     y2: -(Number(line?.bz) || 0),
   })),
+  ...(isDoorLibraryFront2dActive.value ? doorLibraryPreviewInstances2d.value : []).flatMap((instance) => ([
+    ...((instance?.outerLines || []).map((line) => ({
+      x1: Number(line?.x1) || 0,
+      y1: Number(line?.y1) || 0,
+      x2: Number(line?.x2) || 0,
+      y2: Number(line?.y2) || 0,
+    }))),
+    ...((instance?.innerLines || []).map((line) => ({
+      x1: Number(line?.x1) || 0,
+      y1: Number(line?.y1) || 0,
+      x2: Number(line?.x2) || 0,
+      y2: Number(line?.y2) || 0,
+    }))),
+  ])),
 ]));
 const doorLibraryFrontSnapPoints = computed(() =>
   isDoorLibraryFront2dActive.value ? collectInteriorSnapPoints(doorLibraryFrontSnapLines.value) : []
@@ -24870,25 +24887,25 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
-                :class="{ 'is-active': subtractorLibraryPreviewMode === 'front2d' }"
+                :class="{ 'is-active': interiorLibraryPreviewMode === 'front2d' }"
                 title="نمای داخلی دوبعدی"
-                @click="setSubtractorLibraryPreviewMode('front2d')"
+                @click="setInteriorLibraryPreviewMode('front2d')"
               >
                 <img src="/icons/enternal.png" alt="" />
               </button>
               <button
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
-                :class="{ 'is-active': subtractorLibraryPreviewMode === 'model3d' }"
+                :class="{ 'is-active': interiorLibraryPreviewMode === 'model3d' }"
                 title="نمای سه بعدی طرح"
-                @click="setSubtractorLibraryPreviewMode('model3d')"
+                @click="setInteriorLibraryPreviewMode('model3d')"
               >
                 <img src="/icons/3d_viewer.png" alt="" />
               </button>
               <button
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
-                :class="{ 'is-active': subtractorLibraryShowDimensions }"
+                :class="{ 'is-active': interiorLibraryShowDimensions }"
                 title="نمایش اندازه گذاری"
                 aria-label="نمایش اندازه گذاری"
                 @click="toggleInteriorLibraryDimensionsVisibility"
@@ -24898,7 +24915,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
-                :class="{ 'is-active': subtractorLibraryAnnotationTool === 'dimension' }"
+                :class="{ 'is-active': interiorLibraryAnnotationTool === 'dimension' }"
                 title="رسم اندازه گذاری"
                 aria-label="رسم اندازه گذاری"
                 @click="toggleInteriorLibraryDimensionTool"
@@ -24930,17 +24947,17 @@ onBeforeUnmount(() => {
               :class="[
                 interiorLibraryFrontCursorClass,
                 {
-                  'is-panning': interiorLibraryFrontPanning && subtractorLibraryPreviewMode === 'front2d',
-                  'is-front2d-mode': subtractorLibraryPreviewMode === 'front2d',
+                  'is-panning': interiorLibraryFrontPanning && interiorLibraryPreviewMode === 'front2d',
+                  'is-front2d-mode': interiorLibraryPreviewMode === 'front2d',
                 }
               ]"
               @wheel.prevent="handleInteriorLibraryPreviewWheel"
               @pointermove="onInteriorLibraryViewerPointerMove"
               @pointerleave="onInteriorLibraryViewerPointerLeave"
               @pointerdown="onInteriorLibraryViewerPointerDown"
-              @dblclick.prevent="subtractorLibraryPreviewMode === 'model3d' ? focusInteriorLibraryPreviewCloser() : null"
+              @dblclick.prevent="interiorLibraryPreviewMode === 'model3d' ? focusInteriorLibraryPreviewCloser() : null"
             >
-              <div v-if="subtractorLibraryPreviewMode === 'model3d'" class="subCategoryDesignEditor__previewOpacity subCategoryDesignEditor__previewOpacity--overlay">
+              <div v-if="interiorLibraryPreviewMode === 'model3d'" class="subCategoryDesignEditor__previewOpacity subCategoryDesignEditor__previewOpacity--overlay">
                 <span class="subCategoryDesignEditor__previewOpacityValue">0</span>
                 <input
                   :value="interiorLibraryPreviewOpacity"
@@ -24954,7 +24971,7 @@ onBeforeUnmount(() => {
                 <span class="subCategoryDesignEditor__previewOpacityValue">100</span>
               </div>
               <GlbViewerWidget
-                v-if="subtractorLibraryPreviewMode === 'model3d' && activeInteriorLibraryViewerBoxes.length"
+                v-if="interiorLibraryPreviewMode === 'model3d' && activeInteriorLibraryViewerBoxes.length"
                 ref="interiorLibraryPreview3dRef"
                 src="/models/1_z1.glb"
                 :walls2d="widgetPreviewWalls2d"
@@ -24967,7 +24984,7 @@ onBeforeUnmount(() => {
                 :preview-active="false"
               />
               <FrontViewCanvas
-                v-else-if="subtractorLibraryPreviewMode === 'front2d' && interiorLibraryPreviewSvgLines.outer.length"
+                v-else-if="interiorLibraryPreviewMode === 'front2d' && interiorLibraryPreviewSvgLines.outer.length"
                 ref="interiorLibraryFrontSvgEl"
                 class="subCategoryDesignEditor__frontCanvas"
                 :scene="interiorLibraryFrontCanvasScene"
@@ -27370,26 +27387,6 @@ onBeforeUnmount(() => {
                 @click="setSubtractorLibraryPreviewMode('model3d')"
               >
                 <img src="/icons/3d_viewer.png" alt="" />
-              </button>
-              <button
-                type="button"
-                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
-                :class="{ 'is-active': subtractorLibraryShowDimensions }"
-                title="نمایش اندازه گذاری"
-                aria-label="نمایش اندازه گذاری"
-                @click="toggleInteriorLibraryDimensionsVisibility"
-              >
-                <img src="/icons/turn_dim.png" alt="" />
-              </button>
-              <button
-                type="button"
-                class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
-                :class="{ 'is-active': subtractorLibraryAnnotationTool === 'dimension' }"
-                title="رسم اندازه گذاری"
-                aria-label="رسم اندازه گذاری"
-                @click="toggleInteriorLibraryDimensionTool"
-              >
-                <img src="/icons/drawing_dimension.png" alt="" />
               </button>
               <button
                 type="button"
