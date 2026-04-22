@@ -4036,6 +4036,19 @@ option {
 }
 .subCategoryDesignEditor__layout--structuralLibrary {
   min-height: 620px;
+  align-items: stretch;
+}
+.subCategoryDesignEditor__layout--structuralLibrary .subCategoryDesignEditor__panel--structuralAvailable {
+  grid-column: 3;
+  grid-row: 1;
+}
+.subCategoryDesignEditor__layout--structuralLibrary .subCategoryDesignEditor__panel--structuralPreview {
+  grid-column: 1;
+  grid-row: 1;
+}
+.subCategoryDesignEditor__layout--structuralLibrary .subCategoryDesignEditor__panel--structuralSelected {
+  grid-column: 2;
+  grid-row: 1;
 }
 .subCategoryDesignEditor__partItem--structuralCard {
   grid-template-columns: 18px minmax(0, 1fr);
