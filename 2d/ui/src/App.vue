@@ -28071,7 +28071,10 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview subCategoryDesignEditor__panel--interiorPreview subCategoryDesignEditor__panel--structuralPreview">
+          <div
+            class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview subCategoryDesignEditor__panel--interiorPreview subCategoryDesignEditor__panel--structuralPreview orderDesignEditor__frontPreviewPanel"
+            :class="`orderDesignEditor__frontPreviewPanel--${orderDesignEditorActiveSection}`"
+          >
             <div class="subCategoryDesignEditor__panelHead subCategoryDesignEditor__panelHead--interiorPreview">
               <div class="subCategoryDesignEditor__panelTitle">پیش‌نمایش {{ activeOrderDesignEditorSection.label }}</div>
               <div class="subCategoryDesignEditor__previewActions">
@@ -28133,6 +28136,8 @@ onBeforeUnmount(() => {
               <div
                 class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior"
                 :class="[
+                  'orderDesignEditor__frontPreviewWrap',
+                  `orderDesignEditor__frontPreviewWrap--${orderDesignEditorActiveSection}`,
                   orderDesignEditorActiveSection === 'door' ? doorLibraryFrontCursorClass : interiorLibraryFrontCursorClass,
                   {
                     'is-panning': orderDesignEditorActiveSection === 'door'
@@ -28163,7 +28168,8 @@ onBeforeUnmount(() => {
                 />
                 <FrontViewCanvas
                   v-else
-                  class="subCategoryDesignEditor__frontCanvas"
+                  class="subCategoryDesignEditor__frontCanvas orderDesignEditor__frontCanvas"
+                  :class="`orderDesignEditor__frontCanvas--${orderDesignEditorActiveSection}`"
                   :scene="orderDesignEditorActiveSection === 'door' ? doorLibraryFrontCanvasScene : interiorLibraryFrontCanvasScene"
                   :cursor-class="orderDesignEditorActiveSection === 'door' ? doorLibraryFrontCursorClass : interiorLibraryFrontCursorClass"
                   @canvas-wheel="orderDesignEditorActiveSection === 'door' ? handleDoorLibraryPreviewWheel($event.event) : handleInteriorLibraryPreviewWheel($event.event)"

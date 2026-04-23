@@ -3769,7 +3769,7 @@ option {
 .subCategoryDesignEditor {
   display: flex;
   flex-direction: column;
-  gap: 23px;
+  gap: 19px;
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -3910,6 +3910,7 @@ option {
   backdrop-filter: blur(10px);
   user-select: none;
   -webkit-user-select: none;
+  margin-bottom: 5px;
 }
 .subCategoryDesignEditor__previewIconBtn {
   flex: 0 0 auto;
@@ -5465,6 +5466,32 @@ option {
 .orderDesignEditor__embeddedCard > .subCategoryDesignEditor__layout {
   height: 100%;
   min-height: 0;
+}
+
+.orderDesignEditor__frontPreviewPanel--door,
+.orderDesignEditor__frontPreviewPanel--subtractor {
+  overflow: hidden;
+}
+
+.orderDesignEditor__frontPreviewWrap--door,
+.orderDesignEditor__frontPreviewWrap--subtractor {
+  padding: 7px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,245,244,0.95)),
+    radial-gradient(circle at top left, rgba(118, 45, 71, 0.05), transparent 42%);
+}
+
+.orderDesignEditor__frontCanvas--door,
+.orderDesignEditor__frontCanvas--subtractor,
+.orderDesignEditor__frontCanvas--door .frontViewCanvas__canvas,
+.orderDesignEditor__frontCanvas--subtractor .frontViewCanvas__canvas {
+  border-radius: 10px;
+}
+
+.orderDesignEditor__frontCanvas--door .frontViewCanvas__canvas,
+.orderDesignEditor__frontCanvas--subtractor .frontViewCanvas__canvas {
+  border: 0;
 }
 .subCategoryPreview__tree {
   display: grid;

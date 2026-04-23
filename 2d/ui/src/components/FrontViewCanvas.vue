@@ -649,21 +649,33 @@ watch(viewport, () => {
 .frontViewCanvas {
   position: absolute;
   inset: 0;
-  border: 1px solid rgba(118, 45, 71, 0.14);
+  box-sizing: border-box;
   border-radius: 10px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.82);
+  background: #fff;
+  box-shadow: 0 1px 1px rgba(70, 24, 42, 0.04);
+}
+
+.frontViewCanvas::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 1px solid rgba(211, 151, 172, 0.26);
+  border-radius: inherit;
+  pointer-events: none;
 }
 
 .frontViewCanvas__canvas {
   width: 100%;
   height: 100%;
+  box-sizing: border-box;
   display: block;
-  background: transparent;
+  background: #fff;
   border-top-left-radius: 10px;
   border-top-right-radius: 10px;
   border-bottom-right-radius: 10px;
   border-bottom-left-radius: 10px;
-  padding: 7px;
 }
 </style>
