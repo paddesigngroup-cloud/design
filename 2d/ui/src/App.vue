@@ -26650,7 +26650,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="subCategoryUserPreviewOpen" class="appDialog" role="dialog" aria-modal="true">
+  <div v-if="subCategoryUserPreviewOpen" class="appDialog" :class="{ 'appDialog--stacked': orderDesignEditorOpen }" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeSubCategoryUserPreview"></div>
     <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
       <div class="subCategoryPreview__header">
@@ -27832,49 +27832,85 @@ onBeforeUnmount(() => {
   <div v-if="orderDesignEditorOpen" class="appDialog" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeOrderDesignEditor"></div>
     <div class="appDialog__card" :class="orderDesignEditorMode === 'full' ? 'appDialog__card--subDesign' : 'appDialog__card--subPreview'" dir="rtl">
-      <div class="subCategoryPreview__header">
-        <div>
-          <div class="subCategoryPreview__title">
-            {{ orderDesignEditorMode === "full" ? "ویرایش کامل طرح سفارش" : "تنظیمات پارامترهای طرح سفارش" }}
-          </div>
-          <div class="subCategoryPreview__caption">
-            {{ orderDesignEditorDraft?.manual_name || orderDesignEditorDraft?.design_title || "طرح سفارش" }}
-            <span v-if="orderDesignEditorDraft?.instance_code">{{ orderDesignEditorDraft.instance_code }}</span>
-            <span v-if="orderDesignEditorDraft?.design_code">{{ orderDesignEditorDraft.design_code }}</span>
-          </div>
+      <template v-if="orderDesignEditorMode === 'full'">
+        <div class="formulaBuilder__head">
+          <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش طرح سفارش</div>
+          <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeOrderDesignEditor">×</button>
         </div>
-        <button type="button" class="constructionDialog__textBtn" @click="closeOrderDesignEditor">بستن</button>
-      </div>
+      </template>
+      <template v-else>
+        <div class="subCategoryPreview__header">
+          <div>
+            <div class="subCategoryPreview__title">تنظیمات پارامترهای طرح سفارش</div>
+            <div class="subCategoryPreview__caption">
+              {{ orderDesignEditorDraft?.manual_name || orderDesignEditorDraft?.design_title || "طرح سفارش" }}
+              <span v-if="orderDesignEditorDraft?.instance_code">{{ orderDesignEditorDraft.instance_code }}</span>
+              <span v-if="orderDesignEditorDraft?.design_code">{{ orderDesignEditorDraft.design_code }}</span>
+            </div>
+          </div>
+          <button type="button" class="constructionDialog__textBtn" @click="closeOrderDesignEditor">بستن</button>
+        </div>
+      </template>
       <div class="constructionDialog__sectionHint">
         در این بخش پیش‌فرض پارامترهای همین طرح سفارش را به‌صورت گروه‌بندی‌شده تغییر می‌دهید. مقادیر عددی با واحد نمایشی فعلی دیده می‌شوند و هنگام ذخیره به میلی‌متر برمی‌گردند.
       </div>
-      <div v-if="orderDesignEditorDraft" class="subCategoryDesignEditor__meta orderDesignEditor__meta">
-        <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
-          <span>نام دستی طرح سفارش</span>
-          <input
-            v-model="orderDesignEditorDraft.manual_name"
-            class="constructionDialog__input"
-            type="text"
-            maxlength="255"
-            placeholder="مثلاً کابینت دیوار شمالی"
-          />
-        </label>
-      </div>
-      <div v-if="orderDesignEditorMode === 'full'" class="subCategoryDesignEditor__metaActions subCategoryDesignEditor__metaActions--tabs orderDesignEditor__tabs">
-        <button
-          v-for="section in orderDesignEditorSections"
-          :key="section.id"
-          type="button"
-          class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__tabBtn"
-          :class="{ 'is-active': orderDesignEditorActiveSection === section.id }"
-          :title="section.label"
-          @click="selectOrderDesignEditorSection(section.id)"
-        >
-          <img :src="section.icon" alt="" class="subCategoryDesignEditor__metaIcon" />
-          <span>{{ section.label }}</span>
-        </button>
-      </div>
-      <div v-if="orderDesignEditorDraft" class="subCategoryPreview__body">
+      <div v-if="orderDesignEditorDraft" :class="orderDesignEditorMode === 'full' ? 'subCategoryDesignEditor' : 'subCategoryPreview__body'">
+        <div v-if="orderDesignEditorMode === 'full'" class="subCategoryDesignEditor__meta orderDesignEditor__meta">
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>سابکت</span>
+            <select v-model="orderDesignEditorDraft.sub_category_id" class="constructionDialog__input" disabled>
+              <option v-for="item in constructionSubCategoryDesignSubCategoryOptions" :key="`order-design-subcat-${item.value}`" :value="item.value">{{ item.label }}</option>
+            </select>
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>شناسه طرح</span>
+            <input v-model="orderDesignEditorDraft.instance_code" class="constructionDialog__input constructionDialog__input--mono" type="text" readonly />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>عنوان طرح</span>
+            <input v-model="orderDesignEditorDraft.design_title" class="constructionDialog__input" type="text" readonly />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>کد طرح</span>
+            <input v-model="orderDesignEditorDraft.design_code" class="constructionDialog__input constructionDialog__input--mono" type="text" readonly />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>نام دستی طرح سفارش</span>
+            <input
+              v-model="orderDesignEditorDraft.manual_name"
+              class="constructionDialog__input"
+              type="text"
+              maxlength="255"
+              placeholder="مثلاً کابینت دیوار شمالی"
+            />
+          </label>
+          <div class="subCategoryDesignEditor__metaActions subCategoryDesignEditor__metaActions--tabs orderDesignEditor__tabs">
+            <button
+              v-for="section in orderDesignEditorSections"
+              :key="section.id"
+              type="button"
+              class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__tabBtn"
+              :class="{ 'is-active': orderDesignEditorActiveSection === section.id }"
+              :title="section.label"
+              @click="selectOrderDesignEditorSection(section.id)"
+            >
+              <img :src="section.icon" alt="" class="subCategoryDesignEditor__metaIcon" />
+              <span>{{ section.label }}</span>
+            </button>
+          </div>
+        </div>
+        <div v-else class="subCategoryDesignEditor__meta orderDesignEditor__meta">
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>نام دستی طرح سفارش</span>
+            <input
+              v-model="orderDesignEditorDraft.manual_name"
+              class="constructionDialog__input"
+              type="text"
+              maxlength="255"
+              placeholder="مثلاً کابینت دیوار شمالی"
+            />
+          </label>
+        </div>
         <div v-if="orderDesignEditorMode !== 'full' || orderDesignEditorActiveSection === 'defaults'" class="subCategoryPreview__tree">
           <div class="subCategoryPreview__panel subCategoryPreview__panel--groups">
             <div class="subCategoryPreview__selectorList">
@@ -28356,7 +28392,9 @@ onBeforeUnmount(() => {
       </div>
       <div class="appDialog__actions">
         <button type="button" class="constructionDialog__textBtn" @click="closeOrderDesignEditor">انصراف</button>
-        <button type="button" class="constructionDialog__textBtn is-primary" @click="saveOrderDesignEditor">اعمال</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="saveOrderDesignEditor">
+          {{ orderDesignEditorMode === 'full' ? 'ذخیره طرح' : 'اعمال' }}
+        </button>
       </div>
     </div>
   </div>

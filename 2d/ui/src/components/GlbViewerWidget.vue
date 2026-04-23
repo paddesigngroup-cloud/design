@@ -3,6 +3,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { DEFAULT_DOOR_MODEL_URL, cloneDoorModelSceneSync, getFallbackDoorModelBoundsMm, loadDoorModelAsset } from "../features/door_model_asset.js";
 
 const props = defineProps({
@@ -96,6 +99,10 @@ const hostEl = ref(null);
 const canvasEl = ref(null);
 const widgetCursorPoint = ref(null);
 const widgetCursorPanning = ref(false);
+
+const PLACEHOLDER_EDGE_WIDTH_PX = 0.55;
+const PLACEHOLDER_EDGE_OPACITY = 0.68;
+const PLACEHOLDER_EDGE_COLOR = "#2F2F2F";
 
 let renderer = null;
 let scene = null;
@@ -1458,8 +1465,49 @@ function normalizePlaceholderColor(value, fallback = "#7A4A2B") {
 
 function buildPlaceholderPalette(outlineColor) {
   const fill = new THREE.Color(normalizePlaceholderColor(outlineColor)).lerp(new THREE.Color("#FFFFFF"), 0.76);
-  const edge = new THREE.Color("#000000");
+  const edge = new THREE.Color(PLACEHOLDER_EDGE_COLOR);
   return { edge, fill };
+}
+
+function getRendererViewportSize() {
+  if (!renderer || !hostEl.value) return new THREE.Vector2(1, 1);
+  const r = hostEl.value.getBoundingClientRect();
+  return new THREE.Vector2(
+    Math.max(1, Math.floor(r.width)),
+    Math.max(1, Math.floor(r.height))
+  );
+}
+
+function createPlaceholderEdgeLines(geometry, palette) {
+  const edges = new THREE.EdgesGeometry(geometry);
+  const lineGeometry = new LineSegmentsGeometry().fromEdgesGeometry(edges);
+  const edgeMaterial = new LineMaterial({
+    color: palette.edge.clone(),
+    transparent: true,
+    opacity: PLACEHOLDER_EDGE_OPACITY,
+    linewidth: PLACEHOLDER_EDGE_WIDTH_PX,
+    worldUnits: false,
+    depthTest: true,
+    depthWrite: false,
+  });
+  edgeMaterial.resolution.copy(getRendererViewportSize());
+  const edgeLines = new LineSegments2(lineGeometry, edgeMaterial);
+  edgeLines.userData.isPlaceholderEdge = true;
+  edgeLines.userData.basePlaceholderEdgeColor = palette.edge.clone();
+  return edgeLines;
+}
+
+function syncPlaceholderEdgeResolution() {
+  if (!placeholderBoxesRoot) return;
+  const resolution = getRendererViewportSize();
+  placeholderBoxesRoot.traverse((obj) => {
+    if (!obj?.userData?.isPlaceholderEdge) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of mats) {
+      if (!mat?.resolution) continue;
+      mat.resolution.copy(resolution);
+    }
+  });
 }
 
 function cloneColor(color, fallback = "#FFFFFF") {
@@ -1626,10 +1674,10 @@ function applyPlaceholderInstanceVisualState(instanceRoot, state = "default") {
       : state === "drag-preview" ? 0.94
       : 1;
   const edgeOpacity =
-    state === "selected" ? 1
-      : state === "ready" ? 0.95
-      : state === "drag-preview" ? 0.96
-      : 0.95;
+    state === "selected" ? 0.72
+      : state === "ready" ? 0.56
+      : state === "drag-preview" ? 0.6
+      : PLACEHOLDER_EDGE_OPACITY;
   const emissiveIntensity =
     state === "selected" ? 0.62
       : state === "ready" ? 0
@@ -1734,19 +1782,7 @@ function rebuildPlaceholderBoxes() {
       mesh.userData.isPlaceholderSolid = true;
       mesh.userData.basePlaceholderColor = palette.fill.clone();
       mesh.userData.basePlaceholderOpacity = 1;
-      const edges = new THREE.EdgesGeometry(geometry);
-      const edgeLines = new THREE.LineSegments(
-        edges,
-        new THREE.LineBasicMaterial({
-          color: palette.edge.clone(),
-          transparent: true,
-          opacity: 0.95,
-          depthTest: true,
-          depthWrite: false,
-        })
-      );
-      edgeLines.userData.isPlaceholderEdge = true;
-      edgeLines.userData.basePlaceholderEdgeColor = palette.edge.clone();
+      const edgeLines = createPlaceholderEdgeLines(geometry, palette);
 
       mesh.position.set(cxM, czM, -cyM);
       edgeLines.position.copy(mesh.position);
@@ -1777,19 +1813,7 @@ function rebuildPlaceholderBoxes() {
       mesh.userData.isPlaceholderSolid = true;
       mesh.userData.basePlaceholderColor = palette.fill.clone();
       mesh.userData.basePlaceholderOpacity = 1;
-      const edges = new THREE.EdgesGeometry(geometry);
-      const edgeLines = new THREE.LineSegments(
-        edges,
-        new THREE.LineBasicMaterial({
-          color: palette.edge.clone(),
-          transparent: true,
-          opacity: 0.95,
-          depthTest: true,
-          depthWrite: false,
-        })
-      );
-      edgeLines.userData.isPlaceholderEdge = true;
-      edgeLines.userData.basePlaceholderEdgeColor = palette.edge.clone();
+      const edgeLines = createPlaceholderEdgeLines(geometry, palette);
       instanceRoot.add(mesh);
       instanceRoot.add(edgeLines);
     }
@@ -2331,6 +2355,7 @@ function resizeToHost() {
   const w = Math.max(1, Math.floor(r.width));
   const h = Math.max(1, Math.floor(r.height));
   renderer.setSize(w, h, false);
+  syncPlaceholderEdgeResolution();
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   if (props.embedded) {

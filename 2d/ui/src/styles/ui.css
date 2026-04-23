@@ -5410,6 +5410,10 @@ option {
 .orderDesignEditor__tabs {
   margin-top: 12px;
 }
+.appDialog__card--subDesign .orderDesignEditor__meta,
+.appDialog__card--subDesign .orderDesignEditor__tabs {
+  margin-top: 0;
+}
 .orderDesignEditor__sectionPanel {
   width: 100%;
 }
