@@ -1779,7 +1779,7 @@ option {
 .glbWidget.is-embedded {
   position: relative;
   top: auto;
-  left: auto;
+  left: -6px;
   z-index: 1;
   width: 100% !important;
   height: 100% !important;
@@ -4247,6 +4247,7 @@ option {
   min-height: 500px;
   touch-action: none;
   cursor: none;
+  margin-top: 7px;
 }
 .subCategoryDesignEditor__viewerWrap--interior.is-idle,
 .subCategoryDesignEditor__frontSvg.is-idle,
