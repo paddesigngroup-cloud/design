@@ -82,6 +82,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  forceCustomCursor: {
+    type: Boolean,
+    default: false,
+  },
   showWindowControls: {
     type: Boolean,
     default: true,
@@ -2454,7 +2458,7 @@ function onCanvasMouseDown(event) {
 }
 
 function shouldShowCustomWidgetCursor() {
-  return !props.embedded && !props.previewOnly;
+  return !!props.forceCustomCursor || (!props.embedded && !props.previewOnly);
 }
 
 function isWidgetUiEventTarget(target) {
@@ -2865,14 +2869,14 @@ defineExpose({
     <div
       ref="hostEl"
       class="glbWidget__host"
-      :class="{ 'has-custom-cursor': !embedded && !previewOnly }"
+      :class="{ 'has-custom-cursor': forceCustomCursor || (!embedded && !previewOnly) }"
       @pointermove="onHostPointerMove"
       @pointerleave="onHostPointerLeave"
       @pointerdown="onHostPointerDown"
     >
       <canvas ref="canvasEl" class="glbWidget__canvas"></canvas>
       <div
-        v-if="!embedded && !previewOnly && widgetCursorPoint"
+        v-if="(forceCustomCursor || (!embedded && !previewOnly)) && widgetCursorPoint"
         class="glbWidget__floatingCursor"
         :class="{ 'is-panning': widgetCursorPanning }"
         :style="{ left: `${Math.round(widgetCursorPoint.x)}px`, top: `${Math.round(widgetCursorPoint.y)}px` }"

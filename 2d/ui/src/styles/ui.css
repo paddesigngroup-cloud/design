@@ -4253,6 +4253,10 @@ option {
 .subCategoryDesignEditor__frontCanvas.is-idle {
   cursor: default;
 }
+.subCategoryDesignEditor__viewerWrap--interior.has-model3d-cursor,
+.subCategoryDesignEditor__viewerWrap--interior.has-model3d-cursor * {
+  cursor: none !important;
+}
 .subCategoryDesignEditor__viewerWrap--interior.is-clickable,
 .subCategoryDesignEditor__frontSvg.is-clickable,
 .subCategoryDesignEditor__frontCanvas.is-clickable {

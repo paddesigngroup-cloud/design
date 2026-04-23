@@ -23961,6 +23961,7 @@ onBeforeUnmount(() => {
                   :display-unit="currentEditorDisplayUnit"
                   :show-attrs-panel="false"
                   :embedded="true"
+                  :force-custom-cursor="true"
                   :show-window-controls="false"
                 />
                 <div v-if="subCategoryDesignPreviewLoading" class="subCategoryDesignEditor__viewerOverlay">
@@ -25167,6 +25168,7 @@ onBeforeUnmount(() => {
               :class="[
                 interiorLibraryFrontCursorClass,
                 {
+                  'has-model3d-cursor': interiorLibraryPreviewMode === 'model3d',
                   'is-panning': interiorLibraryFrontPanning && interiorLibraryPreviewMode === 'front2d',
                   'is-front2d-mode': interiorLibraryPreviewMode === 'front2d',
                 }
@@ -25200,6 +25202,7 @@ onBeforeUnmount(() => {
                 :display-unit="currentEditorDisplayUnit"
                 :show-attrs-panel="false"
                 :embedded="true"
+                :force-custom-cursor="true"
                 :preview-only="true"
                 :preview-active="false"
               />
@@ -27021,6 +27024,7 @@ onBeforeUnmount(() => {
               :class="[
                 doorLibraryFrontCursorClass,
                 {
+                  'has-model3d-cursor': doorLibraryPreviewMode === 'model3d',
                   'is-panning': doorLibraryFrontPanning && doorLibraryPreviewMode === 'front2d',
                   'is-front2d-mode': doorLibraryPreviewMode === 'front2d',
                 }
@@ -27054,6 +27058,7 @@ onBeforeUnmount(() => {
                 :display-unit="currentEditorDisplayUnit"
                 :show-attrs-panel="false"
                 :embedded="true"
+                :force-custom-cursor="true"
                 :preview-only="true"
                 :preview-active="false"
               />
@@ -27625,6 +27630,7 @@ onBeforeUnmount(() => {
               :class="[
                 interiorLibraryFrontCursorClass,
                 {
+                  'has-model3d-cursor': subtractorLibraryPreviewMode === 'model3d',
                   'is-panning': interiorLibraryFrontPanning && subtractorLibraryPreviewMode === 'front2d',
                   'is-front2d-mode': subtractorLibraryPreviewMode === 'front2d',
                 }
@@ -27658,6 +27664,7 @@ onBeforeUnmount(() => {
                 :display-unit="currentEditorDisplayUnit"
                 :show-attrs-panel="false"
                 :embedded="true"
+                :force-custom-cursor="true"
                 :preview-only="true"
                 :preview-active="false"
               />
@@ -28199,6 +28206,7 @@ onBeforeUnmount(() => {
                   :display-unit="currentEditorDisplayUnit"
                   :show-attrs-panel="false"
                   :embedded="true"
+                  :force-custom-cursor="true"
                   :preview-only="true"
                   :preview-active="false"
                 />
@@ -28354,6 +28362,7 @@ onBeforeUnmount(() => {
                     :display-unit="currentEditorDisplayUnit"
                     :show-attrs-panel="false"
                     :embedded="true"
+                    :force-custom-cursor="true"
                     :show-window-controls="false"
                   />
                 </div>
