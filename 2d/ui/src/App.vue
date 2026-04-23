@@ -28057,6 +28057,12 @@ onBeforeUnmount(() => {
                       </span>
                     </div>
                     <div class="subCategoryDesignEditor__interiorGroupFooter">
+                      <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--sidebar">
+                        <label class="subCategoryDesignEditor__miniColorBtn subCategoryDesignEditor__miniColorBtn--static" :style="{ '--line-color': item.lineColor }" :title="`رنگ پیش‌فرض خطوط ${item.group_title}`">
+                          <span class="subCategoryDesignEditor__miniColorPreview" aria-hidden="true"></span>
+                        </label>
+                        <span class="constructionDialog__pill">{{ toPersianDigits(item.parts?.length || 0) }} قطعه</span>
+                      </div>
                       <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" :disabled="isAddingInteriorGroup(item)" @click="addInteriorGroupToDesign(item)">
                         <span v-if="isAddingInteriorGroup(item)" class="constructionDialog__spinner"></span>
                         <span>{{ isAddingInteriorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
@@ -28080,6 +28086,12 @@ onBeforeUnmount(() => {
                       </span>
                     </div>
                     <div class="subCategoryDesignEditor__interiorGroupFooter">
+                      <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--sidebar">
+                        <label class="subCategoryDesignEditor__miniColorBtn subCategoryDesignEditor__miniColorBtn--static" :style="{ '--line-color': item.lineColor }" :title="`رنگ پیش‌فرض خطوط ${item.group_title}`">
+                          <span class="subCategoryDesignEditor__miniColorPreview" aria-hidden="true"></span>
+                        </label>
+                        <span class="constructionDialog__pill">{{ toPersianDigits(item.partsCount || 0) }} قطعه</span>
+                      </div>
                       <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" :disabled="isAddingDoorGroup(item)" @click="addDoorGroupToDesign(item)">
                         <span v-if="isAddingDoorGroup(item)" class="constructionDialog__spinner"></span>
                         <span>{{ isAddingDoorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
@@ -28103,6 +28115,12 @@ onBeforeUnmount(() => {
                       </span>
                     </div>
                     <div class="subCategoryDesignEditor__interiorGroupFooter">
+                      <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--sidebar">
+                        <label class="subCategoryDesignEditor__miniColorBtn subCategoryDesignEditor__miniColorBtn--static" :style="{ '--line-color': item.lineColor }" :title="`رنگ پیش‌فرض خطوط ${item.group_title}`">
+                          <span class="subCategoryDesignEditor__miniColorPreview" aria-hidden="true"></span>
+                        </label>
+                        <span class="constructionDialog__pill">{{ toPersianDigits(item.partsCount || 0) }} قطعه</span>
+                      </div>
                       <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" :disabled="isAddingSubtractorGroup(item)" @click="addSubtractorGroupToDesign(item)">
                         <span v-if="isAddingSubtractorGroup(item)" class="constructionDialog__spinner"></span>
                         <span>{{ isAddingSubtractorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
@@ -28250,9 +28268,27 @@ onBeforeUnmount(() => {
             <div class="subCategoryDesignEditor__partList interiorLibraryPartList">
               <template v-if="orderDesignEditorActiveSection === 'internal'">
                 <div v-if="!interiorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز نمونه داخلی به این طرح اضافه نشده است.</div>
-                <div v-for="(item, itemIndex) in interiorLibraryInstanceCards" v-else :key="`order-internal-instance-${item.id}`" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+                <div
+                  v-for="(item, itemIndex) in interiorLibraryInstanceCards"
+                  v-else
+                  :key="`order-internal-instance-${item.id}`"
+                  class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard"
+                  :class="{ 'is-active': String(interiorLibrarySelectedInstanceId || '') === String(item.id || '') }"
+                  @click="selectInteriorLibraryInstance(item.id)"
+                >
                   <div class="subCategoryDesignEditor__interiorGroupHead">
                     <div class="subCategoryDesignEditor__interiorGroupSummary">
+                      <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !item.iconUrl }">
+                        <img
+                          v-if="item.iconUrl"
+                          :key="item.iconUrl"
+                          :src="item.iconUrl"
+                          :alt="item.groupTitle"
+                          class="subCategoryPreview__groupIcon"
+                          @error="handleSubCategoryDefaultIconError"
+                        />
+                        <span v-else class="subCategoryPreview__groupFallback">•</span>
+                      </div>
                       <span class="subCategoryDesignEditor__partMeta" dir="rtl">
                         <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
                         <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
@@ -28260,19 +28296,49 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="subCategoryDesignEditor__interiorGroupFooter">
                       <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits(itemIndex + 1) }}</span>
-                      <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini" title="تنظیمات" @click="openInteriorInstanceEditor(item)">
-                        <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-                      </button>
-                      <button type="button" class="constructionDialog__iconBtn" title="حذف نمونه" @click="deleteInteriorInstanceFromDesign(item)">×</button>
+                      <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--instance">
+                        <label class="subCategoryDesignEditor__miniColorBtn" :style="{ '--line-color': item.lineColor }" :title="`رنگ خطوط ${item.instance_code}`">
+                          <input
+                            :value="item.lineColor"
+                            class="subCategoryDesignEditor__miniColorInput"
+                            type="color"
+                            @click.stop
+                            @input="previewInteriorInstanceLineColor(item, $event.target.value)"
+                            @change="applyInteriorInstanceLineColor(item, $event.target.value)"
+                          />
+                        </label>
+                        <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini" title="تنظیمات این نمونه" @click.stop="openInteriorInstanceEditor(item)">
+                          <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                        </button>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف نمونه" @click.stop="deleteInteriorInstanceFromDesign(item)">×</button>
+                      </div>
                     </div>
                   </div>
                 </div>
               </template>
               <template v-else-if="orderDesignEditorActiveSection === 'door'">
                 <div v-if="!doorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز نمونه درب به این طرح اضافه نشده است.</div>
-                <div v-for="item in doorLibraryInstanceCards" v-else :key="`order-door-instance-${item.id}`" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+                <div
+                  v-for="item in doorLibraryInstanceCards"
+                  v-else
+                  :key="`order-door-instance-${item.id}`"
+                  class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard"
+                  :class="{ 'is-active': String(doorLibrarySelectedPlacedInstanceId || '') === String(item.id || '') }"
+                  @click="selectDoorLibraryPlacedInstance(item.id)"
+                >
                   <div class="subCategoryDesignEditor__interiorGroupHead">
                     <div class="subCategoryDesignEditor__interiorGroupSummary">
+                      <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !item.iconUrl }">
+                        <img
+                          v-if="item.iconUrl"
+                          :key="item.iconUrl"
+                          :src="item.iconUrl"
+                          :alt="item.groupTitle"
+                          class="subCategoryPreview__groupIcon"
+                          @error="handleSubCategoryDefaultIconError"
+                        />
+                        <span v-else class="subCategoryPreview__groupFallback">•</span>
+                      </div>
                       <span class="subCategoryDesignEditor__partMeta" dir="rtl">
                         <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
                         <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
@@ -28280,20 +28346,50 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="subCategoryDesignEditor__interiorGroupFooter">
                       <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits(item.orderIndex) }}</span>
-                      <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini" title="تنظیمات" @click="openDoorInstanceEditor(item)">
-                        <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-                      </button>
-                      <button type="button" class="constructionDialog__iconBtn" title="حذف نمونه" @click="deleteDoorInstanceFromDesign(item)">×</button>
-                      <button type="button" class="constructionDialog__iconBtn" title="کپی نمونه" @click="duplicateDoorInstanceInDesign(item)">⧉</button>
+                      <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--instance">
+                        <label class="subCategoryDesignEditor__miniColorBtn" :style="{ '--line-color': item.lineColor }" :title="`رنگ خطوط ${item.instance_code}`">
+                          <input
+                            :value="item.lineColor"
+                            class="subCategoryDesignEditor__miniColorInput"
+                            type="color"
+                            @click.stop
+                            @input="previewDoorInstanceLineColor(item, $event.target.value)"
+                            @change="applyDoorInstanceLineColor(item, $event.target.value)"
+                          />
+                        </label>
+                        <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini" title="تنظیمات این نمونه" @click.stop="openDoorInstanceEditor(item)">
+                          <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                        </button>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف نمونه" @click.stop="deleteDoorInstanceFromDesign(item)">×</button>
+                        <button type="button" class="constructionDialog__iconBtn" title="کپی نمونه" @click.stop="duplicateDoorInstanceInDesign(item)">⧉</button>
+                      </div>
                     </div>
                   </div>
                 </div>
               </template>
               <template v-else>
                 <div v-if="!subtractorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز نمونه دستگیره مخفی به این طرح اضافه نشده است.</div>
-                <div v-for="item in subtractorLibraryInstanceCards" v-else :key="`order-subtractor-instance-${item.id}`" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+                <div
+                  v-for="item in subtractorLibraryInstanceCards"
+                  v-else
+                  :key="`order-subtractor-instance-${item.id}`"
+                  class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard"
+                  :class="{ 'is-active': String(subtractorLibrarySelectedInstanceId || '') === String(item.id || '') }"
+                  @click="selectInteriorLibraryInstance(item.id)"
+                >
                   <div class="subCategoryDesignEditor__interiorGroupHead">
                     <div class="subCategoryDesignEditor__interiorGroupSummary">
+                      <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !item.iconUrl }">
+                        <img
+                          v-if="item.iconUrl"
+                          :key="item.iconUrl"
+                          :src="item.iconUrl"
+                          :alt="item.groupTitle"
+                          class="subCategoryPreview__groupIcon"
+                          @error="handleSubCategoryDefaultIconError"
+                        />
+                        <span v-else class="subCategoryPreview__groupFallback">•</span>
+                      </div>
                       <span class="subCategoryDesignEditor__partMeta" dir="rtl">
                         <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
                         <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
@@ -28301,11 +28397,23 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="subCategoryDesignEditor__interiorGroupFooter">
                       <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits(item.orderIndex) }}</span>
-                      <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini" title="تنظیمات" @click="openSubtractorInstanceEditor(item)">
-                        <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-                      </button>
-                      <button type="button" class="constructionDialog__iconBtn" title="حذف نمونه" @click="deleteSubtractorInstanceFromDesign(item)">×</button>
-                      <button type="button" class="constructionDialog__iconBtn" title="کپی نمونه" @click="duplicateSubtractorInstanceInDesign(item)">⧉</button>
+                      <div class="subCategoryDesignEditor__interiorGroupActions subCategoryDesignEditor__interiorGroupActions--instance">
+                        <label class="subCategoryDesignEditor__miniColorBtn" :style="{ '--line-color': item.lineColor }" :title="`رنگ خطوط ${item.instance_code}`">
+                          <input
+                            :value="item.lineColor"
+                            class="subCategoryDesignEditor__miniColorInput"
+                            type="color"
+                            @click.stop
+                            @input="previewSubtractorInstanceLineColor(item, $event.target.value)"
+                            @change="applySubtractorInstanceLineColor(item, $event.target.value)"
+                          />
+                        </label>
+                        <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini" title="تنظیمات این نمونه" @click.stop="openSubtractorInstanceEditor(item)">
+                          <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                        </button>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف نمونه" @click.stop="deleteSubtractorInstanceFromDesign(item)">×</button>
+                        <button type="button" class="constructionDialog__iconBtn" title="کپی نمونه" @click.stop="duplicateSubtractorInstanceInDesign(item)">⧉</button>
+                      </div>
                     </div>
                   </div>
                 </div>
