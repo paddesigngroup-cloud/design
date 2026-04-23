@@ -650,7 +650,7 @@ watch(viewport, () => {
   position: absolute;
   inset: 0;
   box-sizing: border-box;
-  border-radius: 10px;
+  border-radius: 20px;
   overflow: hidden;
   background: #fff;
   box-shadow: 0 1px 1px rgba(70, 24, 42, 0.04);
