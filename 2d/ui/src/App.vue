@@ -25085,7 +25085,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="interiorLibraryOpen" :class="orderDesignFullEditorEmbedded ? 'orderDesignEditor__embeddedShell' : (subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog')" role="dialog" aria-modal="true">
+  <div v-if="interiorLibraryOpen && !orderDesignFullEditorEmbedded" :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
     <div v-if="!subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded" class="appDialog__backdrop" @click="closeInteriorLibrary"></div>
     <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen, 'orderDesignEditor__embeddedCard': orderDesignFullEditorEmbedded }" dir="rtl">
       <div v-if="interiorLibraryControllerApplying" class="interiorLibraryLoadingPopup" role="status" aria-live="polite" aria-busy="true">
@@ -26930,7 +26930,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="doorLibraryOpen" :class="orderDesignFullEditorEmbedded ? 'orderDesignEditor__embeddedShell' : (subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog')" role="dialog" aria-modal="true">
+  <div v-if="doorLibraryOpen && !orderDesignFullEditorEmbedded" :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
     <div v-if="!subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded" class="appDialog__backdrop" @click="closeDoorLibrary"></div>
     <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen, 'orderDesignEditor__embeddedCard': orderDesignFullEditorEmbedded }" dir="rtl">
       <div class="formulaBuilder__head">
@@ -27567,7 +27567,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="subtractorLibraryOpen" :class="orderDesignFullEditorEmbedded ? 'orderDesignEditor__embeddedShell' : (subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog')" role="dialog" aria-modal="true">
+  <div v-if="subtractorLibraryOpen && !orderDesignFullEditorEmbedded" :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
     <div v-if="!subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded" class="appDialog__backdrop" @click="closeSubtractorLibrary"></div>
     <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen, 'orderDesignEditor__embeddedCard': orderDesignFullEditorEmbedded }" dir="rtl">
       <div class="formulaBuilder__head">
@@ -27966,11 +27966,303 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div
-          v-if="orderDesignEditorMode === 'full'"
-          v-show="orderDesignEditorActiveSection !== 'structural'"
-          id="order-design-editor-embedded-host"
-          class="orderDesignEditor__embeddedHost"
-        ></div>
+          v-if="orderDesignEditorMode === 'full' && ['internal', 'door', 'subtractor'].includes(orderDesignEditorActiveSection)"
+          class="subCategoryDesignEditor__layout subCategoryDesignEditor__layout--interiorLibrary subCategoryDesignEditor__layout--structuralLibrary orderDesignEditor__fullLayout"
+        >
+          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorSidebar subCategoryDesignEditor__panel--structuralAvailable">
+            <div class="subCategoryDesignEditor__panelTitle">
+              {{ orderDesignEditorActiveSection === 'internal' ? 'گروه‌های قطعات داخلی' : orderDesignEditorActiveSection === 'door' ? 'گروه‌های قطعات درب' : 'گروه‌های دستگیره مخفی' }}
+            </div>
+            <select
+              v-if="orderDesignEditorActiveSection === 'internal'"
+              v-model="interiorLibraryGroupPartKindFilter"
+              class="constructionDialog__input interiorLibraryPartKindFilter"
+            >
+              <option value="">همه انواع قطعات داخلی</option>
+              <option v-for="option in constructionInternalPartKindOptions" :key="`order-internal-group-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+            </select>
+            <select
+              v-else-if="orderDesignEditorActiveSection === 'door'"
+              v-model="doorLibraryGroupPartKindFilter"
+              class="constructionDialog__input interiorLibraryPartKindFilter"
+            >
+              <option value="">همه انواع قطعات درب</option>
+              <option v-for="option in constructionDoorPartKindOptions" :key="`order-door-group-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+            </select>
+            <select
+              v-else
+              v-model="subtractorLibraryGroupPartKindFilter"
+              class="constructionDialog__input interiorLibraryPartKindFilter"
+            >
+              <option value="">همه انواع دستگیره مخفی</option>
+              <option v-for="option in constructionSubtractorPartKindOptions" :key="`order-subtractor-group-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+            </select>
+
+            <div class="subCategoryDesignEditor__partList interiorLibraryPartList">
+              <template v-if="orderDesignEditorActiveSection === 'internal'">
+                <div v-if="!interiorLibraryGroupCards.length" class="designMenu__cabinetState">هنوز گروه قطعات داخلی برای استفاده ثبت نشده است.</div>
+                <div v-for="item in interiorLibraryGroupCards" v-else :key="`order-internal-group-${item.id}`" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+                  <div class="subCategoryDesignEditor__interiorGroupHead">
+                    <div class="subCategoryDesignEditor__interiorGroupSummary">
+                      <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !item.iconUrl }">
+                        <img v-if="item.iconUrl" :src="item.iconUrl" :alt="item.group_title" class="subCategoryPreview__groupIcon" @error="handleSubCategoryDefaultIconError" />
+                        <span v-else class="subCategoryPreview__groupFallback">•</span>
+                      </div>
+                      <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                        <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
+                        <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+                      </span>
+                    </div>
+                    <div class="subCategoryDesignEditor__interiorGroupFooter">
+                      <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" :disabled="isAddingInteriorGroup(item)" @click="addInteriorGroupToDesign(item)">
+                        <span v-if="isAddingInteriorGroup(item)" class="constructionDialog__spinner"></span>
+                        <span>{{ isAddingInteriorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <template v-else-if="orderDesignEditorActiveSection === 'door'">
+                <div v-if="!doorLibraryGroupCards.length" class="designMenu__cabinetState">هنوز گروه قطعات درب برای استفاده ثبت نشده است.</div>
+                <div v-for="item in doorLibraryGroupCards" v-else :key="`order-door-group-${item.id}`" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+                  <div class="subCategoryDesignEditor__interiorGroupHead">
+                    <div class="subCategoryDesignEditor__interiorGroupSummary">
+                      <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !item.iconUrl }">
+                        <img v-if="item.iconUrl" :src="item.iconUrl" :alt="item.group_title" class="subCategoryPreview__groupIcon" @error="handleSubCategoryDefaultIconError" />
+                        <span v-else class="subCategoryPreview__groupFallback">•</span>
+                      </div>
+                      <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                        <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
+                        <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+                      </span>
+                    </div>
+                    <div class="subCategoryDesignEditor__interiorGroupFooter">
+                      <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" :disabled="isAddingDoorGroup(item)" @click="addDoorGroupToDesign(item)">
+                        <span v-if="isAddingDoorGroup(item)" class="constructionDialog__spinner"></span>
+                        <span>{{ isAddingDoorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <template v-else>
+                <div v-if="!subtractorLibraryGroupCards.length" class="designMenu__cabinetState">هنوز گروه دستگیره مخفی برای استفاده ثبت نشده است.</div>
+                <div v-for="item in subtractorLibraryGroupCards" v-else :key="`order-subtractor-group-${item.id}`" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+                  <div class="subCategoryDesignEditor__interiorGroupHead">
+                    <div class="subCategoryDesignEditor__interiorGroupSummary">
+                      <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !item.iconUrl }">
+                        <img v-if="item.iconUrl" :src="item.iconUrl" :alt="item.group_title" class="subCategoryPreview__groupIcon" @error="handleSubCategoryDefaultIconError" />
+                        <span v-else class="subCategoryPreview__groupFallback">•</span>
+                      </div>
+                      <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                        <span class="subCategoryDesignEditor__partTitle">{{ item.group_title }}</span>
+                        <span class="subCategoryDesignEditor__partCode">{{ item.code }}</span>
+                      </span>
+                    </div>
+                    <div class="subCategoryDesignEditor__interiorGroupFooter">
+                      <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" :disabled="isAddingSubtractorGroup(item)" @click="addSubtractorGroupToDesign(item)">
+                        <span v-if="isAddingSubtractorGroup(item)" class="constructionDialog__spinner"></span>
+                        <span>{{ isAddingSubtractorGroup(item) ? "در حال افزودن..." : "افزودن" }}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview subCategoryDesignEditor__panel--interiorPreview subCategoryDesignEditor__panel--structuralPreview">
+            <div class="subCategoryDesignEditor__panelHead subCategoryDesignEditor__panelHead--interiorPreview">
+              <div class="subCategoryDesignEditor__panelTitle">پیش‌نمایش {{ activeOrderDesignEditorSection.label }}</div>
+              <div class="subCategoryDesignEditor__previewActions">
+                <button
+                  type="button"
+                  class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                  :class="{ 'is-active': orderDesignEditorActiveSection === 'door' ? doorLibraryPreviewMode === 'front2d' : (orderDesignEditorActiveSection === 'subtractor' ? subtractorLibraryPreviewMode === 'front2d' : interiorLibraryPreviewMode === 'front2d') }"
+                  title="نمای روبرو"
+                  @click="orderDesignEditorActiveSection === 'door' ? setDoorLibraryPreviewMode('front2d') : (orderDesignEditorActiveSection === 'subtractor' ? setSubtractorLibraryPreviewMode('front2d') : setInteriorLibraryPreviewMode('front2d'))"
+                >
+                  <img :src="activeOrderDesignEditorSection.icon" alt="" />
+                </button>
+                <button
+                  type="button"
+                  class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                  :class="{ 'is-active': orderDesignEditorActiveSection === 'door' ? doorLibraryPreviewMode === 'model3d' : (orderDesignEditorActiveSection === 'subtractor' ? subtractorLibraryPreviewMode === 'model3d' : interiorLibraryPreviewMode === 'model3d') }"
+                  title="نمای سه بعدی"
+                  @click="orderDesignEditorActiveSection === 'door' ? setDoorLibraryPreviewMode('model3d') : (orderDesignEditorActiveSection === 'subtractor' ? setSubtractorLibraryPreviewMode('model3d') : setInteriorLibraryPreviewMode('model3d'))"
+                >
+                  <img src="/icons/3d_viewer.png" alt="" />
+                </button>
+                <button
+                  type="button"
+                  class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                  :class="{ 'is-active': orderDesignEditorActiveSection === 'door' ? doorLibraryShowDimensions : interiorLibraryShowDimensions }"
+                  title="نمایش اندازه گذاری"
+                  @click="orderDesignEditorActiveSection === 'door' ? toggleDoorLibraryDimensionsVisibility() : toggleInteriorLibraryDimensionsVisibility()"
+                >
+                  <img src="/icons/turn_dim.png" alt="" />
+                </button>
+                <button
+                  type="button"
+                  class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                  :class="{ 'is-active': orderDesignEditorActiveSection === 'door' ? doorLibraryAnnotationTool === 'dimension' : interiorLibraryAnnotationTool === 'dimension' }"
+                  title="رسم اندازه گذاری"
+                  @click="orderDesignEditorActiveSection === 'door' ? (doorLibraryAnnotationTool = doorLibraryAnnotationTool === 'dimension' ? null : 'dimension') : toggleInteriorLibraryDimensionTool()"
+                >
+                  <img src="/icons/drawing_dimension.png" alt="" />
+                </button>
+                <button
+                  type="button"
+                  class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                  title="بزرگنمایی"
+                  @click="orderDesignEditorActiveSection === 'door' ? zoomDoorLibraryFrontIn() : zoomInteriorLibraryFrontIn()"
+                >
+                  <img src="/icons/zoom-in.png" alt="" />
+                </button>
+                <button
+                  type="button"
+                  class="iconbtn iconbtn--sm stageQuickBar__btn subCategoryDesignEditor__previewIconBtn"
+                  title="کوچکنمایی"
+                  @click="orderDesignEditorActiveSection === 'door' ? zoomDoorLibraryFrontOut() : zoomInteriorLibraryFrontOut()"
+                >
+                  <img src="/icons/zoom-out.png" alt="" />
+                </button>
+              </div>
+            </div>
+            <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
+              <div
+                class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior"
+                :class="[
+                  orderDesignEditorActiveSection === 'door' ? doorLibraryFrontCursorClass : interiorLibraryFrontCursorClass,
+                  {
+                    'is-panning': orderDesignEditorActiveSection === 'door'
+                      ? (doorLibraryFrontPanning && doorLibraryPreviewMode === 'front2d')
+                      : (interiorLibraryFrontPanning && (orderDesignEditorActiveSection === 'subtractor' ? subtractorLibraryPreviewMode === 'front2d' : interiorLibraryPreviewMode === 'front2d')),
+                    'is-front2d-mode': orderDesignEditorActiveSection === 'door' ? doorLibraryPreviewMode === 'front2d' : (orderDesignEditorActiveSection === 'subtractor' ? subtractorLibraryPreviewMode === 'front2d' : interiorLibraryPreviewMode === 'front2d'),
+                  }
+                ]"
+                @wheel.prevent="orderDesignEditorActiveSection === 'door' ? handleDoorLibraryPreviewWheel($event) : handleInteriorLibraryPreviewWheel($event)"
+                @pointermove="orderDesignEditorActiveSection === 'door' ? onDoorLibraryViewerPointerMove($event) : onInteriorLibraryViewerPointerMove($event)"
+                @pointerleave="orderDesignEditorActiveSection === 'door' ? onDoorLibraryViewerPointerLeave($event) : onInteriorLibraryViewerPointerLeave($event)"
+                @pointerdown="orderDesignEditorActiveSection === 'door' ? onDoorLibraryViewerPointerDown($event) : onInteriorLibraryViewerPointerDown($event)"
+                @dblclick.prevent="orderDesignEditorActiveSection === 'door'
+                  ? (doorLibraryPreviewMode === 'model3d' ? focusDoorLibraryPreviewCloser() : null)
+                  : ((orderDesignEditorActiveSection === 'subtractor' ? subtractorLibraryPreviewMode : interiorLibraryPreviewMode) === 'model3d' ? focusInteriorLibraryPreviewCloser() : null)"
+              >
+                <GlbViewerWidget
+                  v-if="orderDesignEditorActiveSection === 'door' ? doorLibraryPreviewMode === 'model3d' : (orderDesignEditorActiveSection === 'subtractor' ? subtractorLibraryPreviewMode === 'model3d' : interiorLibraryPreviewMode === 'model3d')"
+                  src="/models/1_z1.glb"
+                  :walls2d="widgetPreviewWalls2d"
+                  :placeholder-outline-color="orderDesignEditorActiveSection === 'door' ? activeDoorLibraryOutlineColor : activeInteriorLibraryOutlineColor"
+                  :placeholder-boxes="orderDesignEditorActiveSection === 'door' ? activeDoorLibraryViewerBoxes : activeInteriorLibraryViewerBoxes"
+                  :display-unit="currentEditorDisplayUnit"
+                  :show-attrs-panel="false"
+                  :embedded="true"
+                  :preview-only="true"
+                  :preview-active="false"
+                />
+                <FrontViewCanvas
+                  v-else
+                  class="subCategoryDesignEditor__frontCanvas"
+                  :scene="orderDesignEditorActiveSection === 'door' ? doorLibraryFrontCanvasScene : interiorLibraryFrontCanvasScene"
+                  :cursor-class="orderDesignEditorActiveSection === 'door' ? doorLibraryFrontCursorClass : interiorLibraryFrontCursorClass"
+                  @canvas-wheel="orderDesignEditorActiveSection === 'door' ? handleDoorLibraryPreviewWheel($event.event) : handleInteriorLibraryPreviewWheel($event.event)"
+                  @pointerdown="orderDesignEditorActiveSection === 'door' ? onDoorLibraryFrontSvgPointerDown($event) : onInteriorLibraryFrontSvgPointerDown($event)"
+                  @pointermove="orderDesignEditorActiveSection === 'door' ? onDoorLibraryFrontSvgPointerMove($event) : onInteriorLibraryFrontSvgPointerMove($event)"
+                  @pointerup="orderDesignEditorActiveSection === 'door' ? null : onInteriorLibraryFrontSvgPointerUp($event)"
+                  @pointercancel="orderDesignEditorActiveSection === 'door' ? null : onInteriorLibraryFrontSvgPointerCancel($event)"
+                  @pointerleave="orderDesignEditorActiveSection === 'door' ? onDoorLibraryFrontSvgPointerLeave($event) : onInteriorLibraryFrontSvgPointerLeave($event)"
+                  @contextmenu="orderDesignEditorActiveSection === 'door' ? onDoorLibraryFrontSvgContextMenu($event) : onInteriorLibraryFrontSvgContextMenu($event)"
+                  @dblclick="orderDesignEditorActiveSection === 'door' ? onDoorLibraryFrontSvgDoubleClick($event) : onInteriorLibraryFrontSvgDoubleClick($event)"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances subCategoryDesignEditor__panel--structuralSelected">
+            <div class="subCategoryDesignEditor__panelTitle">نمونه‌های {{ activeOrderDesignEditorSection.label }} این طرح</div>
+            <select
+              v-if="orderDesignEditorActiveSection === 'internal'"
+              v-model="interiorLibraryInstancePartKindFilter"
+              class="constructionDialog__input interiorLibraryPartKindFilter"
+            >
+              <option value="">همه انواع قطعات داخلی</option>
+              <option v-for="option in constructionInternalPartKindOptions" :key="`order-internal-instance-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+            </select>
+            <select
+              v-else-if="orderDesignEditorActiveSection === 'door'"
+              v-model="doorLibraryInstancePartKindFilter"
+              class="constructionDialog__input interiorLibraryPartKindFilter"
+            >
+              <option value="">همه انواع قطعات درب</option>
+              <option v-for="option in constructionDoorPartKindOptions" :key="`order-door-instance-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+            </select>
+            <div class="subCategoryDesignEditor__partList interiorLibraryPartList">
+              <template v-if="orderDesignEditorActiveSection === 'internal'">
+                <div v-if="!interiorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز نمونه داخلی به این طرح اضافه نشده است.</div>
+                <div v-for="(item, itemIndex) in interiorLibraryInstanceCards" v-else :key="`order-internal-instance-${item.id}`" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+                  <div class="subCategoryDesignEditor__interiorGroupHead">
+                    <div class="subCategoryDesignEditor__interiorGroupSummary">
+                      <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                        <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
+                        <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
+                      </span>
+                    </div>
+                    <div class="subCategoryDesignEditor__interiorGroupFooter">
+                      <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits(itemIndex + 1) }}</span>
+                      <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini" title="تنظیمات" @click="openInteriorInstanceEditor(item)">
+                        <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                      </button>
+                      <button type="button" class="constructionDialog__iconBtn" title="حذف نمونه" @click="deleteInteriorInstanceFromDesign(item)">×</button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <template v-else-if="orderDesignEditorActiveSection === 'door'">
+                <div v-if="!doorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز نمونه درب به این طرح اضافه نشده است.</div>
+                <div v-for="item in doorLibraryInstanceCards" v-else :key="`order-door-instance-${item.id}`" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+                  <div class="subCategoryDesignEditor__interiorGroupHead">
+                    <div class="subCategoryDesignEditor__interiorGroupSummary">
+                      <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                        <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
+                        <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
+                      </span>
+                    </div>
+                    <div class="subCategoryDesignEditor__interiorGroupFooter">
+                      <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits(item.orderIndex) }}</span>
+                      <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini" title="تنظیمات" @click="openDoorInstanceEditor(item)">
+                        <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                      </button>
+                      <button type="button" class="constructionDialog__iconBtn" title="حذف نمونه" @click="deleteDoorInstanceFromDesign(item)">×</button>
+                      <button type="button" class="constructionDialog__iconBtn" title="کپی نمونه" @click="duplicateDoorInstanceInDesign(item)">⧉</button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <template v-else>
+                <div v-if="!subtractorLibraryInstanceCards.length" class="designMenu__cabinetState">هنوز نمونه دستگیره مخفی به این طرح اضافه نشده است.</div>
+                <div v-for="item in subtractorLibraryInstanceCards" v-else :key="`order-subtractor-instance-${item.id}`" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard">
+                  <div class="subCategoryDesignEditor__interiorGroupHead">
+                    <div class="subCategoryDesignEditor__interiorGroupSummary">
+                      <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                        <span class="subCategoryDesignEditor__partTitle">{{ item.groupTitle }}</span>
+                        <span class="subCategoryDesignEditor__partCode">{{ item.instance_code }}</span>
+                      </span>
+                    </div>
+                    <div class="subCategoryDesignEditor__interiorGroupFooter">
+                      <span class="constructionDialog__pill subCategoryDesignEditor__orderPill">{{ toPersianDigits(item.orderIndex) }}</span>
+                      <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__settingsBtn--mini" title="تنظیمات" @click="openSubtractorInstanceEditor(item)">
+                        <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
+                      </button>
+                      <button type="button" class="constructionDialog__iconBtn" title="حذف نمونه" @click="deleteSubtractorInstanceFromDesign(item)">×</button>
+                      <button type="button" class="constructionDialog__iconBtn" title="کپی نمونه" @click="duplicateSubtractorInstanceInDesign(item)">⧉</button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
         <div
           v-if="orderDesignEditorMode === 'full' && orderDesignEditorActiveSection === 'structural'"
           class="subCategoryDesignEditor__layout subCategoryDesignEditor__layout--interiorLibrary subCategoryDesignEditor__layout--structuralLibrary orderDesignEditor__fullLayout"

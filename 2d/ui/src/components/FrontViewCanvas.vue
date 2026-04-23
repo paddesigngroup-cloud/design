@@ -649,6 +649,10 @@ watch(viewport, () => {
 .frontViewCanvas {
   position: absolute;
   inset: 0;
+  border: 1px solid rgba(118, 45, 71, 0.14);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .frontViewCanvas__canvas {
@@ -656,5 +660,10 @@ watch(viewport, () => {
   height: 100%;
   display: block;
   background: transparent;
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+  border-bottom-left-radius: 10px;
+  padding: 7px;
 }
 </style>
