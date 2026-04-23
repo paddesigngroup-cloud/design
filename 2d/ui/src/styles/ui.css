@@ -1805,8 +1805,8 @@ option {
 }
 .glbWidget.is-embedded .glbWidget__opacity {
   display: flex;
-  left: 18px;
-  bottom: 18px;
+  left: 4px;
+  bottom: 4px;
   background: rgba(255, 255, 255, 0.72);
   box-shadow: 0 10px 24px rgba(70, 24, 42, 0.08);
 }
@@ -3570,7 +3570,7 @@ option {
   font-family: Vazirmatn, sans-serif;
 }
 .appDialog__card--subPreview {
-  width: min(1100px, calc(100vw - 28px));
+  width: max(00px, calc(100vw - 28px));
   max-height: calc(100vh - 28px);
   overflow: hidden;
   font-family: Vazirmatn, sans-serif;
@@ -3938,8 +3938,8 @@ option {
 }
 .subCategoryDesignEditor__previewOpacity--overlay {
   position: absolute;
-  left: 18px;
-  bottom: 18px;
+  left: 24px;
+  bottom: 24px;
   z-index: 4;
   padding: 6px 10px;
   border-radius: 999px;
@@ -4035,7 +4035,7 @@ option {
   height: 100%;
 }
 .subCategoryDesignEditor__layout--structuralLibrary {
-  min-height: 620px;
+  min-height: 550px;
   align-items: stretch;
 }
 .subCategoryDesignEditor__layout--structuralLibrary .subCategoryDesignEditor__panel--structuralAvailable {
@@ -4365,8 +4365,8 @@ option {
 }
 .subCategoryDesignEditor__controllerHint {
   position: absolute;
-  left: 0;
-  bottom: 0;
+  left: 6px;
+  bottom: 6px;
   z-index: 4;
   max-width: min(480px, calc(100% - 40px));
   padding: 10px 14px;
@@ -5401,6 +5401,71 @@ option {
   gap: 12px;
   min-height: 0;
   flex: 1 1 auto;
+}
+.orderDesignEditor__meta {
+  margin-top: 12px;
+}
+.orderDesignEditor__tabs {
+  margin-top: 12px;
+}
+.orderDesignEditor__sectionPanel {
+  width: 100%;
+}
+.orderDesignEditor__sectionAction {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.orderDesignEditor__sectionAction--full {
+  grid-column: 1 / -1;
+  min-height: 420px;
+  align-content: center;
+  gap: 14px;
+}
+
+.orderDesignEditor__embeddedHost {
+  width: 100%;
+  min-height: 620px;
+  flex: 1 1 auto;
+  display: flex;
+}
+
+.orderDesignEditor__embeddedShell {
+  position: fixed;
+  z-index: 4070;
+  top: calc(50% - min(900px, calc(100vh - 28px)) / 2 + 275px);
+  left: calc(50% - min(1440px, calc(100vw - 24px)) / 2 + 14px);
+  width: calc(min(1440px, calc(100vw - 24px)) - 28px);
+  height: 100%;
+  min-height: 320px;
+  max-height: calc(100vh - 392px);
+  display: flex;
+  pointer-events: auto;
+  background: #fff;
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.orderDesignEditor__embeddedCard {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+}
+
+.orderDesignEditor__embeddedCard > .formulaBuilder__head,
+.orderDesignEditor__embeddedCard > .constructionDialog__sectionHint,
+.orderDesignEditor__embeddedCard > .appDialog__actions {
+  display: none;
+}
+
+.orderDesignEditor__embeddedCard > .subCategoryDesignEditor__layout {
+  height: 100%;
+  min-height: 0;
 }
 .subCategoryPreview__tree {
   display: grid;

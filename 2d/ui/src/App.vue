@@ -566,6 +566,16 @@ let doorLibraryHoverRafId = 0;
 const orderDesignEditorOpen = ref(false);
 const orderDesignEditorDraft = ref(null);
 const orderDesignEditorActiveGroupId = ref("");
+const orderDesignEditorMode = ref("settings");
+const orderDesignEditorActiveSection = ref("structural");
+const orderDesignEditorSections = [
+  { id: "structural", label: "سازه", icon: "/icons/vertical_piece.png" },
+  { id: "internal", label: "داخلی", icon: "/icons/enternal.png" },
+  { id: "door", label: "درب", icon: "/icons/door_styles.png" },
+  { id: "subtractor", label: "دستگیره مخفی", icon: "/icons/handless.png" },
+  { id: "defaults", label: "پیش‌فرض طرح سابکت", icon: "/icons/setting.png" },
+];
+const orderDesignFullEditorEmbedded = computed(() => orderDesignEditorOpen.value && orderDesignEditorMode.value === "full");
 const orderDesignSavingIds = ref([]);
 const orderDesignPlacements = ref([]);
 const stageCabinetPlaceholderBoxes = ref([]);
@@ -3887,6 +3897,47 @@ const availableSubCategoryStructuralPartCards = computed(() =>
     .filter((item) => matchesStructuralLibraryPartKindFilter(item.partKindId, structuralLibraryAvailablePartKindFilter.value))
     .sort((a, b) => Number(a.uiOrder || 0) - Number(b.uiOrder || 0) || String(a.title || "").localeCompare(String(b.title || ""), "fa"))
 );
+const selectedOrderDesignStructuralPartCards = computed(() => {
+  const draft = orderDesignEditorDraft.value;
+  const rows = Array.isArray(draft?.part_snapshots) ? draft.part_snapshots : [];
+  return rows
+    .map((part, index) => {
+      const formulaId = Number(part?.part_formula_id || part?.id) || 0;
+      const formula = constructionPartFormulasById.value.get(formulaId);
+      const partKindId = Number(part?.part_kind_id || formula?.part_kind_id) || 0;
+      return {
+        id: formulaId || `${String(part?.part_code || "part").trim()}-${index}`,
+        formulaId,
+        title: String(part?.part_title || formula?.part_title || formula?.title || part?.title || part?.part_code || `part_${index + 1}`).trim(),
+        code: String(part?.part_code || formula?.part_code || "").trim(),
+        partKindId,
+        partKindLabel: getConstructionPartKindInternalLabel(partKindId),
+        orderIndex: Number(part?.ui_order) || index + 1,
+      };
+    })
+    .filter((item) => matchesStructuralLibraryPartKindFilter(item.partKindId, structuralLibrarySelectedPartKindFilter.value))
+    .sort((a, b) => a.orderIndex - b.orderIndex || String(a.title || "").localeCompare(String(b.title || ""), "fa"));
+});
+const availableOrderDesignStructuralPartCards = computed(() => {
+  const selectedFormulaIds = new Set(
+    selectedOrderDesignStructuralPartCards.value
+      .map((item) => Number(item.formulaId) || 0)
+      .filter(Boolean)
+  );
+  const selectedCodes = new Set(
+    selectedOrderDesignStructuralPartCards.value
+      .map((item) => String(item.code || "").trim())
+      .filter(Boolean)
+  );
+  return constructionSubCategoryDesignPartFormulaOptions.value
+    .map((item) => ({
+      ...item,
+      partKindLabel: getConstructionPartKindInternalLabel(item.partKindId),
+      selected: selectedFormulaIds.has(Number(item.id) || 0) || selectedCodes.has(String(item.code || "").trim()),
+    }))
+    .filter((item) => matchesStructuralLibraryPartKindFilter(item.partKindId, structuralLibraryAvailablePartKindFilter.value))
+    .sort((a, b) => Number(a.uiOrder || 0) - Number(b.uiOrder || 0) || String(a.title || "").localeCompare(String(b.title || ""), "fa"));
+});
 const constructionInteriorPartFormulaOptions = computed(() =>
   constructionPartFormulas.value
     .filter((item) => {
@@ -9947,6 +9998,7 @@ function normalizeOrderDesignRecord(item) {
     design_outline_color: normalizeHexColor(item.design_outline_color),
     design_code: String(item.design_code || "").trim(),
     design_title: String(item.design_title || "").trim(),
+    manual_name: String(item.manual_name || "").trim(),
     instance_code: String(item.instance_code || "").trim(),
     status: String(item.status || "draft").trim() || "draft",
     sort_order: Number(item.sort_order) || 0,
@@ -10147,9 +10199,10 @@ async function createOrderDesignFromSource(sourceDesign, { instanceCode = "", de
   return freshCreated;
 }
 
-function openOrderDesignEditor(item) {
+function openOrderDesignEditor(item, options = {}) {
   const normalized = normalizeOrderDesignRecord(item);
   if (!normalized) return;
+  const mode = options?.mode === "full" ? "full" : "settings";
   orderDesignEditorDraft.value = {
     ...normalized,
     order_attr_values: Object.fromEntries(
@@ -10161,21 +10214,32 @@ function openOrderDesignEditor(item) {
     order_attr_meta: { ...(normalized.order_attr_meta || {}) },
   };
   orderDesignEditorActiveGroupId.value = buildOrderDesignEditorGroups(normalized)[0]?.id || "";
+  orderDesignEditorMode.value = mode;
+  orderDesignEditorActiveSection.value = mode === "full" ? "structural" : "structural";
   orderDesignEditorOpen.value = true;
 }
 
-function openOrderDesignEditorById(orderDesignId) {
+function openOrderDesignEditorById(orderDesignId, options = {}) {
   const key = String(orderDesignId || "").trim();
   if (!key) return;
   const item = orderDesignCatalog.value.find((row) => String(row.id) === key);
   if (!item) return;
-  openOrderDesignEditor(item);
+  openOrderDesignEditor(item, options);
+}
+
+function openOrderDesignFullEditorById(orderDesignId) {
+  openOrderDesignEditorById(orderDesignId, { mode: "full" });
 }
 
 function closeOrderDesignEditor() {
+  closeInteriorLibrary();
+  closeDoorLibrary();
+  closeSubtractorLibrary();
   orderDesignEditorOpen.value = false;
   orderDesignEditorDraft.value = null;
   orderDesignEditorActiveGroupId.value = "";
+  orderDesignEditorMode.value = "settings";
+  orderDesignEditorActiveSection.value = "structural";
 }
 
 function getOrderDesignAttrEntries(item) {
@@ -10280,9 +10344,65 @@ const activeOrderDesignEditorGroup = computed(() =>
   || orderDesignEditorGroups.value[0]
   || null
 );
+const activeOrderDesignEditorSection = computed(() =>
+  orderDesignEditorSections.find((section) => section.id === orderDesignEditorActiveSection.value)
+  || orderDesignEditorSections[0]
+);
 
 function selectOrderDesignEditorGroup(groupId) {
   orderDesignEditorActiveGroupId.value = String(groupId || "").trim();
+}
+
+async function selectOrderDesignEditorSection(sectionId) {
+  const nextId = String(sectionId || "").trim();
+  if (!orderDesignEditorSections.some((item) => item.id === nextId)) return;
+  if (nextId === "defaults") {
+    closeInteriorLibrary();
+    closeDoorLibrary();
+    closeSubtractorLibrary();
+    openOrderDesignSubCategoryDefaultsFromEditor();
+    return;
+  }
+  orderDesignEditorActiveSection.value = nextId;
+  if (nextId === "structural") {
+    closeInteriorLibrary();
+    closeDoorLibrary();
+    closeSubtractorLibrary();
+    return;
+  }
+  await openOrderDesignEditorRelatedSection(nextId);
+}
+
+function openOrderDesignSubCategoryDefaultsFromEditor() {
+  const draft = orderDesignEditorDraft.value;
+  const subCategoryId = String(draft?.sub_category_id || "").trim();
+  if (!subCategoryId) return;
+  const target = constructionSubCategories.value.find((item) => String(item.id) === subCategoryId);
+  if (!target) {
+    showAlert("ساب‌کت این طرح سفارش در جدول ساب‌کت‌ها پیدا نشد.", { title: "پیش‌فرض طرح سابکت" });
+    return;
+  }
+  openSubCategoryUserPreview(target);
+}
+
+async function openOrderDesignEditorRelatedSection(sectionId) {
+  const draft = orderDesignEditorDraft.value;
+  const designId = String(draft?.id || "").trim();
+  if (!designId) return;
+  if (orderDesignFullEditorEmbedded.value) {
+    await nextTick();
+  }
+  if (sectionId === "internal") {
+    await openInteriorLibraryForDesign(designId);
+    return;
+  }
+  if (sectionId === "door") {
+    await openDoorLibraryForDesign(designId);
+    return;
+  }
+  if (sectionId === "subtractor") {
+    await openSubtractorLibraryForDesign(designId);
+  }
 }
 
 function setOrderDesignEditorBinaryValue(key, value) {
@@ -10299,6 +10419,7 @@ async function persistOrderDesignRecord(item, nextAttrValues = null) {
   if (!target?.id) return null;
   const payload = {
     design_title: String(target.design_title || "").trim(),
+    manual_name: String(target.manual_name || "").trim() || null,
     instance_code: String(target.instance_code || "").trim(),
     sort_order: Number(target.sort_order) || 0,
     status: String(target.status || "draft"),
@@ -11040,6 +11161,7 @@ function buildOrderDesignHistoryRestorePayload(item) {
   if (!target?.id) return null;
   return {
     design_title: String(target.design_title || "").trim(),
+    manual_name: String(target.manual_name || "").trim() || null,
     instance_code: String(target.instance_code || "").trim(),
     sort_order: Number(target.sort_order) || 0,
     status: String(target.status || "draft").trim() || "draft",
@@ -19728,6 +19850,37 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
     }
     return;
   }
+  if (orderDesignFullEditorEmbedded.value) {
+    const resolvedTargetId = String(targetOrderDesignId || orderDesignEditorDraft.value?.id || "").trim();
+    if (!resolvedTargetId) return;
+    orderDesignEditorActiveSection.value = "internal";
+    doorLibraryOpen.value = false;
+    subtractorLibraryOpen.value = false;
+    interiorLibraryForcedOrderDesignId.value = resolvedTargetId;
+    interiorLibraryOpen.value = true;
+    interiorLibraryPreviewMode.value = "front2d";
+    interiorLibraryFrontZoom.value = 1;
+    interiorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
+    interiorLibraryShowInnerLines.value = true;
+    resetInteriorLibraryAnnotations();
+    interiorLibraryFrontPan.value = { x: 0, y: 0 };
+    stopInteriorLibraryFrontPan();
+    await Promise.allSettled([
+      loadConstructionParamGroups(),
+      loadConstructionParams(),
+      loadConstructionSubCategories(),
+      loadConstructionInternalPartGroups(),
+      loadConstructionSubtractorPartGroups(),
+      loadConstructionSubCategoryDesigns(),
+      loadConstructionPartKinds(),
+      loadConstructionPartFormulas(),
+    ]);
+    if (activeOrder.value?.id) {
+      await loadOrderDesignCatalog(true);
+      await ensureOrderDesignInteriorParamMetaLoaded(resolvedTargetId);
+    }
+    return;
+  }
   closeSubtractorLibrary();
   const nextTargetOrderDesignId = String(targetOrderDesignId || "").trim();
   const currentTargetOrderDesignId = String(activeInteriorLibraryOrderDesignId.value || "").trim();
@@ -19806,6 +19959,30 @@ async function openDoorLibrary(targetOrderDesignId = "") {
     }
     return;
   }
+  if (orderDesignFullEditorEmbedded.value) {
+    const resolvedTargetId = String(targetOrderDesignId || orderDesignEditorDraft.value?.id || "").trim();
+    if (!resolvedTargetId) return;
+    orderDesignEditorActiveSection.value = "door";
+    interiorLibraryOpen.value = false;
+    subtractorLibraryOpen.value = false;
+    doorLibraryForcedOrderDesignId.value = resolvedTargetId;
+    doorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
+    clearDoorLibraryPlacedInstanceSelection();
+    resetDoorLibraryPreviewView();
+    await Promise.allSettled([
+      loadConstructionDoorPartGroups(),
+      loadConstructionSubtractorPartGroups(),
+      loadConstructionPartKinds(),
+      loadConstructionPartFormulas(),
+    ]);
+    if (activeOrder.value?.id) {
+      await loadOrderDesignCatalog(true);
+    }
+    doorLibraryOpen.value = true;
+    doorLibraryPreviewMode.value = "front2d";
+    resetDoorLibraryAnnotations();
+    return;
+  }
   closeSubtractorLibrary();
   const nextTargetOrderDesignId = String(targetOrderDesignId || "").trim();
   const currentTargetOrderDesignId = String(activeDoorLibraryOrderDesignId.value || "").trim();
@@ -19874,6 +20051,34 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
     if (!subCategoryDesignPreviewLoading.value) {
       await refreshSubCategoryDesignPreview();
     }
+    return;
+  }
+  if (orderDesignFullEditorEmbedded.value) {
+    const resolvedTargetId = String(targetOrderDesignId || orderDesignEditorDraft.value?.id || "").trim();
+    if (!resolvedTargetId) return;
+    orderDesignEditorActiveSection.value = "subtractor";
+    interiorLibraryOpen.value = false;
+    doorLibraryOpen.value = false;
+    subtractorLibraryForcedOrderDesignId.value = resolvedTargetId;
+    interiorLibraryForcedOrderDesignId.value = resolvedTargetId;
+    await Promise.allSettled([
+      loadConstructionParamGroups(),
+      loadConstructionParams(),
+      loadConstructionSubCategories(),
+      loadConstructionSubtractorPartGroups(),
+      loadConstructionPartKinds(),
+      loadConstructionPartFormulas(),
+    ]);
+    if (activeOrder.value?.id) {
+      await loadOrderDesignCatalog(true);
+      await refreshOrderDesignGeometryFromServer(resolvedTargetId, { updateStage: false });
+      await Promise.allSettled([
+        ensureOrderDesignInteriorParamMetaLoaded(resolvedTargetId),
+        ensureOrderDesignDoorParamMetaLoaded(resolvedTargetId),
+        ensureOrderDesignSubtractorParamMetaLoaded(resolvedTargetId),
+      ]);
+    }
+    subtractorLibraryOpen.value = true;
     return;
   }
   closeInteriorLibrary();
@@ -21679,7 +21884,8 @@ onBeforeUnmount(() => {
             @update:wallStyleDraft="updateWallStyleDraft"
             @update:selectedWallCoords="updateSelectedWallCoords"
             @update:orderDesignAttr="updateActiveOrderDesignAttr"
-            @openOrderDesignSettings="openOrderDesignEditorById"
+            @openOrderDesignSettings="openOrderDesignFullEditorById"
+            @openOrderDesignFullEditor="openOrderDesignFullEditorById"
             @openInteriorLibraryForDesign="openInteriorLibraryForDesign"
             @openDoorLibraryForDesign="openDoorLibraryForDesign"
             @openSubtractorLibraryForDesign="openSubtractorLibraryForDesign"
@@ -24879,9 +25085,9 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="interiorLibraryOpen" :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
-    <div v-if="!subCategoryDesignEditorOpen" class="appDialog__backdrop" @click="closeInteriorLibrary"></div>
-    <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen }" dir="rtl">
+  <div v-if="interiorLibraryOpen" :class="orderDesignFullEditorEmbedded ? 'orderDesignEditor__embeddedShell' : (subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog')" role="dialog" aria-modal="true">
+    <div v-if="!subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded" class="appDialog__backdrop" @click="closeInteriorLibrary"></div>
+    <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen, 'orderDesignEditor__embeddedCard': orderDesignFullEditorEmbedded }" dir="rtl">
       <div v-if="interiorLibraryControllerApplying" class="interiorLibraryLoadingPopup" role="status" aria-live="polite" aria-busy="true">
         <span class="interiorLibraryLoadingPopup__spinner" aria-hidden="true"></span>
         <span class="interiorLibraryLoadingPopup__text">در حال اعمال تغییرات کنترلر...</span>
@@ -25474,14 +25680,6 @@ onBeforeUnmount(() => {
                 </button>
               </div>
               <div
-                v-if="subtractorLibraryPreviewMode !== 'model3d' && !interiorLibraryPreviewSvgLines.outer.length"
-                class="designMenu__cabinetState"
-              >
-                {{ subtractorLibraryPreviewMode === "model3d"
-                  ? "برای این طرح هنوز preview سه بعدی قابل نمایش نیست."
-                  : "برای این طرح هنوز preview خطی قابل نمایش نیست." }}
-              </div>
-              <div
                 v-if="interiorLibraryPreviewMode === 'front2d' && interiorLibraryControllerState.message"
                 class="subCategoryDesignEditor__controllerHint"
               >
@@ -25620,7 +25818,7 @@ onBeforeUnmount(() => {
   </div>
 
   <div
-    v-if="interiorLibraryOpen && !subCategoryDesignEditorOpen && interiorLibraryInstanceContextMenu.visible && activeInteriorLibraryContextMenuInstance"
+    v-if="interiorLibraryOpen && !subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded && interiorLibraryInstanceContextMenu.visible && activeInteriorLibraryContextMenuInstance"
     class="subCategoryDesignEditor__contextMenu"
     :style="interiorLibraryInstanceContextMenuStyle"
     @pointerdown.stop
@@ -25630,7 +25828,7 @@ onBeforeUnmount(() => {
   </div>
 
   <div
-    v-if="doorLibraryOpen && !subCategoryDesignEditorOpen && doorLibraryInstanceContextMenu.visible && activeDoorLibraryContextMenuInstance"
+    v-if="doorLibraryOpen && !subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded && doorLibraryInstanceContextMenu.visible && activeDoorLibraryContextMenuInstance"
     class="subCategoryDesignEditor__contextMenu"
     :style="doorLibraryInstanceContextMenuStyle"
     @pointerdown.stop
@@ -26732,9 +26930,9 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="doorLibraryOpen" :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
-    <div v-if="!subCategoryDesignEditorOpen" class="appDialog__backdrop" @click="closeDoorLibrary"></div>
-    <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen }" dir="rtl">
+  <div v-if="doorLibraryOpen" :class="orderDesignFullEditorEmbedded ? 'orderDesignEditor__embeddedShell' : (subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog')" role="dialog" aria-modal="true">
+    <div v-if="!subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded" class="appDialog__backdrop" @click="closeDoorLibrary"></div>
+    <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen, 'orderDesignEditor__embeddedCard': orderDesignFullEditorEmbedded }" dir="rtl">
       <div class="formulaBuilder__head">
         <div class="constructionDialog__sectionTitle formulaBuilder__title">قطعات درب</div>
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeDoorLibrary">×</button>
@@ -27369,9 +27567,9 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="subtractorLibraryOpen" :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
-    <div v-if="!subCategoryDesignEditorOpen" class="appDialog__backdrop" @click="closeSubtractorLibrary"></div>
-    <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen }" dir="rtl">
+  <div v-if="subtractorLibraryOpen" :class="orderDesignFullEditorEmbedded ? 'orderDesignEditor__embeddedShell' : (subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog')" role="dialog" aria-modal="true">
+    <div v-if="!subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded" class="appDialog__backdrop" @click="closeSubtractorLibrary"></div>
+    <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen, 'orderDesignEditor__embeddedCard': orderDesignFullEditorEmbedded }" dir="rtl">
       <div class="formulaBuilder__head">
         <div class="constructionDialog__sectionTitle formulaBuilder__title">دستگیره مخفی</div>
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeSubtractorLibrary">×</button>
@@ -27504,15 +27702,7 @@ onBeforeUnmount(() => {
                 </button>
               </div>
               <div
-                v-if="subtractorLibraryPreviewMode !== 'model3d' && !interiorLibraryPreviewSvgLines.outer.length"
-                class="designMenu__cabinetState"
-              >
-                {{ subtractorLibraryPreviewMode === "model3d"
-                  ? "برای این طرح هنوز preview سه بعدی قابل نمایش نیست."
-                  : "برای این طرح هنوز preview خطی قابل نمایش نیست." }}
-              </div>
-              <div
-                v-if="interiorLibraryPreviewMode === 'front2d' && interiorLibraryControllerState.message"
+                v-if="subtractorLibraryPreviewMode === 'front2d' && interiorLibraryControllerState.message"
                 class="subCategoryDesignEditor__controllerHint"
               >
                 {{ interiorLibraryControllerState.message }}
@@ -27629,7 +27819,7 @@ onBeforeUnmount(() => {
   </div>
 
   <div
-    v-if="subtractorLibraryOpen && !subCategoryDesignEditorOpen && subtractorLibraryInstanceContextMenu.visible && activeSubtractorLibraryContextMenuInstance"
+    v-if="subtractorLibraryOpen && !subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded && subtractorLibraryInstanceContextMenu.visible && activeSubtractorLibraryContextMenuInstance"
     class="subCategoryDesignEditor__contextMenu"
     :style="subtractorLibraryInstanceContextMenuStyle"
     dir="rtl"
@@ -27641,12 +27831,14 @@ onBeforeUnmount(() => {
 
   <div v-if="orderDesignEditorOpen" class="appDialog" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeOrderDesignEditor"></div>
-    <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
+    <div class="appDialog__card" :class="orderDesignEditorMode === 'full' ? 'appDialog__card--subDesign' : 'appDialog__card--subPreview'" dir="rtl">
       <div class="subCategoryPreview__header">
         <div>
-          <div class="subCategoryPreview__title">تنظیمات پارامترهای طرح سفارش</div>
+          <div class="subCategoryPreview__title">
+            {{ orderDesignEditorMode === "full" ? "ویرایش کامل طرح سفارش" : "تنظیمات پارامترهای طرح سفارش" }}
+          </div>
           <div class="subCategoryPreview__caption">
-            {{ orderDesignEditorDraft?.design_title || "طرح سفارش" }}
+            {{ orderDesignEditorDraft?.manual_name || orderDesignEditorDraft?.design_title || "طرح سفارش" }}
             <span v-if="orderDesignEditorDraft?.instance_code">{{ orderDesignEditorDraft.instance_code }}</span>
             <span v-if="orderDesignEditorDraft?.design_code">{{ orderDesignEditorDraft.design_code }}</span>
           </div>
@@ -27656,8 +27848,34 @@ onBeforeUnmount(() => {
       <div class="constructionDialog__sectionHint">
         در این بخش پیش‌فرض پارامترهای همین طرح سفارش را به‌صورت گروه‌بندی‌شده تغییر می‌دهید. مقادیر عددی با واحد نمایشی فعلی دیده می‌شوند و هنگام ذخیره به میلی‌متر برمی‌گردند.
       </div>
+      <div v-if="orderDesignEditorDraft" class="subCategoryDesignEditor__meta orderDesignEditor__meta">
+        <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+          <span>نام دستی طرح سفارش</span>
+          <input
+            v-model="orderDesignEditorDraft.manual_name"
+            class="constructionDialog__input"
+            type="text"
+            maxlength="255"
+            placeholder="مثلاً کابینت دیوار شمالی"
+          />
+        </label>
+      </div>
+      <div v-if="orderDesignEditorMode === 'full'" class="subCategoryDesignEditor__metaActions subCategoryDesignEditor__metaActions--tabs orderDesignEditor__tabs">
+        <button
+          v-for="section in orderDesignEditorSections"
+          :key="section.id"
+          type="button"
+          class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__tabBtn"
+          :class="{ 'is-active': orderDesignEditorActiveSection === section.id }"
+          :title="section.label"
+          @click="selectOrderDesignEditorSection(section.id)"
+        >
+          <img :src="section.icon" alt="" class="subCategoryDesignEditor__metaIcon" />
+          <span>{{ section.label }}</span>
+        </button>
+      </div>
       <div v-if="orderDesignEditorDraft" class="subCategoryPreview__body">
-        <div class="subCategoryPreview__tree">
+        <div v-if="orderDesignEditorMode !== 'full' || orderDesignEditorActiveSection === 'defaults'" class="subCategoryPreview__tree">
           <div class="subCategoryPreview__panel subCategoryPreview__panel--groups">
             <div class="subCategoryPreview__selectorList">
               <button
@@ -27746,6 +27964,96 @@ onBeforeUnmount(() => {
             </div>
             <div v-else class="designMenu__cabinetState">برای این طرح سفارش هنوز پارامتری قابل نمایش نیست.</div>
           </div>
+        </div>
+        <div
+          v-if="orderDesignEditorMode === 'full'"
+          v-show="orderDesignEditorActiveSection !== 'structural'"
+          id="order-design-editor-embedded-host"
+          class="orderDesignEditor__embeddedHost"
+        ></div>
+        <div
+          v-if="orderDesignEditorMode === 'full' && orderDesignEditorActiveSection === 'structural'"
+          class="subCategoryDesignEditor__layout subCategoryDesignEditor__layout--interiorLibrary subCategoryDesignEditor__layout--structuralLibrary orderDesignEditor__fullLayout"
+        >
+          <template v-if="orderDesignEditorActiveSection === 'structural'">
+            <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorSidebar subCategoryDesignEditor__panel--structuralAvailable">
+              <div class="subCategoryDesignEditor__panelTitle">قطعات قابل افزودن به سازه</div>
+              <select v-model="structuralLibraryAvailablePartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+                <option value="">همه انواع قطعات سازه</option>
+                <option v-for="option in constructionStructuralPartKindOptions" :key="`order-structural-available-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+              </select>
+              <div class="subCategoryDesignEditor__partList interiorLibraryPartList">
+                <div
+                  v-for="item in availableOrderDesignStructuralPartCards"
+                  :key="`order-available-structural-${item.id}`"
+                  class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard subCategoryDesignEditor__partItem--structuralCard"
+                  :class="{ 'is-static': item.selected }"
+                >
+                  <div class="subCategoryDesignEditor__interiorGroupHead">
+                    <div class="subCategoryDesignEditor__interiorGroupSummary">
+                      <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                        <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
+                        <span class="subCategoryDesignEditor__partCode">{{ item.code || `PF-${item.id}` }}</span>
+                      </span>
+                    </div>
+                    <div class="subCategoryDesignEditor__interiorGroupFooter">
+                      <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" disabled>
+                        {{ item.selected ? "افزوده شده" : "افزودن" }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--preview subCategoryDesignEditor__panel--interiorPreview subCategoryDesignEditor__panel--structuralPreview">
+              <div class="subCategoryDesignEditor__panelHead subCategoryDesignEditor__panelHead--interiorPreview">
+                <div class="subCategoryDesignEditor__panelTitle">پیش‌نمایش سازه</div>
+              </div>
+              <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
+                <div class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior">
+                  <GlbViewerWidget
+                    src="/models/1_z1.glb"
+                    :walls2d="widgetPreviewWalls2d"
+                    :placeholder-outline-color="normalizeHexColor(orderDesignEditorDraft?.design_outline_color)"
+                    :placeholder-boxes="orderDesignEditorDraft?.viewer_boxes || []"
+                    :display-unit="currentEditorDisplayUnit"
+                    :show-attrs-panel="false"
+                    :embedded="true"
+                    :show-window-controls="false"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div class="subCategoryDesignEditor__panel subCategoryDesignEditor__panel--parts subCategoryDesignEditor__panel--interiorInstances subCategoryDesignEditor__panel--structuralSelected">
+              <div class="subCategoryDesignEditor__panelTitle">قطعات سازه این طرح</div>
+              <select v-model="structuralLibrarySelectedPartKindFilter" class="constructionDialog__input interiorLibraryPartKindFilter">
+                <option value="">همه انواع قطعات سازه</option>
+                <option v-for="option in constructionStructuralPartKindOptions" :key="`order-structural-selected-filter-${option.value}`" :value="String(option.value)">{{ option.label }}</option>
+              </select>
+              <div v-if="!selectedOrderDesignStructuralPartCards.length" class="designMenu__cabinetState">هنوز قطعه‌ای برای سازه این طرح سفارش ثبت نشده است.</div>
+              <div v-else class="subCategoryDesignEditor__partList interiorLibraryPartList">
+                <div
+                  v-for="item in selectedOrderDesignStructuralPartCards"
+                  :key="`order-selected-structural-${item.id}`"
+                  class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard subCategoryDesignEditor__partItem--structuralCard"
+                >
+                  <div class="subCategoryDesignEditor__interiorGroupHead">
+                    <div class="subCategoryDesignEditor__interiorGroupSummary">
+                      <span class="subCategoryDesignEditor__partMeta" dir="rtl">
+                        <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
+                        <span class="subCategoryDesignEditor__partCode">{{ item.code || `PF-${item.id}` }}</span>
+                      </span>
+                    </div>
+                    <div class="subCategoryDesignEditor__interiorGroupFooter">
+                      <button type="button" class="constructionDialog__iconBtn" title="حذف از سازه" disabled>×</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
         </div>
       </div>
       <div class="appDialog__actions">

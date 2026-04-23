@@ -268,6 +268,7 @@ class OrderDesign(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionM
     )
     design_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     design_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    manual_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     instance_code: Mapped[str] = mapped_column(String(64), nullable=False)
     sort_order: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", server_default="draft")

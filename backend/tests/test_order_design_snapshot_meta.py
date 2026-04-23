@@ -237,6 +237,7 @@ def test_duplicate_order_design_record_clones_full_payload(monkeypatch) -> None:
         sub_category_id=source_sub_category_id,
         design_code="z1",
         design_title="طرح مبدا",
+        manual_name="نام دستی مبدا",
         instance_code="U4",
         sort_order=4,
         status="draft",
@@ -253,6 +254,9 @@ def test_duplicate_order_design_record_clones_full_payload(monkeypatch) -> None:
         return True
 
     async def _door_ready(_session):
+        return False
+
+    async def _subtractor_ready(_session):
         return False
 
     async def _require_order(_session, *, order_id):
@@ -272,6 +276,7 @@ def test_duplicate_order_design_record_clones_full_payload(monkeypatch) -> None:
 
     monkeypatch.setattr(order_designs_router, "interior_instance_tables_ready", _interior_ready)
     monkeypatch.setattr(order_designs_router, "door_instance_tables_ready", _door_ready)
+    monkeypatch.setattr(order_designs_router, "subtractor_instance_tables_ready", _subtractor_ready)
     monkeypatch.setattr(order_designs_router, "require_accessible_order", _require_order)
     monkeypatch.setattr(order_designs_router, "next_order_design_instance_code", _next_instance_code)
     monkeypatch.setattr(order_designs_router, "next_order_design_sort_order", _next_sort_order)
@@ -288,6 +293,7 @@ def test_duplicate_order_design_record_clones_full_payload(monkeypatch) -> None:
     assert duplicated is session.created_order_design
     assert duplicated.instance_code == "U5"
     assert duplicated.design_title == source_item.design_title
+    assert duplicated.manual_name == source_item.manual_name
     assert duplicated.design_code == source_item.design_code
     assert duplicated.sort_order == 5
     assert duplicated.snapshot_checksum == source_snapshot_checksum

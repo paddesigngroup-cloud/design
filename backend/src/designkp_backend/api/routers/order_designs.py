@@ -71,6 +71,7 @@ class OrderDesignItem(BaseModel):
     design_outline_color: str
     design_code: str
     design_title: str
+    manual_name: str | None = None
     instance_code: str
     sort_order: int
     status: str
@@ -91,6 +92,7 @@ class OrderDesignCreate(BaseModel):
     order_id: uuid.UUID
     sub_category_design_id: uuid.UUID
     design_title: str | None = Field(default=None, max_length=255)
+    manual_name: str | None = Field(default=None, max_length=255)
     instance_code: str | None = Field(default=None, max_length=64)
     sort_order: int | None = Field(default=None, ge=0)
     status: str = Field(default="draft", max_length=32)
@@ -99,6 +101,7 @@ class OrderDesignCreate(BaseModel):
 
 class OrderDesignUpdate(BaseModel):
     design_title: str = Field(min_length=1, max_length=255)
+    manual_name: str | None = Field(default=None, max_length=255)
     instance_code: str = Field(min_length=1, max_length=64)
     sort_order: int = Field(ge=0)
     status: str = Field(default="draft", max_length=32)
@@ -242,6 +245,7 @@ class OrderDesignHistoryRestoreDoorInstance(BaseModel):
 
 class OrderDesignHistoryRestorePayload(BaseModel):
     design_title: str = Field(min_length=1, max_length=255)
+    manual_name: str | None = Field(default=None, max_length=255)
     instance_code: str = Field(min_length=1, max_length=64)
     sort_order: int = Field(ge=0)
     status: str = Field(default="draft", max_length=32)
@@ -470,6 +474,7 @@ def _serialize_item(item: OrderDesign, *, include_interior: bool = True) -> Orde
         design_outline_color=str(getattr(category, "design_outline_color", "#7A4A2B") or "#7A4A2B"),
         design_code=str(item.design_code or "").strip(),
         design_title=str(item.design_title or "").strip(),
+        manual_name=str(getattr(item, "manual_name", "") or "").strip() or None,
         instance_code=str(item.instance_code or "").strip(),
         sort_order=int(item.sort_order or 0),
         status=str(item.status or "draft").strip() or "draft",
@@ -894,6 +899,7 @@ async def _duplicate_order_design_record(
             sub_category_id=source_item.sub_category_id,
             design_code=str(source_item.design_code or "").strip(),
             design_title=str(source_item.design_title or "").strip(),
+            manual_name=str(getattr(source_item, "manual_name", "") or "").strip() or None,
             instance_code=next_instance_code,
             sort_order=await next_order_design_sort_order(session, order_id=source_item.order_id),
             status=str(source_item.status or "draft").strip() or "draft",
@@ -1093,6 +1099,7 @@ async def create_order_design(payload: OrderDesignCreate, session: AsyncSession 
             sub_category_id=source_design.sub_category_id,
             design_code=str(snapshot["design_code"]),
             design_title=title,
+            manual_name=str(payload.manual_name or "").strip() or None,
             instance_code=instance_code,
             sort_order=payload.sort_order if payload.sort_order is not None else await next_order_design_sort_order(session, order_id=order.id),
             status=str(payload.status or "draft").strip() or "draft",
@@ -1257,6 +1264,7 @@ async def update_order_design(
         door_instances=current_door_instances,
     )
     item.design_title = title
+    item.manual_name = str(payload.manual_name or "").strip() or None
     item.instance_code = instance_code
     item.sort_order = payload.sort_order
     item.status = str(payload.status or "draft").strip() or "draft"
@@ -1373,6 +1381,7 @@ async def restore_order_design_history_state(
     )
 
     item.design_title = str(payload.design_title or "").strip()
+    item.manual_name = str(payload.manual_name or "").strip() or None
     item.instance_code = str(payload.instance_code or "").strip()
     item.sort_order = int(payload.sort_order)
     item.status = str(payload.status or "draft").strip() or "draft"

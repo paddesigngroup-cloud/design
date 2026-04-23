@@ -89,7 +89,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords", "update:orderDesignAttr", "openInteriorLibraryForDesign", "openDoorLibraryForDesign", "openOrderDesignSettings"]);
+const emit = defineEmits(["mouseenter", "mouseleave", "model2d", "update:wallStyleDraft", "update:selectedWallCoords", "update:orderDesignAttr", "openInteriorLibraryForDesign", "openDoorLibraryForDesign", "openSubtractorLibraryForDesign", "openOrderDesignSettings", "openOrderDesignFullEditor"]);
 
 const widgetEl = ref(null);
 const hostEl = ref(null);
@@ -292,8 +292,9 @@ const activeOrderDesignIdentity = computed(() => {
   const title = String(item.design_title || item.instance_code || "").trim();
   const code = String(item.design_code || "").trim();
   const name = String(item.instance_code || "").trim();
-  if (!title && !code && !name) return null;
-  return { title, code, name };
+  const manualName = String(item.manual_name || "").trim();
+  if (!title && !code && !name && !manualName) return null;
+  return { title, code, name, manualName };
 });
 const showOrderDesignTools = computed(() =>
   showOrderDesignAttrPanel.value
@@ -2924,14 +2925,8 @@ defineExpose({
         <button type="button" class="glbWallAttrs__toolBtn" title="تنظیمات پارامترها" @click="openOrderDesignSettingsForActiveDesign">
           <img src="/icons/setting.png" alt="" class="glbWallAttrs__toolIcon" />
         </button>
-        <button type="button" class="glbWallAttrs__toolBtn" title="درب" @click="openDoorAttrsForActiveDesign">
-          <img src="/icons/door_styles.png" alt="" class="glbWallAttrs__toolIcon" />
-        </button>
-        <button type="button" class="glbWallAttrs__toolBtn" title="سه بعدی" @click="focusActiveDesign3d">
+        <button type="button" class="glbWallAttrs__toolBtn" title="ویرایش کامل طرح سفارش" @click="focusActiveDesign3d">
           <img src="/icons/3d_viewer.png" alt="" class="glbWallAttrs__toolIcon" />
-        </button>
-        <button type="button" class="glbWallAttrs__toolBtn" title="داخلی" @click="openInteriorLibraryForActiveDesign">
-          <img src="/icons/enternal.png" alt="" class="glbWallAttrs__toolIcon" />
         </button>
       </div>
       <div class="glbWallAttrs__sep"></div>
@@ -2942,7 +2937,11 @@ defineExpose({
         <div v-if="selectedOrderDesignCount > 1" class="glbWallAttrs__objectTitleMain">
           {{ `${selectedOrderDesignCount} طرح سفارش` }}
         </div>
-        <div v-else class="glbWallAttrs__designIdentity">
+          <div v-else class="glbWallAttrs__designIdentity">
+          <div v-if="activeOrderDesignIdentity?.manualName" class="glbWallAttrs__identityRow">
+            <span class="glbWallAttrs__identityLabel">نام دستی</span>
+            <span class="glbWallAttrs__identityValue">{{ activeOrderDesignIdentity.manualName }}</span>
+          </div>
           <div v-if="activeOrderDesignIdentity?.title" class="glbWallAttrs__identityRow">
             <span class="glbWallAttrs__identityLabel">عنوان طرح</span>
             <span class="glbWallAttrs__identityValue">{{ activeOrderDesignIdentity.title }}</span>
