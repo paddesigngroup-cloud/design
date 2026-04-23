@@ -23720,16 +23720,12 @@ onBeforeUnmount(() => {
               >
                 <div class="subCategoryDesignEditor__interiorGroupHead">
                   <div class="subCategoryDesignEditor__interiorGroupSummary">
-                    <div class="subCategoryPreview__groupBadge">
-                      <span class="subCategoryPreview__groupFallback">{{ toPersianDigits(item.orderIndex || item.id) }}</span>
-                    </div>
                     <span class="subCategoryDesignEditor__partMeta" dir="rtl">
                       <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
                       <span class="subCategoryDesignEditor__partCode">{{ item.code || `PF-${item.id}` }}</span>
                     </span>
                   </div>
                   <div class="subCategoryDesignEditor__interiorGroupFooter">
-                    <span class="constructionDialog__pill">{{ item.partKindLabel }}</span>
                     <button
                       type="button"
                       class="constructionDialog__textBtn constructionDialog__textBtn--compact"
@@ -23781,16 +23777,12 @@ onBeforeUnmount(() => {
               <div v-for="item in selectedSubCategoryStructuralPartCards" :key="`selected-structural-${item.id}`" class="subCategoryDesignEditor__partItem subCategoryDesignEditor__partItem--interiorCard subCategoryDesignEditor__partItem--structuralCard">
                 <div class="subCategoryDesignEditor__interiorGroupHead">
                   <div class="subCategoryDesignEditor__interiorGroupSummary">
-                    <div class="subCategoryPreview__groupBadge">
-                      <span class="subCategoryPreview__groupFallback">{{ toPersianDigits(item.orderIndex) }}</span>
-                    </div>
                     <span class="subCategoryDesignEditor__partMeta" dir="rtl">
                       <span class="subCategoryDesignEditor__partTitle">{{ item.title }}</span>
                       <span class="subCategoryDesignEditor__partCode">{{ item.code || `PF-${item.id}` }}</span>
                     </span>
                   </div>
                   <div class="subCategoryDesignEditor__interiorGroupFooter">
-                    <span class="constructionDialog__pill">{{ item.partKindLabel }}</span>
                     <button type="button" class="constructionDialog__iconBtn" title="حذف از سازه" @click="removeStructuralPartFormulaFromDesign(item.id)">×</button>
                   </div>
                 </div>
