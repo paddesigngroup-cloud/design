@@ -4592,7 +4592,7 @@ const activeSubtractorLibraryBaseParamValues = computed(() => {
 });
 const FRONT_VIEW_WIDTH = DEFAULT_FRONT_VIEW_WIDTH;
 const FRONT_VIEW_HEIGHT = DEFAULT_FRONT_VIEW_HEIGHT;
-const FRONT_VIEW_PAD = 28;
+const FRONT_VIEW_PAD = 0;
 const DEFAULT_INTERIOR_LINE_COLOR = "#8A98A3";
 const interiorLibraryViewerWrapEl = ref(null);
 const interiorLibraryFrontViewport = ref({
