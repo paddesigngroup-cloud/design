@@ -26754,7 +26754,7 @@ onBeforeUnmount(() => {
                 title="نمای روبروی درب"
                 @click="setDoorLibraryPreviewMode('front2d')"
               >
-                <img src="/icons/door.png" alt="" />
+                <img src="/icons/door_styles.png" alt="" />
               </button>
               <button
                 type="button"
@@ -27391,7 +27391,7 @@ onBeforeUnmount(() => {
                 title="نمای داخلی دوبعدی"
                 @click="setSubtractorLibraryPreviewMode('front2d')"
               >
-                <img src="/icons/enternal.png" alt="" />
+                <img src="/icons/handless.png" alt="" />
               </button>
               <button
                 type="button"
