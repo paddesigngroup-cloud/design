@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -48,6 +48,86 @@ const DEFAULT_3D_WIDGET_OPACITY = 85;
 const orderDesignGeometryCache = new Map();
 const frontViewGeometryCache = new Map();
 const interiorInstanceFrontGeometryCache = new Map();
+const DEV_PERF_ENABLED = !!import.meta.env?.DEV;
+const perfScenarioStats = new Map();
+function nowPerfMs() {
+  return (typeof performance !== "undefined" && typeof performance.now === "function")
+    ? performance.now()
+    : Date.now();
+}
+function startPerfScenario(name, meta = null) {
+  if (!DEV_PERF_ENABLED) return () => {};
+  const start = nowPerfMs();
+  return (resultMeta = null) => {
+    const durationMs = nowPerfMs() - start;
+    const key = String(name || "").trim() || "unknown-scenario";
+    const current = perfScenarioStats.get(key) || { count: 0, totalMs: 0, maxMs: 0 };
+    const next = {
+      count: current.count + 1,
+      totalMs: current.totalMs + durationMs,
+      maxMs: Math.max(Number(current.maxMs) || 0, durationMs),
+    };
+    perfScenarioStats.set(key, next);
+    const avgMs = next.totalMs / next.count;
+    const payload = {
+      scenario: key,
+      durationMs: Number(durationMs.toFixed(1)),
+      avgMs: Number(avgMs.toFixed(1)),
+      maxMs: Number(next.maxMs.toFixed(1)),
+      runs: next.count,
+      ...(meta || {}),
+      ...(resultMeta || {}),
+    };
+    console.debug("[perf-ui]", payload);
+  };
+}
+function getPerfScenarioSummaryRows() {
+  return Array.from(perfScenarioStats.entries())
+    .map(([scenario, stat]) => ({
+      scenario,
+      runs: Number(stat?.count) || 0,
+      avgMs: Number(((Number(stat?.totalMs) || 0) / Math.max(1, Number(stat?.count) || 1)).toFixed(1)),
+      maxMs: Number((Number(stat?.maxMs) || 0).toFixed(1)),
+      totalMs: Number((Number(stat?.totalMs) || 0).toFixed(1)),
+    }))
+    .sort((a, b) => b.avgMs - a.avgMs || b.maxMs - a.maxMs || a.scenario.localeCompare(b.scenario));
+}
+const orderDesignDefaultsCache = new Map();
+let orderDesignDefaultsCacheEpoch = 0;
+function invalidateOrderDesignDefaultsCache() {
+  orderDesignDefaultsCacheEpoch += 1;
+  orderDesignDefaultsCache.clear();
+}
+function buildEnabledParamGroupSignature(paramGroups) {
+  const rows = (Array.isArray(paramGroups) ? paramGroups : [])
+    .filter((item) => item?.enabled !== false && Number(item?.param_group_id) > 0)
+    .map((item) => `${Number(item.param_group_id)}:${item.enabled === false ? 0 : 1}`)
+    .sort();
+  return rows.join("|");
+}
+function buildParamOverrideSignature(overrides) {
+  const keys = Object.keys(overrides || {}).map((key) => String(key || "").trim()).filter(Boolean).sort();
+  return keys.map((key) => {
+    const item = overrides?.[key] || {};
+    return [
+      key,
+      String(item.display_title || "").trim(),
+      String(item.description_text || "").trim(),
+      String(item.icon_path || "").trim(),
+      item.input_mode === "binary" ? "binary" : "value",
+      String(item.binary_off_label || "").trim(),
+      String(item.binary_on_label || "").trim(),
+      String(item.binary_off_icon_path || "").trim(),
+      String(item.binary_on_icon_path || "").trim(),
+    ].join("~");
+  }).join("|");
+}
+function buildParamDefaultsSignature(defaults) {
+  return Object.entries(defaults || {})
+    .map(([key, value]) => `${String(key || "").trim()}:${String(value ?? "").trim()}`)
+    .sort()
+    .join("|");
+}
 const walls3dSnapshot = ref({
   nodes: [],
   walls: [],
@@ -259,6 +339,10 @@ function createEmptyPresetDragState() {
   };
 }
 const presetDrag = ref(createEmptyPresetDragState());
+let presetPointerMoveRaf = 0;
+let pendingPresetPointerMove = null;
+let passiveModelsSyncRaf = 0;
+let pendingPassiveModels = null;
 const PRESET_PREVIEW_MIN_DRAG_PX = 12;
 const DEFAULT_FRONT_VIEW_WIDTH = 760;
 const DEFAULT_FRONT_VIEW_HEIGHT = 460;
@@ -581,6 +665,7 @@ const orderDesignEditorSections = [
 ];
 const orderDesignFullEditorEmbedded = computed(() => orderDesignEditorOpen.value && orderDesignEditorMode.value === "full");
 const orderDesignSavingIds = ref([]);
+const orderDesignEditorSaving = ref(false);
 const orderDesignPlacements = ref([]);
 const stageCabinetPlaceholderBoxes = ref([]);
 const activeCabinetDesignId = ref(null);
@@ -2508,7 +2593,7 @@ async function persistActiveInteriorLibraryControllerInstance() {
       );
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره کنترلر نمونه دستگیره مخفی طرح ثبت‌شده انجام نشد."));
       syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-      await refreshOrderDesignGeometryFromServer(orderDesign.id);
+      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
       return;
     }
     const orderDesign = activeInteriorLibraryOrderDesign.value;
@@ -2529,7 +2614,7 @@ async function persistActiveInteriorLibraryControllerInstance() {
     );
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره کنترلر نمونه داخلی طرح ثبت‌شده انجام نشد."));
     syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
   } finally {
     interiorLibraryControllerApplying.value = false;
   }
@@ -3809,6 +3894,11 @@ const constructionSubCategoryParamTree = computed(() => {
       return a.title.localeCompare(b.title, "fa");
     });
 });
+const constructionSubCategoryParamTreeSignature = computed(() =>
+  constructionSubCategoryParamTree.value
+    .map((group) => `${String(group.id)}:${(Array.isArray(group.items) ? group.items : []).map((item) => String(item?.key || "")).join(",")}`)
+    .join("|")
+);
 const activeSubCategoryDefaultsRow = computed(() =>
   editableSubCategories.value.find((item) => String(item.id) === String(subCategoryDefaultsEditorRowId.value)) || null
 );
@@ -6730,6 +6820,74 @@ function matchesInteriorLibraryPartKindFilter(group, filterValue) {
   const selectedPartKindId = getInteriorLibrarySelectedPartKindId(filterValue);
   if (!selectedPartKindId) return true;
   return getInternalPartGroupPartKindIds(group).has(selectedPartKindId);
+}
+
+function getCachedOrderDesignDefaultsMetaCount(cacheKey, compute) {
+  const key = String(cacheKey || "").trim();
+  if (!key) return Number(compute?.() || 0);
+  const cached = orderDesignDefaultsCache.get(key);
+  if (Number.isFinite(cached)) return Number(cached);
+  const next = Number(compute?.() || 0);
+  orderDesignDefaultsCache.set(key, next);
+  return next;
+}
+
+function getInternalExpectedMetaCountCached(sourceInternalGroup, designChecksum = "") {
+  const groupId = String(sourceInternalGroup?.id || sourceInternalGroup?.group_id || "").trim();
+  if (!groupId) return 0;
+  const cacheKey = [
+    "internal-count",
+    orderDesignDefaultsCacheEpoch,
+    String(designChecksum || "").trim(),
+    groupId,
+    constructionSubCategoryParamTreeSignature.value,
+    buildEnabledParamGroupSignature(sourceInternalGroup?.param_groups),
+    buildParamOverrideSignature(sourceInternalGroup?.param_overrides),
+    buildParamDefaultsSignature(sourceInternalGroup?.param_defaults),
+    String(activeInteriorLibrarySubCategory.value?.id || ""),
+    buildParamOverrideSignature(activeInteriorLibrarySubCategory.value?.param_overrides),
+  ].join("::");
+  return getCachedOrderDesignDefaultsMetaCount(cacheKey, () =>
+    buildInternalGroupDefaultsTree(sourceInternalGroup).reduce((sum, group) => sum + group.items.length, 0)
+  );
+}
+
+function getDoorExpectedMetaCountCached(sourceDoorGroup, designChecksum = "") {
+  const groupId = String(sourceDoorGroup?.id || sourceDoorGroup?.group_id || "").trim();
+  if (!groupId) return 0;
+  const cacheKey = [
+    "door-count",
+    orderDesignDefaultsCacheEpoch,
+    String(designChecksum || "").trim(),
+    groupId,
+    constructionSubCategoryParamTreeSignature.value,
+    buildEnabledParamGroupSignature(sourceDoorGroup?.param_groups),
+    buildParamOverrideSignature(sourceDoorGroup?.param_overrides),
+    buildParamDefaultsSignature(sourceDoorGroup?.param_defaults),
+  ].join("::");
+  return getCachedOrderDesignDefaultsMetaCount(cacheKey, () =>
+    buildDoorPartGroupDefaultsGroups(sourceDoorGroup).reduce((sum, group) => sum + group.items.length, 0)
+  );
+}
+
+function getSubtractorExpectedMetaCountCached(sourceGroup, designChecksum = "") {
+  const groupId = String(sourceGroup?.id || sourceGroup?.group_id || "").trim();
+  if (!groupId) return 0;
+  const cacheKey = [
+    "subtractor-count",
+    orderDesignDefaultsCacheEpoch,
+    String(designChecksum || "").trim(),
+    groupId,
+    constructionSubCategoryParamTreeSignature.value,
+    buildEnabledParamGroupSignature(sourceGroup?.param_groups),
+    buildParamOverrideSignature(sourceGroup?.param_overrides),
+    buildParamDefaultsSignature(sourceGroup?.param_defaults),
+    String(activeSubtractorLibrarySubCategory.value?.id || ""),
+    buildParamOverrideSignature(activeSubtractorLibrarySubCategory.value?.param_overrides),
+  ].join("::");
+  return getCachedOrderDesignDefaultsMetaCount(cacheKey, () =>
+    buildSubtractorPartGroupDefaultsGroups(sourceGroup).reduce((sum, group) => sum + group.items.length, 0)
+  );
 }
 
 function buildInternalGroupDefaultsTree(group) {
@@ -10277,6 +10435,7 @@ async function loadConstructionInternalPartGroups() {
         }))
       )
     );
+    invalidateOrderDesignDefaultsCache();
   } catch (_) {
     showAlert("خواندن جدول گروه قطعات داخلی از دیتابیس انجام نشد.", { title: "خطا" });
   }
@@ -10297,35 +10456,51 @@ function reconcileActiveOrderDesignSelection() {
 }
 
 async function createOrderDesignFromSource(sourceDesign, { instanceCode = "", designTitle = "", orderAttrValues = {} } = {}) {
+  const finishPerf = startPerfScenario("order-design:create-from-source", {
+    sourceDesignId: String(sourceDesign?.id || ""),
+  });
   const orderId = String(activeOrder.value?.id || "").trim();
   if (!orderId) {
+    finishPerf({ status: "no-active-order" });
     openOrderEntry();
     throw new Error("ابتدا یک سفارش فعال انتخاب کنید.");
   }
-  const res = await fetch("/api/order-designs", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      order_id: orderId,
-      sub_category_design_id: sourceDesign.id,
-      instance_code: String(instanceCode || "").trim() || null,
-      design_title: String(designTitle || sourceDesign.design_title || "").trim() || null,
-      order_attr_values: orderAttrValues,
-    }),
-  });
-  if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن طرح به سفارش انجام نشد."));
-  const freshCreated = upsertOrderDesignCatalogItem(await res.json());
-  if (!freshCreated) throw new Error("طرح سفارش ساخته شد اما پاسخ معتبر برنگشت.");
-  orderDesignCatalogLoadedForOrderId.value = orderId;
-  if (String(activeCabinetDesignId.value || "") === String(freshCreated.id)) {
-    stageCabinetPlaceholderBoxes.value = (freshCreated.viewer_boxes || []).map(normalizeCabinetBox);
+  try {
+    const res = await fetch("/api/order-designs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order_id: orderId,
+        sub_category_design_id: sourceDesign.id,
+        instance_code: String(instanceCode || "").trim() || null,
+        design_title: String(designTitle || sourceDesign.design_title || "").trim() || null,
+        order_attr_values: orderAttrValues,
+      }),
+    });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن طرح به سفارش انجام نشد."));
+    const freshCreated = upsertOrderDesignCatalogItem(await res.json());
+    if (!freshCreated) throw new Error("طرح سفارش ساخته شد اما پاسخ معتبر برنگشت.");
+    orderDesignCatalogLoadedForOrderId.value = orderId;
+    if (String(activeCabinetDesignId.value || "") === String(freshCreated.id)) {
+      stageCabinetPlaceholderBoxes.value = (freshCreated.viewer_boxes || []).map(normalizeCabinetBox);
+    }
+    finishPerf({ status: "ok", createdId: String(freshCreated.id || "") });
+    return freshCreated;
+  } catch (error) {
+    finishPerf({ status: "error" });
+    throw error;
   }
-  return freshCreated;
 }
 
 function openOrderDesignEditor(item, options = {}) {
+  const finishPerf = startPerfScenario("order-design:editor-open", {
+    mode: options?.mode === "full" ? "full" : "settings",
+  });
   const normalized = normalizeOrderDesignRecord(item);
-  if (!normalized) return;
+  if (!normalized) {
+    finishPerf({ status: "missing-record" });
+    return;
+  }
   const mode = options?.mode === "full" ? "full" : "settings";
   clearOrderDesignSectionEnsureSession(normalized.id);
   orderDesignEditorDraft.value = {
@@ -10345,6 +10520,7 @@ function openOrderDesignEditor(item, options = {}) {
   if (mode === "full") {
     startOrderDesignEditorBackgroundPrewarm(normalized.id);
   }
+  finishPerf({ status: "ok", designId: String(normalized.id || "") });
 }
 
 function openOrderDesignEditorById(orderDesignId, options = {}) {
@@ -10483,13 +10659,20 @@ function selectOrderDesignEditorGroup(groupId) {
 }
 
 async function selectOrderDesignEditorSection(sectionId) {
+  const finishPerf = startPerfScenario("order-design:editor-section-switch", {
+    sectionId: String(sectionId || ""),
+  });
   const nextId = String(sectionId || "").trim();
-  if (!orderDesignEditorSections.some((item) => item.id === nextId)) return;
+  if (!orderDesignEditorSections.some((item) => item.id === nextId)) {
+    finishPerf({ status: "invalid-section" });
+    return;
+  }
   if (nextId === "defaults") {
     closeInteriorLibrary();
     closeDoorLibrary();
     closeSubtractorLibrary();
     openOrderDesignSubCategoryDefaultsFromEditor();
+    finishPerf({ status: "ok" });
     return;
   }
   orderDesignEditorActiveSection.value = nextId;
@@ -10497,9 +10680,16 @@ async function selectOrderDesignEditorSection(sectionId) {
     closeInteriorLibrary();
     closeDoorLibrary();
     closeSubtractorLibrary();
+    finishPerf({ status: "ok" });
     return;
   }
-  await openOrderDesignEditorRelatedSection(nextId);
+  try {
+    await openOrderDesignEditorRelatedSection(nextId);
+    finishPerf({ status: "ok" });
+  } catch (error) {
+    finishPerf({ status: "error" });
+    throw error;
+  }
 }
 
 function openOrderDesignSubCategoryDefaultsFromEditor() {
@@ -10584,7 +10774,7 @@ function queueOrderDesignGeometryRefresh(item, { placement = null, persistDrawin
       if (activeJob !== job) return;
       pendingOrderDesignGeometryRefreshes.delete(key);
       try {
-        const fresh = await refreshOrderDesignGeometryFromServer(key, {
+        const fresh = await refreshOrderDesignGeometrySingleFlight(key, {
           updateStage: String(activeCabinetDesignId.value || "") === key,
         });
         if (fresh && activeJob?.placement && String(activeCabinetDesignId.value || "") === String(fresh.id)) {
@@ -10603,23 +10793,33 @@ function queueOrderDesignGeometryRefresh(item, { placement = null, persistDrawin
 }
 
 async function updateActiveOrderDesignAttr({ key, value }) {
+  const finishPerf = startPerfScenario("order-design:attr-edit");
   const attrKey = String(key || "").trim();
   const normalizedValue = value == null ? "" : String(value);
   const targetIds = selectedOrderDesignIds.value.length
     ? selectedOrderDesignIds.value.slice()
     : (activeStageOrderDesign.value?.id ? [String(activeStageOrderDesign.value.id)] : []);
-  if (!attrKey || !targetIds.length) return;
+  if (!attrKey || !targetIds.length) {
+    finishPerf({ status: "skipped" });
+    return;
+  }
 
   const targets = targetIds
     .map((id) => orderDesignCatalog.value.find((item) => String(item.id) === String(id)))
     .filter(Boolean);
-  if (!targets.length) return;
+  if (!targets.length) {
+    finishPerf({ status: "skipped" });
+    return;
+  }
 
   const changedTargets = targets.filter((item) => {
     const currentValue = item?.order_attr_values?.[attrKey] == null ? "" : String(item.order_attr_values[attrKey]);
     return currentValue !== normalizedValue && !isOrderDesignSaving(item.id);
   });
-  if (!changedTargets.length) return;
+  if (!changedTargets.length) {
+    finishPerf({ status: "no-change" });
+    return;
+  }
 
   const placementById = new Map(
     changedTargets.map((item) => [
@@ -10674,7 +10874,9 @@ async function updateActiveOrderDesignAttr({ key, value }) {
     if (shouldSaveDrawingImmediately) {
       await saveActiveOrderDrawing();
     }
+    finishPerf({ status: "ok", affected: changedTargets.length });
   } catch (error) {
+    finishPerf({ status: "error", affected: changedTargets.length });
     showAlert(error?.message || "ذخیره صفات طرح سفارش انجام نشد.", { title: "خطا" });
     await loadOrderDesignCatalog(true);
   } finally {
@@ -10688,8 +10890,13 @@ async function updateActiveOrderDesignAttr({ key, value }) {
 }
 
 async function saveOrderDesignEditor() {
+  const finishPerf = startPerfScenario("order-design:editor-save");
   const draft = orderDesignEditorDraft.value;
-  if (!draft?.id || cabinetDesignDropLoading.value) return;
+  if (!draft?.id || cabinetDesignDropLoading.value || orderDesignEditorSaving.value) {
+    finishPerf({ status: "skipped" });
+    return;
+  }
+  orderDesignEditorSaving.value = true;
   const activePlacement = getOrderDesignPlacement(draft.id) || getCurrentModel2dTransform();
   cabinetDesignDropLoadingMode.value = "edit";
   cabinetDesignDropLoading.value = true;
@@ -10729,9 +10936,12 @@ async function saveOrderDesignEditor() {
       // In defaults/apply mode keep the editor open so admins can continue adjusting values.
       showAlert("مقادیر پیش‌فرض طرح سفارش اعمال شد.", { title: "اعمال تنظیمات" });
     }
+    finishPerf({ status: "ok", designId: String(draft.id || "") });
   } catch (error) {
+    finishPerf({ status: "error", designId: String(draft.id || "") });
     showAlert(error?.message || "ذخیره تنظیمات طرح سفارش انجام نشد.", { title: "خطا" });
   } finally {
+    orderDesignEditorSaving.value = false;
     cabinetDesignDropLoading.value = false;
     cabinetDesignDropLoadingTitle.value = "";
     cabinetDesignDropLoadingMode.value = "add";
@@ -11560,14 +11770,23 @@ async function rollbackTransientCabinetDesignDrag(dragState) {
 
 function finishPresetDragSession() {
   presetDrag.value = createEmptyPresetDragState();
+  pendingPresetPointerMove = null;
+  if (presetPointerMoveRaf) {
+    cancelAnimationFrame(presetPointerMoveRaf);
+    presetPointerMoveRaf = 0;
+  }
   window.removeEventListener("pointermove", onPresetPointerMove);
   window.removeEventListener("pointerup", onPresetPointerUp);
   enable2dInput();
 }
 
 async function ensureCabinetDesignDragPlacement(clientX, clientY) {
+  const finishPerf = startPerfScenario("order-design:drag-place");
   const drag = presetDrag.value;
-  if (!drag.active || drag.type !== "cabinetDesign" || drag.dragBootstrapping || drag.createdOrderDesignId) return false;
+  if (!drag.active || drag.type !== "cabinetDesign" || drag.dragBootstrapping || drag.createdOrderDesignId) {
+    finishPerf({ status: "skipped" });
+    return false;
+  }
   const sessionId = drag.sessionId;
   const previousActiveOrderDesignId = String(activeCabinetDesignId.value || "").trim();
   const previousActivePlacement = previousActiveOrderDesignId
@@ -11589,6 +11808,7 @@ async function ensureCabinetDesignDragPlacement(clientX, clientY) {
       if (createdOrderDesign?.id) {
         await deleteOrderDesignSilentlyById(createdOrderDesign.id).catch(() => loadOrderDesignCatalog(true).catch(() => {}));
       }
+      finishPerf({ status: "aborted-after-create" });
       return false;
     }
     const latestClientX = Number.isFinite(Number(presetDrag.value.clientX)) ? Number(presetDrag.value.clientX) : clientX;
@@ -11616,7 +11836,8 @@ async function ensureCabinetDesignDragPlacement(clientX, clientY) {
       previousActivePlacement,
     };
     syncQuickStateFromEditor();
-    if (presetDrag.value.releasePending) {
+    const hasReleasePending = !!presetDrag.value.releasePending;
+    if (hasReleasePending) {
       const releaseX = Number.isFinite(Number(presetDrag.value.releaseClientX)) ? Number(presetDrag.value.releaseClientX) : latestClientX;
       const releaseY = Number.isFinite(Number(presetDrag.value.releaseClientY)) ? Number(presetDrag.value.releaseClientY) : latestClientY;
       const stageRect = stageEl.value?.getBoundingClientRect();
@@ -11637,6 +11858,10 @@ async function ensureCabinetDesignDragPlacement(clientX, clientY) {
         await rollbackTransientCabinetDesignDrag({ ...presetDrag.value });
       }
       finishPresetDragSession();
+      finishPerf({ status: commit ? "ok-committed" : "ok-rolled-back" });
+    }
+    if (!hasReleasePending) {
+      finishPerf({ status: "ok-prepared" });
     }
     return true;
   } catch (error) {
@@ -11647,6 +11872,7 @@ async function ensureCabinetDesignDragPlacement(clientX, clientY) {
         dragBootstrapping: false,
       };
     }
+    finishPerf({ status: "error" });
     return false;
   } finally {
     cabinetDesignDropLoading.value = false;
@@ -12148,22 +12374,38 @@ function syncOrderDesignInCollection(item) {
   return normalized;
 }
 
-async function refreshOrderDesignGeometryFromServer(orderDesignId, { updateStage = true } = {}) {
+async function refreshOrderDesignGeometryFromServer(orderDesignId, { updateStage = true, syncEditorDraft = true } = {}) {
   const key = String(orderDesignId || "").trim();
   if (!key) return null;
-  const res = await fetch(`/api/order-designs/${encodeURIComponent(key)}/recompute`, {
-    method: "POST",
+  const finishPerf = startPerfScenario("order-design:geometry-refresh", {
+    orderDesignId: key,
+    updateStage: updateStage ? 1 : 0,
+    syncEditorDraft: syncEditorDraft ? 1 : 0,
   });
-  if (!res.ok) throw new Error(await readApiErrorMessage(res, "بازسازی نمایش طرح سفارش انجام نشد."));
-  const fresh = syncOrderDesignInCollection(await res.json());
-  if (!fresh) return null;
-  syncOrderDesignEditorDraftDerivedFields(fresh);
-  if (updateStage && String(activeCabinetDesignId.value || "") === String(fresh.id)) {
-    const placement = getOrderDesignPlacement(fresh.id) || getCurrentEditorModelPlacement();
-    stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
-    restoreActiveOrderDesignToEditor(fresh, placement);
+  try {
+    const res = await fetch(`/api/order-designs/${encodeURIComponent(key)}/recompute`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "بازسازی نمایش طرح سفارش انجام نشد."));
+    const fresh = syncOrderDesignInCollection(await res.json());
+    if (!fresh) {
+      finishPerf({ status: "empty" });
+      return null;
+    }
+    if (syncEditorDraft) {
+      syncOrderDesignEditorDraftDerivedFields(fresh);
+    }
+    if (updateStage && String(activeCabinetDesignId.value || "") === String(fresh.id)) {
+      const placement = getOrderDesignPlacement(fresh.id) || getCurrentEditorModelPlacement();
+      stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
+      restoreActiveOrderDesignToEditor(fresh, placement);
+    }
+    finishPerf({ status: "ok" });
+    return fresh;
+  } catch (error) {
+    finishPerf({ status: "error" });
+    throw error;
   }
-  return fresh;
 }
 
 function syncOrderDesignEditorDraftDerivedFields(freshItem) {
@@ -12174,15 +12416,15 @@ function syncOrderDesignEditorDraftDerivedFields(freshItem) {
   orderDesignEditorDraft.value = {
     ...draft,
     snapshot_checksum: fresh.snapshot_checksum,
-    part_snapshots: Array.isArray(fresh.part_snapshots) ? fresh.part_snapshots.map((item) => ({ ...(item || {}) })) : [],
-    viewer_boxes: Array.isArray(fresh.viewer_boxes) ? fresh.viewer_boxes.map((item) => ({ ...(item || {}) })) : [],
-    boolean_targets: Array.isArray(fresh.boolean_targets) ? fresh.boolean_targets.map((item) => ({ ...(item || {}) })) : [],
-    boolean_cutters: Array.isArray(fresh.boolean_cutters) ? fresh.boolean_cutters.map((item) => ({ ...(item || {}) })) : [],
-    boolean_result: Array.isArray(fresh.boolean_result) ? fresh.boolean_result.map((item) => ({ ...(item || {}) })) : [],
+    part_snapshots: Array.isArray(fresh.part_snapshots) ? fresh.part_snapshots : [],
+    viewer_boxes: Array.isArray(fresh.viewer_boxes) ? fresh.viewer_boxes : [],
+    boolean_targets: Array.isArray(fresh.boolean_targets) ? fresh.boolean_targets : [],
+    boolean_cutters: Array.isArray(fresh.boolean_cutters) ? fresh.boolean_cutters : [],
+    boolean_result: Array.isArray(fresh.boolean_result) ? fresh.boolean_result : [],
     order_attr_meta: { ...(fresh.order_attr_meta || {}) },
-    interior_instances: Array.isArray(fresh.interior_instances) ? fresh.interior_instances.map(normalizeInteriorInstanceRecord).filter(Boolean) : [],
-    door_instances: Array.isArray(fresh.door_instances) ? fresh.door_instances.map(normalizeDoorInstanceRecord).filter(Boolean) : [],
-    subtractor_instances: Array.isArray(fresh.subtractor_instances) ? fresh.subtractor_instances.map(normalizeSubtractorInstanceRecord).filter(Boolean) : [],
+    interior_instances: Array.isArray(fresh.interior_instances) ? fresh.interior_instances : [],
+    door_instances: Array.isArray(fresh.door_instances) ? fresh.door_instances : [],
+    subtractor_instances: Array.isArray(fresh.subtractor_instances) ? fresh.subtractor_instances : [],
   };
 }
 
@@ -12202,6 +12444,7 @@ function getOrderDesignSectionEnsureSession(orderDesignId) {
         door: null,
         subtractor: null,
       },
+      prewarmTimerId: null,
       prewarmPromise: null,
     };
     orderDesignSectionEnsureSessions.set(key, session);
@@ -12212,9 +12455,18 @@ function getOrderDesignSectionEnsureSession(orderDesignId) {
 function clearOrderDesignSectionEnsureSession(orderDesignId = "") {
   const key = String(orderDesignId || "").trim();
   if (key) {
+    const existing = orderDesignSectionEnsureSessions.get(key);
+    if (existing?.prewarmTimerId && typeof window !== "undefined") {
+      window.clearTimeout(existing.prewarmTimerId);
+    }
     orderDesignSectionEnsureSessions.delete(key);
     orderDesignRefreshInflight.delete(key);
     return;
+  }
+  if (typeof window !== "undefined") {
+    for (const session of orderDesignSectionEnsureSessions.values()) {
+      if (session?.prewarmTimerId) window.clearTimeout(session.prewarmTimerId);
+    }
   }
   orderDesignSectionEnsureSessions.clear();
   orderDesignRefreshInflight.clear();
@@ -12222,6 +12474,7 @@ function clearOrderDesignSectionEnsureSession(orderDesignId = "") {
 
 function orderDesignSectionNeedsMetaRefresh(item, sectionId) {
   if (!item) return false;
+  const checksum = String(item?.snapshot_checksum || "").trim();
   if (sectionId === "internal") {
     const interiors = Array.isArray(item.interior_instances) ? item.interior_instances : [];
     if (!interiors.length) return false;
@@ -12229,7 +12482,7 @@ function orderDesignSectionNeedsMetaRefresh(item, sectionId) {
       const metaCount = Object.keys(instance?.param_meta || {}).length;
       const sourceInternalGroup = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
       const expectedMetaCount = sourceInternalGroup
-        ? buildInternalGroupDefaultsTree(sourceInternalGroup).reduce((sum, group) => sum + group.items.length, 0)
+        ? getInternalExpectedMetaCountCached(sourceInternalGroup, checksum)
         : Object.keys(instance?.param_values || {}).length;
       return expectedMetaCount > 0 && metaCount < expectedMetaCount;
     });
@@ -12241,7 +12494,7 @@ function orderDesignSectionNeedsMetaRefresh(item, sectionId) {
       const metaCount = Object.keys(instance?.param_meta || {}).length;
       const sourceDoorGroup = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
       const expectedMetaCount = sourceDoorGroup
-        ? buildDoorPartGroupDefaultsGroups(sourceDoorGroup).reduce((sum, group) => sum + group.items.length, 0)
+        ? getDoorExpectedMetaCountCached(sourceDoorGroup, checksum)
         : Object.keys(instance?.param_values || {}).length;
       return expectedMetaCount > 0 && metaCount < expectedMetaCount;
     });
@@ -12253,7 +12506,7 @@ function orderDesignSectionNeedsMetaRefresh(item, sectionId) {
       const metaCount = Object.keys(instance?.param_meta || {}).length;
       const sourceGroup = constructionSubtractorPartGroupsById.value.get(String(instance?.subtractor_part_group_id || "").trim());
       const expectedMetaCount = sourceGroup
-        ? buildSubtractorPartGroupDefaultsGroups(sourceGroup).reduce((sum, group) => sum + group.items.length, 0)
+        ? getSubtractorExpectedMetaCountCached(sourceGroup, checksum)
         : Object.keys(instance?.param_values || {}).length;
       return expectedMetaCount > 0 && metaCount < expectedMetaCount;
     });
@@ -12261,19 +12514,46 @@ function orderDesignSectionNeedsMetaRefresh(item, sectionId) {
   return false;
 }
 
-async function refreshOrderDesignGeometrySingleFlight(orderDesignId, { updateStage = false } = {}) {
+async function refreshOrderDesignGeometrySingleFlight(orderDesignId, { updateStage = true, syncEditorDraft = true } = {}) {
   const key = String(orderDesignId || "").trim();
   if (!key) return null;
-  const pending = orderDesignRefreshInflight.get(key);
-  if (pending) return pending;
-  const next = (async () => refreshOrderDesignGeometryFromServer(key, { updateStage }))()
-    .finally(() => {
-      if (orderDesignRefreshInflight.get(key) === next) {
-        orderDesignRefreshInflight.delete(key);
-      }
-    });
-  orderDesignRefreshInflight.set(key, next);
-  return next;
+  const wantsUpdateStage = !!updateStage;
+  const wantsSyncEditorDraft = !!syncEditorDraft;
+  let lastResult = null;
+
+  while (true) {
+    let flight = orderDesignRefreshInflight.get(key) || null;
+    if (!flight) {
+      const nextFlight = {
+        promise: null,
+        result: null,
+        appliedUpdateStage: wantsUpdateStage,
+        appliedSyncEditorDraft: wantsSyncEditorDraft,
+      };
+      nextFlight.promise = (async () => {
+        const fresh = await refreshOrderDesignGeometryFromServer(key, {
+          updateStage: nextFlight.appliedUpdateStage,
+          syncEditorDraft: nextFlight.appliedSyncEditorDraft,
+        });
+        nextFlight.result = fresh;
+        return fresh;
+      })().finally(() => {
+        if (orderDesignRefreshInflight.get(key) === nextFlight) {
+          orderDesignRefreshInflight.delete(key);
+        }
+      });
+      orderDesignRefreshInflight.set(key, nextFlight);
+      flight = nextFlight;
+    }
+
+    await flight.promise;
+    lastResult = flight.result;
+    const updateStageSatisfied = !wantsUpdateStage || flight.appliedUpdateStage;
+    const syncEditorDraftSatisfied = !wantsSyncEditorDraft || flight.appliedSyncEditorDraft;
+    if (updateStageSatisfied && syncEditorDraftSatisfied) {
+      return lastResult;
+    }
+  }
 }
 
 async function loadOrderDesignSectionDependencies(sectionId) {
@@ -12310,27 +12590,44 @@ async function loadOrderDesignSectionDependencies(sectionId) {
   }
 }
 
-async function ensureOrderDesignSectionDataReady(orderDesignId, sectionId) {
+async function ensureOrderDesignSectionDataReady(orderDesignId, sectionId, { syncEditorDraft = true } = {}) {
   const key = String(orderDesignId || "").trim();
   const section = String(sectionId || "").trim();
-  if (!key || !ORDER_EDITOR_SECTION_SET.has(section)) return;
+  const finishPerf = startPerfScenario("order-design:section-ready", {
+    orderDesignId: key,
+    section,
+  });
+  if (!key || !ORDER_EDITOR_SECTION_SET.has(section)) {
+    finishPerf({ status: "invalid-request" });
+    return;
+  }
   const session = getOrderDesignSectionEnsureSession(key);
-  if (!session) return;
+  if (!session) {
+    finishPerf({ status: "missing-session" });
+    return;
+  }
   const pending = session.inflightBySection[section];
   if (pending) {
     await pending;
+    finishPerf({ status: "joined-inflight" });
     return;
   }
   const currentItem = orderDesignCatalog.value.find((row) => String(row.id) === key);
   const currentChecksum = String(currentItem?.snapshot_checksum || "").trim();
-  if (currentChecksum && session.readySnapshotBySection[section] === currentChecksum) return;
+  if (currentChecksum && session.readySnapshotBySection[section] === currentChecksum) {
+    finishPerf({ status: "cache-hit" });
+    return;
+  }
   const run = (async () => {
     await loadOrderDesignSectionDependencies(section);
     const beforeItem = orderDesignCatalog.value.find((row) => String(row.id) === key);
     if (!beforeItem) return;
     if (orderDesignSectionNeedsMetaRefresh(beforeItem, section)) {
       try {
-        await refreshOrderDesignGeometrySingleFlight(key, { updateStage: false });
+        await refreshOrderDesignGeometrySingleFlight(key, {
+          updateStage: false,
+          syncEditorDraft,
+        });
       } catch (_) {
         // Silent: failing to refresh should not block opening the library.
       }
@@ -12342,7 +12639,13 @@ async function ensureOrderDesignSectionDataReady(orderDesignId, sectionId) {
     session.inflightBySection[section] = null;
   });
   session.inflightBySection[section] = run;
-  await run;
+  try {
+    await run;
+    finishPerf({ status: "ok" });
+  } catch (error) {
+    finishPerf({ status: "error" });
+    throw error;
+  }
 }
 
 async function ensureOrderDesignInteriorParamMetaLoaded(orderDesignId) {
@@ -12362,16 +12665,35 @@ function startOrderDesignEditorBackgroundPrewarm(orderDesignId) {
   if (!key) return;
   const session = getOrderDesignSectionEnsureSession(key);
   if (!session) return;
-  if (session.prewarmPromise) return;
-  session.prewarmPromise = (async () => {
-    for (const section of ORDER_EDITOR_PREWARM_SECTIONS) {
-      await ensureOrderDesignSectionDataReady(key, section);
+  if (session.prewarmPromise || session.prewarmTimerId) return;
+  if (typeof window === "undefined") return;
+  session.prewarmTimerId = window.setTimeout(() => {
+    const activeSession = getOrderDesignSectionEnsureSession(key);
+    if (!activeSession) return;
+    activeSession.prewarmTimerId = null;
+    const runPrewarm = async () => {
+      if (!orderDesignEditorOpen.value || orderDesignEditorMode.value !== "full") return;
+      if (presetDrag.value.active || cabinetDesignDropLoading.value) return;
+      activeSession.prewarmPromise = (async () => {
+        for (const section of ORDER_EDITOR_PREWARM_SECTIONS) {
+          if (!orderDesignEditorOpen.value || orderDesignEditorMode.value !== "full") break;
+          await ensureOrderDesignSectionDataReady(key, section, { syncEditorDraft: false });
+        }
+      })();
+      try {
+        await activeSession.prewarmPromise;
+      } finally {
+        activeSession.prewarmPromise = null;
+      }
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(() => {
+        runPrewarm().catch(() => {});
+      }, { timeout: 1800 });
+      return;
     }
-  })().finally(() => {
-    if (session.prewarmPromise) {
-      session.prewarmPromise = null;
-    }
-  });
+    runPrewarm().catch(() => {});
+  }, 450);
 }
 
 async function loadConstructionDoorPartGroups() {
@@ -12382,6 +12704,7 @@ async function loadConstructionDoorPartGroups() {
       abortChannel: `construction:door-part-groups:${currentAdminId.value}`,
     });
     editableDoorPartGroups.value = payload.map(normalizeEditableDoorPartGroupRecord);
+    invalidateOrderDesignDefaultsCache();
   } catch (_) {
     showAlert("خواندن جدول گروه قطعات درب از دیتابیس انجام نشد.", { title: "خطا" });
   }
@@ -12495,7 +12818,7 @@ async function addInteriorGroupToDesign(group) {
     });
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه داخلی به طرح ثبت‌شده انجام نشد."));
     syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
   } catch (error) {
     showAlert(error?.message || "افزودن گروه داخلی به طرح ثبت‌شده انجام نشد.", { title: "خطا" });
   } finally {
@@ -12667,7 +12990,7 @@ async function addSubtractorGroupToDesign(group) {
     });
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن نمونه دستگیره مخفی انجام نشد."));
     syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
   } catch (error) {
     showAlert(error?.message || "افزودن نمونه دستگیره مخفی انجام نشد.", { title: "خطا" });
   } finally {
@@ -12725,7 +13048,7 @@ async function addDoorGroupToDesign(group) {
     });
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه درب به طرح ثبت‌شده انجام نشد."));
     syncDoorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
   } catch (error) {
     showAlert(error?.message || "افزودن گروه درب به طرح انجام نشد.", { title: "خطا" });
   } finally {
@@ -12774,7 +13097,7 @@ async function finalizePendingDoorController() {
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "افزودن گروه درب به طرح ثبت‌شده انجام نشد."));
       const created = await res.json();
       syncDoorInstanceInOrderDesignCollection(orderDesign.id, created);
-      await refreshOrderDesignGeometryFromServer(orderDesign.id);
+      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
     }
     resetDoorLibraryPendingControllerState();
     doorLibraryHoveredInstanceId.value = "";
@@ -12948,7 +13271,7 @@ async function applyDoorInstanceEditor() {
       );
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه درب طرح ثبت‌شده انجام نشد."));
       syncDoorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-      await refreshOrderDesignGeometryFromServer(orderDesign.id);
+      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
     }
     resetDoorInstanceEditorState();
   } catch (error) {
@@ -13005,7 +13328,7 @@ async function applySubtractorInstanceEditor() {
     );
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه دستگیره مخفی طرح ثبت‌شده انجام نشد."));
     syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
     resetSubtractorInstanceEditorState();
   } catch (error) {
     showAlert(error?.message || "ذخیره تنظیمات نمونه دستگیره مخفی انجام نشد.", { title: "خطا" });
@@ -13059,7 +13382,7 @@ async function applyDoorInstanceLineColor(instance, lineColor) {
       );
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه درب طرح ثبت‌شده انجام نشد."));
       syncDoorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-      await refreshOrderDesignGeometryFromServer(orderDesign.id);
+      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
     }
   } catch (error) {
     showAlert(error?.message || "ذخیره رنگ خطوط نمونه درب انجام نشد.", { title: "خطا" });
@@ -13121,7 +13444,7 @@ async function deleteDoorInstanceFromDesign(instance) {
       );
       if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف نمونه درب طرح ثبت‌شده انجام نشد."));
       removeDoorInstanceFromOrderDesignCollection(orderDesign.id, instance.id);
-      await refreshOrderDesignGeometryFromServer(orderDesign.id);
+      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
     }
     if (String(doorLibrarySelectedPlacedInstanceId.value || "") === String(instance.id || "")) {
       clearDoorLibraryPlacedInstanceSelection();
@@ -13251,7 +13574,7 @@ async function applyInteriorInstanceEditor() {
     );
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه داخلی طرح ثبت‌شده انجام نشد."));
     syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
     resetInteriorInstanceEditorState();
   } catch (error) {
     showAlert(error?.message || "ذخیره تنظیمات نمونه داخلی طرح ثبت‌شده انجام نشد.", { title: "خطا" });
@@ -13316,7 +13639,7 @@ async function applyInteriorInstanceLineColor(instance, lineColor) {
     );
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه داخلی انجام نشد."));
     syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
   } catch (error) {
     showAlert(error?.message || "ذخیره رنگ خطوط نمونه داخلی انجام نشد.", { title: "خطا" });
   }
@@ -13535,7 +13858,7 @@ async function deleteInteriorInstanceFromDesign(instance) {
     if (String(interiorLibraryInstanceContextMenu.value?.instanceId || "") === String(instance.id || "")) {
       closeInteriorInstanceContextMenu();
     }
-    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
     if (String(interiorInstanceEditorDraft.value?.id || "") === String(instance.id)) {
       closeInteriorInstanceEditor();
     }
@@ -13573,7 +13896,7 @@ async function duplicateInteriorInstanceInDesign(instance) {
   const duplicated = await res.json();
   syncInteriorInstanceInOrderDesignCollection(orderDesign.id, duplicated);
   selectInteriorLibraryInstance(duplicated.id);
-  await refreshOrderDesignGeometryFromServer(orderDesign.id);
+  await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
   closeInteriorInstanceContextMenu();
   return duplicated;
 }
@@ -13624,7 +13947,7 @@ async function duplicateDoorInstanceInDesign(instance) {
   const duplicated = await res.json();
   syncDoorInstanceInOrderDesignCollection(orderDesign.id, duplicated);
   selectDoorLibraryPlacedInstance(duplicated.id);
-  await refreshOrderDesignGeometryFromServer(orderDesign.id);
+  await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
   closeDoorInstanceContextMenu();
   return duplicated;
 }
@@ -13679,7 +14002,7 @@ async function editSubtractorInstanceInDesign(instance, patch = {}) {
   );
   if (!res.ok) throw new Error(await readApiErrorMessage(res, "ویرایش نمونه دستگیره مخفی انجام نشد."));
   syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-  await refreshOrderDesignGeometryFromServer(orderDesign.id);
+  await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
 }
 
 async function applySubtractorInstanceLineColor(instance, lineColor) {
@@ -13729,7 +14052,7 @@ async function applySubtractorInstanceLineColor(instance, lineColor) {
     );
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه دستگیره مخفی انجام نشد."));
     syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometryFromServer(orderDesign.id);
+    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
   } catch (error) {
     showAlert(error?.message || "ذخیره رنگ خطوط نمونه دستگیره مخفی انجام نشد.", { title: "خطا" });
   }
@@ -13802,7 +14125,7 @@ async function duplicateSubtractorInstanceInDesign(instance) {
   const duplicated = await res.json();
   syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, duplicated);
   subtractorLibrarySelectedInstanceId.value = String(duplicated.id || "");
-  await refreshOrderDesignGeometryFromServer(orderDesign.id);
+  await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
   return duplicated;
 }
 
@@ -13850,7 +14173,7 @@ async function deleteSubtractorInstanceFromDesign(instance) {
   if (String(subtractorLibraryInstanceContextMenu.value?.instanceId || "") === String(instance.id || "")) {
     closeSubtractorInstanceContextMenu();
   }
-  await refreshOrderDesignGeometryFromServer(orderDesign.id);
+  await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
   if (String(subtractorInstanceEditorDraft.value?.id || "") === String(instance.id || "")) {
     closeSubtractorInstanceEditor();
   }
@@ -14007,6 +14330,7 @@ async function loadConstructionSubtractorPartGroups() {
         }))
       )
     );
+    invalidateOrderDesignDefaultsCache();
   } catch (_) {
     showAlert("خواندن جدول گروه دستگیره مخفی از دیتابیس انجام نشد.", { title: "خطا" });
   }
@@ -17098,6 +17422,7 @@ async function loadConstructionParamGroups() {
       })
     );
     constructionDeletedParamGroupIds.value = [];
+    invalidateOrderDesignDefaultsCache();
   } catch (_) {
     showAlert("خواندن جدول گروه پارامترها از دیتابیس انجام نشد.", { title: "خطا" });
   }
@@ -17117,6 +17442,7 @@ async function loadConstructionParams() {
       })
     );
     constructionDeletedParamIds.value = [];
+    invalidateOrderDesignDefaultsCache();
   } catch (_) {
     showAlert("خواندن جدول پارامترها از دیتابیس انجام نشد.", { title: "خطا" });
   }
@@ -17131,6 +17457,7 @@ async function loadConstructionSubCategories() {
     });
     editableSubCategories.value = payload.map((item) => ensureSubCategoryParamDefaults(withConstructionDraftState(item)));
     constructionDeletedSubCategoryIds.value = [];
+    invalidateOrderDesignDefaultsCache();
   } catch (_) {
     showAlert("خواندن جدول ساب‌کت‌ها از دیتابیس انجام نشد.", { title: "خطا" });
   }
@@ -19665,34 +19992,45 @@ async function updateOrder() {
 }
 
 async function saveActiveOrderDrawing() {
+  const finishPerf = startPerfScenario("order-design:drawing-save");
   if (orderOpening.value || orderDrawingLoading.value) {
+    finishPerf({ status: "skipped" });
     return false;
   }
   const target = normalizeOrderRecord(activeOrder.value);
   if (!target?.id) {
+    finishPerf({ status: "missing-order" });
     openOrderEntry();
     return false;
   }
   const payload = buildOrderDrawingSavePayload();
   if (!payload) {
+    finishPerf({ status: "empty-payload" });
     showAlert("ترسیم فعالی برای ذخیره وجود ندارد.", { title: "ذخیره سفارش" });
     return false;
   }
-  const res = await fetch(`/api/orders/${encodeURIComponent(target.id)}/drawing`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const message = await readApiErrorMessage(res, "ذخیره ترسیمات سفارش انجام نشد.");
-    if (res.status === 404 && /Order not found/i.test(message)) {
-      await handleMissingActiveOrder();
-      return false;
+  try {
+    const res = await fetch(`/api/orders/${encodeURIComponent(target.id)}/drawing`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const message = await readApiErrorMessage(res, "ذخیره ترسیمات سفارش انجام نشد.");
+      if (res.status === 404 && /Order not found/i.test(message)) {
+        await handleMissingActiveOrder();
+        finishPerf({ status: "order-missing" });
+        return false;
+      }
+      throw new Error(message);
     }
-    throw new Error(message);
+    await pruneUnplacedOrderDesignsForActiveOrder();
+    finishPerf({ status: "ok" });
+    return true;
+  } catch (error) {
+    finishPerf({ status: "error" });
+    throw error;
   }
-  await pruneUnplacedOrderDesignsForActiveOrder();
-  return true;
 }
 
 async function selectOrder(item) {
@@ -20041,6 +20379,21 @@ watch(
 );
 
 onMounted(() => {
+  if (DEV_PERF_ENABLED && typeof window !== "undefined") {
+    window.__designkpPerf = {
+      summary() {
+        return getPerfScenarioSummaryRows();
+      },
+      print() {
+        const rows = getPerfScenarioSummaryRows();
+        console.table(rows);
+        return rows;
+      },
+      reset() {
+        perfScenarioStats.clear();
+      },
+    };
+  }
   getDoorModelBoundsMm(DEFAULT_DOOR_MODEL_URL)
     .then((boundsMm) => {
       doorAssetLibrary.value = doorAssetLibrary.value.map((item) => ({
@@ -20088,7 +20441,14 @@ watch(
     models: [...passiveStageOrderDesignModels.value, ...passiveDoorSceneModels.value],
   }),
   ({ models }) => {
-    editorRef.value?.setPassiveModels?.(models);
+    pendingPassiveModels = Array.isArray(models) ? models : [];
+    if (passiveModelsSyncRaf) return;
+    passiveModelsSyncRaf = requestAnimationFrame(() => {
+      passiveModelsSyncRaf = 0;
+      const nextModels = pendingPassiveModels;
+      pendingPassiveModels = null;
+      editorRef.value?.setPassiveModels?.(Array.isArray(nextModels) ? nextModels : []);
+    });
   },
   { deep: true, immediate: true }
 );
@@ -20448,7 +20808,7 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
     await loadOrderDesignCatalog(true);
     const currentOrderDesignId = String(activeSubtractorLibraryOrderDesign.value?.id || "").trim();
     if (currentOrderDesignId) {
-      await refreshOrderDesignGeometryFromServer(currentOrderDesignId, { updateStage: false });
+      await refreshOrderDesignGeometrySingleFlight(currentOrderDesignId, { updateStage: false });
       await Promise.allSettled([
         ensureOrderDesignInteriorParamMetaLoaded(currentOrderDesignId),
         ensureOrderDesignDoorParamMetaLoaded(currentOrderDesignId),
@@ -20779,7 +21139,7 @@ function startCabinetDesignDrag(ev, design) {
   window.addEventListener("pointerup", onPresetPointerUp, { once: true });
 }
 
-async function onPresetPointerMove(ev) {
+function processPresetPointerMove(ev) {
   if (!presetDrag.value.active) return;
   const stageRect = stageEl.value?.getBoundingClientRect();
   const panelRect = menuPanelEl.value?.getBoundingClientRect();
@@ -20803,6 +21163,22 @@ async function onPresetPointerMove(ev) {
   const movedEnough = Math.hypot(dragDx, dragDy) >= PRESET_PREVIEW_MIN_DRAG_PX;
   const canDropCabinet = drag.leftPanel;
   if (!movedEnough || !canDropCabinet || (!inStage && !drag.enteredStage)) return;
+}
+
+function onPresetPointerMove(ev) {
+  if (!presetDrag.value.active) return;
+  pendingPresetPointerMove = {
+    clientX: Number(ev?.clientX) || 0,
+    clientY: Number(ev?.clientY) || 0,
+  };
+  if (presetPointerMoveRaf) return;
+  presetPointerMoveRaf = requestAnimationFrame(() => {
+    presetPointerMoveRaf = 0;
+    const queued = pendingPresetPointerMove;
+    pendingPresetPointerMove = null;
+    if (!queued) return;
+    processPresetPointerMove(queued);
+  });
 }
 
 async function onPresetPointerUp(ev) {
@@ -21569,8 +21945,19 @@ onBeforeUnmount(() => {
     interiorLibraryFrontViewportObserver.disconnect();
     interiorLibraryFrontViewportObserver = null;
   }
+  if (presetPointerMoveRaf) {
+    cancelAnimationFrame(presetPointerMoveRaf);
+    presetPointerMoveRaf = 0;
+  }
+  pendingPresetPointerMove = null;
+  if (passiveModelsSyncRaf) {
+    cancelAnimationFrame(passiveModelsSyncRaf);
+    passiveModelsSyncRaf = 0;
+  }
+  pendingPassiveModels = null;
   window.removeEventListener("pointermove", onPresetPointerMove);
   if (window.__designkpDialogs) delete window.__designkpDialogs;
+  if (window.__designkpPerf) delete window.__designkpPerf;
   window.removeEventListener("resize", scheduleShift);
   window.removeEventListener("resize", scheduleSubRailPosition);
   stopQuickSyncTimer();
@@ -28938,9 +29325,10 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="appDialog__actions">
-        <button type="button" class="constructionDialog__textBtn" @click="closeOrderDesignEditor">انصراف</button>
-        <button type="button" class="constructionDialog__textBtn is-primary" @click="saveOrderDesignEditor">
-          {{ orderDesignEditorMode === 'full' ? 'ذخیره طرح' : 'اعمال' }}
+        <button type="button" class="constructionDialog__textBtn" :disabled="orderDesignEditorSaving" @click="closeOrderDesignEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" :disabled="orderDesignEditorSaving" @click="saveOrderDesignEditor">
+          <span v-if="orderDesignEditorSaving" class="constructionDialog__spinner"></span>
+          <span>{{ orderDesignEditorSaving ? 'در حال ذخیره...' : (orderDesignEditorMode === 'full' ? 'ذخیره طرح' : 'اعمال') }}</span>
         </button>
       </div>
     </div>
@@ -28966,3 +29354,4 @@ onBeforeUnmount(() => {
   </div>
 
 </template>
+
