@@ -51,6 +51,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-weight: 500;
+  zoom: 0.9;
 }
 button,
 input,
@@ -4101,8 +4102,8 @@ option {
   transform: none;
   width: min(1440px, calc(100vw - 24px));
   height: calc(100vh - 254px);
-  max-height: calc(100vh - 290px);
-  margin: 212px 0 0;
+  max-height: calc(100vh - 250px);
+  margin: 231px 0 0;
   border-radius: 20px;
   box-shadow: none;
   background: transparent;
@@ -4154,7 +4155,7 @@ option {
   display: flex;
   align-items: stretch;
   justify-content: stretch;
-  min-height: 500px;
+  min-height: 450px;
   padding: 7px;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,245,244,0.95)),

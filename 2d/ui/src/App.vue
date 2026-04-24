@@ -4910,7 +4910,7 @@ const activeInteriorLibraryStructureViewerBoxes = computed(() => {
 });
 const activeSubtractorFrontFrameBoxes = computed(() => {
   if (!isSharedSubtractorLibraryActive.value) return [];
-  const sourceBoxes = activeInteriorLibraryViewerBoxes.value || [];
+  const sourceBoxes = activeInteriorLibraryStructureViewerBoxes.value || [];
   const frameBox = buildBoundingViewerBoxFromBoxes(sourceBoxes);
   return frameBox ? [frameBox] : [];
 });
@@ -5042,11 +5042,11 @@ const interiorLibraryFrontView = computed(() =>
     ? buildFrontViewLinesFromBoxes(
       (isSharedSubtractorLibraryActive.value
         ? activeSubtractorFrontFrameBoxes.value
-        : activeInteriorLibraryViewerBoxes.value) || [],
+        : activeInteriorLibraryStructureViewerBoxes.value) || [],
       subCategoryDesignEditorOpen.value
         ? `interior-structure:subcat:${String(subCategoryDesignEditorDraft.value?.id || "preview").trim()}`
         : `interior-structure:order:${String((isSharedSubtractorLibraryActive.value ? activeSubtractorLibraryOrderDesign.value?.id : activeInteriorLibraryOrderDesign.value?.id) || (isSharedSubtractorLibraryActive.value ? activeSubtractorLibrarySourceDesign.value?.id : activeInteriorLibrarySourceDesign.value?.id) || "none").trim()}`,
-      (isSharedSubtractorLibraryActive.value ? activeSubtractorFrontFrameBoxes.value : activeInteriorLibraryViewerBoxes.value) || []
+      (isSharedSubtractorLibraryActive.value ? activeSubtractorFrontFrameBoxes.value : activeInteriorLibraryStructureViewerBoxes.value) || []
     )
     : { outer: [], inner: [], bounds: null }
 );
@@ -6479,6 +6479,16 @@ watch(subCategoryDesignEditorOpen, (open) => {
     return;
   }
   if (!interiorLibraryOpen.value && !doorLibraryOpen.value && !subtractorLibraryOpen.value) enable2dInput();
+});
+watch(subCategoryDesignEditorActiveTab, () => {
+  nextTick(() => {
+    syncInteriorLibraryFrontViewport();
+  });
+});
+watch(orderDesignEditorActiveSection, () => {
+  nextTick(() => {
+    syncInteriorLibraryFrontViewport();
+  });
 });
 watch(interiorLibraryViewerWrapEl, (el) => {
   if (interiorLibraryFrontViewportObserver) {
@@ -20066,6 +20076,11 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
     subCategoryDesignEditorActiveTab.value = "internal";
     doorLibraryOpen.value = false;
     subtractorLibraryOpen.value = false;
+    interiorLibraryPreviewMode.value = "front2d";
+    interiorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
+    interiorLibraryShowInnerLines.value = true;
+    resetInteriorLibraryAnnotations();
+    resetInteriorLibraryPreviewView();
     interiorLibraryOpen.value = true;
     await Promise.allSettled([
       loadConstructionParamGroups(),
@@ -20165,6 +20180,11 @@ async function openDoorLibrary(targetOrderDesignId = "") {
     subCategoryDesignEditorActiveTab.value = "door";
     interiorLibraryOpen.value = false;
     subtractorLibraryOpen.value = false;
+    doorLibraryPreviewMode.value = "front2d";
+    doorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
+    clearDoorLibraryPlacedInstanceSelection();
+    resetDoorLibraryPreviewView();
+    resetDoorLibraryAnnotations();
     doorLibraryOpen.value = true;
     await Promise.allSettled([
       loadConstructionDoorPartGroups(),
@@ -20249,6 +20269,12 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
     subCategoryDesignEditorActiveTab.value = "subtractor";
     interiorLibraryOpen.value = false;
     doorLibraryOpen.value = false;
+    subtractorLibraryPreviewMode.value = "front2d";
+    interiorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
+    interiorLibraryFrontZoom.value = 1;
+    interiorLibraryFrontPan.value = { x: 0, y: 0 };
+    stopInteriorLibraryFrontPan();
+    resetSubtractorLibraryAnnotations();
     subtractorLibraryOpen.value = true;
     await Promise.allSettled([
       loadConstructionParamGroups(),
@@ -20271,6 +20297,12 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
     doorLibraryOpen.value = false;
     subtractorLibraryForcedOrderDesignId.value = resolvedTargetId;
     interiorLibraryForcedOrderDesignId.value = resolvedTargetId;
+    subtractorLibraryPreviewMode.value = "front2d";
+    interiorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
+    interiorLibraryFrontZoom.value = 1;
+    interiorLibraryFrontPan.value = { x: 0, y: 0 };
+    stopInteriorLibraryFrontPan();
+    resetSubtractorLibraryAnnotations();
     await ensureOrderDesignSectionDataReady(resolvedTargetId, "subtractor");
     subtractorLibraryOpen.value = true;
     return;
