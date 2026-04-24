@@ -5560,6 +5560,7 @@ option {
   min-height: 0;
   height: min(68vh, 760px);
   overflow: hidden;
+  max-height: 550px;
 }
 .subCategoryPreview__panel--groups {
   display: flex;
