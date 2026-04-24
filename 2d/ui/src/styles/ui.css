@@ -5444,6 +5444,7 @@ option {
   min-height: 0;
   max-height: 550px;
   flex: 1 1 auto;
+  padding-top: 5px;
 }
 .orderDesignEditor__meta {
   margin-top: 12px;
@@ -5560,7 +5561,7 @@ option {
   min-height: 0;
   height: min(68vh, 760px);
   overflow: hidden;
-  max-height: 550px;
+  max-height: 540px;
 }
 .subCategoryPreview__panel--groups {
   display: flex;

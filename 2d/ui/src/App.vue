@@ -661,7 +661,7 @@ const orderDesignEditorSections = [
   { id: "internal", label: "داخلی", icon: "/icons/enternal.png" },
   { id: "door", label: "درب", icon: "/icons/door_styles.png" },
   { id: "subtractor", label: "دستگیره مخفی", icon: "/icons/handless.png" },
-  { id: "defaults", label: "پیش‌فرض طرح سابکت", icon: "/icons/setting.png" },
+  { id: "defaults", label: "پیشفرض پارامترها", icon: "/icons/setting.png" },
 ];
 const orderDesignFullEditorEmbedded = computed(() => orderDesignEditorOpen.value && orderDesignEditorMode.value === "full");
 const orderDesignSavingIds = ref([]);
@@ -7000,8 +7000,8 @@ function buildInteriorInstanceGroups(instance) {
     const resolvedBinaryOnLabel = String(meta?.binary_on_label || "").trim();
     groupEntry.items.push({
       key: code,
-      displayTitle: String(meta?.label || fallbackOverride.display_title || baseLabel).trim() || code,
-      descriptionText: String(meta?.description_text || fallbackOverride.description_text || "").trim(),
+      displayTitle: String(fallbackOverride.display_title || meta?.label || baseLabel).trim() || code,
+      descriptionText: String(fallbackOverride.description_text || meta?.description_text || "").trim(),
       inputMode: resolvedInputMode,
       iconUrl: getSubCategoryDefaultIconUrl(meta?.icon_path || fallbackOverride.icon_path),
       binaryOffLabel: (resolvedBinaryOffLabel && resolvedBinaryOffLabel !== "0" ? resolvedBinaryOffLabel : fallbackOverride.binary_off_label) || "0",
@@ -7103,8 +7103,8 @@ function buildDoorInstanceGroups(instance) {
     const resolvedBinaryOnLabel = String(meta?.binary_on_label || "").trim();
     groupEntry.items.push({
       key: code,
-      displayTitle: String(meta?.label || fallbackOverride.display_title || baseLabel).trim() || code,
-      descriptionText: String(meta?.description_text || fallbackOverride.description_text || "").trim(),
+      displayTitle: String(fallbackOverride.display_title || meta?.label || baseLabel).trim() || code,
+      descriptionText: String(fallbackOverride.description_text || meta?.description_text || "").trim(),
       inputMode: resolvedInputMode,
       iconUrl: getSubCategoryDefaultIconUrl(meta?.icon_path || fallbackOverride.icon_path),
       binaryOffLabel: (resolvedBinaryOffLabel && resolvedBinaryOffLabel !== "0" ? resolvedBinaryOffLabel : fallbackOverride.binary_off_label) || "0",
@@ -7196,8 +7196,8 @@ function buildSubtractorInstanceGroups(instance) {
     const groupEntry = groupsById.get(groupId);
     groupEntry.items.push({
       key: code,
-      displayTitle: String(meta?.label || fallbackOverride.display_title || baseLabel).trim() || code,
-      descriptionText: String(meta?.description_text || fallbackOverride.description_text || "").trim(),
+      displayTitle: String(fallbackOverride.display_title || meta?.label || baseLabel).trim() || code,
+      descriptionText: String(fallbackOverride.description_text || meta?.description_text || "").trim(),
       inputMode: meta?.input_mode === "binary" || fallbackOverride.input_mode === "binary" ? "binary" : "value",
       iconUrl: getSubCategoryDefaultIconUrl(meta?.icon_path || fallbackOverride.icon_path),
       binaryOffLabel: String(meta?.binary_off_label || "").trim() || "0",
@@ -7999,6 +7999,9 @@ const activeSubCategoryUserPreviewGroups = computed(() => {
     .map((group) => ({
       ...group,
       items: group.items.map((column) => {
+        const sourceParam = constructionParamsByCode.value.get(String(column.key || "").trim());
+        const sourcePartKind = constructionPartKindsById.value.get(Number(sourceParam?.part_kind_id) || 0);
+        const isStructuralParam = getPartKindScope(sourcePartKind) === "structural";
         const baseLabel = column.label || column.key;
         const override = normalizeInternalPartGroupParamOverride(row.param_overrides?.[column.key], baseLabel);
         const displayTitle = String(override.display_title || baseLabel).trim() || column.key;
@@ -8006,6 +8009,7 @@ const activeSubCategoryUserPreviewGroups = computed(() => {
         const inputMode = override.input_mode === "binary" ? "binary" : "value";
         return {
           ...column,
+          isStructuralParam,
           displayTitle,
           descriptionText,
           iconUrl: getSubCategoryDefaultIconUrl(override.icon_path),
@@ -8016,6 +8020,10 @@ const activeSubCategoryUserPreviewGroups = computed(() => {
           binaryOnIconUrl: getSubCategoryDefaultIconUrl(override.binary_on_icon_path),
         };
       }),
+    }))
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((column) => column.isStructuralParam),
     }))
     .filter((group) => group.items.length > 0);
 });
@@ -10550,12 +10558,20 @@ function closeOrderDesignEditor() {
 function getOrderDesignAttrEntries(item) {
   const meta = item?.order_attr_meta || {};
   const values = item?.order_attr_values || {};
+  const isStructuralParamCode = (code) => {
+    const key = String(code || "").trim();
+    if (!key) return false;
+    const sourceParam = constructionParamsByCode.value.get(key);
+    const sourcePartKind = constructionPartKindsById.value.get(Number(sourceParam?.part_kind_id) || 0);
+    return getPartKindScope(sourcePartKind) === "structural";
+  };
   return Object.keys(meta)
     .map((key) => ({
       key,
       meta: meta[key] || {},
       value: values[key] ?? "",
     }))
+    .filter((entry) => isStructuralParamCode(entry.key))
     .sort((a, b) => {
       const groupDelta = (Number(a.meta.group_ui_order) || 0) - (Number(b.meta.group_ui_order) || 0);
       if (groupDelta !== 0) return groupDelta;
@@ -10580,7 +10596,15 @@ function buildOrderDesignEditorGroups(item) {
   const meta = item?.order_attr_meta || {};
   const values = item?.order_attr_values || {};
   const groupsMap = new Map();
+  const isStructuralParamCode = (code) => {
+    const key = String(code || "").trim();
+    if (!key) return false;
+    const sourceParam = constructionParamsByCode.value.get(key);
+    const sourcePartKind = constructionPartKindsById.value.get(Number(sourceParam?.part_kind_id) || 0);
+    return getPartKindScope(sourcePartKind) === "structural";
+  };
   for (const [key, rawMeta] of Object.entries(meta)) {
+    if (!isStructuralParamCode(key)) continue;
     const entryMeta = rawMeta || {};
     const liveGroup = orderDesignParamGroupsById.value.get(String(entryMeta.group_id ?? ""));
     const showsInAttrs = liveGroup
