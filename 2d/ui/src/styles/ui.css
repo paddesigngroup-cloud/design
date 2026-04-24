@@ -4264,6 +4264,10 @@ option {
   cursor: none;
   margin-top: 7px;
 }
+.subCategoryDesignEditor__viewerWrap--interior.is-front2d-mode .subCategoryDesignEditor__frontSvg,
+.subCategoryDesignEditor__viewerWrap--interior.is-front2d-mode .subCategoryDesignEditor__frontCanvas {
+  margin-top: 0;
+}
 .subCategoryDesignEditor__viewerWrap--interior.is-idle,
 .subCategoryDesignEditor__frontSvg.is-idle,
 .subCategoryDesignEditor__frontCanvas.is-idle {
