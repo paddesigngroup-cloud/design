@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 
 from datetime import datetime, timezone
+from time import perf_counter
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -25,6 +28,7 @@ from designkp_backend.services.order_designs import (
     next_order_design_instance_code,
     next_order_design_sort_order,
     normalize_order_attr_value,
+    order_design_snapshot_looks_fresh,
     order_design_snapshot_marker,
     read_order_design_snapshot_checksum,
     refresh_order_design_aggregate_snapshots,
@@ -47,6 +51,9 @@ from designkp_backend.services.sub_category_designs import (
 
 router = APIRouter(prefix="/order-designs", tags=["order_designs"])
 DEFAULT_INTERIOR_LINE_COLOR = "#8A98A3"
+logger = logging.getLogger(__name__)
+SAVE_REBUILD_MAX_CONCURRENCY = 8
+_ORDER_SAVE_REBUILD_SEMAPHORE = asyncio.Semaphore(SAVE_REBUILD_MAX_CONCURRENCY)
 
 
 def _normalize_hex_color(value: str | None, fallback: str = DEFAULT_INTERIOR_LINE_COLOR) -> str:
@@ -1219,6 +1226,7 @@ async def update_order_design(
     payload: OrderDesignUpdate,
     session: AsyncSession = Depends(get_db_session),
 ) -> OrderDesignItem:
+    started_at = perf_counter()
     item = await _require_item(session, item_id)
     include_interior = await interior_instance_tables_ready(session)
     include_subtractors = await subtractor_instance_tables_ready(session)
@@ -1237,73 +1245,101 @@ async def update_order_design(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Instance code is required.")
     await _ensure_unique_instance_code(session, order_id=item.order_id, instance_code=instance_code, exclude_id=item.id)
     next_attr_values = _normalize_attr_values(payload.order_attr_values, dict(item.order_attr_meta or {}))
-    snapshot = await build_order_design_snapshot(
-        session,
-        order=order,
-        source_design=source_design,
-        override_attr_values=next_attr_values,
-        interior_instances=list(item.interior_instances or []) if include_interior else [],
-        subtractor_instances=list(getattr(item, "subtractor_instances", []) or []) if include_subtractors else [],
-        door_instances=list(getattr(item, "door_instances", []) or []) if include_doors else [],
-    )
     current_interior_instances = list(item.interior_instances or []) if include_interior else []
     current_subtractor_instances = list(getattr(item, "subtractor_instances", []) or []) if include_subtractors else []
     current_door_instances = list(getattr(item, "door_instances", []) or []) if include_doors else []
-    snapshot_checksum = build_order_design_snapshot_checksum(
-        source_design=source_design,
-        order_attr_values=snapshot["order_attr_values"],
-        interior_instances=current_interior_instances,
-        subtractor_instances=current_subtractor_instances,
-        door_instances=current_door_instances,
-        source_state=dict(snapshot.get("source_state") or {}),
-    )
-    snapshot_marker = order_design_snapshot_marker(
+    snapshot_is_fresh = order_design_snapshot_looks_fresh(
+        meta=dict(item.order_attr_meta or {}),
+        snapshot_checksum=str(item.snapshot_checksum or ""),
         source_design=source_design,
         interior_instances=current_interior_instances,
         subtractor_instances=current_subtractor_instances,
         door_instances=current_door_instances,
     )
+    needs_snapshot_rebuild = dict(item.order_attr_values or {}) != next_attr_values or not snapshot_is_fresh
+    snapshot_build_ms = 0.0
+    commit_started_at = perf_counter()
     item.design_title = title
     item.manual_name = str(payload.manual_name or "").strip() or None
     item.instance_code = instance_code
     item.sort_order = payload.sort_order
     item.status = str(payload.status or "draft").strip() or "draft"
-    item.order_attr_values = snapshot["order_attr_values"]
-    item.order_attr_meta = with_order_design_snapshot_checksum(
-        snapshot["order_attr_meta"],
-        checksum=snapshot_checksum,
-        marker=snapshot_marker,
-        source_state_signature=str(dict(snapshot.get("source_state") or {}).get("signature") or ""),
-    )
-    item.part_snapshots = snapshot["part_snapshots"]
-    item.viewer_boxes = snapshot["viewer_boxes"]
-    if include_interior:
-        _apply_resolved_interior_snapshot(item, snapshot=snapshot)
-    if include_subtractors:
-        subtractor_by_id = {str(getattr(instance, "id", "")): instance for instance in list(getattr(item, "subtractor_instances", []) or [])}
-        for resolved in list(snapshot.get("subtractor_instances") or []):
-            instance = subtractor_by_id.get(str(resolved.get("id") or ""))
-            if not instance:
-                continue
-            instance.param_values = dict(resolved.get("param_values") or {})
-            instance.param_meta = dict(resolved.get("param_meta") or {})
-            instance.part_snapshots = list(resolved.get("part_snapshots") or [])
-            instance.viewer_boxes = list(resolved.get("viewer_boxes") or [])
-    if include_doors:
-        door_by_id = {str(getattr(instance, "id", "")): instance for instance in list(getattr(item, "door_instances", []) or [])}
-        for resolved in list(snapshot.get("door_instances") or []):
-            instance = door_by_id.get(str(resolved.get("id") or ""))
-            if not instance:
-                continue
-            instance.controller_box_snapshot = dict(resolved.get("controller_box_snapshot") or {})
-            instance.param_values = dict(resolved.get("param_values") or {})
-            instance.param_meta = dict(resolved.get("param_meta") or {})
-            instance.part_snapshots = list(resolved.get("part_snapshots") or [])
-            instance.viewer_boxes = list(resolved.get("viewer_boxes") or [])
-    item.snapshot_checksum = snapshot_checksum
+    if needs_snapshot_rebuild:
+        snapshot_started_at = perf_counter()
+        async with _ORDER_SAVE_REBUILD_SEMAPHORE:
+            snapshot = await build_order_design_snapshot(
+                session,
+                order=order,
+                source_design=source_design,
+                override_attr_values=next_attr_values,
+                interior_instances=current_interior_instances,
+                subtractor_instances=current_subtractor_instances,
+                door_instances=current_door_instances,
+            )
+        snapshot_build_ms = (perf_counter() - snapshot_started_at) * 1000.0
+        snapshot_checksum = build_order_design_snapshot_checksum(
+            source_design=source_design,
+            order_attr_values=snapshot["order_attr_values"],
+            interior_instances=current_interior_instances,
+            subtractor_instances=current_subtractor_instances,
+            door_instances=current_door_instances,
+            source_state=dict(snapshot.get("source_state") or {}),
+        )
+        snapshot_marker = order_design_snapshot_marker(
+            source_design=source_design,
+            interior_instances=current_interior_instances,
+            subtractor_instances=current_subtractor_instances,
+            door_instances=current_door_instances,
+        )
+        item.order_attr_values = snapshot["order_attr_values"]
+        item.order_attr_meta = with_order_design_snapshot_checksum(
+            snapshot["order_attr_meta"],
+            checksum=snapshot_checksum,
+            marker=snapshot_marker,
+            source_state_signature=str(dict(snapshot.get("source_state") or {}).get("signature") or ""),
+        )
+        item.part_snapshots = snapshot["part_snapshots"]
+        item.viewer_boxes = snapshot["viewer_boxes"]
+        if include_interior:
+            _apply_resolved_interior_snapshot(item, snapshot=snapshot)
+        if include_subtractors:
+            subtractor_by_id = {str(getattr(instance, "id", "")): instance for instance in list(getattr(item, "subtractor_instances", []) or [])}
+            for resolved in list(snapshot.get("subtractor_instances") or []):
+                instance = subtractor_by_id.get(str(resolved.get("id") or ""))
+                if not instance:
+                    continue
+                instance.param_values = dict(resolved.get("param_values") or {})
+                instance.param_meta = dict(resolved.get("param_meta") or {})
+                instance.part_snapshots = list(resolved.get("part_snapshots") or [])
+                instance.viewer_boxes = list(resolved.get("viewer_boxes") or [])
+        if include_doors:
+            door_by_id = {str(getattr(instance, "id", "")): instance for instance in list(getattr(item, "door_instances", []) or [])}
+            for resolved in list(snapshot.get("door_instances") or []):
+                instance = door_by_id.get(str(resolved.get("id") or ""))
+                if not instance:
+                    continue
+                instance.controller_box_snapshot = dict(resolved.get("controller_box_snapshot") or {})
+                instance.param_values = dict(resolved.get("param_values") or {})
+                instance.param_meta = dict(resolved.get("param_meta") or {})
+                instance.part_snapshots = list(resolved.get("part_snapshots") or [])
+                instance.viewer_boxes = list(resolved.get("viewer_boxes") or [])
+        item.snapshot_checksum = snapshot_checksum
+    else:
+        stored_checksum = read_order_design_snapshot_checksum(dict(item.order_attr_meta or {}))
+        if stored_checksum and str(item.snapshot_checksum or "") != stored_checksum:
+            item.snapshot_checksum = stored_checksum
     await _commit_order_design_changes(
         session,
         conflict_detail="Order design changed in another request. Please reload and try again.",
+    )
+    commit_ms = (perf_counter() - commit_started_at) * 1000.0
+    logger.info(
+        "order_design.save_timing item_id=%s rebuild=%s snapshot_ms=%.2f commit_ms=%.2f total_ms=%.2f",
+        str(item.id),
+        needs_snapshot_rebuild,
+        snapshot_build_ms,
+        commit_ms,
+        (perf_counter() - started_at) * 1000.0,
     )
     item = await _require_item(session, item.id)
     return _serialize_item(item, include_interior=(include_interior or include_subtractors or include_doors))

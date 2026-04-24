@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
@@ -34,6 +37,9 @@ from designkp_backend.services.sub_category_designs import (
 
 router = APIRouter(prefix="/sub-category-designs", tags=["sub_category_designs"])
 DEFAULT_INTERIOR_LINE_COLOR = "#8A98A3"
+logger = logging.getLogger(__name__)
+SAVE_REBUILD_MAX_CONCURRENCY = 8
+_SUBCATEGORY_SAVE_REBUILD_SEMAPHORE = asyncio.Semaphore(SAVE_REBUILD_MAX_CONCURRENCY)
 
 
 def _normalize_hex_color(value: str | None, fallback: str = DEFAULT_INTERIOR_LINE_COLOR) -> str:
@@ -643,16 +649,33 @@ async def _category_outline_color(session: AsyncSession, cat_id: int) -> str:
     return str(value or "#7A4A2B").strip() or "#7A4A2B"
 
 
-async def _load_design(session: AsyncSession, design_uuid: uuid.UUID) -> SubCategoryDesign:
+async def _resolve_design_instance_schema_flags(session: AsyncSession) -> tuple[bool, bool, bool]:
+    include_interior = await interior_instance_tables_ready(session)
+    include_subtractors = await subtractor_instance_tables_ready(session)
+    include_doors = await door_instance_tables_ready(session)
+    return include_interior, include_subtractors, include_doors
+
+
+async def _load_design(
+    session: AsyncSession,
+    design_uuid: uuid.UUID,
+    *,
+    include_interior: bool | None = None,
+    include_subtractors: bool | None = None,
+    include_doors: bool | None = None,
+) -> SubCategoryDesign:
+    resolved_include_interior = include_interior if include_interior is not None else await interior_instance_tables_ready(session)
+    resolved_include_subtractors = include_subtractors if include_subtractors is not None else await subtractor_instance_tables_ready(session)
+    resolved_include_doors = include_doors if include_doors is not None else await door_instance_tables_ready(session)
     stmt = select(SubCategoryDesign).options(
         selectinload(SubCategoryDesign.parts).selectinload(SubCategoryDesignPart.snapshots),
         selectinload(SubCategoryDesign.sub_category).selectinload(SubCategory.category),
     )
-    if await interior_instance_tables_ready(session):
+    if resolved_include_interior:
         stmt = stmt.options(selectinload(SubCategoryDesign.interior_instances))
-    if await subtractor_instance_tables_ready(session):
+    if resolved_include_subtractors:
         stmt = stmt.options(selectinload(SubCategoryDesign.subtractor_instances))
-    if await door_instance_tables_ready(session):
+    if resolved_include_doors:
         stmt = stmt.options(selectinload(SubCategoryDesign.door_instances))
     item = await session.scalar(
         stmt.where(
@@ -772,6 +795,8 @@ async def list_sub_category_designs(
 
 @router.post("", response_model=SubCategoryDesignItem, status_code=status.HTTP_201_CREATED)
 async def create_sub_category_design(payload: SubCategoryDesignCreate, session: AsyncSession = Depends(get_db_session)) -> SubCategoryDesignItem:
+    started_at = perf_counter()
+    include_interior, include_subtractors, include_doors = await _resolve_design_instance_schema_flags(session)
     await require_admin_if_present(session, payload.admin_id)
     sub_category = await require_accessible_sub_category(session, admin_id=payload.admin_id, sub_category_id=payload.sub_category_id)
     next_design_id = await _resolve_available_design_id(session, payload.design_id)
@@ -800,18 +825,48 @@ async def create_sub_category_design(payload: SubCategoryDesignCreate, session: 
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Design ID or code is already used.") from exc
     await _replace_parts(session, design=item, sub_category=sub_category, parts=payload.parts)
-    item = await _load_design(session, item.id)
-    await _replace_interior_instances(session, design=item, payloads=list(payload.interior_instances or []))
-    item = await _load_design(session, item.id)
-    await _replace_door_instances(session, design=item, payloads=list(payload.door_instances or []))
+    await _replace_interior_instances(
+        session,
+        design=item,
+        payloads=list(payload.interior_instances or []),
+        include_interior=include_interior,
+        include_subtractors=include_subtractors,
+        include_doors=include_doors,
+    )
+    await _replace_door_instances(
+        session,
+        design=item,
+        payloads=list(payload.door_instances or []),
+        include_interior=include_interior,
+        include_subtractors=include_subtractors,
+        include_doors=include_doors,
+    )
     await session.flush()
-    item = await _load_design(session, item.id)
-    await rebuild_design_snapshots(session, item)
+    item = await _load_design(
+        session,
+        item.id,
+        include_interior=include_interior,
+        include_subtractors=include_subtractors,
+        include_doors=include_doors,
+    )
+    async with _SUBCATEGORY_SAVE_REBUILD_SEMAPHORE:
+        await rebuild_design_snapshots(session, item)
     await session.commit()
-    item = await _load_design(session, item.id)
+    item = await _load_design(
+        session,
+        item.id,
+        include_interior=include_interior,
+        include_subtractors=include_subtractors,
+        include_doors=include_doors,
+    )
+    logger.info(
+        "sub_category_design.create_timing design_id=%s total_ms=%.2f",
+        str(item.id),
+        (perf_counter() - started_at) * 1000.0,
+    )
     return _serialize_design(
         item,
-        include_interior=await interior_instance_tables_ready(session),
+        include_interior=(include_interior or include_subtractors or include_doors),
         design_outline_color=await _category_outline_color(session, sub_category.cat_id),
     )
 
@@ -822,7 +877,15 @@ async def update_sub_category_design(
     payload: SubCategoryDesignUpdate,
     session: AsyncSession = Depends(get_db_session),
 ) -> SubCategoryDesignItem:
-    item = await _load_design(session, design_uuid)
+    started_at = perf_counter()
+    include_interior, include_subtractors, include_doors = await _resolve_design_instance_schema_flags(session)
+    item = await _load_design(
+        session,
+        design_uuid,
+        include_interior=include_interior,
+        include_subtractors=include_subtractors,
+        include_doors=include_doors,
+    )
     await require_admin_if_present(session, payload.admin_id)
     sub_category = await require_accessible_sub_category(session, admin_id=payload.admin_id, sub_category_id=payload.sub_category_id)
     next_design_id = await _resolve_available_design_id(session, payload.design_id, exclude_uuid=item.id)
@@ -843,22 +906,52 @@ async def update_sub_category_design(
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     await _replace_parts(session, design=item, sub_category=sub_category, parts=payload.parts)
-    item = await _load_design(session, item.id)
-    await _replace_interior_instances(session, design=item, payloads=list(payload.interior_instances or []))
-    item = await _load_design(session, item.id)
-    await _replace_door_instances(session, design=item, payloads=list(payload.door_instances or []))
+    await _replace_interior_instances(
+        session,
+        design=item,
+        payloads=list(payload.interior_instances or []),
+        include_interior=include_interior,
+        include_subtractors=include_subtractors,
+        include_doors=include_doors,
+    )
+    await _replace_door_instances(
+        session,
+        design=item,
+        payloads=list(payload.door_instances or []),
+        include_interior=include_interior,
+        include_subtractors=include_subtractors,
+        include_doors=include_doors,
+    )
     try:
         await session.flush()
     except IntegrityError as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Design ID or code is already used.") from exc
-    item = await _load_design(session, item.id)
-    await rebuild_design_snapshots(session, item)
+    item = await _load_design(
+        session,
+        item.id,
+        include_interior=include_interior,
+        include_subtractors=include_subtractors,
+        include_doors=include_doors,
+    )
+    async with _SUBCATEGORY_SAVE_REBUILD_SEMAPHORE:
+        await rebuild_design_snapshots(session, item)
     await session.commit()
-    item = await _load_design(session, item.id)
+    item = await _load_design(
+        session,
+        item.id,
+        include_interior=include_interior,
+        include_subtractors=include_subtractors,
+        include_doors=include_doors,
+    )
+    logger.info(
+        "sub_category_design.save_timing design_id=%s total_ms=%.2f",
+        str(item.id),
+        (perf_counter() - started_at) * 1000.0,
+    )
     return _serialize_design(
         item,
-        include_interior=await interior_instance_tables_ready(session),
+        include_interior=(include_interior or include_subtractors or include_doors),
         design_outline_color=await _category_outline_color(session, sub_category.cat_id),
     )
 
@@ -1346,8 +1439,12 @@ async def _replace_interior_instances(
     *,
     design: SubCategoryDesign,
     payloads: list[SubCategoryDesignInteriorInstanceDraftPayload],
+    include_interior: bool | None = None,
+    include_subtractors: bool | None = None,
+    include_doors: bool | None = None,
 ) -> None:
-    if not await interior_instance_tables_ready(session):
+    interior_ready = include_interior if include_interior is not None else await interior_instance_tables_ready(session)
+    if not interior_ready:
         return
     existing = {item.id: item for item in list(getattr(design, "interior_instances", []) or []) if getattr(item, "id", None) is not None}
     keep_ids = {item.id for item in list(payloads or []) if item.id is not None}
@@ -1403,8 +1500,12 @@ async def _replace_door_instances(
     *,
     design: SubCategoryDesign,
     payloads: list[SubCategoryDesignDoorInstanceDraftPayload],
+    include_interior: bool | None = None,
+    include_subtractors: bool | None = None,
+    include_doors: bool | None = None,
 ) -> None:
-    if not await door_instance_tables_ready(session):
+    door_ready = include_doors if include_doors is not None else await door_instance_tables_ready(session)
+    if not door_ready:
         return
     existing = {item.id: item for item in list(getattr(design, "door_instances", []) or []) if getattr(item, "id", None) is not None}
     keep_ids = {item.id for item in list(payloads or []) if item.id is not None}
@@ -1464,8 +1565,12 @@ async def _replace_subtractor_instances(
     *,
     design: SubCategoryDesign,
     payloads: list[SubCategoryDesignSubtractorInstanceDraftPayload],
+    include_interior: bool | None = None,
+    include_subtractors: bool | None = None,
+    include_doors: bool | None = None,
 ) -> None:
-    if not await subtractor_instance_tables_ready(session):
+    subtractor_ready = include_subtractors if include_subtractors is not None else await subtractor_instance_tables_ready(session)
+    if not subtractor_ready:
         return
     existing = {item.id: item for item in list(getattr(design, "subtractor_instances", []) or []) if getattr(item, "id", None) is not None}
     keep_ids = {item.id for item in list(payloads or []) if item.id is not None}
@@ -1473,7 +1578,13 @@ async def _replace_subtractor_instances(
         if instance.id not in keep_ids:
             await session.delete(instance)
     await session.flush()
-    design = await _load_design(session, design.id)
+    design = await _load_design(
+        session,
+        design.id,
+        include_interior=include_interior,
+        include_subtractors=subtractor_ready,
+        include_doors=include_doors,
+    )
     for payload in sorted(list(payloads or []), key=lambda row: (int(row.ui_order or 0), str(row.instance_code or ""))):
         target = existing.get(payload.id) if payload.id is not None else None
         group = await require_accessible_subtractor_part_group(session, admin_id=design.admin_id, group_id=payload.subtractor_part_group_id)
