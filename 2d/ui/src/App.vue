@@ -1004,6 +1004,11 @@ function resetInteriorLibraryPreviewView() {
   interiorLibraryFrontPan.value = { x: 0, y: 0 };
   stopInteriorLibraryFrontPan();
 }
+async function refitInteriorLibraryFrontPreview() {
+  await nextTick();
+  syncInteriorLibraryFrontViewport();
+  resetInteriorLibraryPreviewView();
+}
 function focusInteriorLibraryPreviewCloser() {
   if (shouldBlockInteriorLibraryFrontZoom()) return;
   if (interiorLibraryPreviewMode.value === "model3d") {
@@ -1125,6 +1130,10 @@ function resetDoorLibraryPreviewView() {
   doorLibraryFrontZoom.value = 1;
   doorLibraryFrontPan.value = { x: 0, y: 0 };
   stopDoorLibraryFrontPan();
+}
+async function refitDoorLibraryFrontPreview() {
+  await nextTick();
+  resetDoorLibraryPreviewView();
 }
 function getDoorLibraryControllerStateTargetKey() {
   const scope = subCategoryDesignEditorOpen.value ? "subcat" : "order";
@@ -1907,6 +1916,10 @@ function hitTestControllerOverlay(point, overlays, options = {}) {
   const includeMetrics = options?.includeMetrics === true;
   const includeRect = options?.includeRect !== false;
   const instanceIdKey = String(options?.instanceIdKey || "instanceId").trim() || "instanceId";
+  const fieldPadding = Math.max(0, Number(options?.fieldPadding) || 0);
+  const handlePadding = Math.max(0, Number(options?.handlePadding) || 0);
+  const metricPadding = Math.max(0, Number(options?.metricPadding) || 0);
+  const rectPadding = Math.max(0, Number(options?.rectPadding) || 0);
   for (let overlayIndex = (Array.isArray(overlays) ? overlays.length : 0) - 1; overlayIndex >= 0; overlayIndex -= 1) {
     const overlay = overlays[overlayIndex];
     const instanceId = String(overlay?.[instanceIdKey] || overlay?.id || overlay?.instanceId || "").trim();
@@ -1917,7 +1930,7 @@ function hitTestControllerOverlay(point, overlays, options = {}) {
         y: Number(visual?.fieldY) || 0,
         w: Number(visual?.inputW) || 0,
         h: Number(visual?.inputH) || 0,
-      }, 0)) {
+      }, fieldPadding)) {
         return { ...overlay, ...visual, instanceId, controllerId: String(visual?.id || "").trim(), hitType: "field" };
       }
       if (pointInInteriorRect(target, {
@@ -1925,7 +1938,7 @@ function hitTestControllerOverlay(point, overlays, options = {}) {
         y: Number(visual?.y) || 0,
         w: Number(visual?.w) || 0,
         h: Number(visual?.h) || 0,
-      }, 0)) {
+      }, handlePadding)) {
         return { ...overlay, ...visual, instanceId, controllerId: String(visual?.id || "").trim(), hitType: "handle" };
       }
     }
@@ -1937,12 +1950,12 @@ function hitTestControllerOverlay(point, overlays, options = {}) {
           y: Number(metric?.fieldY) || 0,
           w: Number(metric?.inputW) || 0,
           h: Number(metric?.inputH) || 0,
-        }, 0)) {
+        }, metricPadding)) {
           return { ...overlay, ...metric, instanceId, controllerId: String(metric?.id || "").trim(), hitType: "metric" };
         }
       }
     }
-    if (includeRect && pointInInteriorRect(target, overlay?.rect, 0)) {
+    if (includeRect && pointInInteriorRect(target, overlay?.rect, rectPadding)) {
       return { ...overlay, instanceId, controllerId: "", hitType: "rect" };
     }
   }
@@ -2247,6 +2260,9 @@ function hitTestInteriorLibraryController(point) {
   const result = hitTestControllerOverlay(target, overlays, {
     includeRect: true,
     instanceIdKey: "instanceId",
+    fieldPadding: 4,
+    handlePadding: 6,
+    rectPadding: 6,
   });
   interiorLibraryControllerHitCache.value = {
     token: interiorLibraryControllerVisualsToken.value,
@@ -2260,6 +2276,10 @@ function hitTestDoorLibraryController(point) {
     includeMetrics: true,
     includeRect: true,
     instanceIdKey: "id",
+    fieldPadding: 4,
+    handlePadding: 6,
+    metricPadding: 4,
+    rectPadding: 6,
   });
 }
 
@@ -2870,8 +2890,9 @@ function processInteriorLibraryPointerFrame() {
   interiorLibraryLastProcessedPointerPoint.value = rawPoint;
   const controllerHit = hitTestInteriorLibraryController(rawPoint);
   if (controllerHit) {
-    if (interiorLibraryHoveredControllerId.value !== controllerHit.id) {
-      interiorLibraryHoveredControllerId.value = controllerHit.id;
+    const hoveredControllerId = String(controllerHit.controllerId || controllerHit.id || "__controller_rect__");
+    if (interiorLibraryHoveredControllerId.value !== hoveredControllerId) {
+      interiorLibraryHoveredControllerId.value = hoveredControllerId;
     }
     if (interiorLibraryHoverMode.value !== "clicker") {
       interiorLibraryHoverMode.value = "clicker";
@@ -4614,12 +4635,23 @@ function syncInteriorLibraryFrontViewport() {
     };
     return;
   }
+  const rect = el.getBoundingClientRect?.();
   const styles = window.getComputedStyle(el);
-  const padX = (parseFloat(styles.paddingLeft) || 0) + (parseFloat(styles.paddingRight) || 0);
-  const padY = (parseFloat(styles.paddingTop) || 0) + (parseFloat(styles.paddingBottom) || 0);
+  const rawPadX = (parseFloat(styles.paddingLeft) || 0) + (parseFloat(styles.paddingRight) || 0);
+  const rawPadY = (parseFloat(styles.paddingTop) || 0) + (parseFloat(styles.paddingBottom) || 0);
+  const scaleX = (Number(el.clientWidth) || 0) > 0
+    ? (Math.max(0, Number(rect?.width) || 0) / Number(el.clientWidth))
+    : 1;
+  const scaleY = (Number(el.clientHeight) || 0) > 0
+    ? (Math.max(0, Number(rect?.height) || 0) / Number(el.clientHeight))
+    : 1;
+  const padX = rawPadX * (Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1);
+  const padY = rawPadY * (Number.isFinite(scaleY) && scaleY > 0 ? scaleY : 1);
+  const boxWidth = Math.max(0, Number(rect?.width) || 0) || Number(el.clientWidth) || 0;
+  const boxHeight = Math.max(0, Number(rect?.height) || 0) || Number(el.clientHeight) || 0;
   interiorLibraryFrontViewport.value = {
-    width: Math.max(320, Math.round(el.clientWidth - padX)),
-    height: Math.max(320, Math.round(el.clientHeight - padY)),
+    width: Math.max(320, Math.round(boxWidth - padX)),
+    height: Math.max(320, Math.round(boxHeight - padY)),
   };
 }
 
@@ -9358,6 +9390,9 @@ function resetSubCategoryDesignEditorState() {
   subCategoryDesignPreviewLoading.value = false;
   subCategoryDesignPreviewError.value = "";
   subCategoryDesignEditorSaving.value = false;
+  subCategoryUserPreviewRowId.value = null;
+  subCategoryUserPreviewValues.value = {};
+  subCategoryUserPreviewActiveGroupId.value = "";
 }
 
 function closeSubCategoryDesignEditor() {
@@ -10469,14 +10504,9 @@ async function selectOrderDesignEditorSection(sectionId) {
 
 function openOrderDesignSubCategoryDefaultsFromEditor() {
   const draft = orderDesignEditorDraft.value;
-  const subCategoryId = String(draft?.sub_category_id || "").trim();
-  if (!subCategoryId) return;
-  const target = constructionSubCategories.value.find((item) => String(item.id) === subCategoryId);
-  if (!target) {
-    showAlert("ساب‌کت این طرح سفارش در جدول ساب‌کت‌ها پیدا نشد.", { title: "پیش‌فرض طرح سابکت" });
-    return;
-  }
-  openSubCategoryUserPreview(target);
+  if (!draft) return;
+  orderDesignEditorActiveSection.value = "defaults";
+  orderDesignEditorActiveGroupId.value = buildOrderDesignEditorGroups(draft)[0]?.id || "";
 }
 
 async function openOrderDesignEditorRelatedSection(sectionId) {
@@ -10692,8 +10722,13 @@ async function saveOrderDesignEditor() {
     } else {
       await loadOrderDesignCatalog(true);
     }
-    closeOrderDesignEditor();
-    showAlert("تنظیمات طرح سفارش ذخیره شد.", { title: "ذخیره تنظیمات" });
+    if (orderDesignEditorMode.value === "full") {
+      closeOrderDesignEditor();
+      showAlert("تنظیمات طرح سفارش ذخیره شد.", { title: "ذخیره تنظیمات" });
+    } else {
+      // In defaults/apply mode keep the editor open so admins can continue adjusting values.
+      showAlert("مقادیر پیش‌فرض طرح سفارش اعمال شد.", { title: "اعمال تنظیمات" });
+    }
   } catch (error) {
     showAlert(error?.message || "ذخیره تنظیمات طرح سفارش انجام نشد.", { title: "خطا" });
   } finally {
@@ -11705,6 +11740,7 @@ async function openSubCategoryDesignEditor(item = null) {
   subCategoryDesignEditorPreview.value = null;
   subCategoryDesignPreviewError.value = "";
   subCategoryDesignEditorActiveTab.value = "structural";
+  syncSubCategoryAdminDefaultsDraftForDesignEditor(draft.sub_category_id, { resetGroup: true });
   subCategoryDesignEditorOpen.value = true;
   await refreshSubCategoryDesignPreview();
 }
@@ -13843,27 +13879,31 @@ async function deleteSubtractorInstanceFromContextMenu() {
 
 function onSubCategoryDesignSubCategoryChange() {
   syncSubCategoryDesignDraftSubCategoryFields(subCategoryDesignEditorDraft.value);
+  syncSubCategoryAdminDefaultsDraftForDesignEditor(subCategoryDesignEditorDraft.value?.sub_category_id, { resetGroup: true });
   refreshSubCategoryDesignPreview();
 }
 
 function openSubCategoryAdminDefaultsFromDesignEditor() {
   const draft = subCategoryDesignEditorDraft.value;
   if (!draft?.sub_category_id) return;
-  const target = constructionSubCategories.value.find((item) => String(item.id) === String(draft.sub_category_id));
+  const target = syncSubCategoryAdminDefaultsDraftForDesignEditor(draft.sub_category_id, { resetGroup: true });
   if (!target) {
     showAlert("ساب‌کت انتخاب‌شده در جدول ساب‌کت‌ها پیدا نشد.", { title: "پیش‌فرض ادمین" });
     return;
   }
-  openSubCategoryUserPreview(target);
+  activateSubCategoryDesignEditorTab("defaults");
 }
 
 function activateSubCategoryDesignEditorTab(tab) {
   const nextTab = String(tab || "").trim() || "structural";
   subCategoryDesignEditorActiveTab.value = nextTab;
-  if (nextTab === "structural") {
+  if (nextTab === "structural" || nextTab === "defaults") {
     closeInteriorLibrary();
     closeDoorLibrary();
     closeSubtractorLibrary();
+  }
+  if (nextTab === "defaults") {
+    syncSubCategoryAdminDefaultsDraftForDesignEditor(subCategoryDesignEditorDraft.value?.sub_category_id);
   }
 }
 
@@ -14027,9 +14067,19 @@ async function saveSubCategoryDesignEditor() {
     showAlert("کد طرح تکراری است.", { title: "اعتبارسنجی" });
     return;
   }
+  const defaultsRow = syncSubCategoryAdminDefaultsDraftForDesignEditor(draft.sub_category_id);
+  if (!defaultsRow) {
+    showAlert("ساب‌کت انتخاب‌شده در جدول ساب‌کت‌ها پیدا نشد.", { title: "اعتبارسنجی" });
+    return;
+  }
   const payload = normalizeSubCategoryDesignPayload(draft);
   subCategoryDesignEditorSaving.value = true;
   try {
+    if (hasSubCategoryUserPreviewChanges()) {
+      writeSubCategoryUserPreviewValuesToRow(defaultsRow);
+      markConstructionSubCategoryDirty(defaultsRow);
+      await persistSubCategoryRow(defaultsRow);
+    }
     const res = await fetch(
       draft.id ? `/api/sub-category-designs/${encodeURIComponent(String(draft.id))}` : "/api/sub-category-designs",
       {
@@ -15504,11 +15554,51 @@ async function applySubCategoryDefaultsEditor() {
     return;
   }
   clearSubCategoryDefaultIconPreviews();
-  subCategoryDefaultsEditorOpen.value = false;
-  subCategoryDefaultsEditorRowId.value = null;
-  subCategoryDefaultsEditorDraft.value = {};
-  subCategoryDefaultsEditorOverridesDraft.value = {};
-  subCategoryDefaultsActiveGroupId.value = "";
+  // Keep editor open after Apply so admins can continue tuning defaults.
+  showAlert("پیش‌فرض‌های ساب‌کت اعمال شد.", { title: "اعمال تنظیمات" });
+}
+
+function syncSubCategoryAdminDefaultsDraftForDesignEditor(subCategoryId, { resetGroup = false } = {}) {
+  const key = String(subCategoryId || "").trim();
+  if (!key) return null;
+  const target = editableSubCategories.value.find((item) => String(item.id) === key) || null;
+  if (!target) return null;
+  ensureSubCategoryParamDefaults(target);
+  subCategoryUserPreviewRowId.value = target.id;
+  subCategoryUserPreviewValues.value = Object.fromEntries(
+    constructionSubCategoryParamColumns.value.map((column) => {
+      const override = target.param_overrides?.[column.key] || {};
+      const value = String(target.param_defaults?.[column.key] ?? "").trim();
+      return [
+        column.key,
+        override.input_mode === "binary"
+          ? normalizeBinaryValue(value)
+          : formatParamValueForDisplay(value),
+      ];
+    })
+  );
+  const firstGroupId = constructionSubCategoryParamTree.value[0]?.id || "";
+  if (resetGroup || !String(subCategoryUserPreviewActiveGroupId.value || "").trim()) {
+    subCategoryUserPreviewActiveGroupId.value = firstGroupId;
+  } else {
+    const exists = activeSubCategoryUserPreviewGroups.value.some(
+      (group) => String(group.id) === String(subCategoryUserPreviewActiveGroupId.value)
+    );
+    if (!exists) subCategoryUserPreviewActiveGroupId.value = firstGroupId;
+  }
+  return target;
+}
+
+function writeSubCategoryUserPreviewValuesToRow(row) {
+  if (!row) return;
+  ensureSubCategoryParamDefaults(row);
+  for (const column of constructionSubCategoryParamColumns.value) {
+    const override = row.param_overrides?.[column.key] || {};
+    const nextValue = String(subCategoryUserPreviewValues.value?.[column.key] ?? "").trim();
+    row.param_defaults[column.key] = override.input_mode === "binary"
+      ? normalizeBinaryValue(nextValue)
+      : parseParamDisplayValueToStored(nextValue);
+  }
 }
 
 function openSubCategoryUserPreview(item) {
@@ -15562,14 +15652,7 @@ async function closeSubCategoryUserPreview(forceClose = false) {
 async function applySubCategoryUserPreview() {
   const row = activeSubCategoryUserPreviewRow.value;
   if (!row) return;
-  ensureSubCategoryParamDefaults(row);
-  for (const column of constructionSubCategoryParamColumns.value) {
-    const override = row.param_overrides?.[column.key] || {};
-    const nextValue = String(subCategoryUserPreviewValues.value?.[column.key] ?? "").trim();
-    row.param_defaults[column.key] = override.input_mode === "binary"
-      ? normalizeBinaryValue(nextValue)
-      : parseParamDisplayValueToStored(nextValue);
-  }
+  writeSubCategoryUserPreviewValuesToRow(row);
   markConstructionSubCategoryDirty(row);
   try {
     await persistSubCategoryRow(row);
@@ -15577,10 +15660,8 @@ async function applySubCategoryUserPreview() {
     showAlert(error?.message || "ذخیره پیش‌فرض‌های ساب‌کت انجام نشد.", { title: "خطا" });
     return;
   }
-  subCategoryUserPreviewOpen.value = false;
-  subCategoryUserPreviewRowId.value = null;
-  subCategoryUserPreviewValues.value = {};
-  subCategoryUserPreviewActiveGroupId.value = "";
+  // Keep preview open after Apply to match order-design defaults workflow.
+  showAlert("پیش‌فرض‌های ساب‌کت اعمال شد.", { title: "اعمال تنظیمات" });
 }
 
 function setSubCategoryUserPreviewBinaryValue(paramCode, value) {
@@ -20094,6 +20175,7 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
     if (!subCategoryDesignPreviewLoading.value) {
       await refreshSubCategoryDesignPreview();
     }
+    await refitInteriorLibraryFrontPreview();
     return;
   }
   if (orderDesignFullEditorEmbedded.value) {
@@ -20112,6 +20194,7 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
     interiorLibraryFrontPan.value = { x: 0, y: 0 };
     stopInteriorLibraryFrontPan();
     await ensureOrderDesignSectionDataReady(resolvedTargetId, "internal");
+    await refitInteriorLibraryFrontPreview();
     return;
   }
   closeSubtractorLibrary();
@@ -20168,6 +20251,7 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
   if (subCategoryDesignEditorOpen.value && !subCategoryDesignPreviewLoading.value) {
     await refreshSubCategoryDesignPreview();
   }
+  await refitInteriorLibraryFrontPreview();
   scheduleSubRailPosition();
 }
 
@@ -20195,6 +20279,7 @@ async function openDoorLibrary(targetOrderDesignId = "") {
     if (!subCategoryDesignPreviewLoading.value) {
       await refreshSubCategoryDesignPreview();
     }
+    await refitDoorLibraryFrontPreview();
     return;
   }
   if (orderDesignFullEditorEmbedded.value) {
@@ -20211,6 +20296,7 @@ async function openDoorLibrary(targetOrderDesignId = "") {
     doorLibraryOpen.value = true;
     doorLibraryPreviewMode.value = "front2d";
     resetDoorLibraryAnnotations();
+    await refitDoorLibraryFrontPreview();
     return;
   }
   closeSubtractorLibrary();
@@ -20257,6 +20343,7 @@ async function openDoorLibrary(targetOrderDesignId = "") {
   doorLibraryOpen.value = true;
   doorLibraryPreviewMode.value = "front2d";
   resetDoorLibraryAnnotations();
+  await refitDoorLibraryFrontPreview();
   scheduleSubRailPosition();
 }
 
@@ -20287,6 +20374,7 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
     if (!subCategoryDesignPreviewLoading.value) {
       await refreshSubCategoryDesignPreview();
     }
+    await refitInteriorLibraryFrontPreview();
     return;
   }
   if (orderDesignFullEditorEmbedded.value) {
@@ -20305,6 +20393,7 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
     resetSubtractorLibraryAnnotations();
     await ensureOrderDesignSectionDataReady(resolvedTargetId, "subtractor");
     subtractorLibraryOpen.value = true;
+    await refitInteriorLibraryFrontPreview();
     return;
   }
   closeInteriorLibrary();
@@ -20360,6 +20449,7 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
     await refreshSubCategoryDesignPreview();
   }
   subtractorLibraryOpen.value = true;
+  await refitInteriorLibraryFrontPreview();
   scheduleSubRailPosition();
 }
 
@@ -24129,7 +24219,7 @@ onBeforeUnmount(() => {
               <img src="/icons/handless.png" alt="" class="subCategoryDesignEditor__metaIcon" />
               <span>دستگیره مخفی</span>
             </button>
-            <button type="button" class="subCategoryDesignEditor__settingsBtn" title="پیش‌فرض ادمین" @click="openSubCategoryAdminDefaultsFromDesignEditor">
+            <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__tabBtn" :class="{ 'is-active': subCategoryDesignEditorActiveTab === 'defaults' }" title="پیش‌فرض ادمین" @click="openSubCategoryAdminDefaultsFromDesignEditor">
               <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
               <span>پیش‌فرض ادمین</span>
             </button>
@@ -24239,6 +24329,102 @@ onBeforeUnmount(() => {
             class="subCategoryDesignEditor__tabPanelHost"
             v-show="subCategoryDesignEditorActiveTab === 'subtractor'"
           ></div>
+          <div
+            id="subcat-defaults-tab-panel"
+            class="subCategoryDesignEditor__tabPanelHost"
+            v-show="subCategoryDesignEditorActiveTab === 'defaults'"
+          >
+            <div class="subCategoryPreview__body">
+              <div class="subCategoryPreview__tree">
+                <div class="subCategoryPreview__panel subCategoryPreview__panel--groups">
+                  <div class="subCategoryPreview__selectorList">
+                    <button
+                      v-for="group in activeSubCategoryUserPreviewGroups"
+                      :key="group.id"
+                      type="button"
+                      class="subCategoryPreview__groupHead"
+                      :class="{ 'is-active': String(activeSubCategoryUserPreviewGroup?.id || '') === String(group.id) }"
+                      @click="selectSubCategoryUserPreviewGroup(group.id)"
+                    >
+                      <div class="subCategoryPreview__groupMeta">
+                        <div class="subCategoryPreview__groupTitle">{{ group.title }}</div>
+                        <div class="subCategoryPreview__groupCaption">{{ toPersianDigits(group.items.length) }} پارامتر</div>
+                      </div>
+                      <div class="subCategoryPreview__groupBadge" :class="{ 'is-empty': !group.iconUrl }">
+                        <img
+                          v-if="group.iconUrl"
+                          :key="group.iconUrl"
+                          :src="group.iconUrl"
+                          :alt="group.title"
+                          class="subCategoryPreview__groupIcon"
+                          @error="handleSubCategoryDefaultIconError"
+                        />
+                        <span v-else class="subCategoryPreview__groupFallback">{{ toPersianDigits(group.items.length) }}</span>
+                      </div>
+                      <span class="subCategoryPreview__groupChevron" aria-hidden="true">‹</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="subCategoryPreview__panel subCategoryPreview__panel--params">
+                  <div v-if="activeSubCategoryUserPreviewGroup" class="subCategoryPreview__panelHead">
+                    <div class="subCategoryPreview__panelTitle">{{ activeSubCategoryUserPreviewGroup.title }}</div>
+                    <div class="subCategoryPreview__panelCaption">{{ toPersianDigits(activeSubCategoryUserPreviewGroup.items.length) }} پارامتر در این گروه</div>
+                  </div>
+                  <div v-if="activeSubCategoryUserPreviewGroup" class="subCategoryPreview__params">
+                    <article v-for="column in activeSubCategoryUserPreviewGroup.items" :key="column.key" class="subCategoryPreview__paramCard">
+                      <template v-if="column.inputMode === 'binary'">
+                        <div class="subCategoryPreview__paramMeta">
+                          <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                          <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                        </div>
+                        <div class="subCategoryPreview__binaryChoices">
+                          <button
+                            type="button"
+                            class="subCategoryPreview__binaryChoice"
+                            :class="{ 'is-active': String(subCategoryUserPreviewValues[column.key] ?? '0') !== '1' }"
+                            @click="setSubCategoryUserPreviewBinaryValue(column.key, '0')"
+                          >
+                            <img :src="column.binaryOffIconUrl" :alt="column.binaryOffLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                            <span class="subCategoryPreview__binaryLabel">{{ column.binaryOffLabel }}</span>
+                          </button>
+                          <button
+                            type="button"
+                            class="subCategoryPreview__binaryChoice"
+                            :class="{ 'is-active': String(subCategoryUserPreviewValues[column.key] ?? '0') === '1' }"
+                            @click="setSubCategoryUserPreviewBinaryValue(column.key, '1')"
+                          >
+                            <img :src="column.binaryOnIconUrl" :alt="column.binaryOnLabel" class="subCategoryPreview__binaryIcon" @error="handleSubCategoryDefaultIconError" />
+                            <span class="subCategoryPreview__binaryLabel">{{ column.binaryOnLabel }}</span>
+                          </button>
+                        </div>
+                      </template>
+                      <template v-else>
+                        <div class="subCategoryPreview__valueHead">
+                          <div class="subCategoryPreview__valueIconBox">
+                            <img :src="column.iconUrl" :alt="column.displayTitle" class="subCategoryPreview__valueIcon" @error="handleSubCategoryDefaultIconError" />
+                          </div>
+                          <div class="subCategoryPreview__paramMeta">
+                            <div class="subCategoryPreview__paramTitle">{{ column.displayTitle }}</div>
+                            <div v-if="column.descriptionText" class="subCategoryPreview__paramDescription">{{ column.descriptionText }}</div>
+                          </div>
+                        </div>
+                        <input
+                          v-model="subCategoryUserPreviewValues[column.key]"
+                          class="constructionDialog__input subCategoryPreview__valueInput"
+                          type="number"
+                          inputmode="numeric"
+                          min="0"
+                          :placeholder="column.displayTitle"
+                        />
+                        <div class="subCategoryPreview__valueUnit">{{ getCurrentParamLengthUnitLabel() }}</div>
+                      </template>
+                    </article>
+                  </div>
+                  <div v-else class="designMenu__cabinetState">برای این ساب‌کت هنوز پارامتری قابل نمایش نیست.</div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

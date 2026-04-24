@@ -38,55 +38,20 @@ function syncViewport() {
     viewport.value = { width: 320, height: 320 };
     return;
   }
+  const rect = el.getBoundingClientRect?.();
   viewport.value = {
-    width: Math.max(320, Math.round(el.clientWidth || 320)),
-    height: Math.max(320, Math.round(el.clientHeight || 320)),
+    width: Math.max(320, Math.round((Number(rect?.width) || 0) || el.clientWidth || 320)),
+    height: Math.max(320, Math.round((Number(rect?.height) || 0) || el.clientHeight || 320)),
   };
 }
 
 const sceneViewBox = computed(() => {
   const raw = props.scene?.viewBox || {};
-  const baseX = Number(raw.x) || 0;
-  const baseY = Number(raw.y) || 0;
-  const baseWidth = Math.max(1, Number(raw.width) || 1);
-  const baseHeight = Math.max(1, Number(raw.height) || 1);
-  const viewportWidth = Math.max(1, Number(viewport.value.width) || 1);
-  const viewportHeight = Math.max(1, Number(viewport.value.height) || 1);
-  const boxRatio = baseWidth / baseHeight;
-  const viewportRatio = viewportWidth / viewportHeight;
-  if (!Number.isFinite(boxRatio) || !Number.isFinite(viewportRatio) || boxRatio <= 0 || viewportRatio <= 0) {
-    return {
-      x: baseX,
-      y: baseY,
-      width: baseWidth,
-      height: baseHeight,
-    };
-  }
-  if (Math.abs(boxRatio - viewportRatio) < 0.0001) {
-    return {
-      x: baseX,
-      y: baseY,
-      width: baseWidth,
-      height: baseHeight,
-    };
-  }
-  if (boxRatio > viewportRatio) {
-    const expandedHeight = Math.max(1, baseWidth / viewportRatio);
-    const delta = (expandedHeight - baseHeight) * 0.5;
-    return {
-      x: baseX,
-      y: baseY - delta,
-      width: baseWidth,
-      height: expandedHeight,
-    };
-  }
-  const expandedWidth = Math.max(1, baseHeight * viewportRatio);
-  const delta = (expandedWidth - baseWidth) * 0.5;
   return {
-    x: baseX - delta,
-    y: baseY,
-    width: expandedWidth,
-    height: baseHeight,
+    x: Number(raw.x) || 0,
+    y: Number(raw.y) || 0,
+    width: Math.max(1, Number(raw.width) || 1),
+    height: Math.max(1, Number(raw.height) || 1),
   };
 });
 
