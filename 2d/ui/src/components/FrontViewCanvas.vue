@@ -399,7 +399,14 @@ function drawEntityBase(ctx, entity, state) {
   }
   for (const line of entity.outerLines || []) {
     if ((safeState.outerOpacity == null ? 1 : safeState.outerOpacity) <= 0 || (safeState.outerStrokeWidth || 0) <= 0) continue;
-    drawWorldLine(ctx, line, entity.lineColor || "#7B858C", safeState.outerStrokeWidth || 1.6, false, safeState.outerOpacity == null ? 1 : safeState.outerOpacity);
+    drawWorldLine(
+      ctx,
+      line,
+      entity.lineColor || "#7B858C",
+      safeState.outerStrokeWidth || 1.6,
+      !!line.dashed,
+      safeState.outerOpacity == null ? 1 : safeState.outerOpacity
+    );
   }
 }
 
@@ -414,7 +421,14 @@ function drawEntityDynamic(ctx, entity, state) {
   }
   if ((safeState.outerOpacity == null ? 1 : safeState.outerOpacity) > 0 && (safeState.outerStrokeWidth || 0) > 0) {
     for (const line of entity.outerLines || []) {
-      drawWorldLine(ctx, line, entity.highlightColor || entity.lineColor || "#7B858C", safeState.outerStrokeWidth || 1.6, false, safeState.outerOpacity == null ? 1 : safeState.outerOpacity);
+      drawWorldLine(
+        ctx,
+        line,
+        entity.highlightColor || entity.lineColor || "#7B858C",
+        safeState.outerStrokeWidth || 1.6,
+        !!line.dashed,
+        safeState.outerOpacity == null ? 1 : safeState.outerOpacity
+      );
     }
   }
   if ((safeState.innerOpacity == null ? 1 : safeState.innerOpacity) > 0 && (safeState.innerStrokeWidth || 0) > 0 && (safeState.selected || safeState.hovered || safeState.preview)) {

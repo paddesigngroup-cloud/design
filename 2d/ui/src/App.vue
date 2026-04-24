@@ -5781,7 +5781,11 @@ const subtractorSupportPreviewInstances2d = computed(() => {
       w: Math.abs(x2 - x1),
       h: Math.abs(y2 - y1),
     };
-    const outlineLines = buildProjectedRectOutlineLines(boundsRect, 1.4, 0);
+    const outlineLines = buildProjectedRectOutlineLines(boundsRect, 1.4, 0)
+      .map((line) => ({
+        ...line,
+        dashed: true,
+      }));
     return {
       id: instance.id,
       instanceCode: instance.instanceCode,
