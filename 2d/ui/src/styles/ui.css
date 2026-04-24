@@ -4077,14 +4077,28 @@ option {
   gap: 10px;
 }
 .subCategoryDesignEditor__tabPlaceholder {
-  min-height: 320px;
+  min-height: 0;
   display: flex;
   align-items: flex-start;
   width: 100%;
+  flex: 1 1 auto;
 }
 .subCategoryDesignEditor__tabPanelHost {
   width: 100%;
-  min-height: 620px;
+  min-height: 0;
+  height: 100%;
+}
+.subCategoryDesignEditor__tabPanelHost--defaults {
+  position: static;
+  pointer-events: auto;
+}
+.subCategoryDesignEditor__tabPanelHost--defaults .subCategoryPreview__tree {
+  min-height: 0;
+  height: 100%;
+}
+.subCategoryDesignEditor__tabPanelHost--defaults .subCategoryPreview__panel {
+  min-height: 0;
+  height: 100%;
 }
 .subCategoryDesignEditor__embeddedShell {
   position: fixed;
@@ -5428,6 +5442,7 @@ option {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  max-height: 550px;
   flex: 1 1 auto;
 }
 .orderDesignEditor__meta {

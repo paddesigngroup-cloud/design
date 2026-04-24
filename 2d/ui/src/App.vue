@@ -14067,7 +14067,7 @@ async function saveSubCategoryDesignEditor() {
     showAlert("کد طرح تکراری است.", { title: "اعتبارسنجی" });
     return;
   }
-  const defaultsRow = syncSubCategoryAdminDefaultsDraftForDesignEditor(draft.sub_category_id);
+  const defaultsRow = syncSubCategoryAdminDefaultsDraftForDesignEditor(draft.sub_category_id, { hydrateValues: false });
   if (!defaultsRow) {
     showAlert("ساب‌کت انتخاب‌شده در جدول ساب‌کت‌ها پیدا نشد.", { title: "اعتبارسنجی" });
     return;
@@ -15558,25 +15558,27 @@ async function applySubCategoryDefaultsEditor() {
   showAlert("پیش‌فرض‌های ساب‌کت اعمال شد.", { title: "اعمال تنظیمات" });
 }
 
-function syncSubCategoryAdminDefaultsDraftForDesignEditor(subCategoryId, { resetGroup = false } = {}) {
+function syncSubCategoryAdminDefaultsDraftForDesignEditor(subCategoryId, { resetGroup = false, hydrateValues = true } = {}) {
   const key = String(subCategoryId || "").trim();
   if (!key) return null;
   const target = editableSubCategories.value.find((item) => String(item.id) === key) || null;
   if (!target) return null;
   ensureSubCategoryParamDefaults(target);
   subCategoryUserPreviewRowId.value = target.id;
-  subCategoryUserPreviewValues.value = Object.fromEntries(
-    constructionSubCategoryParamColumns.value.map((column) => {
-      const override = target.param_overrides?.[column.key] || {};
-      const value = String(target.param_defaults?.[column.key] ?? "").trim();
-      return [
-        column.key,
-        override.input_mode === "binary"
-          ? normalizeBinaryValue(value)
-          : formatParamValueForDisplay(value),
-      ];
-    })
-  );
+  if (hydrateValues) {
+    subCategoryUserPreviewValues.value = Object.fromEntries(
+      constructionSubCategoryParamColumns.value.map((column) => {
+        const override = target.param_overrides?.[column.key] || {};
+        const value = String(target.param_defaults?.[column.key] ?? "").trim();
+        return [
+          column.key,
+          override.input_mode === "binary"
+            ? normalizeBinaryValue(value)
+            : formatParamValueForDisplay(value),
+        ];
+      })
+    );
+  }
   const firstGroupId = constructionSubCategoryParamTree.value[0]?.id || "";
   if (resetGroup || !String(subCategoryUserPreviewActiveGroupId.value || "").trim()) {
     subCategoryUserPreviewActiveGroupId.value = firstGroupId;
@@ -15669,6 +15671,15 @@ function setSubCategoryUserPreviewBinaryValue(paramCode, value) {
   subCategoryUserPreviewValues.value = {
     ...subCategoryUserPreviewValues.value,
     [paramCode]: normalizeBinaryValue(value),
+  };
+}
+
+function setSubCategoryUserPreviewValue(paramCode, value) {
+  const key = String(paramCode || "").trim();
+  if (!key) return;
+  subCategoryUserPreviewValues.value = {
+    ...subCategoryUserPreviewValues.value,
+    [key]: String(value ?? ""),
   };
 }
 
@@ -21223,12 +21234,15 @@ onMounted(() => {
     doSaveProject();
   };
   const onSaveShortcut = (e) => {
+    const isSaveCombo = (e.ctrlKey || e.metaKey) && !e.altKey && String(e.key || "").toLowerCase() === "s";
     if (subCategoryDesignEditorOpen.value) {
+      if (!isSaveCombo) return;
       e.preventDefault();
       e.stopPropagation();
+      void saveSubCategoryDesignEditor();
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && String(e.key || "").toLowerCase() === "s") {
+    if (isSaveCombo) {
       e.preventDefault();
       triggerShortcutSave();
     }
@@ -24331,7 +24345,7 @@ onBeforeUnmount(() => {
           ></div>
           <div
             id="subcat-defaults-tab-panel"
-            class="subCategoryDesignEditor__tabPanelHost"
+            class="subCategoryDesignEditor__tabPanelHost subCategoryDesignEditor__tabPanelHost--defaults"
             v-show="subCategoryDesignEditorActiveTab === 'defaults'"
           >
             <div class="subCategoryPreview__body">
@@ -24409,12 +24423,14 @@ onBeforeUnmount(() => {
                           </div>
                         </div>
                         <input
-                          v-model="subCategoryUserPreviewValues[column.key]"
+                          :value="subCategoryUserPreviewValues[column.key] ?? ''"
                           class="constructionDialog__input subCategoryPreview__valueInput"
                           type="number"
                           inputmode="numeric"
+                          step="any"
                           min="0"
                           :placeholder="column.displayTitle"
+                          @input="setSubCategoryUserPreviewValue(column.key, $event.target.value)"
                         />
                         <div class="subCategoryPreview__valueUnit">{{ getCurrentParamLengthUnitLabel() }}</div>
                       </template>
@@ -27158,12 +27174,14 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
                 <input
-                  v-model="subCategoryUserPreviewValues[column.key]"
+                  :value="subCategoryUserPreviewValues[column.key] ?? ''"
                   class="constructionDialog__input subCategoryPreview__valueInput"
                   type="number"
                   inputmode="numeric"
+                  step="any"
                   min="0"
                   :placeholder="column.displayTitle"
+                  @input="setSubCategoryUserPreviewValue(column.key, $event.target.value)"
                 />
                 <div class="subCategoryPreview__valueUnit">{{ getCurrentParamLengthUnitLabel() }}</div>
               </template>
