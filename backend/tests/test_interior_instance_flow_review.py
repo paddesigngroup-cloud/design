@@ -64,6 +64,9 @@ def test_subcategory_add_refreshes_only_target_instance(monkeypatch) -> None:
     async def fake_door_ready(_session) -> bool:
         return False
 
+    async def fake_subtractor_ready(_session) -> bool:
+        return False
+
     async def fake_next_state(_session, **_kwargs):
         return "inner-01", 0, {"width": 10}, {"depth": "550"}, {"depth": {"label": "عمق"}}
 
@@ -651,6 +654,9 @@ def test_order_design_read_path_can_trigger_snapshot_sync(monkeypatch) -> None:
     async def fake_door_ready(_session) -> bool:
         return False
 
+    async def fake_subtractor_ready(_session) -> bool:
+        return False
+
     async def fake_require_order(_session, *, order_id):
         assert order_id == item.order_id
         return SimpleNamespace(id=order_id, admin_id=uuid4())
@@ -666,6 +672,7 @@ def test_order_design_read_path_can_trigger_snapshot_sync(monkeypatch) -> None:
 
     monkeypatch.setattr(order_router, "interior_instance_tables_ready", fake_interior_ready)
     monkeypatch.setattr(order_router, "door_instance_tables_ready", fake_door_ready)
+    monkeypatch.setattr(order_router, "subtractor_instance_tables_ready", fake_subtractor_ready)
     monkeypatch.setattr(order_router, "require_accessible_order", fake_require_order)
     monkeypatch.setattr(order_router, "require_accessible_sub_category_design", fake_require_source_design)
     monkeypatch.setattr(order_router, "sync_order_design_snapshot", fake_sync)
@@ -676,3 +683,335 @@ def test_order_design_read_path_can_trigger_snapshot_sync(monkeypatch) -> None:
     assert sync_calls == 1
     assert session.commit_count == 1
     assert session.scalar_calls >= 2
+
+
+def test_order_patch_interior_include_design_returns_bundle(monkeypatch) -> None:
+    instance_id = uuid4()
+    item = SimpleNamespace(
+        id=uuid4(),
+        order_id=uuid4(),
+        sub_category_design_id=uuid4(),
+        interior_instances=[
+            SimpleNamespace(
+                id=instance_id,
+                internal_part_group_id=uuid4(),
+                instance_code="inner-01",
+                line_color="#8A98A3",
+                ui_order=0,
+                placement_z=0.0,
+                interior_box_snapshot={},
+                param_values={},
+                param_meta={},
+                part_snapshots=[],
+                viewer_boxes=[],
+                status="draft",
+            )
+        ],
+    )
+
+    async def _ready(_session):
+        return True
+
+    async def _require_item(_session, _item_id):
+        return item
+
+    async def _require_order(_session, *, order_id):
+        return SimpleNamespace(id=order_id, admin_id=uuid4())
+
+    async def _require_design(_session, *, admin_id, design_id):
+        return SimpleNamespace(id=design_id)
+
+    async def _refresh(*_args, **_kwargs):
+        return None
+
+    def _refresh_aggregate(**_kwargs):
+        return None
+
+    def _refresh_state(**_kwargs):
+        return None
+
+    async def _commit(*_args, **_kwargs):
+        return None
+
+    async def _sync(*_args, **_kwargs):
+        return True
+
+    async def _design_bundle(*_args, **_kwargs):
+        return order_router.OrderDesignItem(
+            id=item.id,
+            order_id=item.order_id,
+            admin_id=uuid4(),
+            user_id=uuid4(),
+            sub_category_design_id=item.sub_category_design_id,
+            sub_category_id=uuid4(),
+            design_outline_color="#7A4A2B",
+            design_code="z1",
+            design_title="demo",
+            manual_name=None,
+            instance_code="U1",
+            sort_order=1,
+            status="draft",
+            order_attr_values={},
+            order_attr_meta={},
+            part_snapshots=[],
+            viewer_boxes=[{"width": 10}],
+            boolean_targets=[],
+            boolean_cutters=[],
+            boolean_result=[],
+            interior_instances=[],
+            subtractor_instances=[],
+            door_instances=[],
+            snapshot_checksum="s1",
+        )
+
+    monkeypatch.setattr(order_router, "interior_instance_tables_ready", _ready)
+    monkeypatch.setattr(order_router, "_require_item", _require_item)
+    monkeypatch.setattr(order_router, "require_accessible_order", _require_order)
+    monkeypatch.setattr(order_router, "require_accessible_sub_category_design", _require_design)
+    monkeypatch.setattr(order_router, "refresh_order_design_interior_instance", _refresh)
+    monkeypatch.setattr(order_router, "refresh_order_design_aggregate_snapshots", _refresh_aggregate)
+    monkeypatch.setattr(order_router, "refresh_order_design_snapshot_state", _refresh_state)
+    monkeypatch.setattr(order_router, "sync_order_design_snapshot", _sync)
+    monkeypatch.setattr(order_router, "_commit_order_design_changes", _commit)
+    monkeypatch.setattr(order_router, "_serialize_design_item_for_patch_response", _design_bundle)
+
+    payload = order_router.OrderDesignInteriorInstanceUpdate(
+        placement_z=5,
+        ui_order=1,
+        instance_code="inner-02",
+        line_color="#8A98A3",
+        param_values={"w": "10"},
+    )
+    response = asyncio.run(
+        order_router.update_order_design_interior_instance(
+            item.id,
+            instance_id,
+            payload,
+            include_design=True,
+            session=SimpleNamespace(),
+        )
+    )
+
+    assert str(response.id) == str(instance_id)
+    assert response.design is not None
+    assert str(response.design.id) == str(item.id)
+
+
+def test_order_patch_subtractor_include_design_returns_bundle(monkeypatch) -> None:
+    instance_id = uuid4()
+    item = SimpleNamespace(
+        id=uuid4(),
+        order_id=uuid4(),
+        sub_category_design_id=uuid4(),
+        subtractor_instances=[
+            SimpleNamespace(
+                id=instance_id,
+                subtractor_part_group_id=uuid4(),
+                instance_code="sub-01",
+                line_color="#8A98A3",
+                ui_order=0,
+                placement_z=0.0,
+                param_values={},
+                param_meta={},
+                part_snapshots=[],
+                viewer_boxes=[],
+                status="draft",
+            )
+        ],
+    )
+
+    async def _ready(_session):
+        return True
+
+    async def _require_item(_session, _item_id):
+        return item
+
+    async def _require_order(_session, *, order_id):
+        return SimpleNamespace(id=order_id, admin_id=uuid4())
+
+    async def _require_design(_session, *, admin_id, design_id):
+        return SimpleNamespace(id=design_id)
+
+    async def _sync(*_args, **_kwargs):
+        return True
+
+    async def _commit(*_args, **_kwargs):
+        return None
+
+    async def _sync(*_args, **_kwargs):
+        return True
+
+    async def _design_bundle(*_args, **_kwargs):
+        return order_router.OrderDesignItem(
+            id=item.id,
+            order_id=item.order_id,
+            admin_id=uuid4(),
+            user_id=uuid4(),
+            sub_category_design_id=item.sub_category_design_id,
+            sub_category_id=uuid4(),
+            design_outline_color="#7A4A2B",
+            design_code="z1",
+            design_title="demo",
+            manual_name=None,
+            instance_code="U1",
+            sort_order=1,
+            status="draft",
+            order_attr_values={},
+            order_attr_meta={},
+            part_snapshots=[],
+            viewer_boxes=[{"width": 10}],
+            boolean_targets=[],
+            boolean_cutters=[],
+            boolean_result=[],
+            interior_instances=[],
+            subtractor_instances=[],
+            door_instances=[],
+            snapshot_checksum="s1",
+        )
+
+    monkeypatch.setattr(order_router, "subtractor_instance_tables_ready", _ready)
+    monkeypatch.setattr(order_router, "_require_item", _require_item)
+    monkeypatch.setattr(order_router, "require_accessible_order", _require_order)
+    monkeypatch.setattr(order_router, "require_accessible_sub_category_design", _require_design)
+    monkeypatch.setattr(order_router, "sync_order_design_snapshot", _sync)
+    monkeypatch.setattr(order_router, "_commit_order_design_changes", _commit)
+    monkeypatch.setattr(order_router, "_serialize_design_item_for_patch_response", _design_bundle)
+
+    payload = order_router.OrderDesignSubtractorInstanceUpdate(
+        placement_z=5,
+        ui_order=1,
+        instance_code="sub-02",
+        line_color="#8A98A3",
+        param_values={"w": "10"},
+    )
+    response = asyncio.run(
+        order_router.update_order_design_subtractor_instance(
+            item.id,
+            instance_id,
+            payload,
+            include_design=True,
+            session=SimpleNamespace(),
+        )
+    )
+
+    assert str(response.id) == str(instance_id)
+    assert response.design is not None
+    assert str(response.design.id) == str(item.id)
+
+
+def test_order_patch_door_include_design_returns_bundle(monkeypatch) -> None:
+    instance_id = uuid4()
+    item = SimpleNamespace(
+        id=uuid4(),
+        order_id=uuid4(),
+        sub_category_design_id=uuid4(),
+        door_instances=[
+            SimpleNamespace(
+                id=instance_id,
+                door_part_group_id=uuid4(),
+                instance_code="door-01",
+                line_color="#8A98A3",
+                ui_order=0,
+                structural_part_formula_ids=[],
+                dependent_interior_instance_ids=[],
+                controller_box_snapshot={},
+                param_values={},
+                param_meta={},
+                part_snapshots=[],
+                viewer_boxes=[],
+                status="draft",
+            )
+        ],
+    )
+
+    async def _ready(_session):
+        return True
+
+    async def _require_item(_session, _item_id):
+        return item
+
+    async def _require_order(_session, *, order_id):
+        return SimpleNamespace(id=order_id, admin_id=uuid4())
+
+    async def _require_design(_session, *, admin_id, design_id):
+        return SimpleNamespace(id=design_id)
+
+    async def _require_group(*_args, **_kwargs):
+        return SimpleNamespace(controller_type="", controller_bindings={})
+
+    async def _refresh(*_args, **_kwargs):
+        return None
+
+    def _refresh_aggregate(**_kwargs):
+        return None
+
+    def _refresh_state(**_kwargs):
+        return None
+
+    async def _commit(*_args, **_kwargs):
+        return None
+
+    async def _sync(*_args, **_kwargs):
+        return True
+
+    async def _design_bundle(*_args, **_kwargs):
+        return order_router.OrderDesignItem(
+            id=item.id,
+            order_id=item.order_id,
+            admin_id=uuid4(),
+            user_id=uuid4(),
+            sub_category_design_id=item.sub_category_design_id,
+            sub_category_id=uuid4(),
+            design_outline_color="#7A4A2B",
+            design_code="z1",
+            design_title="demo",
+            manual_name=None,
+            instance_code="U1",
+            sort_order=1,
+            status="draft",
+            order_attr_values={},
+            order_attr_meta={},
+            part_snapshots=[],
+            viewer_boxes=[{"width": 10}],
+            boolean_targets=[],
+            boolean_cutters=[],
+            boolean_result=[],
+            interior_instances=[],
+            subtractor_instances=[],
+            door_instances=[],
+            snapshot_checksum="s1",
+        )
+
+    monkeypatch.setattr(order_router, "door_instance_tables_ready", _ready)
+    monkeypatch.setattr(order_router, "_require_item", _require_item)
+    monkeypatch.setattr(order_router, "require_accessible_order", _require_order)
+    monkeypatch.setattr(order_router, "require_accessible_sub_category_design", _require_design)
+    monkeypatch.setattr(order_router, "require_accessible_door_part_group", _require_group)
+    monkeypatch.setattr(order_router, "refresh_order_design_door_instance", _refresh)
+    monkeypatch.setattr(order_router, "refresh_order_design_aggregate_snapshots", _refresh_aggregate)
+    monkeypatch.setattr(order_router, "refresh_order_design_snapshot_state", _refresh_state)
+    monkeypatch.setattr(order_router, "sync_order_design_snapshot", _sync)
+    monkeypatch.setattr(order_router, "_commit_order_design_changes", _commit)
+    monkeypatch.setattr(order_router, "_serialize_design_item_for_patch_response", _design_bundle)
+
+    payload = order_router.OrderDesignDoorInstanceUpdate(
+        ui_order=1,
+        instance_code="door-02",
+        line_color="#8A98A3",
+        structural_part_formula_ids=[],
+        dependent_interior_instance_ids=[],
+        param_values={"w": "10"},
+    )
+    response = asyncio.run(
+        order_router.update_order_design_door_instance(
+            item.id,
+            instance_id,
+            payload,
+            include_design=True,
+            session=SimpleNamespace(),
+        )
+    )
+
+    assert str(response.id) == str(instance_id)
+    assert response.design is not None
+    assert str(response.design.id) == str(item.id)

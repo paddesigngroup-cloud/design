@@ -33,7 +33,7 @@ import {
   snapInteriorPointToGeometry,
 } from "./features/interior_library_annotations.js";
 import { CURRENT_ADMIN_ID, CURRENT_BOOTSTRAP_USER_ID, CURRENT_BOOTSTRAP_USER_NAME, PART_KINDS_CATALOG } from "./features/part_kinds_catalog.js";
-import { getJson, invalidateApiCache } from "./services/api_client.js";
+import { getJson, invalidateApiCache, sendJson } from "./services/api_client.js";
 
 const GlbViewerWidget = defineAsyncComponent(() => import("./components/GlbViewerWidget.vue"));
 const FrontViewCanvas = defineAsyncComponent(() => import("./components/FrontViewCanvas.vue"));
@@ -2578,44 +2578,48 @@ async function persistActiveInteriorLibraryControllerInstance() {
     if (isSharedSubtractorLibraryActive.value) {
       const orderDesign = activeSubtractorLibraryOrderDesign.value;
       if (!orderDesign?.id) return;
-      const res = await fetch(
-        `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/subtractor-instances/${encodeURIComponent(String(instance.id))}`,
+      const responsePayload = await sendJson(
+        `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/subtractor-instances/${encodeURIComponent(String(instance.id))}?include_design=1`,
+        "PATCH",
         {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            placement_z: Number(instance.placement_z) || 0,
-            ui_order: Math.max(0, Number(instance.ui_order) || 0),
-            instance_code: String(instance.instance_code || "").trim() || "subtractor",
-            line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-            param_values: serializeStoredParamValuesForPayload(instance.param_values),
-          }),
-        }
+          placement_z: Number(instance.placement_z) || 0,
+          ui_order: Math.max(0, Number(instance.ui_order) || 0),
+          instance_code: String(instance.instance_code || "").trim() || "subtractor",
+          line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+          param_values: serializeStoredParamValuesForPayload(instance.param_values),
+        },
+        {
+          abortChannel: getOrderDesignPatchAbortChannel(orderDesign.id, "subtractor"),
+        },
       );
-      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره کنترلر نمونه دستگیره مخفی طرح ثبت‌شده انجام نشد."));
-      syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+      const { instancePayload, hasDesign } = applyOrderDesignPatchResponse(orderDesign.id, "subtractor", responsePayload);
+      if (instancePayload) syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, instancePayload);
+      if (!hasDesign) {
+        await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+      }
       return;
     }
     const orderDesign = activeInteriorLibraryOrderDesign.value;
     if (!orderDesign?.id) return;
-    const res = await fetch(
-      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
+    const responsePayload = await sendJson(
+      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(instance.id))}?include_design=1`,
+      "PATCH",
       {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          placement_z: Number(instance.placement_z) || 0,
-          ui_order: Math.max(0, Number(instance.ui_order) || 0),
-          instance_code: String(instance.instance_code || "").trim() || "interior",
-          line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-          param_values: serializeStoredParamValuesForPayload(instance.param_values),
-        }),
-      }
+        placement_z: Number(instance.placement_z) || 0,
+        ui_order: Math.max(0, Number(instance.ui_order) || 0),
+        instance_code: String(instance.instance_code || "").trim() || "interior",
+        line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+        param_values: serializeStoredParamValuesForPayload(instance.param_values),
+      },
+      {
+        abortChannel: getOrderDesignPatchAbortChannel(orderDesign.id, "interior"),
+      },
     );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره کنترلر نمونه داخلی طرح ثبت‌شده انجام نشد."));
-    syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+    const { instancePayload, hasDesign } = applyOrderDesignPatchResponse(orderDesign.id, "interior", responsePayload);
+    if (instancePayload) syncInteriorInstanceInOrderDesignCollection(orderDesign.id, instancePayload);
+    if (!hasDesign) {
+      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+    }
   } finally {
     interiorLibraryControllerApplying.value = false;
   }
@@ -4573,14 +4577,38 @@ function getDoorLibraryControllerValuesForInstance(instance, group) {
     })
   );
 }
+function mergeDoorControllerOverlayValues(snapshotValues, instanceValues) {
+  const snapshot = snapshotValues && typeof snapshotValues === "object" ? snapshotValues : {};
+  const instance = instanceValues && typeof instanceValues === "object" ? instanceValues : {};
+  const merged = {
+    ...snapshot,
+    ...instance,
+  };
+  // Controller handle distances must follow the latest frame/snapshot geometry.
+  for (const key of ["left", "right", "top", "bottom_offset"]) {
+    const snapshotValue = Number(snapshot?.[key]);
+    if (Number.isFinite(snapshotValue)) {
+      merged[key] = snapshotValue;
+    }
+  }
+  // Keep metric values deterministic and numeric.
+  for (const key of ["door_width", "door_height"]) {
+    const instanceValue = Number(instance?.[key]);
+    const snapshotValue = Number(snapshot?.[key]);
+    if (Number.isFinite(instanceValue)) {
+      merged[key] = instanceValue;
+    } else if (Number.isFinite(snapshotValue)) {
+      merged[key] = snapshotValue;
+    }
+  }
+  return merged;
+}
 function buildDoorLibraryControllerOverlayForInstance(instance) {
   const group = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
   const controllerType = normalizeDoorPartGroupControllerType(group?.controller_type || instance?.controller_type);
   const snapshotValues = getDoorLibraryControllerValuesFromSnapshot(instance?.controller_box_snapshot || {});
-  const values = {
-    ...snapshotValues,
-    ...getDoorLibraryControllerValuesForInstance(instance, group),
-  };
+  const instanceValues = getDoorLibraryControllerValuesForInstance(instance, group);
+  const values = mergeDoorControllerOverlayValues(snapshotValues, instanceValues);
   const snapshotRect = normalizeDoorControllerSnapshotRect(instance?.controller_box_snapshot || {});
   const rect = buildDoorLibraryControllerRectFromFrameValues(doorLibraryControllerFrameRect.value, values) || snapshotRect;
   if (!group || !controllerType || !rect) return null;
@@ -10952,18 +10980,24 @@ async function saveOrderDesignEditor() {
       ...draft,
     }, nextAttrValues);
     if (fresh) {
-      const queued = queueOrderDesignGeometryRefresh(fresh, {
-        placement: activePlacement,
-        persistDrawing: String(activeCabinetDesignId.value || "") === String(fresh.id),
-      });
-      const nextActive = fresh;
+      let nextActive = fresh;
       upsertOrderDesignCatalogItem(nextActive);
+      syncOrderDesignEditorDraftDerivedFields(nextActive);
+      if (hasOrderDesignDependentInstances(nextActive)) {
+        const recomputed = await refreshOrderDesignGeometrySingleFlight(String(nextActive.id), {
+          updateStage: String(activeCabinetDesignId.value || "") === String(nextActive.id),
+          syncEditorDraft: true,
+        });
+        if (recomputed) {
+          nextActive = recomputed;
+          upsertOrderDesignCatalogItem(nextActive);
+          syncOrderDesignEditorDraftDerivedFields(nextActive);
+        }
+      }
       if (String(activeCabinetDesignId.value || "") === String(nextActive.id)) {
         stageCabinetPlaceholderBoxes.value = (nextActive.viewer_boxes || []).map(normalizeCabinetBox);
         restoreActiveOrderDesignToEditor(nextActive, activePlacement);
-        if (!queued) {
-          await saveActiveOrderDrawing();
-        }
+        await saveActiveOrderDrawing();
       }
     } else {
       await loadOrderDesignCatalog(true);
@@ -12413,6 +12447,43 @@ function syncOrderDesignInCollection(item) {
   return normalized;
 }
 
+function getOrderDesignPatchAbortChannel(orderDesignId, section) {
+  const id = String(orderDesignId || "").trim();
+  const key = String(section || "").trim() || "generic";
+  return id ? `order-design:${id}:${key}:patch` : `order-design:${key}:patch`;
+}
+
+function applyOrderDesignPatchResponse(
+  orderDesignId,
+  section,
+  payload,
+  {
+    updateStage = true,
+    syncEditorDraft = true,
+  } = {},
+) {
+  const data = payload && typeof payload === "object" ? payload : {};
+  const hasDesign = !!(data.design && typeof data.design === "object");
+  const instancePayload = hasDesign
+    ? (data.instance && typeof data.instance === "object" ? data.instance : data)
+    : data;
+  if (hasDesign) {
+    const fresh = syncOrderDesignInCollection(data.design);
+    if (fresh && syncEditorDraft) {
+      syncOrderDesignEditorDraftDerivedFields(fresh);
+    }
+    if (fresh && updateStage && String(activeCabinetDesignId.value || "") === String(fresh.id)) {
+      const placement = getOrderDesignPlacement(fresh.id) || getCurrentEditorModelPlacement();
+      stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
+      restoreActiveOrderDesignToEditor(fresh, placement);
+    }
+  }
+  return {
+    instancePayload,
+    hasDesign,
+  };
+}
+
 async function refreshOrderDesignGeometryFromServer(orderDesignId, { updateStage = true, syncEditorDraft = true } = {}) {
   const key = String(orderDesignId || "").trim();
   if (!key) return null;
@@ -13300,17 +13371,19 @@ async function applyDoorInstanceEditor() {
     } else {
       const orderDesign = activeDoorLibraryOrderDesign.value;
       if (!orderDesign?.id) return;
-      const res = await fetch(
-        `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/door-instances/${encodeURIComponent(String(instance.id))}`,
+      const responsePayload = await sendJson(
+        `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/door-instances/${encodeURIComponent(String(instance.id))}?include_design=1`,
+        "PATCH",
+        requestBody,
         {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
-        }
+          abortChannel: getOrderDesignPatchAbortChannel(orderDesign.id, "door"),
+        },
       );
-      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه درب طرح ثبت‌شده انجام نشد."));
-      syncDoorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+      const { instancePayload, hasDesign } = applyOrderDesignPatchResponse(orderDesign.id, "door", responsePayload);
+      if (instancePayload) syncDoorInstanceInOrderDesignCollection(orderDesign.id, instancePayload);
+      if (!hasDesign) {
+        await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+      }
     }
     resetDoorInstanceEditorState();
   } catch (error) {
@@ -13357,17 +13430,19 @@ async function applySubtractorInstanceEditor() {
     }
     const orderDesign = activeSubtractorLibraryOrderDesign.value;
     if (!orderDesign?.id) return;
-    const res = await fetch(
-      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/subtractor-instances/${encodeURIComponent(String(instance.id))}`,
+    const responsePayload = await sendJson(
+      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/subtractor-instances/${encodeURIComponent(String(instance.id))}?include_design=1`,
+      "PATCH",
+      requestBody,
       {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      }
+        abortChannel: getOrderDesignPatchAbortChannel(orderDesign.id, "subtractor"),
+      },
     );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه دستگیره مخفی طرح ثبت‌شده انجام نشد."));
-    syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+    const { instancePayload, hasDesign } = applyOrderDesignPatchResponse(orderDesign.id, "subtractor", responsePayload);
+    if (instancePayload) syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, instancePayload);
+    if (!hasDesign) {
+      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+    }
     resetSubtractorInstanceEditorState();
   } catch (error) {
     showAlert(error?.message || "ذخیره تنظیمات نمونه دستگیره مخفی انجام نشد.", { title: "خطا" });
@@ -13411,17 +13486,19 @@ async function applyDoorInstanceLineColor(instance, lineColor) {
     } else {
       const orderDesign = activeDoorLibraryOrderDesign.value;
       if (!orderDesign?.id) return;
-      const res = await fetch(
-        `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/door-instances/${encodeURIComponent(String(normalized.id))}`,
+      const responsePayload = await sendJson(
+        `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/door-instances/${encodeURIComponent(String(normalized.id))}?include_design=1`,
+        "PATCH",
+        requestBody,
         {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
-        }
+          abortChannel: getOrderDesignPatchAbortChannel(orderDesign.id, "door"),
+        },
       );
-      if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه درب طرح ثبت‌شده انجام نشد."));
-      syncDoorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+      const { instancePayload, hasDesign } = applyOrderDesignPatchResponse(orderDesign.id, "door", responsePayload);
+      if (instancePayload) syncDoorInstanceInOrderDesignCollection(orderDesign.id, instancePayload);
+      if (!hasDesign) {
+        await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+      }
     }
   } catch (error) {
     showAlert(error?.message || "ذخیره رنگ خطوط نمونه درب انجام نشد.", { title: "خطا" });
@@ -13597,23 +13674,25 @@ async function applyInteriorInstanceEditor() {
     return;
   }
   try {
-    const res = await fetch(
-      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(instance.id))}`,
+    const responsePayload = await sendJson(
+      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(instance.id))}?include_design=1`,
+      "PATCH",
       {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          placement_z: Number(instance.placement_z) || 0,
-          ui_order: Math.max(0, Number(instance.ui_order) || 0),
-          instance_code: String(instance.instance_code || "").trim() || "interior",
-          line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-          param_values: serializeDisplayParamValuesForPayload(instance.param_values, instance.param_meta, currentEditorDisplayUnit.value, fallbackInputModes),
-        }),
-      }
+        placement_z: Number(instance.placement_z) || 0,
+        ui_order: Math.max(0, Number(instance.ui_order) || 0),
+        instance_code: String(instance.instance_code || "").trim() || "interior",
+        line_color: instance.line_color ? normalizeHexColor(instance.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+        param_values: serializeDisplayParamValuesForPayload(instance.param_values, instance.param_meta, currentEditorDisplayUnit.value, fallbackInputModes),
+      },
+      {
+        abortChannel: getOrderDesignPatchAbortChannel(orderDesign.id, "interior"),
+      },
     );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره تنظیمات نمونه داخلی طرح ثبت‌شده انجام نشد."));
-    syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+    const { instancePayload, hasDesign } = applyOrderDesignPatchResponse(orderDesign.id, "interior", responsePayload);
+    if (instancePayload) syncInteriorInstanceInOrderDesignCollection(orderDesign.id, instancePayload);
+    if (!hasDesign) {
+      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+    }
     resetInteriorInstanceEditorState();
   } catch (error) {
     showAlert(error?.message || "ذخیره تنظیمات نمونه داخلی طرح ثبت‌شده انجام نشد.", { title: "خطا" });
@@ -13660,25 +13739,27 @@ async function applyInteriorInstanceLineColor(instance, lineColor) {
   const orderDesign = activeInteriorLibraryOrderDesign.value;
   if (!orderDesign?.id) return;
   try {
-    const res = await fetch(
-      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(normalized.id))}`,
+    const responsePayload = await sendJson(
+      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/interior-instances/${encodeURIComponent(String(normalized.id))}?include_design=1`,
+      "PATCH",
       {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          placement_z: Number(normalized.placement_z) || 0,
-          ui_order: Math.max(0, Number(normalized.ui_order) || 0),
-          instance_code: String(normalized.instance_code || "").trim() || "interior",
-          line_color: normalized.line_color ? normalizeHexColor(normalized.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
-          param_values: Object.fromEntries(
-            Object.entries(normalized.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
-          ),
-        }),
-      }
+        placement_z: Number(normalized.placement_z) || 0,
+        ui_order: Math.max(0, Number(normalized.ui_order) || 0),
+        instance_code: String(normalized.instance_code || "").trim() || "interior",
+        line_color: normalized.line_color ? normalizeHexColor(normalized.line_color, DEFAULT_INTERIOR_LINE_COLOR) : null,
+        param_values: Object.fromEntries(
+          Object.entries(normalized.param_values || {}).map(([key, value]) => [key, value == null ? null : String(value)])
+        ),
+      },
+      {
+        abortChannel: getOrderDesignPatchAbortChannel(orderDesign.id, "interior"),
+      },
     );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه داخلی انجام نشد."));
-    syncInteriorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+    const { instancePayload, hasDesign } = applyOrderDesignPatchResponse(orderDesign.id, "interior", responsePayload);
+    if (instancePayload) syncInteriorInstanceInOrderDesignCollection(orderDesign.id, instancePayload);
+    if (!hasDesign) {
+      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+    }
   } catch (error) {
     showAlert(error?.message || "ذخیره رنگ خطوط نمونه داخلی انجام نشد.", { title: "خطا" });
   }
@@ -14035,13 +14116,19 @@ async function editSubtractorInstanceInDesign(instance, patch = {}) {
   }
   const orderDesign = activeSubtractorLibraryOrderDesign.value;
   if (!orderDesign?.id) return;
-  const res = await fetch(
-    `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/subtractor-instances/${encodeURIComponent(String(normalized.id))}`,
-    { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestBody) }
+  const responsePayload = await sendJson(
+    `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/subtractor-instances/${encodeURIComponent(String(normalized.id))}?include_design=1`,
+    "PATCH",
+    requestBody,
+    {
+      abortChannel: getOrderDesignPatchAbortChannel(orderDesign.id, "subtractor"),
+    },
   );
-  if (!res.ok) throw new Error(await readApiErrorMessage(res, "ویرایش نمونه دستگیره مخفی انجام نشد."));
-  syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-  await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+  const { instancePayload, hasDesign } = applyOrderDesignPatchResponse(orderDesign.id, "subtractor", responsePayload);
+  if (instancePayload) syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, instancePayload);
+  if (!hasDesign) {
+    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+  }
 }
 
 async function applySubtractorInstanceLineColor(instance, lineColor) {
@@ -14081,17 +14168,19 @@ async function applySubtractorInstanceLineColor(instance, lineColor) {
   const orderDesign = activeSubtractorLibraryOrderDesign.value;
   if (!orderDesign?.id) return;
   try {
-    const res = await fetch(
-      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/subtractor-instances/${encodeURIComponent(String(normalized.id))}`,
+    const responsePayload = await sendJson(
+      `/api/order-designs/${encodeURIComponent(String(orderDesign.id))}/subtractor-instances/${encodeURIComponent(String(normalized.id))}?include_design=1`,
+      "PATCH",
+      requestBody,
       {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      }
+        abortChannel: getOrderDesignPatchAbortChannel(orderDesign.id, "subtractor"),
+      },
     );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره رنگ خطوط نمونه دستگیره مخفی انجام نشد."));
-    syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, await res.json());
-    await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+    const { instancePayload, hasDesign } = applyOrderDesignPatchResponse(orderDesign.id, "subtractor", responsePayload);
+    if (instancePayload) syncSubtractorInstanceInOrderDesignCollection(orderDesign.id, instancePayload);
+    if (!hasDesign) {
+      await refreshOrderDesignGeometrySingleFlight(orderDesign.id);
+    }
   } catch (error) {
     showAlert(error?.message || "ذخیره رنگ خطوط نمونه دستگیره مخفی انجام نشد.", { title: "خطا" });
   }

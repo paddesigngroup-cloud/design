@@ -151,6 +151,10 @@ class OrderDesignInteriorInstanceItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class OrderDesignInteriorInstancePatchResponse(OrderDesignInteriorInstanceItem):
+    design: OrderDesignItem | None = None
+
+
 class OrderDesignSubtractorInstanceUpdate(BaseModel):
     placement_z: float
     ui_order: int = Field(ge=0)
@@ -184,6 +188,10 @@ class OrderDesignSubtractorInstanceItem(BaseModel):
     status: str
 
     model_config = {"from_attributes": True}
+
+
+class OrderDesignSubtractorInstancePatchResponse(OrderDesignSubtractorInstanceItem):
+    design: OrderDesignItem | None = None
 
 
 class OrderDesignDoorInstanceUpdate(BaseModel):
@@ -224,6 +232,10 @@ class OrderDesignDoorInstanceItem(BaseModel):
     status: str
 
     model_config = {"from_attributes": True}
+
+
+class OrderDesignDoorInstancePatchResponse(OrderDesignDoorInstanceItem):
+    design: OrderDesignItem | None = None
 
 
 class OrderDesignHistoryRestoreInteriorInstance(BaseModel):
@@ -814,6 +826,18 @@ def _serialize_subtractor_instance_item(instance: OrderDesignSubtractorInstance)
     )
 
 
+async def _serialize_design_item_for_patch_response(
+    session: AsyncSession,
+    *,
+    item_id: uuid.UUID,
+) -> OrderDesignItem:
+    fresh_item = await _require_item(session, item_id)
+    include_interior = await interior_instance_tables_ready(session)
+    include_subtractors = await subtractor_instance_tables_ready(session)
+    include_doors = await door_instance_tables_ready(session)
+    return _serialize_item(fresh_item, include_interior=(include_interior or include_subtractors or include_doors))
+
+
 async def _rebuild_order_design_after_interior_change(
     session: AsyncSession,
     *,
@@ -1318,6 +1342,12 @@ async def update_order_design(
                 instance = door_by_id.get(str(resolved.get("id") or ""))
                 if not instance:
                     continue
+                instance.structural_part_formula_ids = [
+                    int(row) for row in list(resolved.get("structural_part_formula_ids") or []) if int(row) > 0
+                ]
+                instance.dependent_interior_instance_ids = [
+                    str(row).strip() for row in list(resolved.get("dependent_interior_instance_ids") or []) if str(row).strip()
+                ]
                 instance.controller_box_snapshot = dict(resolved.get("controller_box_snapshot") or {})
                 instance.param_values = dict(resolved.get("param_values") or {})
                 instance.param_meta = dict(resolved.get("param_meta") or {})
@@ -1527,13 +1557,16 @@ async def restore_order_design_history_state(
     return _serialize_item(item, include_interior=(include_interior or include_subtractors or include_doors))
 
 
-@router.patch("/{item_id}/interior-instances/{instance_id}", response_model=OrderDesignInteriorInstanceItem)
+@router.patch("/{item_id}/interior-instances/{instance_id}", response_model=OrderDesignInteriorInstancePatchResponse)
 async def update_order_design_interior_instance(
     item_id: uuid.UUID,
     instance_id: uuid.UUID,
     payload: OrderDesignInteriorInstanceUpdate,
+    include_design: bool = Query(default=False),
     session: AsyncSession = Depends(get_db_session),
-) -> OrderDesignInteriorInstanceItem:
+) -> OrderDesignInteriorInstancePatchResponse:
+    started_at = perf_counter()
+    refresh_ms = 0.0
     if not await interior_instance_tables_ready(session):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Interior-instance tables are not available yet. Run database migrations first.")
     item = await _require_item(session, item_id)
@@ -1551,6 +1584,7 @@ async def update_order_design_interior_instance(
         admin_id=order.admin_id,
         design_id=item.sub_category_design_id,
     )
+    refresh_started_at = perf_counter()
     await refresh_order_design_interior_instance(
         session,
         item=item,
@@ -1558,12 +1592,36 @@ async def update_order_design_interior_instance(
         source_design=source_design,
         instance=target,
     )
+    refresh_ms = (perf_counter() - refresh_started_at) * 1000.0
     refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
     refresh_order_design_snapshot_state(item=item, source_design=source_design)
-    response = _serialize_interior_instance_item(target)
+    if include_design:
+        # Keep full-order behavior parity with legacy recompute path so door dependencies
+        # and frame-driven controller adaptation stay consistent after interior edits.
+        await sync_order_design_snapshot(
+            session,
+            item=item,
+            order=order,
+            source_design=source_design,
+            force=True,
+        )
     await _commit_order_design_changes(
         session,
         conflict_detail="نمونه داخلی طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+    )
+    design_payload = await _serialize_design_item_for_patch_response(session, item_id=item.id) if include_design else None
+    response = OrderDesignInteriorInstancePatchResponse(
+        **_serialize_interior_instance_item(target).model_dump(),
+        design=design_payload,
+    )
+    total_ms = (perf_counter() - started_at) * 1000.0
+    logger.info(
+        "order_design.interior_patch item_id=%s instance_id=%s include_design=%s refresh_ms=%.2f total_ms=%.2f",
+        item_id,
+        instance_id,
+        include_design,
+        refresh_ms,
+        total_ms,
     )
     return response
 
@@ -1733,13 +1791,16 @@ async def delete_order_design_interior_instance(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.patch("/{item_id}/subtractor-instances/{instance_id}", response_model=OrderDesignSubtractorInstanceItem)
+@router.patch("/{item_id}/subtractor-instances/{instance_id}", response_model=OrderDesignSubtractorInstancePatchResponse)
 async def update_order_design_subtractor_instance(
     item_id: uuid.UUID,
     instance_id: uuid.UUID,
     payload: OrderDesignSubtractorInstanceUpdate,
+    include_design: bool = Query(default=False),
     session: AsyncSession = Depends(get_db_session),
-) -> OrderDesignSubtractorInstanceItem:
+) -> OrderDesignSubtractorInstancePatchResponse:
+    started_at = perf_counter()
+    refresh_ms = 0.0
     if not await subtractor_instance_tables_ready(session):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subtractor-instance tables are not available yet. Run database migrations first.")
     item = await _require_item(session, item_id)
@@ -1751,8 +1812,38 @@ async def update_order_design_subtractor_instance(
     target.ui_order = int(payload.ui_order)
     target.placement_z = float(payload.placement_z or 0)
     target.param_values = _normalize_interior_param_values(payload.param_values)
+    if include_design:
+        refresh_started_at = perf_counter()
+        order = await require_accessible_order(session, order_id=item.order_id)
+        source_design = await require_accessible_sub_category_design(
+            session,
+            admin_id=order.admin_id,
+            design_id=item.sub_category_design_id,
+        )
+        await sync_order_design_snapshot(
+            session,
+            item=item,
+            order=order,
+            source_design=source_design,
+            force=True,
+        )
+        refresh_ms = (perf_counter() - refresh_started_at) * 1000.0
     await _commit_order_design_changes(session, conflict_detail="نمونه دستگیره مخفی طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.")
-    return _serialize_subtractor_instance_item(target)
+    design_payload = await _serialize_design_item_for_patch_response(session, item_id=item.id) if include_design else None
+    response = OrderDesignSubtractorInstancePatchResponse(
+        **_serialize_subtractor_instance_item(target).model_dump(),
+        design=design_payload,
+    )
+    total_ms = (perf_counter() - started_at) * 1000.0
+    logger.info(
+        "order_design.subtractor_patch item_id=%s instance_id=%s include_design=%s refresh_ms=%.2f total_ms=%.2f",
+        item_id,
+        instance_id,
+        include_design,
+        refresh_ms,
+        total_ms,
+    )
+    return response
 
 
 @router.post("/{item_id}/subtractor-instances", response_model=OrderDesignSubtractorInstanceItem, status_code=status.HTTP_201_CREATED)
@@ -1850,13 +1941,16 @@ async def delete_order_design_subtractor_instance(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.patch("/{item_id}/door-instances/{instance_id}", response_model=OrderDesignDoorInstanceItem)
+@router.patch("/{item_id}/door-instances/{instance_id}", response_model=OrderDesignDoorInstancePatchResponse)
 async def update_order_design_door_instance(
     item_id: uuid.UUID,
     instance_id: uuid.UUID,
     payload: OrderDesignDoorInstanceUpdate,
+    include_design: bool = Query(default=False),
     session: AsyncSession = Depends(get_db_session),
-) -> OrderDesignDoorInstanceItem:
+) -> OrderDesignDoorInstancePatchResponse:
+    started_at = perf_counter()
+    refresh_ms = 0.0
     if not await door_instance_tables_ready(session):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Door-instance tables are not available yet. Run database migrations first.")
     item = await _require_item(session, item_id)
@@ -1882,6 +1976,7 @@ async def update_order_design_door_instance(
     )
     if str(getattr(door_group, "controller_type", "") or "").strip() == "double_equal_hinged_doors" and len(target.structural_part_formula_ids) != 4:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Double-equal hinged door controller requires exactly 4 structural parts.")
+    refresh_started_at = perf_counter()
     await refresh_order_design_door_instance(
         session,
         item=item,
@@ -1890,12 +1985,36 @@ async def update_order_design_door_instance(
         instance=target,
         door_group=door_group,
     )
+    refresh_ms = (perf_counter() - refresh_started_at) * 1000.0
     refresh_order_design_aggregate_snapshots(item=item, source_design=source_design)
     refresh_order_design_snapshot_state(item=item, source_design=source_design)
-    response = _serialize_door_instance_item(target)
+    if include_design:
+        # Preserve full sync semantics used by legacy recompute to avoid dropping
+        # dependent selections when structural frame inputs have changed.
+        await sync_order_design_snapshot(
+            session,
+            item=item,
+            order=order,
+            source_design=source_design,
+            force=True,
+        )
     await _commit_order_design_changes(
         session,
         conflict_detail="نمونه درب طرح سفارش همزمان در جای دیگری تغییر کرده است. دوباره بارگذاری و تلاش کنید.",
+    )
+    design_payload = await _serialize_design_item_for_patch_response(session, item_id=item.id) if include_design else None
+    response = OrderDesignDoorInstancePatchResponse(
+        **_serialize_door_instance_item(target).model_dump(),
+        design=design_payload,
+    )
+    total_ms = (perf_counter() - started_at) * 1000.0
+    logger.info(
+        "order_design.door_patch item_id=%s instance_id=%s include_design=%s refresh_ms=%.2f total_ms=%.2f",
+        item_id,
+        instance_id,
+        include_design,
+        refresh_ms,
+        total_ms,
     )
     return response
 

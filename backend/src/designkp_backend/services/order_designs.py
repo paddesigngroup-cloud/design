@@ -1142,6 +1142,16 @@ async def sync_order_design_snapshot(
             instance = door_by_id.get(str(resolved.get("id") or ""))
             if not instance:
                 continue
+            resolved_structural_ids = [int(row) for row in list(resolved.get("structural_part_formula_ids") or []) if int(row) > 0]
+            if list(instance.structural_part_formula_ids or []) != resolved_structural_ids:
+                instance.structural_part_formula_ids = resolved_structural_ids
+                changed = True
+            resolved_dependent_ids = [
+                str(row).strip() for row in list(resolved.get("dependent_interior_instance_ids") or []) if str(row).strip()
+            ]
+            if list(instance.dependent_interior_instance_ids or []) != resolved_dependent_ids:
+                instance.dependent_interior_instance_ids = resolved_dependent_ids
+                changed = True
             if dict(instance.controller_box_snapshot or {}) != resolved["controller_box_snapshot"]:
                 instance.controller_box_snapshot = resolved["controller_box_snapshot"]
                 changed = True
