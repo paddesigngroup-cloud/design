@@ -568,6 +568,10 @@ const orderDesignEditorDraft = ref(null);
 const orderDesignEditorActiveGroupId = ref("");
 const orderDesignEditorMode = ref("settings");
 const orderDesignEditorActiveSection = ref("structural");
+const ORDER_EDITOR_PREWARM_SECTIONS = ["internal", "door", "subtractor"];
+const ORDER_EDITOR_SECTION_SET = new Set(ORDER_EDITOR_PREWARM_SECTIONS);
+const orderDesignSectionEnsureSessions = new Map();
+const orderDesignRefreshInflight = new Map();
 const orderDesignEditorSections = [
   { id: "structural", label: "سازه", icon: "/icons/vertical_piece.png" },
   { id: "internal", label: "داخلی", icon: "/icons/enternal.png" },
@@ -10188,9 +10192,11 @@ async function loadOrderDesignCatalog(force = false) {
 async function loadConstructionInternalPartGroups() {
   try {
     const url = `/api/internal-part-groups?admin_id=${encodeURIComponent(currentAdminId.value)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("load-failed");
-    editableInternalPartGroups.value = (await res.json()).map((item) =>
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:internal-part-groups:${currentAdminId.value}`,
+    });
+    editableInternalPartGroups.value = payload.map((item) =>
       ensureInternalPartGroupControllerConfig(
         ensureInternalPartGroupParamDefaults(withConstructionDraftState({
           ...item,
@@ -10276,6 +10282,7 @@ function openOrderDesignEditor(item, options = {}) {
   const normalized = normalizeOrderDesignRecord(item);
   if (!normalized) return;
   const mode = options?.mode === "full" ? "full" : "settings";
+  clearOrderDesignSectionEnsureSession(normalized.id);
   orderDesignEditorDraft.value = {
     ...normalized,
     order_attr_values: Object.fromEntries(
@@ -10290,6 +10297,9 @@ function openOrderDesignEditor(item, options = {}) {
   orderDesignEditorMode.value = mode;
   orderDesignEditorActiveSection.value = mode === "full" ? "structural" : "structural";
   orderDesignEditorOpen.value = true;
+  if (mode === "full") {
+    startOrderDesignEditorBackgroundPrewarm(normalized.id);
+  }
 }
 
 function openOrderDesignEditorById(orderDesignId, options = {}) {
@@ -10305,6 +10315,7 @@ function openOrderDesignFullEditorById(orderDesignId) {
 }
 
 function closeOrderDesignEditor() {
+  clearOrderDesignSectionEnsureSession(orderDesignEditorDraft.value?.id);
   closeInteriorLibrary();
   closeDoorLibrary();
   closeSubtractorLibrary();
@@ -12100,6 +12111,7 @@ async function refreshOrderDesignGeometryFromServer(orderDesignId, { updateStage
   if (!res.ok) throw new Error(await readApiErrorMessage(res, "بازسازی نمایش طرح سفارش انجام نشد."));
   const fresh = syncOrderDesignInCollection(await res.json());
   if (!fresh) return null;
+  syncOrderDesignEditorDraftDerivedFields(fresh);
   if (updateStage && String(activeCabinetDesignId.value || "") === String(fresh.id)) {
     const placement = getOrderDesignPlacement(fresh.id) || getCurrentEditorModelPlacement();
     stageCabinetPlaceholderBoxes.value = (fresh.viewer_boxes || []).map(normalizeCabinetBox);
@@ -12108,78 +12120,222 @@ async function refreshOrderDesignGeometryFromServer(orderDesignId, { updateStage
   return fresh;
 }
 
-async function ensureOrderDesignInteriorParamMetaLoaded(orderDesignId) {
+function syncOrderDesignEditorDraftDerivedFields(freshItem) {
+  const fresh = normalizeOrderDesignRecord(freshItem);
+  if (!fresh?.id) return;
+  const draft = orderDesignEditorDraft.value;
+  if (!draft || String(draft.id) !== String(fresh.id)) return;
+  orderDesignEditorDraft.value = {
+    ...draft,
+    snapshot_checksum: fresh.snapshot_checksum,
+    part_snapshots: Array.isArray(fresh.part_snapshots) ? fresh.part_snapshots.map((item) => ({ ...(item || {}) })) : [],
+    viewer_boxes: Array.isArray(fresh.viewer_boxes) ? fresh.viewer_boxes.map((item) => ({ ...(item || {}) })) : [],
+    boolean_targets: Array.isArray(fresh.boolean_targets) ? fresh.boolean_targets.map((item) => ({ ...(item || {}) })) : [],
+    boolean_cutters: Array.isArray(fresh.boolean_cutters) ? fresh.boolean_cutters.map((item) => ({ ...(item || {}) })) : [],
+    boolean_result: Array.isArray(fresh.boolean_result) ? fresh.boolean_result.map((item) => ({ ...(item || {}) })) : [],
+    order_attr_meta: { ...(fresh.order_attr_meta || {}) },
+    interior_instances: Array.isArray(fresh.interior_instances) ? fresh.interior_instances.map(normalizeInteriorInstanceRecord).filter(Boolean) : [],
+    door_instances: Array.isArray(fresh.door_instances) ? fresh.door_instances.map(normalizeDoorInstanceRecord).filter(Boolean) : [],
+    subtractor_instances: Array.isArray(fresh.subtractor_instances) ? fresh.subtractor_instances.map(normalizeSubtractorInstanceRecord).filter(Boolean) : [],
+  };
+}
+
+function getOrderDesignSectionEnsureSession(orderDesignId) {
   const key = String(orderDesignId || "").trim();
-  if (!key) return;
-  const item = orderDesignCatalog.value.find((row) => String(row.id) === key);
-  const interiors = Array.isArray(item?.interior_instances) ? item.interior_instances : [];
-  if (!interiors.length) return;
-  const needsRefresh = interiors.some((instance) => {
-    const metaCount = Object.keys(instance?.param_meta || {}).length;
-    const sourceInternalGroup = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
-    const expectedMetaCount = sourceInternalGroup
-      ? buildInternalGroupDefaultsTree(sourceInternalGroup).reduce((sum, group) => sum + group.items.length, 0)
-      : Object.keys(instance?.param_values || {}).length;
-    return expectedMetaCount > 0 && metaCount < expectedMetaCount;
-  });
-  if (!needsRefresh) return;
-  try {
-    await refreshOrderDesignGeometryFromServer(key, { updateStage: false });
-  } catch (_) {
-    // Silent: failing to refresh should not block opening the library.
+  if (!key) return null;
+  let session = orderDesignSectionEnsureSessions.get(key);
+  if (!session) {
+    session = {
+      readySnapshotBySection: {
+        internal: "",
+        door: "",
+        subtractor: "",
+      },
+      inflightBySection: {
+        internal: null,
+        door: null,
+        subtractor: null,
+      },
+      prewarmPromise: null,
+    };
+    orderDesignSectionEnsureSessions.set(key, session);
   }
+  return session;
+}
+
+function clearOrderDesignSectionEnsureSession(orderDesignId = "") {
+  const key = String(orderDesignId || "").trim();
+  if (key) {
+    orderDesignSectionEnsureSessions.delete(key);
+    orderDesignRefreshInflight.delete(key);
+    return;
+  }
+  orderDesignSectionEnsureSessions.clear();
+  orderDesignRefreshInflight.clear();
+}
+
+function orderDesignSectionNeedsMetaRefresh(item, sectionId) {
+  if (!item) return false;
+  if (sectionId === "internal") {
+    const interiors = Array.isArray(item.interior_instances) ? item.interior_instances : [];
+    if (!interiors.length) return false;
+    return interiors.some((instance) => {
+      const metaCount = Object.keys(instance?.param_meta || {}).length;
+      const sourceInternalGroup = constructionInternalPartGroupsById.value.get(String(instance?.internal_part_group_id || "").trim());
+      const expectedMetaCount = sourceInternalGroup
+        ? buildInternalGroupDefaultsTree(sourceInternalGroup).reduce((sum, group) => sum + group.items.length, 0)
+        : Object.keys(instance?.param_values || {}).length;
+      return expectedMetaCount > 0 && metaCount < expectedMetaCount;
+    });
+  }
+  if (sectionId === "door") {
+    const doors = Array.isArray(item.door_instances) ? item.door_instances : [];
+    if (!doors.length) return false;
+    return doors.some((instance) => {
+      const metaCount = Object.keys(instance?.param_meta || {}).length;
+      const sourceDoorGroup = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
+      const expectedMetaCount = sourceDoorGroup
+        ? buildDoorPartGroupDefaultsGroups(sourceDoorGroup).reduce((sum, group) => sum + group.items.length, 0)
+        : Object.keys(instance?.param_values || {}).length;
+      return expectedMetaCount > 0 && metaCount < expectedMetaCount;
+    });
+  }
+  if (sectionId === "subtractor") {
+    const subtractors = Array.isArray(item.subtractor_instances) ? item.subtractor_instances : [];
+    if (!subtractors.length) return false;
+    return subtractors.some((instance) => {
+      const metaCount = Object.keys(instance?.param_meta || {}).length;
+      const sourceGroup = constructionSubtractorPartGroupsById.value.get(String(instance?.subtractor_part_group_id || "").trim());
+      const expectedMetaCount = sourceGroup
+        ? buildSubtractorPartGroupDefaultsGroups(sourceGroup).reduce((sum, group) => sum + group.items.length, 0)
+        : Object.keys(instance?.param_values || {}).length;
+      return expectedMetaCount > 0 && metaCount < expectedMetaCount;
+    });
+  }
+  return false;
+}
+
+async function refreshOrderDesignGeometrySingleFlight(orderDesignId, { updateStage = false } = {}) {
+  const key = String(orderDesignId || "").trim();
+  if (!key) return null;
+  const pending = orderDesignRefreshInflight.get(key);
+  if (pending) return pending;
+  const next = (async () => refreshOrderDesignGeometryFromServer(key, { updateStage }))()
+    .finally(() => {
+      if (orderDesignRefreshInflight.get(key) === next) {
+        orderDesignRefreshInflight.delete(key);
+      }
+    });
+  orderDesignRefreshInflight.set(key, next);
+  return next;
+}
+
+async function loadOrderDesignSectionDependencies(sectionId) {
+  if (sectionId === "internal") {
+    await Promise.allSettled([
+      loadConstructionParamGroups(),
+      loadConstructionParams(),
+      loadConstructionSubCategories(),
+      loadConstructionInternalPartGroups(),
+      loadConstructionSubtractorPartGroups(),
+      loadConstructionPartKinds(),
+      loadConstructionPartFormulas(),
+    ]);
+    return;
+  }
+  if (sectionId === "door") {
+    await Promise.allSettled([
+      loadConstructionDoorPartGroups(),
+      loadConstructionSubtractorPartGroups(),
+      loadConstructionPartKinds(),
+      loadConstructionPartFormulas(),
+    ]);
+    return;
+  }
+  if (sectionId === "subtractor") {
+    await Promise.allSettled([
+      loadConstructionParamGroups(),
+      loadConstructionParams(),
+      loadConstructionSubCategories(),
+      loadConstructionSubtractorPartGroups(),
+      loadConstructionPartKinds(),
+      loadConstructionPartFormulas(),
+    ]);
+  }
+}
+
+async function ensureOrderDesignSectionDataReady(orderDesignId, sectionId) {
+  const key = String(orderDesignId || "").trim();
+  const section = String(sectionId || "").trim();
+  if (!key || !ORDER_EDITOR_SECTION_SET.has(section)) return;
+  const session = getOrderDesignSectionEnsureSession(key);
+  if (!session) return;
+  const pending = session.inflightBySection[section];
+  if (pending) {
+    await pending;
+    return;
+  }
+  const currentItem = orderDesignCatalog.value.find((row) => String(row.id) === key);
+  const currentChecksum = String(currentItem?.snapshot_checksum || "").trim();
+  if (currentChecksum && session.readySnapshotBySection[section] === currentChecksum) return;
+  const run = (async () => {
+    await loadOrderDesignSectionDependencies(section);
+    const beforeItem = orderDesignCatalog.value.find((row) => String(row.id) === key);
+    if (!beforeItem) return;
+    if (orderDesignSectionNeedsMetaRefresh(beforeItem, section)) {
+      try {
+        await refreshOrderDesignGeometrySingleFlight(key, { updateStage: false });
+      } catch (_) {
+        // Silent: failing to refresh should not block opening the library.
+      }
+    }
+    const finalItem = orderDesignCatalog.value.find((row) => String(row.id) === key);
+    const finalChecksum = String(finalItem?.snapshot_checksum || beforeItem?.snapshot_checksum || "").trim();
+    session.readySnapshotBySection[section] = finalChecksum || "__ready__";
+  })().finally(() => {
+    session.inflightBySection[section] = null;
+  });
+  session.inflightBySection[section] = run;
+  await run;
+}
+
+async function ensureOrderDesignInteriorParamMetaLoaded(orderDesignId) {
+  await ensureOrderDesignSectionDataReady(orderDesignId, "internal");
 }
 
 async function ensureOrderDesignDoorParamMetaLoaded(orderDesignId) {
-  const key = String(orderDesignId || "").trim();
-  if (!key) return;
-  const item = orderDesignCatalog.value.find((row) => String(row.id) === key);
-  const doors = Array.isArray(item?.door_instances) ? item.door_instances : [];
-  if (!doors.length) return;
-  const needsRefresh = doors.some((instance) => {
-    const metaCount = Object.keys(instance?.param_meta || {}).length;
-    const sourceDoorGroup = constructionDoorPartGroupsById.value.get(String(instance?.door_part_group_id || "").trim());
-    const expectedMetaCount = sourceDoorGroup
-      ? buildDoorPartGroupDefaultsGroups(sourceDoorGroup).reduce((sum, group) => sum + group.items.length, 0)
-      : Object.keys(instance?.param_values || {}).length;
-    return expectedMetaCount > 0 && metaCount < expectedMetaCount;
-  });
-  if (!needsRefresh) return;
-  try {
-    await refreshOrderDesignGeometryFromServer(key, { updateStage: false });
-  } catch (_) {
-    // Silent: failing to refresh should not block opening the library.
-  }
+  await ensureOrderDesignSectionDataReady(orderDesignId, "door");
 }
 
 async function ensureOrderDesignSubtractorParamMetaLoaded(orderDesignId) {
+  await ensureOrderDesignSectionDataReady(orderDesignId, "subtractor");
+}
+
+function startOrderDesignEditorBackgroundPrewarm(orderDesignId) {
   const key = String(orderDesignId || "").trim();
   if (!key) return;
-  const item = orderDesignCatalog.value.find((row) => String(row.id) === key);
-  const subtractors = Array.isArray(item?.subtractor_instances) ? item.subtractor_instances : [];
-  if (!subtractors.length) return;
-  const needsRefresh = subtractors.some((instance) => {
-    const metaCount = Object.keys(instance?.param_meta || {}).length;
-    const sourceGroup = constructionSubtractorPartGroupsById.value.get(String(instance?.subtractor_part_group_id || "").trim());
-    const expectedMetaCount = sourceGroup
-      ? buildSubtractorPartGroupDefaultsGroups(sourceGroup).reduce((sum, group) => sum + group.items.length, 0)
-      : Object.keys(instance?.param_values || {}).length;
-    return expectedMetaCount > 0 && metaCount < expectedMetaCount;
+  const session = getOrderDesignSectionEnsureSession(key);
+  if (!session) return;
+  if (session.prewarmPromise) return;
+  session.prewarmPromise = (async () => {
+    for (const section of ORDER_EDITOR_PREWARM_SECTIONS) {
+      await ensureOrderDesignSectionDataReady(key, section);
+    }
+  })().finally(() => {
+    if (session.prewarmPromise) {
+      session.prewarmPromise = null;
+    }
   });
-  if (!needsRefresh) return;
-  try {
-    await refreshOrderDesignGeometryFromServer(key, { updateStage: false });
-  } catch (_) {
-    // Silent: failing to refresh should not block opening the library.
-  }
 }
 
 async function loadConstructionDoorPartGroups() {
   try {
     const url = `/api/door-part-groups?admin_id=${encodeURIComponent(currentAdminId.value)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("load-failed");
-    editableDoorPartGroups.value = (await res.json()).map(normalizeEditableDoorPartGroupRecord);
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:door-part-groups:${currentAdminId.value}`,
+    });
+    editableDoorPartGroups.value = payload.map(normalizeEditableDoorPartGroupRecord);
   } catch (_) {
     showAlert("خواندن جدول گروه قطعات درب از دیتابیس انجام نشد.", { title: "خطا" });
   }
@@ -13761,9 +13917,11 @@ function togglePartFormulaInInternalGroup(partFormulaId) {
 async function loadConstructionSubtractorPartGroups() {
   try {
     const url = `/api/subtractor-part-groups?admin_id=${encodeURIComponent(currentAdminId.value)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("load-failed");
-    editableSubtractorPartGroups.value = (await res.json()).map((item) =>
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:subtractor-part-groups:${currentAdminId.value}`,
+    });
+    editableSubtractorPartGroups.value = payload.map((item) =>
       ensureSubtractorPartGroupControllerConfig(
         ensureSubtractorPartGroupParamDefaults(withConstructionDraftState({
           ...item,
@@ -19938,20 +20096,7 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
     resetInteriorLibraryAnnotations();
     interiorLibraryFrontPan.value = { x: 0, y: 0 };
     stopInteriorLibraryFrontPan();
-    await Promise.allSettled([
-      loadConstructionParamGroups(),
-      loadConstructionParams(),
-      loadConstructionSubCategories(),
-      loadConstructionInternalPartGroups(),
-      loadConstructionSubtractorPartGroups(),
-      loadConstructionSubCategoryDesigns(),
-      loadConstructionPartKinds(),
-      loadConstructionPartFormulas(),
-    ]);
-    if (activeOrder.value?.id) {
-      await loadOrderDesignCatalog(true);
-      await ensureOrderDesignInteriorParamMetaLoaded(resolvedTargetId);
-    }
+    await ensureOrderDesignSectionDataReady(resolvedTargetId, "internal");
     return;
   }
   closeSubtractorLibrary();
@@ -20042,15 +20187,7 @@ async function openDoorLibrary(targetOrderDesignId = "") {
     doorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
     clearDoorLibraryPlacedInstanceSelection();
     resetDoorLibraryPreviewView();
-    await Promise.allSettled([
-      loadConstructionDoorPartGroups(),
-      loadConstructionSubtractorPartGroups(),
-      loadConstructionPartKinds(),
-      loadConstructionPartFormulas(),
-    ]);
-    if (activeOrder.value?.id) {
-      await loadOrderDesignCatalog(true);
-    }
+    await ensureOrderDesignSectionDataReady(resolvedTargetId, "door");
     doorLibraryOpen.value = true;
     doorLibraryPreviewMode.value = "front2d";
     resetDoorLibraryAnnotations();
@@ -20134,23 +20271,7 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
     doorLibraryOpen.value = false;
     subtractorLibraryForcedOrderDesignId.value = resolvedTargetId;
     interiorLibraryForcedOrderDesignId.value = resolvedTargetId;
-    await Promise.allSettled([
-      loadConstructionParamGroups(),
-      loadConstructionParams(),
-      loadConstructionSubCategories(),
-      loadConstructionSubtractorPartGroups(),
-      loadConstructionPartKinds(),
-      loadConstructionPartFormulas(),
-    ]);
-    if (activeOrder.value?.id) {
-      await loadOrderDesignCatalog(true);
-      await refreshOrderDesignGeometryFromServer(resolvedTargetId, { updateStage: false });
-      await Promise.allSettled([
-        ensureOrderDesignInteriorParamMetaLoaded(resolvedTargetId),
-        ensureOrderDesignDoorParamMetaLoaded(resolvedTargetId),
-        ensureOrderDesignSubtractorParamMetaLoaded(resolvedTargetId),
-      ]);
-    }
+    await ensureOrderDesignSectionDataReady(resolvedTargetId, "subtractor");
     subtractorLibraryOpen.value = true;
     return;
   }
