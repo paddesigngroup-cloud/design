@@ -3557,7 +3557,7 @@ option {
   padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   font-family: Vazirmatn, sans-serif;
 }
 .appDialog__card button,

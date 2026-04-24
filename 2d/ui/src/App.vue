@@ -26653,7 +26653,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="subCategoryUserPreviewOpen" class="appDialog" :class="{ 'appDialog--stacked': orderDesignEditorOpen }" role="dialog" aria-modal="true">
+  <div v-if="subCategoryUserPreviewOpen" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeSubCategoryUserPreview"></div>
     <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
       <div class="subCategoryPreview__header">
