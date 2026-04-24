@@ -9755,6 +9755,7 @@ function normalizeCabinetBox(box) {
     cy: Number(box?.cy) || 0,
     cz: Number(box?.cz) || 0,
     lineColor: String(box?.lineColor || box?.line_color || "").trim() || "",
+    targetId: String(box?.targetId || box?.target_id || "").trim(),
   };
 }
 
@@ -9834,6 +9835,74 @@ function normalizeBooleanState(item) {
     raw_viewer_boxes: Array.isArray(item?.viewer_boxes) ? item.viewer_boxes.map((row) => ({ ...(row || {}) })) : [],
     viewer_boxes: buildRenderedBoxesFromBooleanPayload(item?.viewer_boxes, boolean_targets, boolean_cutters, boolean_result),
   };
+}
+
+function applyBooleanPreviewToOwnerViewerBoxes(
+  viewerBoxes,
+  booleanTargets,
+  booleanResult,
+  ownerType,
+  ownerId,
+) {
+  const normalizedOwnerType = String(ownerType || "").trim();
+  const normalizedOwnerId = String(ownerId || "").trim();
+  const sourceBoxes = (Array.isArray(viewerBoxes) ? viewerBoxes : []).map((box) => ({ ...(box || {}) }));
+  if (!normalizedOwnerType || !normalizedOwnerId || !sourceBoxes.length) return sourceBoxes;
+  const targetsForOwner = (Array.isArray(booleanTargets) ? booleanTargets : []).filter((target) =>
+    String(target?.owner_type || "").trim() === normalizedOwnerType
+    && String(target?.owner_id || "").trim() === normalizedOwnerId
+  );
+  if (!targetsForOwner.length) return sourceBoxes;
+
+  const targetIds = new Set(targetsForOwner.map((target) => String(target?.target_id || "").trim()).filter(Boolean));
+  const targetSignatures = new Set(
+    targetsForOwner
+      .map((target) => target?.box)
+      .filter((box) => box && typeof box === "object")
+      .map((box) => buildBoxSignature(box))
+  );
+  const resultBoxes = (Array.isArray(booleanResult) ? booleanResult : [])
+    .filter((item) => targetIds.has(String(item?.target_id || "").trim()))
+    .flatMap((item) =>
+      (Array.isArray(item?.boxes) ? item.boxes : []).map((box) => ({
+        ...(box || {}),
+        lineColor: String(box?.lineColor || item?.line_color || item?.lineColor || "").trim(),
+        targetId: String(item?.target_id || "").trim(),
+      }))
+    );
+  if (!resultBoxes.length) return sourceBoxes;
+
+  const deduped = [];
+  const seen = new Set();
+  for (const box of [
+    ...sourceBoxes.filter((box) => !targetSignatures.has(buildBoxSignature(box))),
+    ...resultBoxes,
+  ]) {
+    const signature = buildBoxSignature(box);
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    deduped.push(box);
+  }
+  return deduped;
+}
+
+function applyBooleanPreviewToInteriorInstances(instances, booleanState) {
+  const targets = booleanState?.boolean_targets || [];
+  const result = booleanState?.boolean_result || [];
+  return (Array.isArray(instances) ? instances : []).map((instance) => {
+    const ownerId = String(instance?.id || "").trim();
+    if (!ownerId) return instance;
+    return {
+      ...(instance || {}),
+      viewer_boxes: applyBooleanPreviewToOwnerViewerBoxes(
+        instance?.viewer_boxes,
+        targets,
+        result,
+        "interior",
+        ownerId,
+      ),
+    };
+  });
 }
 
 function normalizeOrderDesignPlacement(item) {
@@ -9989,6 +10058,10 @@ async function enrichDesignWithPreview(item) {
 function normalizeOrderDesignRecord(item) {
   if (!item || !item.id) return null;
   const booleanState = normalizeBooleanState(item);
+  const normalizedInteriorInstances = applyBooleanPreviewToInteriorInstances(
+    Array.isArray(item.interior_instances) ? item.interior_instances.map(normalizeInteriorInstanceRecord).filter(Boolean) : [],
+    booleanState,
+  );
   return {
     ...item,
     id: String(item.id),
@@ -10015,7 +10088,7 @@ function normalizeOrderDesignRecord(item) {
     boolean_targets: booleanState.boolean_targets,
     boolean_cutters: booleanState.boolean_cutters,
     boolean_result: booleanState.boolean_result,
-    interior_instances: Array.isArray(item.interior_instances) ? item.interior_instances.map(normalizeInteriorInstanceRecord).filter(Boolean) : [],
+    interior_instances: normalizedInteriorInstances,
     door_instances: Array.isArray(item.door_instances) ? item.door_instances.map(normalizeDoorInstanceRecord).filter(Boolean) : [],
     subtractor_instances: Array.isArray(item.subtractor_instances) ? item.subtractor_instances.map(normalizeSubtractorInstanceRecord).filter(Boolean) : [],
   };
