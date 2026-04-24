@@ -2951,11 +2951,23 @@ defineExpose({
         <div v-if="isGroupEditMode || selectedOrderDesignCount > 1" class="glbWallAttrs__groupLabel">ویرایش گروهی</div>
       </div>
       <div v-if="showOrderDesignTools" class="glbWallAttrs__tools">
-        <button type="button" class="glbWallAttrs__toolBtn" title="تنظیمات پارامترها" @click="openOrderDesignSettingsForActiveDesign">
-          <img src="/icons/setting.png" alt="" class="glbWallAttrs__toolIcon" />
-        </button>
-        <button type="button" class="glbWallAttrs__toolBtn" title="ویرایش کامل طرح سفارش" @click="focusActiveDesign3d">
+        <button
+          type="button"
+          class="glbWallAttrs__toolBtn"
+          title="ویرایش طرح"
+          aria-label="ویرایش طرح"
+          @click="openOrderDesignSettingsForActiveDesign"
+        >
           <img src="/icons/3d_viewer.png" alt="" class="glbWallAttrs__toolIcon" />
+        </button>
+        <button
+          type="button"
+          class="glbWallAttrs__toolBtn"
+          title="نمایش طرح"
+          aria-label="نمایش طرح"
+          @click="focusActiveDesign3d"
+        >
+          <img src="/icons/see_all.png" alt="" class="glbWallAttrs__toolIcon" />
         </button>
       </div>
       <div class="glbWallAttrs__sep"></div>
