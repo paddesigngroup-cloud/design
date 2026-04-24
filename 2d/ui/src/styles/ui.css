@@ -5553,6 +5553,11 @@ option {
   margin-top: 0 !important;
   margin-bottom: 0 !important;
 }
+
+.orderDesignEditor__frontCanvas .frontViewCanvas,
+.orderDesignEditor__frontCanvas .frontViewCanvas__canvas {
+  background: transparent !important;
+}
 .subCategoryPreview__tree {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
