@@ -947,6 +947,7 @@ const doorInstanceEditorApplying = ref(false);
 const INTERIOR_LIBRARY_FRONT_ZOOM_MIN = 0.1;
 const INTERIOR_LIBRARY_FRONT_ZOOM_MAX = 20000;
 const INTERIOR_LIBRARY_FRONT_ZOOM_FACTOR = 1.18;
+const FRONT_PREVIEW_DEFAULT_ZOOM = 0.9;
 const INTERIOR_LIBRARY_DOUBLE_CLICK_ZOOM_FACTOR = 1.6;
 const INTERIOR_LIBRARY_POINTER_EPS = 0.4;
 const INTERIOR_LIBRARY_INSTANCE_HIT_PADDING = 6;
@@ -1085,7 +1086,7 @@ function resetInteriorLibraryPreviewView() {
     interiorLibraryPreview3dRef.value?.fitCameraToAll?.();
     return;
   }
-  interiorLibraryFrontZoom.value = 1;
+  interiorLibraryFrontZoom.value = FRONT_PREVIEW_DEFAULT_ZOOM;
   interiorLibraryFrontPan.value = { x: 0, y: 0 };
   stopInteriorLibraryFrontPan();
 }
@@ -1212,7 +1213,7 @@ function resetDoorLibraryPreviewView() {
     doorLibraryPreview3dRef.value?.fitCameraToAll?.();
     return;
   }
-  doorLibraryFrontZoom.value = 1;
+  doorLibraryFrontZoom.value = FRONT_PREVIEW_DEFAULT_ZOOM;
   doorLibraryFrontPan.value = { x: 0, y: 0 };
   stopDoorLibraryFrontPan();
 }
@@ -4745,6 +4746,11 @@ function syncInteriorLibraryFrontViewport() {
   };
 }
 
+function setOrderDesignFrontViewerWrapEl(el) {
+  interiorLibraryViewerWrapEl.value = el || null;
+  doorLibraryViewerWrapEl.value = el || null;
+}
+
 function getViewerBoxesFromPartSnapshots(partSnapshots) {
   return (Array.isArray(partSnapshots) ? partSnapshots : [])
     .map((row) => row?.viewer_payload?.box)
@@ -6609,6 +6615,15 @@ watch(subCategoryDesignEditorActiveTab, () => {
 });
 watch(orderDesignEditorActiveSection, () => {
   nextTick(() => {
+    if (orderDesignEditorActiveSection.value === "door") {
+      doorLibraryFrontPan.value = { x: 0, y: 0 };
+      doorLibraryFrontZoom.value = FRONT_PREVIEW_DEFAULT_ZOOM;
+      stopDoorLibraryFrontPan();
+    } else {
+      interiorLibraryFrontPan.value = { x: 0, y: 0 };
+      interiorLibraryFrontZoom.value = FRONT_PREVIEW_DEFAULT_ZOOM;
+      stopInteriorLibraryFrontPan();
+    }
     syncInteriorLibraryFrontViewport();
   });
 });
@@ -20582,7 +20597,7 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
     interiorLibraryForcedOrderDesignId.value = resolvedTargetId;
     interiorLibraryOpen.value = true;
     interiorLibraryPreviewMode.value = "front2d";
-    interiorLibraryFrontZoom.value = 1;
+    interiorLibraryFrontZoom.value = FRONT_PREVIEW_DEFAULT_ZOOM;
     interiorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
     interiorLibraryShowInnerLines.value = true;
     resetInteriorLibraryAnnotations();
@@ -20616,7 +20631,7 @@ async function openInteriorLibrary(targetOrderDesignId = "") {
   }
   interiorLibraryOpen.value = true;
   interiorLibraryPreviewMode.value = "front2d";
-  interiorLibraryFrontZoom.value = 1;
+  interiorLibraryFrontZoom.value = FRONT_PREVIEW_DEFAULT_ZOOM;
   interiorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
   interiorLibraryShowInnerLines.value = true;
   resetInteriorLibraryAnnotations();
@@ -20753,7 +20768,7 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
     doorLibraryOpen.value = false;
     subtractorLibraryPreviewMode.value = "front2d";
     interiorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
-    interiorLibraryFrontZoom.value = 1;
+    interiorLibraryFrontZoom.value = FRONT_PREVIEW_DEFAULT_ZOOM;
     interiorLibraryFrontPan.value = { x: 0, y: 0 };
     stopInteriorLibraryFrontPan();
     resetSubtractorLibraryAnnotations();
@@ -20782,7 +20797,7 @@ async function openSubtractorLibrary(targetOrderDesignId = "") {
     interiorLibraryForcedOrderDesignId.value = resolvedTargetId;
     subtractorLibraryPreviewMode.value = "front2d";
     interiorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
-    interiorLibraryFrontZoom.value = 1;
+    interiorLibraryFrontZoom.value = FRONT_PREVIEW_DEFAULT_ZOOM;
     interiorLibraryFrontPan.value = { x: 0, y: 0 };
     stopInteriorLibraryFrontPan();
     resetSubtractorLibraryAnnotations();
@@ -20871,7 +20886,7 @@ function closeInteriorLibrary() {
   };
   interiorLibraryForcedOrderDesignId.value = "";
   interiorLibraryPreviewMode.value = "front2d";
-  interiorLibraryFrontZoom.value = 1;
+  interiorLibraryFrontZoom.value = FRONT_PREVIEW_DEFAULT_ZOOM;
   interiorLibraryPreviewOpacity.value = DEFAULT_3D_WIDGET_OPACITY;
   interiorLibraryShowInnerLines.value = true;
   resetInteriorLibraryAnnotations();
@@ -29036,6 +29051,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="subCategoryDesignEditor__previewBody subCategoryDesignEditor__previewBody--interior">
               <div
+                :ref="setOrderDesignFrontViewerWrapEl"
                 class="subCategoryDesignEditor__viewerWrap subCategoryDesignEditor__viewerWrap--interior"
                 :class="[
                   'orderDesignEditor__frontPreviewWrap',
@@ -29056,6 +29072,16 @@ onBeforeUnmount(() => {
                   ? (doorLibraryPreviewMode === 'model3d' ? focusDoorLibraryPreviewCloser() : null)
                   : ((orderDesignEditorActiveSection === 'subtractor' ? subtractorLibraryPreviewMode : interiorLibraryPreviewMode) === 'model3d' ? focusInteriorLibraryPreviewCloser() : null)"
               >
+                <div
+                  v-if="interiorLibraryControllerApplying && (orderDesignEditorActiveSection === 'internal' || orderDesignEditorActiveSection === 'subtractor')"
+                  class="interiorLibraryLoadingPopup"
+                  role="status"
+                  aria-live="polite"
+                  aria-busy="true"
+                >
+                  <span class="interiorLibraryLoadingPopup__spinner" aria-hidden="true"></span>
+                  <span class="interiorLibraryLoadingPopup__text">در حال اعمال تغییرات کنترلر...</span>
+                </div>
                 <GlbViewerWidget
                   v-if="orderDesignEditorActiveSection === 'door' ? doorLibraryPreviewMode === 'model3d' : (orderDesignEditorActiveSection === 'subtractor' ? subtractorLibraryPreviewMode === 'model3d' : interiorLibraryPreviewMode === 'model3d')"
                   src="/models/1_z1.glb"
@@ -29084,6 +29110,25 @@ onBeforeUnmount(() => {
                   @contextmenu="orderDesignEditorActiveSection === 'door' ? onDoorLibraryFrontSvgContextMenu($event) : onInteriorLibraryFrontSvgContextMenu($event)"
                   @dblclick="orderDesignEditorActiveSection === 'door' ? onDoorLibraryFrontSvgDoubleClick($event) : onInteriorLibraryFrontSvgDoubleClick($event)"
                 />
+                <div
+                  v-if="(
+                    orderDesignEditorActiveSection === 'door'
+                    && doorLibraryPreviewMode === 'front2d'
+                    && !doorLibrarySelectedPlacedInstanceId
+                    && !isDoorLibraryPendingControllerActive
+                  ) || (
+                    (orderDesignEditorActiveSection === 'internal' || orderDesignEditorActiveSection === 'subtractor')
+                    && (orderDesignEditorActiveSection === 'subtractor' ? subtractorLibraryPreviewMode === 'front2d' : interiorLibraryPreviewMode === 'front2d')
+                    && interiorLibraryControllerState.message
+                  )"
+                  class="subCategoryDesignEditor__controllerHint"
+                >
+                  {{
+                    orderDesignEditorActiveSection === 'door'
+                      ? "برای نمایش کنترلرها، ابتدا یک نمونه درب را انتخاب کنید."
+                      : interiorLibraryControllerState.message
+                  }}
+                </div>
               </div>
             </div>
           </div>

@@ -5533,6 +5533,10 @@ option {
   padding: 0;
 }
 
+.orderDesignEditor__frontPreviewWrap.is-front2d-mode {
+  padding: 0;
+}
+
 .orderDesignEditor__frontCanvas--door,
 .orderDesignEditor__frontCanvas--subtractor,
 .orderDesignEditor__frontCanvas--door .frontViewCanvas__canvas,
@@ -5543,6 +5547,11 @@ option {
 .orderDesignEditor__frontCanvas--door .frontViewCanvas__canvas,
 .orderDesignEditor__frontCanvas--subtractor .frontViewCanvas__canvas {
   border: 0;
+}
+
+.orderDesignEditor__frontCanvas {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
 }
 .subCategoryPreview__tree {
   display: grid;
