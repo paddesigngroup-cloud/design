@@ -14,6 +14,8 @@ from designkp_backend.config import get_settings
 
 TABLE_FILE_NAMES = {
     "part_kinds": "part_kinds.csv",
+    "part_services": "part_services.csv",
+    "service_types": "service_types.csv",
     "param_groups": "param_groups.csv",
     "params": "params.csv",
     "base_formulas": "base_formulas.csv",

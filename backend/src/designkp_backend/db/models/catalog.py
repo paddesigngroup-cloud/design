@@ -163,6 +163,24 @@ class PartService(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionM
     admin: Mapped["Admin | None"] = relationship(back_populates="part_services")
 
 
+class PartServiceType(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
+    __tablename__ = "part_service_types"
+
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    service_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    service_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    short_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    admin: Mapped["Admin | None"] = relationship(back_populates="part_service_types")
+
+
 class Template(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
     __tablename__ = "templates"
 

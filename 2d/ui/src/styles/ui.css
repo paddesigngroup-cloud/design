@@ -3149,6 +3149,69 @@ option {
   font-weight: 700;
   color: var(--text);
 }
+.constructionDialog__tableWrap--partServices {
+  min-height: 0;
+}
+.constructionDialog__table--partServices {
+  table-layout: fixed;
+}
+.constructionDialog__table--partServices th,
+.constructionDialog__table--partServices td {
+  padding: 14px 16px;
+  vertical-align: top;
+}
+.constructionDialog__table--partServices tbody tr {
+  background: rgba(255, 255, 255, 0.74);
+}
+.constructionDialog__table--partServices tbody tr:hover {
+  background: rgba(255, 248, 250, 0.96);
+}
+.constructionDialog__col--partServiceType {
+  width: 24%;
+  min-width: 180px !important;
+}
+.constructionDialog__col--partServiceDescription {
+  width: 56%;
+  min-width: 320px !important;
+}
+.constructionDialog__col--partServiceCode {
+  width: 16%;
+  min-width: 150px !important;
+}
+.constructionDialog__col--partServiceActions {
+  width: 120px;
+  min-width: 120px !important;
+}
+.constructionDialog__partServiceTypeCell,
+.constructionDialog__partServiceDescriptionCell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.constructionDialog__partServiceTypeText {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(249, 240, 243, 0.96));
+  border: 1px solid rgba(123, 59, 83, 0.12);
+  color: #4d2031;
+  font-family: Vazirmatn, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 2;
+  text-align: center;
+}
+.constructionDialog__partServiceDescriptionText {
+  line-height: 2;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+  word-break: break-word;
+}
 .constructionDialog__table--preview th,
 .constructionDialog__table--preview td {
   padding: 8px 8px;
@@ -3454,6 +3517,45 @@ option {
   align-items: center;
   justify-content: center;
   gap: 3px;
+}
+.constructionDialog__actionsCell--partService {
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+}
+.constructionDialog__table--partServices .constructionDialog__pill--mono {
+  min-width: 88px;
+  justify-content: center;
+  padding-inline: 14px;
+  font-size: 13px;
+}
+@media (max-width: 960px) {
+  .constructionDialog__table--partServices th,
+  .constructionDialog__table--partServices td {
+    padding: 12px 10px;
+  }
+  .constructionDialog__col--partServiceType {
+    min-width: 150px !important;
+  }
+  .constructionDialog__col--partServiceDescription {
+    min-width: 240px !important;
+  }
+  .constructionDialog__col--partServiceCode {
+    min-width: 120px !important;
+  }
+  .constructionDialog__col--partServiceActions {
+    width: 108px;
+    min-width: 108px !important;
+  }
+  .constructionDialog__partServiceTypeText {
+    font-size: 14px;
+    min-height: 46px;
+  }
+  .constructionDialog__partServiceDescriptionText {
+    font-size: 14px;
+  }
 }
 .constructionDialog__saving {
   font-family: Vazirmatn, sans-serif !important;

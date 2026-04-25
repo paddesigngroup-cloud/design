@@ -854,6 +854,7 @@ const editableInternalPartGroups = ref([]);
 const editableDoorPartGroups = ref([]);
 const editableSubtractorPartGroups = ref([]);
 const editablePartServices = ref([]);
+const editableServiceTypes = ref([]);
 const editableBaseFormulas = ref([]);
 const editablePartFormulas = ref([]);
 const subCategoryDefaultsEditorOpen = ref(false);
@@ -886,6 +887,8 @@ const doorPartGroupEditorOpen = ref(false);
 const doorPartGroupEditorDraft = ref(null);
 const partServiceEditorOpen = ref(false);
 const partServiceEditorDraft = ref(null);
+const serviceTypeEditorOpen = ref(false);
+const serviceTypeEditorDraft = ref(null);
 const doorPartGroupParamGroupsOpen = ref(false);
 const doorPartGroupDefaultsEditorOpen = ref(false);
 const doorPartGroupDefaultsEditorRowId = ref(null);
@@ -939,6 +942,8 @@ const DEFAULT_SUB_CATEGORY_DESIGN_OUTLINE_COLOR = "#7A4A2B";
 const constructionDeletedSubCategoryDesignIds = ref([]);
 const constructionDeletedBaseFormulaIds = ref([]);
 const constructionDeletedPartFormulaIds = ref([]);
+const constructionDeletedPartServiceIds = ref([]);
+const constructionDeletedServiceTypeIds = ref([]);
 const constructionImportInputEl = ref(null);
 const constructionParamsTableWrapEl = ref(null);
 const interiorLibraryAddingGroupKey = ref("");
@@ -3588,6 +3593,7 @@ const constructionTables = [
   { id: "door_part_groups", title: "گروه قطعات درب", status: "active" },
   { id: "hidden_handle_part_groups", title: "گروه دستگیره مخفی", status: "active" },
   { id: "part_services", title: "خدمات قطعات", status: "active" },
+  { id: "service_types", title: "انواع خدمات", status: "active" },
   { id: "base_formulas", title: "فرمول های پایه", status: "active" },
   { id: "part_formulas", title: "فرمول های قطعات", status: "active" },
 ];
@@ -3700,6 +3706,26 @@ const constructionPartServices = computed(() =>
       return String(a.id || "").localeCompare(String(b.id || ""));
     })
 );
+const constructionServiceTypes = computed(() =>
+  editableServiceTypes.value
+    .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
+    .slice()
+    .sort((a, b) => {
+      if (!!a.is_system !== !!b.is_system) return a.is_system ? -1 : 1;
+      const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return String(a.id || "").localeCompare(String(b.id || ""));
+    })
+);
+const constructionServiceTypeOptions = computed(() => {
+  const labels = new Map();
+  for (const item of constructionPartServices.value) {
+    const key = String(item.service_type || "").trim();
+    if (!key || labels.has(key)) continue;
+    labels.set(key, key);
+  }
+  return Array.from(labels.entries()).map(([value, label]) => ({ value, label }));
+});
 const constructionPartKindsById = computed(() =>
   new Map(constructionPartKinds.value.map((item) => [Number(item.part_kind_id) || 0, item]))
 );
@@ -3755,6 +3781,8 @@ const constructionHasPendingChanges = computed(
     constructionDeletedSubCategoryIds.value.length > 0 ||
     constructionDeletedBaseFormulaIds.value.length > 0 ||
     constructionDeletedPartFormulaIds.value.length > 0 ||
+    constructionDeletedPartServiceIds.value.length > 0 ||
+    constructionDeletedServiceTypeIds.value.length > 0 ||
     editableTemplates.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editableCategories.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editablePartKinds.value.some((item) => !!item.__isNew || !!item.__dirty) ||
@@ -3762,7 +3790,9 @@ const constructionHasPendingChanges = computed(
     editableParams.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editableSubCategories.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editableBaseFormulas.value.some((item) => !!item.__isNew || !!item.__dirty) ||
-    editablePartFormulas.value.some((item) => !!item.__isNew || !!item.__dirty)
+    editablePartServices.value.some((item) => !!item.__isNew || !!item.__dirty) ||
+    editablePartFormulas.value.some((item) => !!item.__isNew || !!item.__dirty) ||
+    editableServiceTypes.value.some((item) => !!item.__isNew || !!item.__dirty)
 );
 const constructionImportPreviewCount = computed(() => constructionImportPreviewRows.value.length);
 const constructionParamGroups = computed(() =>
@@ -8197,6 +8227,7 @@ function openConstructionWizard() {
   loadConstructionDoorPartGroups();
   loadConstructionSubtractorPartGroups();
   loadConstructionPartServices();
+  loadConstructionServiceTypes();
   loadConstructionBaseFormulas();
   loadConstructionPartFormulas();
   constructionDeletedTemplateIds.value = [];
@@ -8207,6 +8238,8 @@ function openConstructionWizard() {
   constructionDeletedSubCategoryIds.value = [];
   constructionDeletedBaseFormulaIds.value = [];
   constructionDeletedPartFormulaIds.value = [];
+  constructionDeletedPartServiceIds.value = [];
+  constructionDeletedServiceTypeIds.value = [];
 }
 
 function addConstructionPartKind() {
@@ -8238,6 +8271,7 @@ async function closeConstructionWizard() {
     await loadConstructionDoorPartGroups();
     await loadConstructionSubtractorPartGroups();
     await loadConstructionPartServices();
+    await loadConstructionServiceTypes();
     await loadConstructionBaseFormulas();
     await loadConstructionPartFormulas();
   }
@@ -8607,6 +8641,17 @@ function normalizePartServicePayload(item) {
   };
 }
 
+function normalizeServiceTypePayload(item) {
+  return {
+    admin_id: item.admin_id,
+    service_type: String(item.service_type || "").trim(),
+    service_title: String(item.service_title || "").trim(),
+    short_code: String(item.short_code || "").trim(),
+    sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
+    is_system: !!item.is_system,
+  };
+}
+
 function normalizeInteriorInstanceRecord(item) {
   if (!item || !item.id) return null;
   return {
@@ -8688,6 +8733,17 @@ function normalizeEditablePartServiceRecord(item) {
     service_type: String(item.service_type || "").trim(),
     service_description: String(item.service_description || "").trim(),
     service_code: String(item.service_code || "").trim(),
+    sort_order: Number(item.sort_order) || 0,
+    is_system: !!item.is_system,
+  });
+}
+
+function normalizeEditableServiceTypeRecord(item) {
+  return withConstructionDraftState({
+    ...item,
+    service_type: String(item.service_type || "").trim(),
+    service_title: String(item.service_title || "").trim(),
+    short_code: String(item.short_code || "").trim(),
     sort_order: Number(item.sort_order) || 0,
     is_system: !!item.is_system,
   });
@@ -9644,6 +9700,20 @@ function buildNewPartServiceDraft() {
   };
 }
 
+function buildNewServiceTypeDraft() {
+  const nextSort = editableServiceTypes.value.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), 0) + 1;
+  const fallbackType = constructionServiceTypeOptions.value[0]?.value || "";
+  return {
+    id: null,
+    admin_id: null,
+    service_type: fallbackType,
+    service_title: "",
+    short_code: `service_type_${nextSort}`,
+    sort_order: nextSort,
+    is_system: true,
+  };
+}
+
 function resetSubCategoryDesignEditorState() {
   closeInteriorLibrary();
   closeDoorLibrary();
@@ -9695,6 +9765,11 @@ function closeDoorPartGroupEditor() {
 function closePartServiceEditor() {
   partServiceEditorOpen.value = false;
   partServiceEditorDraft.value = null;
+}
+
+function closeServiceTypeEditor() {
+  serviceTypeEditorOpen.value = false;
+  serviceTypeEditorDraft.value = null;
 }
 
 function hasSubtractorPartGroupDefaultsChanges() {
@@ -12257,6 +12332,21 @@ function openPartServiceEditor(item = null) {
   partServiceEditorOpen.value = true;
 }
 
+function openServiceTypeEditor(item = null) {
+  serviceTypeEditorDraft.value = item
+    ? {
+        id: item.id,
+        admin_id: item.admin_id,
+        service_type: String(item.service_type || "").trim(),
+        service_title: String(item.service_title || "").trim(),
+        short_code: String(item.short_code || "").trim(),
+        sort_order: Number(item.sort_order) || 0,
+        is_system: !!item.is_system,
+      }
+    : buildNewServiceTypeDraft();
+  serviceTypeEditorOpen.value = true;
+}
+
 function togglePartFormulaInDoorGroup(partFormulaId) {
   if (!doorPartGroupEditorDraft.value) return;
   const formulaId = Number(partFormulaId) || 0;
@@ -14572,8 +14662,23 @@ async function loadConstructionPartServices() {
       abortChannel: `construction:part-services:${currentAdminId.value}`,
     });
     editablePartServices.value = payload.map((item) => normalizeEditablePartServiceRecord(item));
+    constructionDeletedPartServiceIds.value = [];
   } catch (_) {
     showAlert("خواندن جدول خدمات قطعات از دیتابیس انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function loadConstructionServiceTypes() {
+  try {
+    const url = `/api/service-types?admin_id=${encodeURIComponent(currentAdminId.value)}`;
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:service-types:${currentAdminId.value}`,
+    });
+    editableServiceTypes.value = payload.map((item) => normalizeEditableServiceTypeRecord(item));
+    constructionDeletedServiceTypeIds.value = [];
+  } catch (_) {
+    showAlert("خواندن جدول انواع خدمات از دیتابیس انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -14921,11 +15026,130 @@ async function savePartServiceEditor() {
       }
     );
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره خدمات قطعات انجام نشد."));
+    invalidateApiCache("/api/part-services?");
     await loadConstructionPartServices();
     closePartServiceEditor();
     showAlert("خدمات قطعات با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
   } catch (error) {
     showAlert(error?.message || "ذخیره خدمات قطعات انجام نشد.", { title: "خطا" });
+  }
+}
+
+function validateConstructionServiceTypes() {
+  for (const item of editableServiceTypes.value) {
+    const serviceType = String(item.service_type || "").trim();
+    const serviceTitle = String(item.service_title || "").trim();
+    const shortCode = String(item.short_code || "").trim();
+    if (!serviceType) {
+      showAlert("نوع خدمت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!serviceTitle) {
+      showAlert("عنوان خدمات نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!shortCode) {
+      showAlert("کد اختصاری نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+  }
+  return true;
+}
+
+function validateConstructionPartServices() {
+  for (const item of editablePartServices.value) {
+    const serviceType = String(item.service_type || "").trim();
+    const serviceDescription = String(item.service_description || "").trim();
+    const serviceCode = String(item.service_code || "").trim();
+    if (!serviceType) {
+      showAlert("نوع خدمات نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!serviceDescription) {
+      showAlert("شرح خدمات نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!serviceCode) {
+      showAlert("کد خدمات نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+  }
+  const seen = new Set();
+  for (const item of editablePartServices.value) {
+    const key = `${String(item.service_code || "").trim().toLowerCase()}::${String(item.admin_id || "")}`;
+    if (seen.has(key)) {
+      showAlert("کد خدمات در همین دامنه مالک تکراری است.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    seen.add(key);
+  }
+  return true;
+}
+
+async function saveServiceTypeEditor() {
+  const draft = serviceTypeEditorDraft.value;
+  if (!draft) return;
+  const serviceType = String(draft.service_type || "").trim();
+  const serviceTitle = String(draft.service_title || "").trim();
+  const shortCode = String(draft.short_code || "").trim();
+  if (!serviceType) {
+    showAlert("نوع خدمت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!serviceTitle) {
+    showAlert("عنوان خدمات نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!shortCode) {
+    showAlert("کد اختصاری نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const duplicateCode = editableServiceTypes.value.some((item) => (
+    String(item.service_type || "").trim().toLowerCase() === serviceType.toLowerCase()
+    && String(item.short_code || "").trim().toLowerCase() === shortCode.toLowerCase()
+    && String(item.admin_id || "") === String(draft.admin_id || "")
+    && String(item.id || "") !== String(draft.id || "")
+  ));
+  if (duplicateCode) {
+    showAlert("کد اختصاری در همین نوع خدمت و همین دامنه مالک تکراری است.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const payload = normalizeServiceTypePayload(draft);
+  try {
+    const res = await fetch(
+      draft.id ? `/api/service-types/${encodeURIComponent(String(draft.id))}` : "/api/service-types",
+      {
+        method: draft.id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره انواع خدمات انجام نشد."));
+    invalidateApiCache("/api/service-types?");
+    await loadConstructionServiceTypes();
+    closeServiceTypeEditor();
+    showAlert("انواع خدمات با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره انواع خدمات انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function deleteConstructionServiceType(id) {
+  const item = editableServiceTypes.value.find((row) => String(row.id) === String(id));
+  if (!item) return;
+  const ok = await showConfirm(`نوع خدمت «${item.service_title || "بدون عنوان"}» حذف شود؟`, {
+    title: "حذف انواع خدمات",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  try {
+    const res = await fetch(`/api/service-types/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف انواع خدمات انجام نشد."));
+    invalidateApiCache("/api/service-types?");
+    await loadConstructionServiceTypes();
+  } catch (error) {
+    showAlert(error?.message || "حذف انواع خدمات انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -14941,6 +15165,7 @@ async function deleteConstructionPartService(id) {
   try {
     const res = await fetch(`/api/part-services/${encodeURIComponent(String(id))}`, { method: "DELETE" });
     if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف خدمات قطعات انجام نشد."));
+    invalidateApiCache("/api/part-services?");
     await loadConstructionPartServices();
   } catch (error) {
     showAlert(error?.message || "حذف خدمات قطعات انجام نشد.", { title: "خطا" });
@@ -16703,6 +16928,12 @@ function validateConstructionPartKinds() {
 }
 
 function getConstructionCsvHeaders() {
+  if (constructionStep.value === "part_services") {
+    return ["service_type", "service_description", "service_code", "admin_mode"];
+  }
+  if (constructionStep.value === "service_types") {
+    return ["service_type", "service_title", "short_code", "admin_mode"];
+  }
   if (constructionStep.value === "templates") {
     return ["temp_id", "temp_title", "admin_mode"];
   }
@@ -16745,6 +16976,24 @@ function getConstructionCsvHeaders() {
 }
 
 function getConstructionCsvRows(items = null) {
+  if (constructionStep.value === "part_services") {
+    const rows = items || constructionPartServices.value;
+    return rows.map((item) => [
+      String(item.service_type || "").trim(),
+      String(item.service_description || "").trim(),
+      String(item.service_code || "").trim(),
+      item.admin_id === null ? "system" : "admin",
+    ]);
+  }
+  if (constructionStep.value === "service_types") {
+    const rows = items || constructionServiceTypes.value;
+    return rows.map((item) => [
+      String(item.service_type || "").trim(),
+      String(item.service_title || "").trim(),
+      String(item.short_code || "").trim(),
+      item.admin_id === null ? "system" : "admin",
+    ]);
+  }
   if (constructionStep.value === "templates") {
     const rows = items || constructionTemplates.value;
     return rows.map((item) => [
@@ -16845,6 +17094,8 @@ function getConstructionCsvRows(items = null) {
 }
 
 function getConstructionImportFileName() {
+  if (constructionStep.value === "part_services") return "part_services_excel_template.csv";
+  if (constructionStep.value === "service_types") return "service_types_excel_template.csv";
   if (constructionStep.value === "templates") return "templates_excel_template.csv";
   if (constructionStep.value === "categories") return "categories_excel_template.csv";
   if (constructionStep.value === "sub_categories") return "sub_categories_excel_template.csv";
@@ -16856,6 +17107,8 @@ function getConstructionImportFileName() {
 }
 
 function getConstructionImportTitle() {
+  if (constructionStep.value === "part_services") return "جدول خدمات قطعات";
+  if (constructionStep.value === "service_types") return "جدول انواع خدمات";
   if (constructionStep.value === "templates") return "جدول تمپلیت‌ها";
   if (constructionStep.value === "categories") return "جدول دسته‌بندی‌ها";
   if (constructionStep.value === "sub_categories") return "جدول ساب‌کت‌ها";
@@ -16866,6 +17119,12 @@ function getConstructionImportTitle() {
 }
 
 function getConstructionImportErrorText() {
+  if (constructionStep.value === "part_services") {
+    return "خواندن فایل اکسل خدمات قطعات انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
+  }
+  if (constructionStep.value === "service_types") {
+    return "خواندن فایل اکسل انواع خدمات انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
+  }
   if (constructionStep.value === "templates") {
     return "خواندن فایل اکسل تمپلیت‌ها انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
   }
@@ -16959,6 +17218,10 @@ function clearConstructionImportPreview() {
 async function downloadConstructionExcelTemplate() {
   const path = constructionStep.value === "templates"
     ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/templates/export`
+    : constructionStep.value === "part_services"
+    ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/part-services/export`
+    : constructionStep.value === "service_types"
+    ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/service-types/export`
     : constructionStep.value === "categories"
     ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/categories/export`
     : constructionStep.value === "sub_categories"
@@ -17005,7 +17268,29 @@ async function onConstructionImportFileChange(event) {
       throw new Error("invalid-headers");
     }
     let previewRows = [];
-    if (constructionStep.value === "templates") {
+    if (constructionStep.value === "part_services") {
+      previewRows = rows.slice(1).map((row, index) => {
+        const adminMode = String(row[3] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        return {
+          lineNo: index + 2,
+          service_type: String(row[0] || "").trim(),
+          service_description: String(row[1] || "").trim(),
+          service_code: String(row[2] || "").trim(),
+          admin_mode: adminMode,
+        };
+      });
+    } else if (constructionStep.value === "service_types") {
+      previewRows = rows.slice(1).map((row, index) => {
+        const adminMode = String(row[3] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        return {
+          lineNo: index + 2,
+          service_type: String(row[0] || "").trim(),
+          service_title: String(row[1] || "").trim(),
+          short_code: String(row[2] || "").trim(),
+          admin_mode: adminMode,
+        };
+      });
+    } else if (constructionStep.value === "templates") {
       previewRows = rows.slice(1).map((row, index) => {
         const tempId = Number(row[0]);
         const tempTitle = String(row[1] || "").trim();
@@ -17178,7 +17463,21 @@ async function onConstructionImportFileChange(event) {
       });
     }
     if (!previewRows.length) throw new Error("empty-file");
-    const invalidRow = constructionStep.value === "templates"
+    const invalidRow = constructionStep.value === "part_services"
+      ? previewRows.find(
+          (row) =>
+            !row.service_type ||
+            !row.service_description ||
+            !row.service_code
+        )
+      : constructionStep.value === "service_types"
+      ? previewRows.find(
+          (row) =>
+            !row.service_type ||
+            !row.service_title ||
+            !row.short_code
+        )
+      : constructionStep.value === "templates"
       ? previewRows.find(
           (row) =>
             !Number.isInteger(row.temp_id) ||
@@ -18029,6 +18328,120 @@ async function saveConstructionPartKinds(options = {}) {
   }
 }
 
+async function saveConstructionServiceTypes(options = {}) {
+  if (!(constructionDeletedServiceTypeIds.value.length > 0 || editableServiceTypes.value.some((item) => !!item.__isNew || !!item.__dirty))) {
+    showAlert("تغییری برای ذخیره وجود ندارد.", { title: "ذخیره تغییرات" });
+    return;
+  }
+  if (!validateConstructionServiceTypes()) return;
+  if (!options.skipConfirm) {
+    const ok = await showConfirm("تغییرات جدول انواع خدمات در دیتابیس ذخیره شود؟", {
+      title: "ذخیره تغییرات",
+      confirmText: "ذخیره",
+      cancelText: "انصراف",
+    });
+    if (!ok) return;
+  }
+
+  const draftIds = editableServiceTypes.value.filter((item) => item.__isNew).map((item) => String(item.id));
+  const dirtyIds = editableServiceTypes.value.filter((item) => !item.__isNew && item.__dirty).map((item) => String(item.id));
+  constructionSavingIds.value = [...new Set([...draftIds, ...dirtyIds])];
+  try {
+    for (const id of constructionDeletedServiceTypeIds.value) {
+      const res = await fetch(`/api/service-types/${encodeURIComponent(String(id))}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "delete-failed"));
+    }
+
+    for (const item of editableServiceTypes.value.filter((row) => row.__isNew)) {
+      const res = await fetch("/api/service-types", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizeServiceTypePayload(item)),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "create-failed"));
+    }
+
+    for (const item of editableServiceTypes.value.filter((row) => !row.__isNew && row.__dirty)) {
+      const res = await fetch(`/api/service-types/${encodeURIComponent(String(item.id))}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizeServiceTypePayload(item)),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "save-failed"));
+    }
+
+    invalidateApiCache("/api/service-types?");
+    await loadConstructionServiceTypes();
+    showAlert(options.successMessage || "تغییرات جدول انواع خدمات با موفقیت ذخیره شد.", {
+      title: options.successTitle || "ذخیره تغییرات",
+    });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره تغییرات جدول انواع خدمات در دیتابیس انجام نشد.", { title: "خطا" });
+    await loadConstructionServiceTypes();
+  } finally {
+    constructionSavingIds.value = [];
+  }
+}
+
+async function saveConstructionPartServices(options = {}) {
+  if (!(constructionDeletedPartServiceIds.value.length > 0 || editablePartServices.value.some((item) => !!item.__isNew || !!item.__dirty))) {
+    showAlert("تغییری برای ذخیره وجود ندارد.", { title: "ذخیره تغییرات" });
+    return;
+  }
+  if (!validateConstructionPartServices()) return;
+  if (!options.skipConfirm) {
+    const ok = await showConfirm("تغییرات جدول خدمات قطعات در دیتابیس ذخیره شود؟", {
+      title: "ذخیره تغییرات",
+      confirmText: "ذخیره",
+      cancelText: "انصراف",
+    });
+    if (!ok) return;
+  }
+
+  const draftIds = editablePartServices.value.filter((item) => item.__isNew).map((item) => String(item.id));
+  const dirtyIds = editablePartServices.value.filter((item) => !item.__isNew && item.__dirty).map((item) => String(item.id));
+  constructionSavingIds.value = [...new Set([...draftIds, ...dirtyIds])];
+  try {
+    for (const id of constructionDeletedPartServiceIds.value) {
+      const res = await fetch(`/api/part-services/${encodeURIComponent(String(id))}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "delete-failed"));
+    }
+
+    for (const item of editablePartServices.value.filter((row) => row.__isNew)) {
+      const res = await fetch("/api/part-services", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizePartServicePayload(item)),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "create-failed"));
+    }
+
+    for (const item of editablePartServices.value.filter((row) => !row.__isNew && row.__dirty)) {
+      const res = await fetch(`/api/part-services/${encodeURIComponent(String(item.id))}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizePartServicePayload(item)),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "save-failed"));
+    }
+
+    invalidateApiCache("/api/part-services?");
+    await loadConstructionPartServices();
+    showAlert(options.successMessage || "تغییرات جدول خدمات قطعات با موفقیت ذخیره شد.", {
+      title: options.successTitle || "ذخیره تغییرات",
+    });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره تغییرات جدول خدمات قطعات در دیتابیس انجام نشد.", { title: "خطا" });
+    await loadConstructionPartServices();
+  } finally {
+    constructionSavingIds.value = [];
+  }
+}
+
 async function saveConstructionTemplates(options = {}) {
   if (!(constructionDeletedTemplateIds.value.length > 0 || editableTemplates.value.some((item) => !!item.__isNew || !!item.__dirty))) {
     showAlert("تغییری برای ذخیره وجود ندارد.", { title: "ذخیره تغییرات" });
@@ -18419,6 +18832,30 @@ async function applyConstructionImportPreview() {
       skipConfirm: true,
       successTitle: "آپلود فایل",
       successMessage: "فایل اکسل پارامترها با موفقیت روی جدول اعمال شد.",
+    });
+    return;
+  }
+  if (constructionImportPreviewKind.value === "service_types") {
+    const { nextRows, deletedIds } = buildImportedConstructionServiceTypeDrafts(constructionImportPreviewRows.value);
+    editableServiceTypes.value = nextRows;
+    constructionDeletedServiceTypeIds.value = deletedIds;
+    clearConstructionImportPreview();
+    await saveConstructionServiceTypes({
+      skipConfirm: true,
+      successTitle: "آپلود فایل",
+      successMessage: "فایل اکسل انواع خدمات با موفقیت روی جدول اعمال شد.",
+    });
+    return;
+  }
+  if (constructionImportPreviewKind.value === "part_services") {
+    const { nextRows, deletedIds } = buildImportedConstructionPartServiceDrafts(constructionImportPreviewRows.value);
+    editablePartServices.value = nextRows;
+    constructionDeletedPartServiceIds.value = deletedIds;
+    clearConstructionImportPreview();
+    await saveConstructionPartServices({
+      skipConfirm: true,
+      successTitle: "آپلود فایل",
+      successMessage: "فایل اکسل خدمات قطعات با موفقیت روی جدول اعمال شد.",
     });
     return;
   }
@@ -20053,6 +20490,98 @@ async function loadOrders() {
   } finally {
     ordersLoading.value = false;
   }
+}
+
+function buildImportedConstructionServiceTypeDrafts(rows) {
+  const existingByScopeKey = new Map(
+    editableServiceTypes.value.map((item) => [
+      `${String(item.service_type || "").trim().toLowerCase()}::${String(item.short_code || "").trim().toLowerCase()}::${String(item.admin_id || "")}`,
+      item,
+    ])
+  );
+  const nextRows = rows.map((row, index) => {
+    const adminId = row.admin_mode === "system" ? null : currentAdminId.value;
+    const key = `${String(row.service_type || "").trim().toLowerCase()}::${String(row.short_code || "").trim().toLowerCase()}::${String(adminId || "")}`;
+    const existing = existingByScopeKey.get(key);
+    const nextPayload = {
+      admin_id: adminId,
+      service_type: String(row.service_type || "").trim(),
+      service_title: String(row.service_title || "").trim(),
+      short_code: String(row.short_code || "").trim(),
+      sort_order: index + 1,
+      is_system: adminId === null,
+    };
+    if (!existing) {
+      return buildPartKindDraft(nextPayload, {
+        id: `draft-service-type-${Date.now()}-${index}`,
+        __isNew: true,
+        __dirty: false,
+      });
+    }
+    const changed =
+      existing.admin_id !== nextPayload.admin_id ||
+      String(existing.service_type || "").trim() !== nextPayload.service_type ||
+      String(existing.service_title || "").trim() !== nextPayload.service_title ||
+      String(existing.short_code || "").trim() !== nextPayload.short_code ||
+      Number(existing.sort_order) !== nextPayload.sort_order ||
+      !!existing.is_system !== nextPayload.is_system;
+    return buildPartKindDraft(existing, {
+      ...nextPayload,
+      __isNew: false,
+      __dirty: changed,
+    });
+  });
+  const importedExistingIds = new Set(nextRows.filter((item) => !item.__isNew).map((item) => String(item.id)));
+  const deletedIds = editableServiceTypes.value
+    .filter((item) => !item.__isNew && !importedExistingIds.has(String(item.id)))
+    .map((item) => String(item.id));
+  return { nextRows, deletedIds };
+}
+
+function buildImportedConstructionPartServiceDrafts(rows) {
+  const existingByScopeKey = new Map(
+    editablePartServices.value.map((item) => [
+      `${String(item.service_code || "").trim().toLowerCase()}::${String(item.admin_id || "")}`,
+      item,
+    ])
+  );
+  const nextRows = rows.map((row, index) => {
+    const adminId = row.admin_mode === "system" ? null : currentAdminId.value;
+    const key = `${String(row.service_code || "").trim().toLowerCase()}::${String(adminId || "")}`;
+    const existing = existingByScopeKey.get(key);
+    const nextPayload = {
+      admin_id: adminId,
+      service_type: String(row.service_type || "").trim(),
+      service_description: String(row.service_description || "").trim(),
+      service_code: String(row.service_code || "").trim(),
+      sort_order: index + 1,
+      is_system: adminId === null,
+    };
+    if (!existing) {
+      return buildPartKindDraft(nextPayload, {
+        id: `draft-part-service-${Date.now()}-${index}`,
+        __isNew: true,
+        __dirty: false,
+      });
+    }
+    const changed =
+      existing.admin_id !== nextPayload.admin_id ||
+      String(existing.service_type || "").trim() !== nextPayload.service_type ||
+      String(existing.service_description || "").trim() !== nextPayload.service_description ||
+      String(existing.service_code || "").trim() !== nextPayload.service_code ||
+      Number(existing.sort_order) !== nextPayload.sort_order ||
+      !!existing.is_system !== nextPayload.is_system;
+    return buildPartKindDraft(existing, {
+      ...nextPayload,
+      __isNew: false,
+      __dirty: changed,
+    });
+  });
+  const importedExistingIds = new Set(nextRows.filter((item) => !item.__isNew).map((item) => String(item.id)));
+  const deletedIds = editablePartServices.value
+    .filter((item) => !item.__isNew && !importedExistingIds.has(String(item.id)))
+    .map((item) => String(item.id));
+  return { nextRows, deletedIds };
 }
 
 function openOrderEntry(tab = null) {
@@ -23110,7 +23639,7 @@ onBeforeUnmount(() => {
             :class="{ 'is-disabled': !constructionHasPendingChanges || constructionSavingIds.length > 0 }"
             :disabled="!constructionHasPendingChanges || constructionSavingIds.length > 0"
             title="ذخیره تغییرات"
-            @click="constructionStep === 'templates' ? saveConstructionTemplates() : constructionStep === 'categories' ? saveConstructionCategories() : constructionStep === 'sub_categories' ? saveConstructionSubCategories() : constructionStep === 'part_kinds' ? saveConstructionPartKinds() : constructionStep === 'param_groups' ? saveConstructionParamGroups() : constructionStep === 'params' ? saveConstructionParams() : constructionStep === 'base_formulas' ? saveConstructionBaseFormulas() : constructionStep === 'part_formulas' ? saveConstructionPartFormulas() : null"
+            @click="constructionStep === 'templates' ? saveConstructionTemplates() : constructionStep === 'categories' ? saveConstructionCategories() : constructionStep === 'sub_categories' ? saveConstructionSubCategories() : constructionStep === 'part_kinds' ? saveConstructionPartKinds() : constructionStep === 'param_groups' ? saveConstructionParamGroups() : constructionStep === 'params' ? saveConstructionParams() : constructionStep === 'part_services' ? saveConstructionPartServices() : constructionStep === 'service_types' ? saveConstructionServiceTypes() : constructionStep === 'base_formulas' ? saveConstructionBaseFormulas() : constructionStep === 'part_formulas' ? saveConstructionPartFormulas() : null"
           >
             <img src="/icons/construction-save.svg" alt="ذخیره" />
           </button>
@@ -23118,7 +23647,7 @@ onBeforeUnmount(() => {
             type="button"
             class="constructionDialog__headIconBtn"
             title="دانلود اکسل"
-            :disabled="!['templates', 'categories', 'sub_categories', 'part_kinds', 'param_groups', 'params', 'base_formulas', 'part_formulas'].includes(constructionStep)"
+            :disabled="!['templates', 'categories', 'sub_categories', 'part_kinds', 'param_groups', 'params', 'part_services', 'service_types', 'base_formulas', 'part_formulas'].includes(constructionStep)"
             @click="downloadConstructionExcelTemplate"
           >
             <img src="/icons/construction-download.svg" alt="دانلود" />
@@ -23127,7 +23656,7 @@ onBeforeUnmount(() => {
             type="button"
             class="constructionDialog__headIconBtn"
             title="آپلود اکسل"
-            :disabled="!['templates', 'categories', 'sub_categories', 'part_kinds', 'param_groups', 'params', 'base_formulas', 'part_formulas'].includes(constructionStep)"
+            :disabled="!['templates', 'categories', 'sub_categories', 'part_kinds', 'param_groups', 'params', 'part_services', 'service_types', 'base_formulas', 'part_formulas'].includes(constructionStep)"
             @click="triggerConstructionImport"
           >
             <img src="/icons/construction-upload.svg" alt="آپلود" />
@@ -24465,6 +24994,13 @@ onBeforeUnmount(() => {
           </template>
 
           <template v-else-if="constructionStep === 'part_services'">
+            <input
+              ref="constructionImportInputEl"
+              class="constructionDialog__fileInput"
+              type="file"
+              accept=".csv"
+              @change="onConstructionImportFileChange"
+            />
             <div class="constructionDialog__toolbar">
               <div class="constructionDialog__toolbarMain">
                 <div class="constructionDialog__sectionTitle">جدول خدمات قطعات</div>
@@ -24477,6 +25013,47 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
+            <div v-if="constructionImportPreviewCount && constructionImportPreviewKind === 'part_services'" class="constructionDialog__importPreview">
+              <div class="constructionDialog__importHead">
+                <div>
+                  <div class="constructionDialog__sectionTitle">پیش‌نمایش فایل اکسل</div>
+                  <div class="constructionDialog__sectionHint">
+                    فایل {{ constructionImportFileName }} خوانده شد. قبل از بروزرسانی، جدول واردشده را بررسی و سپس تایید کنید.
+                  </div>
+                </div>
+                <div class="constructionDialog__toolbarActions">
+                  <button type="button" class="constructionDialog__textBtn" @click="clearConstructionImportPreview">لغو</button>
+                  <button type="button" class="constructionDialog__textBtn is-primary" @click="applyConstructionImportPreview">
+                    تایید بروزرسانی
+                  </button>
+                </div>
+              </div>
+              <div class="constructionDialog__previewMeta">
+                <span>{{ toPersianDigits(constructionImportPreviewCount) }} ردیف</span>
+                <span>فایل CSV قابل ویرایش در Excel</span>
+              </div>
+              <div class="constructionDialog__previewTableWrap">
+                <table class="constructionDialog__table constructionDialog__table--preview">
+                  <thead>
+                    <tr>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceType">نوع خدمات</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceDescription">شرح خدمات</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceCode">کد خدمات</th>
+                      <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in constructionImportPreviewRows" :key="`${row.lineNo}-${row.service_code}`">
+                      <td class="constructionDialog__col constructionDialog__col--partServiceType">{{ row.service_type }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceDescription">{{ row.service_description }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode">{{ row.service_code }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "سیستم" : "ادمین" }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             <div class="constructionDialog__summary">
               <div class="constructionDialog__summaryItem">
                 <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionPartServices.length) }}</span>
@@ -24484,37 +25061,157 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="constructionDialog__tableWrap">
-              <table class="constructionDialog__table">
+            <div class="constructionDialog__tableWrap constructionDialog__tableWrap--partServices">
+              <table class="constructionDialog__table constructionDialog__table--partServices">
                 <thead>
                   <tr>
-                    <th class="constructionDialog__col constructionDialog__col--title">نوع خدمات</th>
-                    <th class="constructionDialog__col constructionDialog__col--title">شرح خدمات</th>
-                    <th class="constructionDialog__col constructionDialog__col--code">کد خدمات</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceType">نوع خدمات</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceDescription">شرح خدمات</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceCode">کد خدمات</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceActions">عملیات</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="item in constructionPartServices" :key="item.id">
-                    <td class="constructionDialog__col constructionDialog__col--title">{{ item.service_type }}</td>
-                    <td class="constructionDialog__col constructionDialog__col--title">
-                      <div>{{ item.service_description }}</div>
-                      <div class="constructionDialog__actionsCell">
+                    <td class="constructionDialog__col constructionDialog__col--partServiceType">
+                      <div class="constructionDialog__partServiceTypeCell">
+                        <strong class="constructionDialog__partServiceTypeText">{{ item.service_type }}</strong>
+                      </div>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription">
+                      <div class="constructionDialog__partServiceDescriptionCell">
+                        <div class="constructionDialog__partServiceDescriptionText">{{ item.service_description }}</div>
+                      </div>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceCode">
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.service_code }}</span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceActions">
+                      <div class="constructionDialog__actionsCell constructionDialog__actionsCell--partService">
                         <button type="button" class="constructionDialog__textBtn" @click="openPartServiceEditor(item)">ویرایش</button>
                         <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionPartService(item.id)">×</button>
                       </div>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--code">
-                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.service_code }}</span>
-                    </td>
                   </tr>
                   <tr v-if="!constructionPartServices.length">
-                    <td class="constructionDialog__col constructionDialog__col--title" colspan="3">هنوز خدمتی برای قطعات ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="4">هنوز خدمتی برای قطعات ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
             </div>
             <div class="constructionDialog__sheetHint">
               افزودن، ویرایش و حذف خدمات قطعات مستقیم روی دیتابیس اعمال می‌شود.
+            </div>
+          </template>
+
+          <template v-else-if="constructionStep === 'service_types'">
+            <input
+              ref="constructionImportInputEl"
+              class="constructionDialog__fileInput"
+              type="file"
+              accept=".csv"
+              @change="onConstructionImportFileChange"
+            />
+            <div class="constructionDialog__toolbar">
+              <div class="constructionDialog__toolbarMain">
+                <div class="constructionDialog__sectionTitle">جدول انواع خدمات</div>
+                <div class="constructionDialog__sectionHint">
+                  در این جدول برای هر نوع خدمتِ تعریف‌شده در خدمات قطعات، عنوان خدمات و کد اختصاری ثبت می‌کنید.
+                </div>
+              </div>
+              <div class="constructionDialog__toolbarActions">
+                <button type="button" class="constructionDialog__textBtn" @click="openServiceTypeEditor()">افزودن نوع خدمات</button>
+              </div>
+            </div>
+
+            <div v-if="constructionImportPreviewCount && constructionImportPreviewKind === 'service_types'" class="constructionDialog__importPreview">
+              <div class="constructionDialog__importHead">
+                <div>
+                  <div class="constructionDialog__sectionTitle">پیش‌نمایش فایل اکسل</div>
+                  <div class="constructionDialog__sectionHint">
+                    فایل {{ constructionImportFileName }} خوانده شد. قبل از بروزرسانی، جدول واردشده را بررسی و سپس تایید کنید.
+                  </div>
+                </div>
+                <div class="constructionDialog__toolbarActions">
+                  <button type="button" class="constructionDialog__textBtn" @click="clearConstructionImportPreview">لغو</button>
+                  <button type="button" class="constructionDialog__textBtn is-primary" @click="applyConstructionImportPreview">
+                    تایید بروزرسانی
+                  </button>
+                </div>
+              </div>
+              <div class="constructionDialog__previewMeta">
+                <span>{{ toPersianDigits(constructionImportPreviewCount) }} ردیف</span>
+                <span>فایل CSV قابل ویرایش در Excel</span>
+              </div>
+              <div class="constructionDialog__previewTableWrap">
+                <table class="constructionDialog__table constructionDialog__table--preview">
+                  <thead>
+                    <tr>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceType">نوع خدمت</th>
+                      <th class="constructionDialog__col constructionDialog__col--title">عنوان خدمات</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceCode">کد اختصاری</th>
+                      <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in constructionImportPreviewRows" :key="`${row.lineNo}-${row.service_type}-${row.short_code}`">
+                      <td class="constructionDialog__col constructionDialog__col--partServiceType">{{ row.service_type }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--title">{{ row.service_title }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode">{{ row.short_code }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "سیستم" : "ادمین" }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionServiceTypes.length) }}</span>
+                <span class="constructionDialog__summaryLabel">کل انواع خدمات</span>
+              </div>
+            </div>
+
+            <div class="constructionDialog__tableWrap constructionDialog__tableWrap--partServices">
+              <table class="constructionDialog__table constructionDialog__table--partServices">
+                <thead>
+                  <tr>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceType">نوع خدمت</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceDescription">عنوان خدمات</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceCode">کد اختصاری</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceActions">عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in constructionServiceTypes" :key="item.id">
+                    <td class="constructionDialog__col constructionDialog__col--partServiceType">
+                      <div class="constructionDialog__partServiceTypeCell">
+                        <strong class="constructionDialog__partServiceTypeText">{{ item.service_type }}</strong>
+                      </div>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription">
+                      <div class="constructionDialog__partServiceDescriptionCell">
+                        <div class="constructionDialog__partServiceDescriptionText">{{ item.service_title }}</div>
+                      </div>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceCode">
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.short_code }}</span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceActions">
+                      <div class="constructionDialog__actionsCell constructionDialog__actionsCell--partService">
+                        <button type="button" class="constructionDialog__textBtn" @click="openServiceTypeEditor(item)">ویرایش</button>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionServiceType(item.id)">×</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="!constructionServiceTypes.length">
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="4">هنوز نوع خدمتی ثبت نشده است.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="constructionDialog__sheetHint">
+              دانلود و آپلود CSV این جدول از همان جریان عمومی جداول ساخت استفاده می‌کند.
             </div>
           </template>
 
@@ -25617,6 +26314,57 @@ onBeforeUnmount(() => {
       <div class="appDialog__actions">
         <button type="button" class="constructionDialog__textBtn" @click="closePartServiceEditor">انصراف</button>
         <button type="button" class="constructionDialog__textBtn is-primary" @click="savePartServiceEditor">ذخیره</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="serviceTypeEditorOpen && serviceTypeEditorDraft" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closeServiceTypeEditor"></div>
+    <div class="appDialog__card appDialog__card--builder" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش انواع خدمات</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeServiceTypeEditor">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        نوع خدمت را از خدمات قطعات انتخاب کنید و سپس عنوان خدمات و کد اختصاری را ثبت کنید.
+      </div>
+      <div class="subCategoryDesignEditor">
+        <div class="subCategoryDesignEditor__meta">
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>نوع خدمت</span>
+            <select v-model="serviceTypeEditorDraft.service_type" class="constructionDialog__input">
+              <option value="" disabled>انتخاب نوع خدمت</option>
+              <option v-for="option in constructionServiceTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>عنوان خدمات</span>
+            <input v-model="serviceTypeEditorDraft.service_title" class="constructionDialog__input" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>کد اختصاری</span>
+            <input v-model="serviceTypeEditorDraft.short_code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>ترتیب</span>
+            <input v-model.number="serviceTypeEditorDraft.sort_order" class="constructionDialog__input" type="number" min="0" step="1" />
+          </label>
+          <div class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>دامنه</span>
+            <button
+              type="button"
+              class="constructionDialog__scopeBtn"
+              :class="serviceTypeEditorDraft.admin_id === null ? 'is-system' : 'is-admin'"
+              @click="serviceTypeEditorDraft.admin_id = serviceTypeEditorDraft.admin_id === null ? currentAdminId : null; serviceTypeEditorDraft.is_system = serviceTypeEditorDraft.admin_id === null"
+            >
+              {{ serviceTypeEditorDraft.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین" }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closeServiceTypeEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="saveServiceTypeEditor">ذخیره</button>
       </div>
     </div>
   </div>
