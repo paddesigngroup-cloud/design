@@ -3832,6 +3832,12 @@ option {
 .subCategoryDesignEditor__metaActions--tabs > .subCategoryDesignEditor__settingsBtn:last-child {
   margin-inline-start: auto;
 }
+.subCategoryDesignEditor__metaActions--tabs:not(.orderDesignEditor__tabs) > .subCategoryDesignEditor__settingsBtn:last-child {
+  margin-inline-start: 0;
+}
+.orderDesignEditor__tabs > .subCategoryDesignEditor__settingsBtn:last-child {
+  margin-inline-start: auto;
+}
 .subCategoryDesignEditor__settingsBtn {
   display: inline-flex;
   align-items: center;
@@ -4101,29 +4107,35 @@ option {
   height: 100%;
 }
 .subCategoryDesignEditor__embeddedShell {
-  position: fixed;
-  inset: 14px 12px 14px;
-  z-index: 4050;
+  position: relative;
+  inset: auto;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  pointer-events: none;
+  pointer-events: auto;
+  background: transparent;
+  border-radius: 18px;
+  overflow: hidden;
 }
 .subCategoryDesignEditor__embeddedCard {
   position: relative;
   top: auto;
   left: auto;
   transform: none;
-  width: min(1440px, calc(100vw - 24px));
-  height: calc(100vh - 254px);
-  max-height: calc(100vh - 250px);
-  margin: 231px 0 0;
-  border-radius: 20px;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  border-radius: 0;
   box-shadow: none;
   background: transparent;
   border: 0;
   pointer-events: auto;
-  min-height: 320px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
 }
 .subCategoryDesignEditor__embeddedCard > .formulaBuilder__head,
 .subCategoryDesignEditor__embeddedCard > .constructionDialog__sectionHint,

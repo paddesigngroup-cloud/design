@@ -26045,7 +26045,8 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="interiorLibraryOpen && !orderDesignFullEditorEmbedded" :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
+  <Teleport v-if="interiorLibraryOpen && !orderDesignFullEditorEmbedded" :to="subCategoryDesignEditorOpen ? '#subcat-internal-tab-panel' : 'body'">
+  <div :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
     <div v-if="!subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded" class="appDialog__backdrop" @click="closeInteriorLibrary"></div>
     <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen, 'orderDesignEditor__embeddedCard': orderDesignFullEditorEmbedded }" dir="rtl">
       <div v-if="interiorLibraryControllerApplying" class="interiorLibraryLoadingPopup" role="status" aria-live="polite" aria-busy="true">
@@ -27893,8 +27894,10 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+  </Teleport>
 
-  <div v-if="doorLibraryOpen && !orderDesignFullEditorEmbedded" :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
+  <Teleport v-if="doorLibraryOpen && !orderDesignFullEditorEmbedded" :to="subCategoryDesignEditorOpen ? '#subcat-door-tab-panel' : 'body'">
+  <div :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
     <div v-if="!subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded" class="appDialog__backdrop" @click="closeDoorLibrary"></div>
     <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen, 'orderDesignEditor__embeddedCard': orderDesignFullEditorEmbedded }" dir="rtl">
       <div class="formulaBuilder__head">
@@ -28532,8 +28535,10 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+  </Teleport>
 
-  <div v-if="subtractorLibraryOpen && !orderDesignFullEditorEmbedded" :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
+  <Teleport v-if="subtractorLibraryOpen && !orderDesignFullEditorEmbedded" :to="subCategoryDesignEditorOpen ? '#subcat-subtractor-tab-panel' : 'body'">
+  <div :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
     <div v-if="!subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded" class="appDialog__backdrop" @click="closeSubtractorLibrary"></div>
     <div class="appDialog__card appDialog__card--subDesign" :class="{ 'subCategoryDesignEditor__embeddedCard': subCategoryDesignEditorOpen, 'orderDesignEditor__embeddedCard': orderDesignFullEditorEmbedded }" dir="rtl">
       <div class="formulaBuilder__head">
@@ -28785,6 +28790,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+  </Teleport>
 
   <div
     v-if="subtractorLibraryOpen && !subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded && subtractorLibraryInstanceContextMenu.visible && activeSubtractorLibraryContextMenuInstance"
