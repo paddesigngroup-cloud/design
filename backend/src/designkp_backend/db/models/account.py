@@ -12,7 +12,7 @@ from designkp_backend.db.base import Base
 from designkp_backend.db.mixins import SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 if TYPE_CHECKING:
-    from .catalog import BaseFormula, Category, InternalPartGroup, Param, ParamGroup, PartFormula, PartKind, SubCategory, SubCategoryDesign, SubCategoryDesignInteriorInstance, SubCategoryDesignSubtractorInstance, SubtractorPartGroup, Template
+    from .catalog import BaseFormula, Category, InternalPartGroup, Param, ParamGroup, PartFormula, PartKind, PartService, SubCategory, SubCategoryDesign, SubCategoryDesignInteriorInstance, SubCategoryDesignSubtractorInstance, SubtractorPartGroup, Template
 
 
 class SuperAdmin(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
@@ -64,6 +64,9 @@ class Admin(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, 
         back_populates="admin",
     )
     part_formulas: Mapped[list["PartFormula"]] = relationship(
+        back_populates="admin",
+    )
+    part_services: Mapped[list["PartService"]] = relationship(
         back_populates="admin",
     )
     templates: Mapped[list["Template"]] = relationship(

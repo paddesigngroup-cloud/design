@@ -13,7 +13,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from sqlalchemy.orm import joinedload
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.account import Order, OrderDrawing, User
+from designkp_backend.db.models.account import Admin, Order, OrderDrawing, User
 from designkp_backend.services.admin_access import require_admin
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -209,13 +209,48 @@ async def list_orders(
 ) -> list[OrderItem]:
     await require_admin(session, admin_id)
     stmt = (
-        select(Order)
-        .options(joinedload(Order.admin), joinedload(Order.user))
-        .where(and_(Order.admin_id == admin_id, Order.deleted_at.is_(None)))
+        select(
+            Order.id,
+            Order.order_name,
+            Order.order_number,
+            Order.status,
+            Order.notes,
+            Order.submitted_at,
+            Order.admin_id,
+            Admin.full_name,
+            Admin.email,
+            Order.user_id,
+            User.full_name,
+            User.email,
+        )
+        .join(Admin, Admin.id == Order.admin_id)
+        .join(User, User.id == Order.user_id)
+        .where(
+            and_(
+                Order.admin_id == admin_id,
+                Order.deleted_at.is_(None),
+                Admin.deleted_at.is_(None),
+                User.deleted_at.is_(None),
+            )
+        )
         .order_by(Order.submitted_at.desc(), Order.order_number.asc())
     )
-    items = (await session.scalars(stmt)).all()
-    return [_to_response(item) for item in items]
+    rows = (await session.execute(stmt)).all()
+    return [
+        OrderItem(
+            id=row[0],
+            order_name=str(row[1] or "").strip(),
+            order_number=str(row[2] or "").strip(),
+            status=str(row[3] or "draft").strip().lower(),  # type: ignore[arg-type]
+            notes=str(row[4] or "").strip() or None,
+            submitted_at=row[5],
+            admin_id=row[6],
+            admin_name=_display_name(row[7], row[8], "Admin"),
+            user_id=row[9],
+            user_name=_display_name(row[10], row[11], "User"),
+        )
+        for row in rows
+    ]
 
 
 @router.post("", response_model=OrderItem, status_code=status.HTTP_201_CREATED)

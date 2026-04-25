@@ -1023,7 +1023,7 @@ option {
   direction: rtl;
   position: relative;
   isolation: isolate;
-  margin-right: -5px;
+  margin-right: 50px;
 }
 /* Soft edge fade (vignette) to make borders feel "melted"/blurred without affecting canvas interaction */
 .stage__card::after {
@@ -2586,7 +2586,7 @@ option {
 .appDialog {
   position: fixed;
   inset: 0;
-  z-index: 4000;
+  z-index: 6000;
 }
 .appDialog--stacked {
   z-index: 4100;

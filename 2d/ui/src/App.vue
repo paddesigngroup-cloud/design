@@ -853,6 +853,7 @@ const editableSubCategoryDesigns = ref([]);
 const editableInternalPartGroups = ref([]);
 const editableDoorPartGroups = ref([]);
 const editableSubtractorPartGroups = ref([]);
+const editablePartServices = ref([]);
 const editableBaseFormulas = ref([]);
 const editablePartFormulas = ref([]);
 const subCategoryDefaultsEditorOpen = ref(false);
@@ -883,6 +884,8 @@ const subtractorPartGroupEditorOpen = ref(false);
 const subtractorPartGroupEditorDraft = ref(null);
 const doorPartGroupEditorOpen = ref(false);
 const doorPartGroupEditorDraft = ref(null);
+const partServiceEditorOpen = ref(false);
+const partServiceEditorDraft = ref(null);
 const doorPartGroupParamGroupsOpen = ref(false);
 const doorPartGroupDefaultsEditorOpen = ref(false);
 const doorPartGroupDefaultsEditorRowId = ref(null);
@@ -3584,6 +3587,7 @@ const constructionTables = [
   { id: "internal_part_groups", title: "گروه قطعات داخلی", status: "active" },
   { id: "door_part_groups", title: "گروه قطعات درب", status: "active" },
   { id: "hidden_handle_part_groups", title: "گروه دستگیره مخفی", status: "active" },
+  { id: "part_services", title: "خدمات قطعات", status: "active" },
   { id: "base_formulas", title: "فرمول های پایه", status: "active" },
   { id: "part_formulas", title: "فرمول های قطعات", status: "active" },
 ];
@@ -3683,6 +3687,17 @@ const constructionSubtractorPartGroups = computed(() =>
       const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
       if (orderDelta !== 0) return orderDelta;
       return (Number(a.group_id) || 0) - (Number(b.group_id) || 0);
+    })
+);
+const constructionPartServices = computed(() =>
+  editablePartServices.value
+    .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
+    .slice()
+    .sort((a, b) => {
+      if (!!a.is_system !== !!b.is_system) return a.is_system ? -1 : 1;
+      const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return String(a.id || "").localeCompare(String(b.id || ""));
     })
 );
 const constructionPartKindsById = computed(() =>
@@ -8181,6 +8196,7 @@ function openConstructionWizard() {
   loadConstructionInternalPartGroups();
   loadConstructionDoorPartGroups();
   loadConstructionSubtractorPartGroups();
+  loadConstructionPartServices();
   loadConstructionBaseFormulas();
   loadConstructionPartFormulas();
   constructionDeletedTemplateIds.value = [];
@@ -8221,6 +8237,7 @@ async function closeConstructionWizard() {
     await loadConstructionInternalPartGroups();
     await loadConstructionDoorPartGroups();
     await loadConstructionSubtractorPartGroups();
+    await loadConstructionPartServices();
     await loadConstructionBaseFormulas();
     await loadConstructionPartFormulas();
   }
@@ -8579,6 +8596,17 @@ function normalizeDoorPartGroupPayload(item) {
   };
 }
 
+function normalizePartServicePayload(item) {
+  return {
+    admin_id: item.admin_id,
+    service_type: String(item.service_type || "").trim(),
+    service_description: String(item.service_description || "").trim(),
+    service_code: String(item.service_code || "").trim(),
+    sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
+    is_system: !!item.is_system,
+  };
+}
+
 function normalizeInteriorInstanceRecord(item) {
   if (!item || !item.id) return null;
   return {
@@ -8652,6 +8680,17 @@ function normalizeEditableDoorPartGroupRecord(item) {
     controller_selection: normalizeDoorPartGroupControllerSelection(item.controller_type, item.controller_selection),
     controller_bindings: normalizeDoorPartGroupControllerBindings(item.controller_type, item.controller_bindings),
   }));
+}
+
+function normalizeEditablePartServiceRecord(item) {
+  return withConstructionDraftState({
+    ...item,
+    service_type: String(item.service_type || "").trim(),
+    service_description: String(item.service_description || "").trim(),
+    service_code: String(item.service_code || "").trim(),
+    sort_order: Number(item.sort_order) || 0,
+    is_system: !!item.is_system,
+  });
 }
 
 function toPersianDigits(value) {
@@ -9592,6 +9631,19 @@ function buildNewDoorPartGroupDraft() {
   });
 }
 
+function buildNewPartServiceDraft() {
+  const nextSort = editablePartServices.value.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), 0) + 1;
+  return {
+    id: null,
+    admin_id: null,
+    service_type: "",
+    service_description: "",
+    service_code: `part_service_${nextSort}`,
+    sort_order: nextSort,
+    is_system: true,
+  };
+}
+
 function resetSubCategoryDesignEditorState() {
   closeInteriorLibrary();
   closeDoorLibrary();
@@ -9638,6 +9690,11 @@ function closeDoorPartGroupEditor() {
   if (activeDoorPartGroupIconRowId.value === DOOR_PART_GROUP_EDITOR_ICON_TARGET) {
     activeDoorPartGroupIconRowId.value = null;
   }
+}
+
+function closePartServiceEditor() {
+  partServiceEditorOpen.value = false;
+  partServiceEditorDraft.value = null;
 }
 
 function hasSubtractorPartGroupDefaultsChanges() {
@@ -12185,6 +12242,21 @@ function openDoorPartGroupEditor(item = null) {
   doorPartGroupEditorOpen.value = true;
 }
 
+function openPartServiceEditor(item = null) {
+  partServiceEditorDraft.value = item
+    ? {
+        id: item.id,
+        admin_id: item.admin_id,
+        service_type: String(item.service_type || "").trim(),
+        service_description: String(item.service_description || "").trim(),
+        service_code: String(item.service_code || "").trim(),
+        sort_order: Number(item.sort_order) || 0,
+        is_system: !!item.is_system,
+      }
+    : buildNewPartServiceDraft();
+  partServiceEditorOpen.value = true;
+}
+
 function togglePartFormulaInDoorGroup(partFormulaId) {
   if (!doorPartGroupEditorDraft.value) return;
   const formulaId = Number(partFormulaId) || 0;
@@ -14468,6 +14540,19 @@ async function loadConstructionSubtractorPartGroups() {
   }
 }
 
+async function loadConstructionPartServices() {
+  try {
+    const url = `/api/part-services?admin_id=${encodeURIComponent(currentAdminId.value)}`;
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:part-services:${currentAdminId.value}`,
+    });
+    editablePartServices.value = payload.map((item) => normalizeEditablePartServiceRecord(item));
+  } catch (_) {
+    showAlert("خواندن جدول خدمات قطعات از دیتابیس انجام نشد.", { title: "خطا" });
+  }
+}
+
 function isSubtractorPartFormulaSelectedInGroup(partFormulaId) {
   return !!subtractorPartGroupEditorDraft.value?.parts?.some((part) => Number(part.part_formula_id) === Number(partFormulaId) && part.enabled !== false);
 }
@@ -14771,6 +14856,70 @@ async function deleteConstructionSubtractorPartGroup(id) {
     await loadConstructionSubtractorPartGroups();
   } catch (error) {
     showAlert(error?.message || "حذف گروه دستگیره مخفی انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function savePartServiceEditor() {
+  const draft = partServiceEditorDraft.value;
+  if (!draft) return;
+  const serviceType = String(draft.service_type || "").trim();
+  const serviceDescription = String(draft.service_description || "").trim();
+  const serviceCode = String(draft.service_code || "").trim();
+  if (!serviceType) {
+    showAlert("نوع خدمات نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!serviceDescription) {
+    showAlert("شرح خدمات نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!serviceCode) {
+    showAlert("کد خدمات نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const duplicateCode = editablePartServices.value.some((item) => (
+    String(item.service_code || "").trim().toLowerCase() === serviceCode.toLowerCase()
+    && String(item.admin_id || "") === String(draft.admin_id || "")
+    && String(item.id || "") !== String(draft.id || "")
+  ));
+  if (duplicateCode) {
+    showAlert("کد خدمات در همین دامنه مالک تکراری است.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const payload = normalizePartServicePayload(draft);
+  try {
+    const res = await fetch(
+      draft.id ? `/api/part-services/${encodeURIComponent(String(draft.id))}` : "/api/part-services",
+      {
+        method: draft.id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره خدمات قطعات انجام نشد."));
+    await loadConstructionPartServices();
+    closePartServiceEditor();
+    showAlert("خدمات قطعات با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره خدمات قطعات انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function deleteConstructionPartService(id) {
+  const item = editablePartServices.value.find((row) => String(row.id) === String(id));
+  if (!item) return;
+  const ok = await showConfirm(`خدمت «${item.service_type || "بدون عنوان"}» حذف شود؟`, {
+    title: "حذف خدمات قطعات",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  try {
+    const res = await fetch(`/api/part-services/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف خدمات قطعات انجام نشد."));
+    await loadConstructionPartServices();
+  } catch (error) {
+    showAlert(error?.message || "حذف خدمات قطعات انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -19556,8 +19705,10 @@ function saveProjects() {
 }
 loadProjects();
 
-const requiresOrderGate = computed(() => route.name === "floorplan");
-const isOrderGateBlocking = computed(() => requiresOrderGate.value && !activeOrder.value);
+const requiresOrderGate = computed(() => route.path !== "/settings");
+const isOrderEntryVisible = computed(() => orderEntryOpen.value || (requiresOrderGate.value && !activeOrder.value));
+const isOrderGateBlocking = computed(() => requiresOrderGate.value && !activeOrder.value && !isOrderEntryVisible.value);
+const startupOrderPromptHandled = ref(false);
 const orderStatusOptions = [
   { value: "draft", label: "پیش نویس" },
   { value: "designing", label: "در حال طراحی" },
@@ -19873,9 +20024,6 @@ async function loadOrders() {
       const fresh = ordersCatalog.value.find((item) => item.id === activeOrder.value.id) || null;
       activeOrder.value = fresh;
     }
-    if (!activeOrder.value) {
-      orderEntryTab.value = ordersCatalog.value.length ? "list" : "create";
-    }
   } catch (_) {
     showAlert("خواندن سفارش‌ها انجام نشد.", { title: "خطا" });
   } finally {
@@ -19885,7 +20033,7 @@ async function loadOrders() {
 
 function openOrderEntry(tab = null) {
   if (tab) orderEntryTab.value = tab;
-  else if (!activeOrder.value) orderEntryTab.value = ordersCatalog.value.length ? "list" : "create";
+  else if (!activeOrder.value) orderEntryTab.value = "create";
   orderEntryOpen.value = true;
 }
 
@@ -19918,12 +20066,22 @@ function resetActiveOrderWorkspace({ clearEditor = true } = {}) {
 
 async function ensureOrderGate() {
   if (!requiresOrderGate.value) return;
+  if (!activeOrder.value) {
+    openOrderEntry("list");
+  }
   if (!ordersCatalog.value.length && !ordersLoading.value) {
     await loadOrders();
   }
-  if (!activeOrder.value) {
-    openOrderEntry();
-  }
+}
+
+function ensureStartupOrderPrompt() {
+  if (startupOrderPromptHandled.value || !requiresOrderGate.value) return;
+  startupOrderPromptHandled.value = true;
+  resetActiveOrderWorkspace();
+  activeOrder.value = null;
+  orderDraftMode.value = "create";
+  resetOrderDraft();
+  openOrderEntry("list");
 }
 
 function resetOrderDraft() {
@@ -20290,9 +20448,16 @@ function doNewDesign() {
   openOrderCreate("طرح جدید");
 }
 
+function openOrderPickerDialog() {
+  orderDraftMode.value = activeOrder.value ? "edit" : "create";
+  orderEntryTab.value = "list";
+  orderEntryOpen.value = true;
+  closeQuickMenus();
+}
+
 async function doSaveProject() {
   if (!activeOrder.value) {
-    openOrderEntry();
+    openOrderPickerDialog();
     return;
   }
   const shouldSaveMeta = orderEntryOpen.value && orderEntryTab.value === "create" && isOrderDraftEditMode.value && hasOrderDraftChanges();
@@ -20331,8 +20496,7 @@ async function doSaveProject() {
 }
 
 function doOpenPicker() {
-  orderDraftMode.value = activeOrder.value ? "edit" : "create";
-  openOrderEntry("list");
+  openOrderPickerDialog();
 }
 function doOpenProject(p) {
   if (!editorRef.value?.setState || !p?.state) return;
@@ -20386,7 +20550,7 @@ function openMenuPanelAt(menuId, anchorEl, mode = "menu") {
 }
 
 function doOpenFromTopbar() {
-  doOpenPicker();
+  openOrderPickerDialog();
 }
 function doSaveFromTopbar() {
   doSaveProject();
@@ -21679,6 +21843,7 @@ watch(
   () => route.fullPath,
   async () => {
     if (requiresOrderGate.value) {
+      ensureStartupOrderPrompt();
       await ensureOrderGate();
     } else {
       closeOrderEntry(true);
@@ -21687,9 +21852,23 @@ watch(
 );
 
 watch(
+  () => [requiresOrderGate.value, String(activeOrder.value?.id || "")],
+  ([gateEnabled, activeOrderId]) => {
+    if (gateEnabled && !activeOrderId) {
+      orderEntryTab.value = "list";
+      orderEntryOpen.value = true;
+    }
+  },
+  { immediate: true }
+);
+
+watch(
   isOrderGateBlocking,
   (blocked) => {
     if (blocked) {
+      if (!orderEntryOpen.value) {
+        openOrderEntry("list");
+      }
       editorRef.value?.setInputEnabled?.(false);
       closeQuickMenus();
     } else {
@@ -21710,6 +21889,7 @@ onMounted(() => {
   setTimeout(scheduleShift, 0);
   scheduleSubRailPosition();
   syncQuickStateFromEditor();
+  ensureStartupOrderPrompt();
   loadOrders().then(() => ensureOrderGate());
   startQuickSyncTimer();
 
@@ -22189,7 +22369,7 @@ onBeforeUnmount(() => {
         <button class="iconbtn iconbtn--sm" title="ذخیره" @click="doSaveFromTopbar">
           <img src="/icons/save.png" alt="" />
         </button>
-        <button class="iconbtn iconbtn--sm" title="باز کردن" @click="doOpenFromTopbar">
+        <button class="iconbtn iconbtn--sm" title="باز کردن" @click.stop.prevent="doOpenFromTopbar">
           <img src="/icons/open.png" alt="" />
         </button>
         <button class="iconbtn iconbtn--sm" title="اشتراک گذاری" @click="doShareFromTopbar">
@@ -22283,7 +22463,7 @@ onBeforeUnmount(() => {
                 <span class="menuPanel__orderMeta">{{ activeOrder.order_number }} / {{ activeOrderStatusLabel }}</span>
               </button>
               <button class="menuItem" type="button" @click="doNewDesign">طرح جدید</button>
-              <button class="menuItem" type="button" @click="doOpenPicker">باز کردن</button>
+              <button class="menuItem" type="button" @click.stop.prevent="doOpenPicker">باز کردن</button>
               <button class="menuItem" type="button" @click="doSaveProject">ذخیره</button>
               <button class="menuItem" type="button" @click="doExportJsonToClipboard">خروجی</button>
               <button class="menuItem" type="button" @click="doPrint">پرینت</button>
@@ -24260,6 +24440,60 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
+          <template v-else-if="constructionStep === 'part_services'">
+            <div class="constructionDialog__toolbar">
+              <div class="constructionDialog__toolbarMain">
+                <div class="constructionDialog__sectionTitle">جدول خدمات قطعات</div>
+                <div class="constructionDialog__sectionHint">
+                  در این جدول خدمات قطعات را با نوع، شرح و کد خدمت مدیریت می‌کنید.
+                </div>
+              </div>
+              <div class="constructionDialog__toolbarActions">
+                <button type="button" class="constructionDialog__textBtn" @click="openPartServiceEditor()">افزودن خدمت</button>
+              </div>
+            </div>
+
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionPartServices.length) }}</span>
+                <span class="constructionDialog__summaryLabel">کل خدمات</span>
+              </div>
+            </div>
+
+            <div class="constructionDialog__tableWrap">
+              <table class="constructionDialog__table">
+                <thead>
+                  <tr>
+                    <th class="constructionDialog__col constructionDialog__col--title">نوع خدمات</th>
+                    <th class="constructionDialog__col constructionDialog__col--title">شرح خدمات</th>
+                    <th class="constructionDialog__col constructionDialog__col--code">کد خدمات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in constructionPartServices" :key="item.id">
+                    <td class="constructionDialog__col constructionDialog__col--title">{{ item.service_type }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--title">
+                      <div>{{ item.service_description }}</div>
+                      <div class="constructionDialog__actionsCell">
+                        <button type="button" class="constructionDialog__textBtn" @click="openPartServiceEditor(item)">ویرایش</button>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionPartService(item.id)">×</button>
+                      </div>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--code">
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.service_code }}</span>
+                    </td>
+                  </tr>
+                  <tr v-if="!constructionPartServices.length">
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="3">هنوز خدمتی برای قطعات ثبت نشده است.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="constructionDialog__sheetHint">
+              افزودن، ویرایش و حذف خدمات قطعات مستقیم روی دیتابیس اعمال می‌شود.
+            </div>
+          </template>
+
           <template v-else-if="constructionStep === 'door_part_groups'">
             <input
               ref="doorPartGroupIconInputEl"
@@ -25307,6 +25541,58 @@ onBeforeUnmount(() => {
       </div>
       <div class="appDialog__actions">
         <button type="button" class="constructionDialog__textBtn" @click="toggleSubtractorPartGroupParamGroupsPanel">بستن</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="partServiceEditorOpen && partServiceEditorDraft" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closePartServiceEditor"></div>
+    <div class="appDialog__card appDialog__card--builder" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش خدمات قطعات</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closePartServiceEditor">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        نوع خدمت، شرح و کد یکتا را ثبت کنید. این اطلاعات مستقیماً در دیتابیس ذخیره می‌شود.
+      </div>
+      <div class="subCategoryDesignEditor">
+        <div class="subCategoryDesignEditor__meta">
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>نوع خدمات</span>
+            <input v-model="partServiceEditorDraft.service_type" class="constructionDialog__input" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>شرح خدمات</span>
+            <textarea
+              v-model="partServiceEditorDraft.service_description"
+              class="constructionDialog__input constructionDialog__textarea"
+              rows="4"
+            ></textarea>
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>کد خدمات</span>
+            <input v-model="partServiceEditorDraft.service_code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>ترتیب</span>
+            <input v-model.number="partServiceEditorDraft.sort_order" class="constructionDialog__input" type="number" min="0" step="1" />
+          </label>
+          <div class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>دامنه</span>
+            <button
+              type="button"
+              class="constructionDialog__scopeBtn"
+              :class="partServiceEditorDraft.admin_id === null ? 'is-system' : 'is-admin'"
+              @click="partServiceEditorDraft.admin_id = partServiceEditorDraft.admin_id === null ? currentAdminId : null; partServiceEditorDraft.is_system = partServiceEditorDraft.admin_id === null"
+            >
+              {{ partServiceEditorDraft.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین" }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closePartServiceEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="savePartServiceEditor">ذخیره</button>
       </div>
     </div>
   </div>
@@ -27729,7 +28015,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="orderEntryOpen" class="appDialog" role="dialog" aria-modal="true">
+  <div v-if="isOrderEntryVisible" class="appDialog" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop"></div>
     <div class="appDialog__card appDialog__card--order" dir="rtl">
       <div class="orderEntry">
