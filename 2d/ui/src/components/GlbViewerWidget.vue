@@ -2385,11 +2385,13 @@ function getMaxSizePx() {
   if (!parent) return { w: 520, h: 420 };
   const r = parent.getBoundingClientRect();
   let rightLimit = r.right - pad;
-
+  const subRailEl = document.querySelector(".subRail");
   const blockers = [
-    document.querySelector(".subRail"),
-    document.querySelector(".menuPanel"),
+    subRailEl,
     document.querySelector(".toolDock"),
+    // When design sub-rail is visible, let 3D widget grow up to that rail,
+    // not up to the menu panel (menu panel sits further left and made the max size too small).
+    subRailEl ? null : document.querySelector(".menuPanel"),
   ].filter(Boolean);
 
   for (const el of blockers) {
