@@ -13313,14 +13313,26 @@ async function openDoorInstanceEditor(instance) {
   const normalized = normalizeDoorInstanceRecord(instance);
   if (!normalized) return;
   selectDoorLibraryPlacedInstance(normalized.id);
-  if (!subCategoryDesignEditorOpen.value) {
-    await ensureOrderDesignDoorParamMetaLoaded(activeDoorLibraryOrderDesign.value?.id);
-    const refreshed = activeDoorLibraryInstances.value.find(
-      (row) => String(row?.id || "").trim() === String(normalized.id || "").trim()
-    );
-    if (refreshed) {
-      const updated = normalizeDoorInstanceRecord(refreshed);
-      if (updated) Object.assign(normalized, updated);
+  if (!subCategoryDesignEditorOpen.value && Object.keys(normalized.param_meta || {}).length === 0) {
+    try {
+      const targetOrderDesignId = String(
+        activeDoorLibraryOrderDesign.value?.id
+        || orderDesignEditorDraft.value?.id
+        || activeCabinetDesignId.value
+        || ""
+      ).trim();
+      if (targetOrderDesignId) {
+        await ensureOrderDesignDoorParamMetaLoaded(targetOrderDesignId);
+        const refreshed = activeDoorLibraryInstances.value.find(
+          (row) => String(row?.id || "").trim() === String(normalized.id || "").trim()
+        );
+        if (refreshed) {
+          const updated = normalizeDoorInstanceRecord(refreshed);
+          if (updated) Object.assign(normalized, updated);
+        }
+      }
+    } catch (_) {
+      // Keep the editor usable even if the background meta refresh fails.
     }
   }
   const previewGroups = buildDoorInstanceGroups(normalized);
@@ -13352,14 +13364,26 @@ async function openSubtractorInstanceEditor(instance) {
   const normalized = normalizeSubtractorInstanceRecord(instance);
   if (!normalized) return;
   subtractorLibrarySelectedInstanceId.value = String(normalized.id || "");
-  if (!subCategoryDesignEditorOpen.value) {
-    await ensureOrderDesignSubtractorParamMetaLoaded(activeSubtractorLibraryOrderDesign.value?.id);
-    const refreshed = activeSubtractorLibraryInstances.value.find(
-      (row) => String(row?.id || "").trim() === String(normalized.id || "").trim()
-    );
-    if (refreshed) {
-      const updated = normalizeSubtractorInstanceRecord(refreshed);
-      if (updated) Object.assign(normalized, updated);
+  if (!subCategoryDesignEditorOpen.value && Object.keys(normalized.param_meta || {}).length === 0) {
+    try {
+      const targetOrderDesignId = String(
+        activeSubtractorLibraryOrderDesign.value?.id
+        || orderDesignEditorDraft.value?.id
+        || activeCabinetDesignId.value
+        || ""
+      ).trim();
+      if (targetOrderDesignId) {
+        await ensureOrderDesignSubtractorParamMetaLoaded(targetOrderDesignId);
+        const refreshed = activeSubtractorLibraryInstances.value.find(
+          (row) => String(row?.id || "").trim() === String(normalized.id || "").trim()
+        );
+        if (refreshed) {
+          const updated = normalizeSubtractorInstanceRecord(refreshed);
+          if (updated) Object.assign(normalized, updated);
+        }
+      }
+    } catch (_) {
+      // Keep the editor usable even if the background meta refresh fails.
     }
   }
   const previewGroups = buildSubtractorInstanceGroups(normalized);
@@ -27065,6 +27089,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+  </Teleport>
 
   <div
     v-if="interiorLibraryOpen && !subCategoryDesignEditorOpen && !orderDesignFullEditorEmbedded && interiorLibraryInstanceContextMenu.visible && activeInteriorLibraryContextMenuInstance"
@@ -27086,6 +27111,7 @@ onBeforeUnmount(() => {
     <button type="button" class="menuItem menuItem--grow menuItem--danger" @click="deleteDoorInstanceFromContextMenu">حذف</button>
   </div>
 
+  <Teleport to="body">
   <div v-if="interiorInstanceEditorOpen && interiorInstanceEditorDraft" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeInteriorInstanceEditor"></div>
     <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
@@ -27230,7 +27256,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+  </Teleport>
 
+  <Teleport to="body">
   <div v-if="subtractorInstanceEditorOpen && subtractorInstanceEditorDraft" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeSubtractorInstanceEditor"></div>
     <div class="appDialog__card appDialog__card--subPreview" dir="rtl">
@@ -27375,7 +27403,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+  </Teleport>
 
+  <Teleport to="body">
   <div v-if="doorInstanceEditorOpen && doorInstanceEditorDraft" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeDoorInstanceEditor"></div>
     <div class="appDialog__card appDialog__card--subPreview" dir="rtl">

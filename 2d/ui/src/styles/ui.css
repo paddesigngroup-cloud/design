@@ -2589,7 +2589,7 @@ option {
   z-index: 6000;
 }
 .appDialog--stacked {
-  z-index: 4100;
+  z-index: 6100;
 }
 .constructionDialog {
   position: fixed;
@@ -3586,8 +3586,8 @@ option {
   font-family: Vazirmatn, sans-serif;
 }
 .appDialog__card--subPreview {
-  width: max(00px, calc(100vw - 28px));
-  max-height: calc(100vh - 28px);
+  width: min(1180px, calc(100vw - 28px));
+  max-height: min(820px, calc(100vh - 28px));
   overflow: hidden;
   font-family: Vazirmatn, sans-serif;
 }
