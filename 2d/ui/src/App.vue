@@ -28014,6 +28014,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+  </Teleport>
 
   <div v-if="isOrderEntryVisible" class="appDialog" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop"></div>
@@ -28180,7 +28181,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
-  </Teleport>
 
   <Teleport v-if="doorLibraryOpen && !orderDesignFullEditorEmbedded" :to="subCategoryDesignEditorOpen ? '#subcat-door-tab-panel' : 'body'">
   <div :class="subCategoryDesignEditorOpen ? 'subCategoryDesignEditor__embeddedShell' : 'appDialog'" role="dialog" aria-modal="true">
