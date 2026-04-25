@@ -3829,11 +3829,21 @@ option {
 .subCategoryDesignEditor__tabBtn {
   min-width: 132px;
 }
+.subCategoryDesignEditor__tabBtn--adminDefaults {
+  direction: ltr;
+}
+.subCategoryDesignEditor__tabBtn--adminDefaults > span {
+  direction: rtl;
+}
 .subCategoryDesignEditor__metaActions--tabs > .subCategoryDesignEditor__settingsBtn:last-child {
   margin-inline-start: auto;
 }
 .subCategoryDesignEditor__metaActions--tabs:not(.orderDesignEditor__tabs) > .subCategoryDesignEditor__settingsBtn:last-child {
   margin-inline-start: 0;
+}
+.subCategoryDesignEditor__metaActions--tabs:not(.orderDesignEditor__tabs) > .subCategoryDesignEditor__tabBtn--adminDefaults {
+  margin-inline-start: 0;
+  margin-right: auto;
 }
 .orderDesignEditor__tabs > .subCategoryDesignEditor__settingsBtn:last-child {
   margin-inline-start: auto;

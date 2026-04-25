@@ -24998,9 +24998,9 @@ onBeforeUnmount(() => {
               <img src="/icons/handless.png" alt="" class="subCategoryDesignEditor__metaIcon" />
               <span>دستگیره مخفی</span>
             </button>
-            <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__tabBtn" :class="{ 'is-active': subCategoryDesignEditorActiveTab === 'defaults' }" title="پیش‌فرض ادمین" @click="openSubCategoryAdminDefaultsFromDesignEditor">
+            <button type="button" class="subCategoryDesignEditor__settingsBtn subCategoryDesignEditor__tabBtn subCategoryDesignEditor__tabBtn--adminDefaults" :class="{ 'is-active': subCategoryDesignEditorActiveTab === 'defaults' }" title="پیشفرض پارامترها (ادمین)" @click="openSubCategoryAdminDefaultsFromDesignEditor">
               <img src="/icons/setting.png" alt="" class="subCategoryDesignEditor__metaIcon" />
-              <span>پیش‌فرض ادمین</span>
+              <span>پیشفرض پارامترها (ادمین)</span>
             </button>
           </div>
         </div>
