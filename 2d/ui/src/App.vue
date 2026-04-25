@@ -21530,6 +21530,18 @@ function syncSharedSubtractorHoverMode(mode) {
 }
 
 let _menuRaf = 0;
+function getLayoutZoomFactor() {
+  if (typeof window === "undefined") return 1;
+  const zoomRaw = Number(window.getComputedStyle(document.body).zoom);
+  return Number.isFinite(zoomRaw) && zoomRaw > 0 ? zoomRaw : 1;
+}
+
+function toUnzoomedCssPx(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric / getLayoutZoomFactor());
+}
+
 function scheduleMenuPanelPosition(anchorEl) {
   if (!mainEl.value || !anchorEl) return;
   if (_menuRaf) cancelAnimationFrame(_menuRaf);
@@ -21553,7 +21565,7 @@ function positionMenuPanel(anchorEl) {
   const pad = 10;
   const maxTop = Math.max(pad, mainRect.height - p.height - pad);
   top = Math.max(pad, Math.min(maxTop, top));
-  mainEl.value.style.setProperty("--menuPanelTop", `${Math.round(top)}px`);
+  mainEl.value.style.setProperty("--menuPanelTop", `${toUnzoomedCssPx(top)}px`);
 }
 
 let _subRaf = 0;
@@ -21593,11 +21605,11 @@ function positionSubRail() {
   }
 
   top = Math.max(pad, Math.min(mainRect.height - pad - 10, top));
-  mainEl.value.style.setProperty("--subRailTop", `${Math.round(top)}px`);
+  mainEl.value.style.setProperty("--subRailTop", `${toUnzoomedCssPx(top)}px`);
   if (typeof right === "number" && isFinite(right)) {
     // Clamp so it never goes off-screen to the left.
     right = Math.max(pad, Math.min(mainRect.width - pad - 10, right));
-    mainEl.value.style.setProperty("--subRailRight", `${Math.round(right)}px`);
+    mainEl.value.style.setProperty("--subRailRight", `${toUnzoomedCssPx(right)}px`);
   } else {
     mainEl.value.style.removeProperty("--subRailRight");
   }

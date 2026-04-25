@@ -301,7 +301,7 @@ option {
   position: absolute;
   top: var(--subRailTop, 10px);
   right: var(--subRailRight, calc(10px + var(--railW) + 10px));
-  z-index: 3;
+  z-index: 4;
   width: var(--subRailW);
   max-height: calc(100% - 20px);
   padding: 6px 5px;
