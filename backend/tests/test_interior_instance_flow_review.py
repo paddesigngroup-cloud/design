@@ -47,6 +47,80 @@ class _FakeScalarSession:
         self.commit_count += 1
 
 
+def test_replace_instance_helpers_preload_design_before_relationship_access(monkeypatch) -> None:
+    class _LazyDesignStub:
+        def __init__(self) -> None:
+            self.id = uuid4()
+
+        @property
+        def interior_instances(self):
+            raise AssertionError("lazy interior_instances should not be touched before _load_design")
+
+        @property
+        def door_instances(self):
+            raise AssertionError("lazy door_instances should not be touched before _load_design")
+
+        @property
+        def subtractor_instances(self):
+            raise AssertionError("lazy subtractor_instances should not be touched before _load_design")
+
+    session = _FakeMutationSession()
+    design = _LazyDesignStub()
+    load_calls: list[tuple[bool | None, bool | None, bool | None]] = []
+    loaded = SimpleNamespace(
+        id=design.id,
+        interior_instances=[],
+        door_instances=[],
+        subtractor_instances=[],
+    )
+
+    async def fake_load_design(_session, _design_id, *, include_interior=None, include_subtractors=None, include_doors=None):
+        load_calls.append((include_interior, include_subtractors, include_doors))
+        return loaded
+
+    monkeypatch.setattr(subcat_router, "_load_design", fake_load_design)
+
+    asyncio.run(
+        subcat_router._replace_interior_instances(
+            session,
+            design=design,
+            payloads=[],
+            include_interior=True,
+            include_subtractors=False,
+            include_doors=False,
+        )
+    )
+    asyncio.run(
+        subcat_router._replace_door_instances(
+            session,
+            design=design,
+            payloads=[],
+            include_interior=False,
+            include_subtractors=False,
+            include_doors=True,
+        )
+    )
+    asyncio.run(
+        subcat_router._replace_subtractor_instances(
+            session,
+            design=design,
+            payloads=[],
+            include_interior=False,
+            include_subtractors=True,
+            include_doors=False,
+        )
+    )
+
+    assert load_calls == [
+        (True, False, False),
+        (True, False, False),
+        (False, False, True),
+        (False, False, True),
+        (False, True, False),
+        (False, True, False),
+    ]
+
+
 def test_subcategory_add_refreshes_only_target_instance(monkeypatch) -> None:
     design_id = uuid4()
     design = SimpleNamespace(

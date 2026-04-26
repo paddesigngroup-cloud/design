@@ -1446,13 +1446,27 @@ async def _replace_interior_instances(
     interior_ready = include_interior if include_interior is not None else await interior_instance_tables_ready(session)
     if not interior_ready:
         return
-    existing = {item.id: item for item in list(getattr(design, "interior_instances", []) or []) if getattr(item, "id", None) is not None}
+    design = await _load_design(
+        session,
+        design.id,
+        include_interior=interior_ready,
+        include_subtractors=include_subtractors,
+        include_doors=include_doors,
+    )
+    existing_instances = list(design.__dict__.get("interior_instances") or [])
+    existing = {item.id: item for item in existing_instances if getattr(item, "id", None) is not None}
     keep_ids = {item.id for item in list(payloads or []) if item.id is not None}
-    for instance in list(getattr(design, "interior_instances", []) or []):
+    for instance in existing_instances:
         if instance.id not in keep_ids:
             await session.delete(instance)
     await session.flush()
-    design = await _load_design(session, design.id)
+    design = await _load_design(
+        session,
+        design.id,
+        include_interior=interior_ready,
+        include_subtractors=include_subtractors,
+        include_doors=include_doors,
+    )
     for payload in sorted(list(payloads or []), key=lambda row: (int(row.ui_order or 0), str(row.instance_code or ""))):
         target = existing.get(payload.id) if payload.id is not None else None
         if target is None:
@@ -1488,11 +1502,23 @@ async def _replace_interior_instances(
             target.param_values = _normalize_interior_param_values(payload.param_values)
             target.param_meta = {str(key): dict(value or {}) for key, value in dict(payload.param_meta or {}).items()}
             await session.flush()
-        design = await _load_design(session, design.id)
+        design = await _load_design(
+            session,
+            design.id,
+            include_interior=interior_ready,
+            include_subtractors=include_subtractors,
+            include_doors=include_doors,
+        )
         target = next(instance for instance in design.interior_instances if instance.id == target.id)
         await _refresh_design_interior_instance(session, design=design, instance=target)
         await session.flush()
-        design = await _load_design(session, design.id)
+        design = await _load_design(
+            session,
+            design.id,
+            include_interior=interior_ready,
+            include_subtractors=include_subtractors,
+            include_doors=include_doors,
+        )
 
 
 async def _replace_door_instances(
@@ -1507,13 +1533,27 @@ async def _replace_door_instances(
     door_ready = include_doors if include_doors is not None else await door_instance_tables_ready(session)
     if not door_ready:
         return
-    existing = {item.id: item for item in list(getattr(design, "door_instances", []) or []) if getattr(item, "id", None) is not None}
+    design = await _load_design(
+        session,
+        design.id,
+        include_interior=include_interior,
+        include_subtractors=include_subtractors,
+        include_doors=door_ready,
+    )
+    existing_instances = list(design.__dict__.get("door_instances") or [])
+    existing = {item.id: item for item in existing_instances if getattr(item, "id", None) is not None}
     keep_ids = {item.id for item in list(payloads or []) if item.id is not None}
-    for instance in list(getattr(design, "door_instances", []) or []):
+    for instance in existing_instances:
         if instance.id not in keep_ids:
             await session.delete(instance)
     await session.flush()
-    design = await _load_design(session, design.id)
+    design = await _load_design(
+        session,
+        design.id,
+        include_interior=include_interior,
+        include_subtractors=include_subtractors,
+        include_doors=door_ready,
+    )
     for payload in sorted(list(payloads or []), key=lambda row: (int(row.ui_order or 0), str(row.instance_code or ""))):
         target = existing.get(payload.id) if payload.id is not None else None
         if target is None:
@@ -1553,11 +1593,23 @@ async def _replace_door_instances(
             target.param_values = _normalize_door_param_values(payload.param_values)
             target.param_meta = {str(key): dict(value or {}) for key, value in dict(payload.param_meta or {}).items()}
             await session.flush()
-        design = await _load_design(session, design.id)
+        design = await _load_design(
+            session,
+            design.id,
+            include_interior=include_interior,
+            include_subtractors=include_subtractors,
+            include_doors=door_ready,
+        )
         target = next(instance for instance in design.door_instances if instance.id == target.id)
         await _refresh_design_door_instance(session, design=design, instance=target)
         await session.flush()
-        design = await _load_design(session, design.id)
+        design = await _load_design(
+            session,
+            design.id,
+            include_interior=include_interior,
+            include_subtractors=include_subtractors,
+            include_doors=door_ready,
+        )
 
 
 async def _replace_subtractor_instances(
@@ -1572,9 +1624,17 @@ async def _replace_subtractor_instances(
     subtractor_ready = include_subtractors if include_subtractors is not None else await subtractor_instance_tables_ready(session)
     if not subtractor_ready:
         return
-    existing = {item.id: item for item in list(getattr(design, "subtractor_instances", []) or []) if getattr(item, "id", None) is not None}
+    design = await _load_design(
+        session,
+        design.id,
+        include_interior=include_interior,
+        include_subtractors=subtractor_ready,
+        include_doors=include_doors,
+    )
+    existing_instances = list(design.__dict__.get("subtractor_instances") or [])
+    existing = {item.id: item for item in existing_instances if getattr(item, "id", None) is not None}
     keep_ids = {item.id for item in list(payloads or []) if item.id is not None}
-    for instance in list(getattr(design, "subtractor_instances", []) or []):
+    for instance in existing_instances:
         if instance.id not in keep_ids:
             await session.delete(instance)
     await session.flush()
