@@ -3600,8 +3600,8 @@ const constructionTables = [
   { id: "door_part_groups", title: "گروه قطعات درب", status: "active" },
   { id: "hidden_handle_part_groups", title: "گروه دستگیره مخفی", status: "active" },
   { id: "part_models", title: "مدل قطعه", status: "active" },
-  { id: "part_services", title: "خدمات قطعات", status: "active" },
-  { id: "service_types", title: "انواع خدمات", status: "active" },
+  { id: "part_services", title: "انواع خدمات", status: "active" },
+  { id: "service_types", title: "خدمات قطعات", status: "active" },
   { id: "base_formulas", title: "فرمول های پایه", status: "active" },
   { id: "part_formulas", title: "فرمول های قطعات", status: "active" },
 ];
@@ -14873,7 +14873,7 @@ async function loadConstructionPartServices() {
     editablePartServices.value = payload.map((item) => normalizeEditablePartServiceRecord(item));
     constructionDeletedPartServiceIds.value = [];
   } catch (_) {
-    showAlert("خواندن جدول خدمات قطعات از دیتابیس انجام نشد.", { title: "خطا" });
+    showAlert("خواندن جدول انواع خدمات از دیتابیس انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -14901,7 +14901,7 @@ async function loadConstructionServiceTypes() {
     editableServiceTypes.value = payload.map((item) => normalizeEditableServiceTypeRecord(item));
     constructionDeletedServiceTypeIds.value = [];
   } catch (_) {
-    showAlert("خواندن جدول انواع خدمات از دیتابیس انجام نشد.", { title: "خطا" });
+    showAlert("خواندن جدول خدمات قطعات از دیتابیس انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -15248,13 +15248,13 @@ async function savePartServiceEditor() {
         body: JSON.stringify(payload),
       }
     );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره خدمات قطعات انجام نشد."));
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره انواع خدمات انجام نشد."));
     invalidateApiCache("/api/part-services?");
     await loadConstructionPartServices();
     closePartServiceEditor();
-    showAlert("خدمات قطعات با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
+    showAlert("انواع خدمات با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
   } catch (error) {
-    showAlert(error?.message || "ذخیره خدمات قطعات انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || "ذخیره انواع خدمات انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -15376,13 +15376,13 @@ async function saveServiceTypeEditor() {
         body: JSON.stringify(payload),
       }
     );
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره انواع خدمات انجام نشد."));
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره خدمات قطعات انجام نشد."));
     invalidateApiCache("/api/service-types?");
     await loadConstructionServiceTypes();
     closeServiceTypeEditor();
-    showAlert("انواع خدمات با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
+    showAlert("خدمات قطعات با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
   } catch (error) {
-    showAlert(error?.message || "ذخیره انواع خدمات انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || "ذخیره خدمات قطعات انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -15437,19 +15437,19 @@ async function savePartModelEditor() {
 async function deleteConstructionServiceType(id) {
   const item = editableServiceTypes.value.find((row) => String(row.id) === String(id));
   if (!item) return;
-  const ok = await showConfirm(`نوع خدمت «${item.service_title || "بدون عنوان"}» حذف شود؟`, {
-    title: "حذف انواع خدمات",
+  const ok = await showConfirm(`خدمت «${item.service_title || "بدون عنوان"}» حذف شود؟`, {
+    title: "حذف خدمات قطعات",
     confirmText: "حذف",
     cancelText: "انصراف",
   });
   if (!ok) return;
   try {
     const res = await fetch(`/api/service-types/${encodeURIComponent(String(id))}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف انواع خدمات انجام نشد."));
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف خدمات قطعات انجام نشد."));
     invalidateApiCache("/api/service-types?");
     await loadConstructionServiceTypes();
   } catch (error) {
-    showAlert(error?.message || "حذف انواع خدمات انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || "حذف خدمات قطعات انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -15475,19 +15475,19 @@ async function deleteConstructionPartModel(id) {
 async function deleteConstructionPartService(id) {
   const item = editablePartServices.value.find((row) => String(row.id) === String(id));
   if (!item) return;
-  const ok = await showConfirm(`خدمت «${item.service_type || "بدون عنوان"}» حذف شود؟`, {
-    title: "حذف خدمات قطعات",
+  const ok = await showConfirm(`نوع خدمات «${item.service_type || "بدون عنوان"}» حذف شود؟`, {
+    title: "حذف انواع خدمات",
     confirmText: "حذف",
     cancelText: "انصراف",
   });
   if (!ok) return;
   try {
     const res = await fetch(`/api/part-services/${encodeURIComponent(String(id))}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف خدمات قطعات انجام نشد."));
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف انواع خدمات انجام نشد."));
     invalidateApiCache("/api/part-services?");
     await loadConstructionPartServices();
   } catch (error) {
-    showAlert(error?.message || "حذف خدمات قطعات انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || "حذف انواع خدمات انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -17428,8 +17428,8 @@ function getConstructionCsvRows(items = null) {
 
 function getConstructionImportFileName() {
   if (constructionStep.value === "part_models") return "part_models_excel_template.csv";
-  if (constructionStep.value === "part_services") return "part_services_excel_template.csv";
-  if (constructionStep.value === "service_types") return "service_types_excel_template.csv";
+  if (constructionStep.value === "part_services") return "service_types_excel_template.csv";
+  if (constructionStep.value === "service_types") return "part_services_excel_template.csv";
   if (constructionStep.value === "templates") return "templates_excel_template.csv";
   if (constructionStep.value === "categories") return "categories_excel_template.csv";
   if (constructionStep.value === "sub_categories") return "sub_categories_excel_template.csv";
@@ -17442,8 +17442,8 @@ function getConstructionImportFileName() {
 
 function getConstructionImportTitle() {
   if (constructionStep.value === "part_models") return "جدول مدل قطعه";
-  if (constructionStep.value === "part_services") return "جدول خدمات قطعات";
-  if (constructionStep.value === "service_types") return "جدول انواع خدمات";
+  if (constructionStep.value === "part_services") return "جدول انواع خدمات";
+  if (constructionStep.value === "service_types") return "جدول خدمات قطعات";
   if (constructionStep.value === "templates") return "جدول تمپلیت‌ها";
   if (constructionStep.value === "categories") return "جدول دسته‌بندی‌ها";
   if (constructionStep.value === "sub_categories") return "جدول ساب‌کت‌ها";
@@ -17458,10 +17458,10 @@ function getConstructionImportErrorText() {
     return "خواندن فایل اکسل مدل قطعه انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
   }
   if (constructionStep.value === "part_services") {
-    return "خواندن فایل اکسل خدمات قطعات انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
+    return "خواندن فایل اکسل انواع خدمات انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
   }
   if (constructionStep.value === "service_types") {
-    return "خواندن فایل اکسل انواع خدمات انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
+    return "خواندن فایل اکسل خدمات قطعات انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
   }
   if (constructionStep.value === "templates") {
     return "خواندن فایل اکسل تمپلیت‌ها انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
@@ -18707,7 +18707,7 @@ async function saveConstructionServiceTypes(options = {}) {
   }
   if (!validateConstructionServiceTypes()) return;
   if (!options.skipConfirm) {
-    const ok = await showConfirm("تغییرات جدول انواع خدمات در دیتابیس ذخیره شود؟", {
+    const ok = await showConfirm("تغییرات جدول خدمات قطعات در دیتابیس ذخیره شود؟", {
       title: "ذخیره تغییرات",
       confirmText: "ذخیره",
       cancelText: "انصراف",
@@ -18746,11 +18746,11 @@ async function saveConstructionServiceTypes(options = {}) {
 
     invalidateApiCache("/api/service-types?");
     await loadConstructionServiceTypes();
-    showAlert(options.successMessage || "تغییرات جدول انواع خدمات با موفقیت ذخیره شد.", {
+    showAlert(options.successMessage || "تغییرات جدول خدمات قطعات با موفقیت ذخیره شد.", {
       title: options.successTitle || "ذخیره تغییرات",
     });
   } catch (error) {
-    showAlert(error?.message || "ذخیره تغییرات جدول انواع خدمات در دیتابیس انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || "ذخیره تغییرات جدول خدمات قطعات در دیتابیس انجام نشد.", { title: "خطا" });
     await loadConstructionServiceTypes();
   } finally {
     constructionSavingIds.value = [];
@@ -18821,7 +18821,7 @@ async function saveConstructionPartServices(options = {}) {
   }
   if (!validateConstructionPartServices()) return;
   if (!options.skipConfirm) {
-    const ok = await showConfirm("تغییرات جدول خدمات قطعات در دیتابیس ذخیره شود؟", {
+    const ok = await showConfirm("تغییرات جدول انواع خدمات در دیتابیس ذخیره شود؟", {
       title: "ذخیره تغییرات",
       confirmText: "ذخیره",
       cancelText: "انصراف",
@@ -18860,11 +18860,11 @@ async function saveConstructionPartServices(options = {}) {
 
     invalidateApiCache("/api/part-services?");
     await loadConstructionPartServices();
-    showAlert(options.successMessage || "تغییرات جدول خدمات قطعات با موفقیت ذخیره شد.", {
+    showAlert(options.successMessage || "تغییرات جدول انواع خدمات با موفقیت ذخیره شد.", {
       title: options.successTitle || "ذخیره تغییرات",
     });
   } catch (error) {
-    showAlert(error?.message || "ذخیره تغییرات جدول خدمات قطعات در دیتابیس انجام نشد.", { title: "خطا" });
+    showAlert(error?.message || "ذخیره تغییرات جدول انواع خدمات در دیتابیس انجام نشد.", { title: "خطا" });
     await loadConstructionPartServices();
   } finally {
     constructionSavingIds.value = [];
@@ -19272,7 +19272,7 @@ async function applyConstructionImportPreview() {
     await saveConstructionServiceTypes({
       skipConfirm: true,
       successTitle: "آپلود فایل",
-      successMessage: "فایل اکسل انواع خدمات با موفقیت روی جدول اعمال شد.",
+      successMessage: "فایل اکسل خدمات قطعات با موفقیت روی جدول اعمال شد.",
     });
     return;
   }
@@ -19296,7 +19296,7 @@ async function applyConstructionImportPreview() {
     await saveConstructionPartServices({
       skipConfirm: true,
       successTitle: "آپلود فایل",
-      successMessage: "فایل اکسل خدمات قطعات با موفقیت روی جدول اعمال شد.",
+      successMessage: "فایل اکسل انواع خدمات با موفقیت روی جدول اعمال شد.",
     });
     return;
   }
@@ -25596,13 +25596,13 @@ onBeforeUnmount(() => {
             />
             <div class="constructionDialog__toolbar">
               <div class="constructionDialog__toolbarMain">
-                <div class="constructionDialog__sectionTitle">جدول خدمات قطعات</div>
+                <div class="constructionDialog__sectionTitle">جدول انواع خدمات</div>
                 <div class="constructionDialog__sectionHint">
-                  در این جدول خدمات قطعات را با نوع، شرح و کد خدمت مدیریت می‌کنید.
+                  در این جدول انواع خدمات قطعات را با نوع، شرح و کد خدمت مدیریت می‌کنید.
                 </div>
               </div>
               <div class="constructionDialog__toolbarActions">
-                <button type="button" class="constructionDialog__textBtn" @click="openPartServiceEditor()">افزودن خدمت</button>
+                <button type="button" class="constructionDialog__textBtn" @click="openPartServiceEditor()">افزودن نوع خدمات</button>
               </div>
             </div>
 
@@ -25650,7 +25650,7 @@ onBeforeUnmount(() => {
             <div class="constructionDialog__summary">
               <div class="constructionDialog__summaryItem">
                 <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionPartServices.length) }}</span>
-                <span class="constructionDialog__summaryLabel">کل خدمات</span>
+                <span class="constructionDialog__summaryLabel">کل انواع خدمات</span>
               </div>
             </div>
 
@@ -25687,13 +25687,13 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionPartServices.length">
-                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="4">هنوز خدمتی برای قطعات ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="4">هنوز نوع خدمتی برای قطعات ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
             </div>
             <div class="constructionDialog__sheetHint">
-              افزودن، ویرایش و حذف خدمات قطعات مستقیم روی دیتابیس اعمال می‌شود.
+              افزودن، ویرایش و حذف انواع خدمات مستقیم روی دیتابیس اعمال می‌شود.
             </div>
           </template>
 
@@ -25707,13 +25707,13 @@ onBeforeUnmount(() => {
             />
             <div class="constructionDialog__toolbar">
               <div class="constructionDialog__toolbarMain">
-                <div class="constructionDialog__sectionTitle">جدول انواع خدمات</div>
+                <div class="constructionDialog__sectionTitle">جدول خدمات قطعات</div>
                 <div class="constructionDialog__sectionHint">
-                  در این جدول برای هر نوع خدمتِ تعریف‌شده در خدمات قطعات، عنوان خدمات و کد اختصاری ثبت می‌کنید.
+                  در این جدول برای هر نوع خدمتِ تعریف‌شده در جدول انواع خدمات، عنوان خدمت و کد اختصاری ثبت می‌کنید.
                 </div>
               </div>
               <div class="constructionDialog__toolbarActions">
-                <button type="button" class="constructionDialog__textBtn" @click="openServiceTypeEditor()">افزودن نوع خدمات</button>
+                <button type="button" class="constructionDialog__textBtn" @click="openServiceTypeEditor()">افزودن خدمت</button>
               </div>
             </div>
 
@@ -25761,7 +25761,7 @@ onBeforeUnmount(() => {
             <div class="constructionDialog__summary">
               <div class="constructionDialog__summaryItem">
                 <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionServiceTypes.length) }}</span>
-                <span class="constructionDialog__summaryLabel">کل انواع خدمات</span>
+                <span class="constructionDialog__summaryLabel">کل خدمات قطعات</span>
               </div>
             </div>
 
@@ -25798,7 +25798,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionServiceTypes.length">
-                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="4">هنوز نوع خدمتی ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="4">هنوز خدمتی برای قطعات ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -26921,7 +26921,7 @@ onBeforeUnmount(() => {
     <div class="appDialog__backdrop" @click="closePartServiceEditor"></div>
     <div class="appDialog__card appDialog__card--builder" dir="rtl">
       <div class="formulaBuilder__head">
-        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش خدمات قطعات</div>
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش انواع خدمات</div>
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closePartServiceEditor">×</button>
       </div>
       <div class="constructionDialog__sectionHint">
@@ -26973,11 +26973,11 @@ onBeforeUnmount(() => {
     <div class="appDialog__backdrop" @click="closeServiceTypeEditor"></div>
     <div class="appDialog__card appDialog__card--builder" dir="rtl">
       <div class="formulaBuilder__head">
-        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش انواع خدمات</div>
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش خدمات قطعات</div>
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeServiceTypeEditor">×</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        نوع خدمت را از خدمات قطعات انتخاب کنید و سپس عنوان خدمات و کد اختصاری را ثبت کنید.
+        نوع خدمت را از جدول انواع خدمات انتخاب کنید و سپس عنوان خدمت و کد اختصاری را ثبت کنید.
       </div>
       <div class="subCategoryDesignEditor">
         <div class="subCategoryDesignEditor__meta">

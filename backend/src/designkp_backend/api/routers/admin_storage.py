@@ -465,7 +465,7 @@ async def export_service_types(admin_id: uuid.UUID, session: AsyncSession = Depe
     return Response(
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="service_types_excel_template.csv"'},
+        headers={"Content-Disposition": 'attachment; filename="part_services_excel_template.csv"'},
     )
 
 
@@ -478,7 +478,7 @@ async def export_part_services(admin_id: uuid.UUID, session: AsyncSession = Depe
     return Response(
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="part_services_excel_template.csv"'},
+        headers={"Content-Disposition": 'attachment; filename="service_types_excel_template.csv"'},
     )
 
 

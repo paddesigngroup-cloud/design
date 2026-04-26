@@ -52,7 +52,7 @@ def test_export_service_types_returns_csv_and_snapshot(monkeypatch: pytest.Monke
     response = asyncio.run(export_service_types(admin_id, session))
     body = response.body.decode("utf-8-sig")
 
-    assert response.headers["Content-Disposition"] == 'attachment; filename="service_types_excel_template.csv"'
+    assert response.headers["Content-Disposition"] == 'attachment; filename="part_services_excel_template.csv"'
     assert "service_type,service_title,short_code,admin_mode" in body
     assert "برش CNC,دورو,dr,system" in body
     assert called["table_name"] == "service_types"
