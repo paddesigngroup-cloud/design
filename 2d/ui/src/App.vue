@@ -888,6 +888,8 @@ const doorPartGroupEditorOpen = ref(false);
 const doorPartGroupEditorDraft = ref(null);
 const partModelEditorOpen = ref(false);
 const partModelEditorDraft = ref(null);
+const selectedPartModelAngleIndex = ref(0);
+const partModelAngleInputRefs = ref({});
 const partServiceEditorOpen = ref(false);
 const partServiceEditorDraft = ref(null);
 const serviceTypeEditorOpen = ref(false);
@@ -9098,6 +9100,7 @@ function buildPartKindDraft(item, overrides = {}) {
 
 const PART_MODEL_ANGLE_PRECISION = 6;
 const PART_MODEL_ANGLE_EPSILON = 1e-4;
+const PART_MODEL_MIN_ANGLE = 0.01;
 
 function roundPartModelAngle(value) {
   return Number(Number(value || 0).toFixed(PART_MODEL_ANGLE_PRECISION));
@@ -9139,6 +9142,15 @@ function buildEqualPartModelAngleRecords(sideCount, interiorAngleSum = null) {
 function formatPartModelAngleNumber(value) {
   const normalized = roundPartModelAngle(value);
   return Number.isInteger(normalized) ? String(normalized) : String(normalized);
+}
+
+function normalizeLocalizedNumberText(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/[۰-۹]/g, (char) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(char)))
+    .replace(/[٠-٩]/g, (char) => String("٠١٢٣٤٥٦٧٨٩".indexOf(char)))
+    .replace(/٫/g, ".")
+    .replace(/,/g, ".");
 }
 
 function normalizePartModelAngleRecords(sideCount, defaultAngles = null, interiorAngleSum = null) {
@@ -9208,42 +9220,65 @@ function buildPartModelAngleDrafts(sideCount, defaultAngles = null, interiorAngl
     index: item.index,
     angle_deg: item.angle_deg,
     _edited: false,
+    _draft_text: formatPartModelAngleNumber(item.angle_deg),
   }));
 }
 
-function redistributePartModelAngleDrafts(sideCount, interiorAngleSum, angleDrafts, editedIndexes = []) {
+function redistributePartModelAngleDrafts(sideCount, interiorAngleSum, angleDrafts, primaryIndex = 0) {
   const normalized = (Array.isArray(angleDrafts) ? angleDrafts : []).map((item, fallbackIndex) => ({
     index: Number.isInteger(Number(item?.index)) ? Number(item.index) : fallbackIndex,
     angle_deg: roundPartModelAngle(item?.angle_deg),
     _edited: !!item?._edited,
   }));
-  const editedSet = new Set((Array.isArray(editedIndexes) ? editedIndexes : []).map((value) => Number(value)));
-  const editedAngles = normalized.filter((item) => editedSet.has(item.index));
-  if (editedAngles.some((item) => !Number.isFinite(item.angle_deg) || item.angle_deg <= 0)) {
+  const targetIndex = normalized.findIndex((item) => item.index === Number(primaryIndex));
+  if (targetIndex === -1) return { ok: false, error: "زاویه انتخاب‌شده پیدا نشد." };
+  if (!Number.isFinite(normalized[targetIndex].angle_deg) || normalized[targetIndex].angle_deg <= 0) {
     return { ok: false, error: "زاویه ویرایش‌شده باید عددی و بزرگ‌تر از صفر باشد." };
   }
-  const remainingIndexes = normalized.filter((item) => !editedSet.has(item.index)).map((item) => item.index);
-  const editedTotal = roundPartModelAngle(editedAngles.reduce((sum, item) => sum + item.angle_deg, 0));
-  if (remainingIndexes.length === 0) {
-    if (Math.abs(editedTotal - Number(interiorAngleSum)) > PART_MODEL_ANGLE_EPSILON) {
-      return { ok: false, error: `جمع زاویه‌ها باید ${toPersianDigits(interiorAngleSum)} باشد.` };
+  const candidateIndexes = normalized
+    .map((item) => item.index)
+    .filter((index) => index !== normalized[targetIndex].index)
+    .sort((a, b) => {
+      const distanceA = (a - normalized[targetIndex].index + normalized.length) % normalized.length;
+      const distanceB = (b - normalized[targetIndex].index + normalized.length) % normalized.length;
+      return distanceA - distanceB;
+    });
+  if (!candidateIndexes.length) return { ok: true, angles: normalized };
+
+  const nextAngles = normalized.map((item) => ({ ...item }));
+  let delta = roundPartModelAngle(Number(interiorAngleSum) - nextAngles.reduce((sum, item) => sum + item.angle_deg, 0));
+  if (Math.abs(delta) <= PART_MODEL_ANGLE_EPSILON) return { ok: true, angles: nextAngles };
+
+  if (delta > 0) {
+    const firstCandidate = nextAngles.find((item) => item.index === candidateIndexes[0]);
+    if (!firstCandidate) return { ok: true, angles: nextAngles };
+    firstCandidate.angle_deg = roundPartModelAngle(firstCandidate.angle_deg + delta);
+    return { ok: true, angles: nextAngles };
+  }
+
+  let remainingToSubtract = Math.abs(delta);
+  for (const candidateIndex of candidateIndexes) {
+    const candidate = nextAngles.find((item) => item.index === candidateIndex);
+    if (!candidate) continue;
+    const available = Math.max(0, roundPartModelAngle(candidate.angle_deg - PART_MODEL_MIN_ANGLE));
+    const consumed = Math.min(available, remainingToSubtract);
+    candidate.angle_deg = roundPartModelAngle(candidate.angle_deg - consumed);
+    remainingToSubtract = roundPartModelAngle(remainingToSubtract - consumed);
+    if (remainingToSubtract <= PART_MODEL_ANGLE_EPSILON) {
+      return { ok: true, angles: nextAngles };
     }
-    return { ok: true, angles: normalized };
   }
-  const remainingTotal = roundPartModelAngle(Number(interiorAngleSum) - editedTotal);
-  if (!(remainingTotal > 0)) {
-    return { ok: false, error: "جمع زاویه‌های ثابت‌شده از مجموع مجاز بیشتر شده است." };
+
+  const maxAllowedForPrimary = roundPartModelAngle(Number(interiorAngleSum) - (candidateIndexes.length * PART_MODEL_MIN_ANGLE));
+  const primary = nextAngles[targetIndex];
+  primary.angle_deg = roundPartModelAngle(Math.min(primary.angle_deg, maxAllowedForPrimary));
+  const finalDelta = roundPartModelAngle(Number(interiorAngleSum) - nextAngles.reduce((sum, item) => sum + item.angle_deg, 0));
+  if (Math.abs(finalDelta) > PART_MODEL_ANGLE_EPSILON) {
+    const firstCandidate = nextAngles.find((item) => item.index === candidateIndexes[0]);
+    if (firstCandidate) {
+      firstCandidate.angle_deg = roundPartModelAngle(firstCandidate.angle_deg + finalDelta);
+    }
   }
-  const redistributedValues = buildEqualPartModelAngleValues(remainingIndexes.length, remainingTotal);
-  const redistributedByIndex = new Map(remainingIndexes.map((index, offset) => [index, redistributedValues[offset]]));
-  const nextAngles = normalized.map((item) => (
-    editedSet.has(item.index)
-      ? item
-      : {
-          ...item,
-          angle_deg: roundPartModelAngle(redistributedByIndex.get(item.index)),
-        }
-  ));
   return { ok: true, angles: nextAngles };
 }
 
@@ -9251,6 +9286,106 @@ function formatPartModelAnglesText(defaultAngles, sideCount, interiorAngleSum) {
   return normalizePartModelAngleRecords(sideCount, defaultAngles, interiorAngleSum)
     .map((item) => formatPartModelAngleNumber(item.angle_deg))
     .join("، ");
+}
+
+function buildRegularPartModelPreviewGeometry(sideCount) {
+  const normalizedSideCount = Math.max(3, Number(sideCount) || 3);
+  const radius = 1;
+  // Rotate the base polygon so common shapes (like rectangles) feel upright.
+  const startAngle = -Math.PI / 2 - Math.PI / normalizedSideCount;
+  const vertices = Array.from({ length: normalizedSideCount }, (_, index) => {
+    const theta = startAngle + ((Math.PI * 2) / normalizedSideCount) * index;
+    return {
+      x: Math.cos(theta) * radius,
+      y: Math.sin(theta) * radius,
+    };
+  });
+  return { vertices, isFallback: true };
+}
+
+function buildPartModelPreviewGeometry(sideCount, defaultAngles) {
+  const normalizedAngles = normalizePartModelAngleRecords(sideCount, defaultAngles, getPartModelInteriorAngleSum(sideCount));
+  const normalizedSideCount = Math.max(3, Number(sideCount) || normalizedAngles.length || 3);
+  const base = buildRegularPartModelPreviewGeometry(normalizedSideCount);
+  const expectedAngle = getPartModelInteriorAngleSum(normalizedSideCount) / normalizedSideCount;
+  const vertices = base.vertices.map((point, index) => {
+    const angleDeg = Number(normalizedAngles[index]?.angle_deg);
+    if (!Number.isFinite(angleDeg)) return point;
+    const dx = point.x;
+    const dy = point.y;
+    const len = Math.hypot(dx, dy) || 1;
+    // Sharper angles push outward; wider angles pull inward.
+    const normalizedDelta = (angleDeg - expectedAngle) / Math.max(expectedAngle, 1);
+    const radialFactor = Math.max(0.62, Math.min(1.38, 1 - (normalizedDelta * 0.72)));
+    return {
+      x: (dx / len) * radialFactor,
+      y: (dy / len) * radialFactor,
+    };
+  });
+  return { vertices, isFallback: false };
+}
+
+function normalizePartModelPreviewGeometry(sideCount, defaultAngles) {
+  const geometry = buildPartModelPreviewGeometry(sideCount, defaultAngles);
+  const vertices = Array.isArray(geometry?.vertices) && geometry.vertices.length
+    ? geometry.vertices
+    : buildRegularPartModelPreviewGeometry(sideCount).vertices;
+  const padding = 34;
+  const viewportSize = 260;
+  const xs = vertices.map((point) => point.x);
+  const ys = vertices.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const width = Math.max(maxX - minX, 1);
+  const height = Math.max(maxY - minY, 1);
+  const scale = Math.min((viewportSize - padding * 2) / width, (viewportSize - padding * 2) / height);
+  const offsetX = (viewportSize - width * scale) / 2 - minX * scale;
+  const offsetY = (viewportSize - height * scale) / 2 - minY * scale;
+  const normalizedVertices = vertices.map((point) => ({
+    x: point.x * scale + offsetX,
+    y: point.y * scale + offsetY,
+  }));
+  const center = normalizedVertices.reduce(
+    (acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }),
+    { x: 0, y: 0 }
+  );
+  center.x /= normalizedVertices.length || 1;
+  center.y /= normalizedVertices.length || 1;
+  return {
+    viewBox: `0 0 ${viewportSize} ${viewportSize}`,
+    points: normalizedVertices.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" "),
+    vertices: normalizedVertices,
+    center,
+  };
+}
+
+function buildPartModelAnglePreviewRecords(sideCount, defaultAngles) {
+  const geometry = normalizePartModelPreviewGeometry(sideCount, defaultAngles);
+  const vertices = geometry.vertices || [];
+  return vertices.map((vertex, index) => {
+    const prev = vertices[(index - 1 + vertices.length) % vertices.length] || vertex;
+    const next = vertices[(index + 1) % vertices.length] || vertex;
+    const dx = vertex.x - geometry.center.x;
+    const dy = vertex.y - geometry.center.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const labelX = vertex.x + ux * 24;
+    const labelY = vertex.y + uy * 24;
+    const startX = vertex.x + (prev.x - vertex.x) * 0.18;
+    const startY = vertex.y + (prev.y - vertex.y) * 0.18;
+    const endX = vertex.x + (next.x - vertex.x) * 0.18;
+    const endY = vertex.y + (next.y - vertex.y) * 0.18;
+    return {
+      index,
+      vertex,
+      labelX,
+      labelY,
+      highlightPath: `M ${startX.toFixed(2)} ${startY.toFixed(2)} L ${vertex.x.toFixed(2)} ${vertex.y.toFixed(2)} L ${endX.toFixed(2)} ${endY.toFixed(2)}`,
+    };
+  });
 }
 
 function serializePartModelAnglesCsv(defaultAngles, sideCount, interiorAngleSum) {
@@ -9268,6 +9403,31 @@ function parsePartModelAnglesCsv(value, sideCount, interiorAngleSum) {
     angle_deg: roundPartModelAngle(item),
   }));
 }
+
+const partModelPreviewState = computed(() => {
+  const draft = partModelEditorDraft.value;
+  if (!draft) {
+    return {
+      viewBox: "0 0 260 260",
+      points: "",
+      angles: [],
+    };
+  }
+  const normalizedAngles = Array.isArray(draft.default_angles) && draft.default_angles.length
+    ? draft.default_angles
+    : buildEqualPartModelAngleDrafts(draft.side_count, null, draft.interior_angle_sum);
+  const geometry = normalizePartModelPreviewGeometry(draft.side_count, normalizedAngles);
+  const angles = buildPartModelAnglePreviewRecords(draft.side_count, normalizedAngles).map((item) => ({
+    ...item,
+    value: normalizedAngles.find((entry) => Number(entry?.index) === item.index)?.angle_deg,
+  }));
+  return {
+    viewBox: geometry.viewBox,
+    points: geometry.points,
+    vertices: geometry.vertices,
+    angles,
+  };
+});
 
 function normalizeBooleanFlag(value, fallback = false) {
   if (typeof value === "boolean") return value;
@@ -10158,6 +10318,8 @@ function closeDoorPartGroupEditor() {
 function closePartModelEditor() {
   partModelEditorOpen.value = false;
   partModelEditorDraft.value = null;
+  selectedPartModelAngleIndex.value = 0;
+  partModelAngleInputRefs.value = {};
 }
 
 function closePartServiceEditor() {
@@ -12745,6 +12907,8 @@ function openPartModelEditor(item = null) {
         is_system: !!item.is_system,
       }
     : buildNewPartModelDraft();
+  selectedPartModelAngleIndex.value = 0;
+  partModelAngleInputRefs.value = {};
   partModelEditorOpen.value = true;
 }
 
@@ -12756,6 +12920,7 @@ function resetPartModelAnglesToDefault(sideCount) {
   draft.side_count = normalizedSideCount;
   draft.interior_angle_sum = interiorAngleSum;
   draft.default_angles = buildEqualPartModelAngleDrafts(normalizedSideCount, null, interiorAngleSum);
+  selectedPartModelAngleIndex.value = 0;
 }
 
 function onPartModelSideCountChange(value) {
@@ -12763,26 +12928,79 @@ function onPartModelSideCountChange(value) {
   resetPartModelAnglesToDefault(normalizedSideCount);
 }
 
-function onPartModelAngleChange(angleIndex, value) {
+function setPartModelAngleInputRef(index, el) {
+  if (el) partModelAngleInputRefs.value[index] = el;
+  else delete partModelAngleInputRefs.value[index];
+}
+
+function setSelectedPartModelAngleIndex(index) {
+  selectedPartModelAngleIndex.value = Math.max(0, Number(index) || 0);
+}
+
+async function focusPartModelAngleInput(index) {
+  await nextTick();
+  const el = partModelAngleInputRefs.value?.[index];
+  if (!el || typeof el.focus !== "function") return;
+  try {
+    el.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  } catch (_) {
+    // Ignore legacy browser option support differences.
+  }
+  el.focus();
+  el.select?.();
+}
+
+function onPartModelAnglePreviewSelect(index) {
+  setSelectedPartModelAngleIndex(index);
+  focusPartModelAngleInput(index);
+}
+
+function syncPartModelAngleDraftTexts(defaultAngles) {
+  return (Array.isArray(defaultAngles) ? defaultAngles : []).map((item) => ({
+    ...item,
+    _draft_text: formatPartModelAngleNumber(item.angle_deg),
+  }));
+}
+
+function onPartModelAngleInput(angleIndex, value) {
   const draft = partModelEditorDraft.value;
   if (!draft) return;
+  setSelectedPartModelAngleIndex(angleIndex);
+  const target = draft.default_angles?.find((item) => Number(item?.index) === Number(angleIndex));
+  if (!target) return;
+  target._draft_text = String(value ?? "");
+}
+
+function onPartModelAngleChange(angleIndex, value = null) {
+  const draft = partModelEditorDraft.value;
+  if (!draft) return;
+  setSelectedPartModelAngleIndex(angleIndex);
+  const targetDraft = draft.default_angles?.find((item) => Number(item?.index) === Number(angleIndex));
+  const parsedValue = Number(normalizeLocalizedNumberText(value ?? targetDraft?._draft_text));
+  if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
+    showAlert("زاویه باید عددی و بزرگ‌تر از صفر باشد.", { title: "اعتبارسنجی" });
+    if (targetDraft) targetDraft._draft_text = formatPartModelAngleNumber(targetDraft.angle_deg);
+    return;
+  }
   const sideCount = Number(draft.side_count);
   const interiorAngleSum = Number(draft.interior_angle_sum);
-  const currentAngles = buildPartModelAngleDrafts(sideCount, draft.default_angles, interiorAngleSum).map((item) => ({
-    ...item,
-    _edited: !!draft.default_angles?.find((entry) => Number(entry?.index) === item.index)?._edited,
+  const currentAngles = (Array.isArray(draft.default_angles) ? draft.default_angles : buildPartModelAngleDrafts(sideCount, null, interiorAngleSum)).map((item, fallbackIndex) => ({
+    index: Number.isInteger(Number(item?.index)) ? Number(item.index) : fallbackIndex,
+    angle_deg: roundPartModelAngle(item?.angle_deg),
+    _edited: !!item?._edited,
+    _draft_text: String(item?._draft_text ?? formatPartModelAngleNumber(item?.angle_deg)),
   }));
   const targetIndex = currentAngles.findIndex((item) => item.index === Number(angleIndex));
   if (targetIndex === -1) return;
-  currentAngles[targetIndex].angle_deg = roundPartModelAngle(value);
+  const maxAllowedForPrimary = roundPartModelAngle(interiorAngleSum - ((currentAngles.length - 1) * PART_MODEL_MIN_ANGLE));
+  currentAngles[targetIndex].angle_deg = roundPartModelAngle(Math.min(parsedValue, maxAllowedForPrimary));
   currentAngles[targetIndex]._edited = true;
-  const editedIndexes = currentAngles.filter((item) => item._edited).map((item) => item.index);
-  const redistributed = redistributePartModelAngleDrafts(sideCount, interiorAngleSum, currentAngles, editedIndexes);
+  const redistributed = redistributePartModelAngleDrafts(sideCount, interiorAngleSum, currentAngles, angleIndex);
   if (!redistributed.ok) {
-    showAlert(redistributed.error || "تنظیم خودکار زاویه‌ها انجام نشد.", { title: "اعتبارسنجی" });
+    if (targetDraft) targetDraft._draft_text = formatPartModelAngleNumber(targetDraft.angle_deg);
     return;
   }
-  draft.default_angles = redistributed.angles;
+  draft.default_angles = syncPartModelAngleDraftTexts(redistributed.angles);
 }
 
 function openServiceTypeEditor(item = null) {
@@ -27167,6 +27385,34 @@ onBeforeUnmount(() => {
         عنوان قطعه و تعداد اضلاع را ثبت کنید. مجموع زوایای داخلی از روی تعداد ضلع محاسبه می‌شود و زاویه‌های ویرایش‌نشده خودکار باقیمانده را می‌گیرند.
       </div>
       <div class="subCategoryDesignEditor">
+        <div class="partModelPreview">
+          <div class="partModelPreview__head">
+            <div class="partModelPreview__title">نمای ساده قطعه</div>
+            <div class="partModelPreview__hint">برای انتخاب سریع، روی زاویه‌ها کلیک کنید.</div>
+          </div>
+          <div class="partModelPreview__canvas">
+            <svg :viewBox="partModelPreviewState.viewBox" class="partModelPreview__svg" aria-hidden="true">
+              <polygon :points="partModelPreviewState.points" class="partModelPreview__shape" />
+              <g v-for="point in partModelPreviewState.vertices" :key="`part-model-vertex-${point.x}-${point.y}`">
+                <circle :cx="point.x" :cy="point.y" r="4.5" class="partModelPreview__vertex" />
+              </g>
+              <g
+                v-for="angle in partModelPreviewState.angles"
+                :key="`part-model-preview-angle-${angle.index}`"
+                class="partModelPreview__angle"
+                :class="{ 'is-active': selectedPartModelAngleIndex === angle.index }"
+                @click="onPartModelAnglePreviewSelect(angle.index)"
+              >
+                <path :d="angle.highlightPath" class="partModelPreview__wedge" />
+                <circle :cx="angle.vertex.x" :cy="angle.vertex.y" r="10" class="partModelPreview__hit" />
+                <circle :cx="angle.labelX" :cy="angle.labelY" r="15" class="partModelPreview__labelBubble" />
+                <text :x="angle.labelX" :y="angle.labelY + 1" class="partModelPreview__label">
+                  {{ toPersianDigits(formatPartModelAngleNumber(angle.value)) }}
+                </text>
+              </g>
+            </svg>
+          </div>
+        </div>
         <div class="subCategoryDesignEditor__meta">
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
             <span>مدل قطعه</span>
@@ -27208,15 +27454,21 @@ onBeforeUnmount(() => {
             v-for="angle in partModelEditorDraft.default_angles"
             :key="`part-model-angle-${angle.index}`"
             class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact"
+            :class="{ 'partModelAngleField--active': selectedPartModelAngleIndex === angle.index }"
           >
             <span>{{ `زاویه ${toPersianDigits(angle.index + 1)}` }}</span>
             <input
-              :value="angle.angle_deg"
+              :value="angle._draft_text ?? formatPartModelAngleNumber(angle.angle_deg)"
+              :ref="(el) => setPartModelAngleInputRef(angle.index, el)"
               class="constructionDialog__input"
-              type="number"
-              min="0.01"
-              step="0.01"
+              type="text"
+              inputmode="decimal"
+              dir="ltr"
+              @focus="setSelectedPartModelAngleIndex(angle.index)"
+              @input="onPartModelAngleInput(angle.index, $event.target.value)"
               @change="onPartModelAngleChange(angle.index, $event.target.value)"
+              @blur="onPartModelAngleChange(angle.index, $event.target.value)"
+              @keydown.enter.prevent="onPartModelAngleChange(angle.index, $event.target.value)"
             />
           </label>
         </div>
@@ -31599,4 +31851,119 @@ onBeforeUnmount(() => {
   </div>
 
 </template>
+
+<style scoped>
+.partModelPreview {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.96));
+}
+
+.partModelPreview__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.partModelPreview__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.partModelPreview__hint {
+  font-size: 12px;
+  color: #475569;
+}
+
+.partModelPreview__canvas {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 280px;
+}
+
+.partModelPreview__svg {
+  width: min(100%, 320px);
+  height: auto;
+  overflow: visible;
+}
+
+.partModelPreview__shape {
+  fill: rgba(148, 163, 184, 0.14);
+  stroke: #0f172a;
+  stroke-width: 2.4;
+  stroke-linejoin: round;
+}
+
+.partModelPreview__vertex {
+  fill: #fff;
+  stroke: #334155;
+  stroke-width: 2;
+}
+
+.partModelPreview__angle {
+  cursor: pointer;
+}
+
+.partModelPreview__wedge {
+  fill: none;
+  stroke: rgba(148, 163, 184, 0.8);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.partModelPreview__hit {
+  fill: transparent;
+  stroke: transparent;
+}
+
+.partModelPreview__labelBubble {
+  fill: rgba(255, 255, 255, 0.96);
+  stroke: rgba(148, 163, 184, 0.85);
+  stroke-width: 1.2;
+}
+
+.partModelPreview__label {
+  fill: #0f172a;
+  font-size: 10px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  user-select: none;
+}
+
+.partModelPreview__angle.is-active .partModelPreview__wedge {
+  stroke: #f97316;
+  stroke-width: 3;
+}
+
+.partModelPreview__angle.is-active .partModelPreview__labelBubble {
+  fill: #fff7ed;
+  stroke: #f97316;
+  stroke-width: 2;
+}
+
+.partModelPreview__angle.is-active .partModelPreview__label {
+  fill: #c2410c;
+}
+
+.partModelAngleField--active .constructionDialog__input {
+  border-color: #f97316;
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.14);
+}
+
+@media (max-width: 900px) {
+  .partModelPreview__canvas {
+    min-height: 240px;
+  }
+}
+</style>
 
