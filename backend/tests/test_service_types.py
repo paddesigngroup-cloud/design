@@ -68,6 +68,7 @@ def test_create_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
         service_type="  برش CNC  ",
         service_title="  دورو  ",
         short_code="  dr  ",
+        part_side="  back  ",
         sort_order=None,
         is_system=True,
     )
@@ -77,6 +78,7 @@ def test_create_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.service_type == "برش CNC"
     assert result.service_title == "دورو"
     assert result.short_code == "dr"
+    assert result.part_side == "back"
     assert result.sort_order == 4
     assert session.added is not None
 
@@ -92,6 +94,7 @@ def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
         service_type="قدیمی",
         service_title="قدیمی",
         short_code="old_code",
+        part_side="front",
         sort_order=1,
         is_system=True,
     )
@@ -101,6 +104,7 @@ def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
         service_type="مونتاژ",
         service_title="مونتاژ بدنه",
         short_code="asm",
+        part_side="back",
         sort_order=8,
         is_system=False,
     )
@@ -110,6 +114,7 @@ def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.service_type == "مونتاژ"
     assert existing.service_title == "مونتاژ بدنه"
     assert existing.short_code == "asm"
+    assert existing.part_side == "back"
     assert existing.sort_order == 8
     assert existing.is_system is False
 
@@ -124,6 +129,7 @@ def test_create_service_type_rejects_blank_trimmed_fields(monkeypatch: pytest.Mo
         service_type="   ",
         service_title="عنوان",
         short_code="code",
+        part_side="front",
         sort_order=0,
         is_system=True,
     )
@@ -147,6 +153,7 @@ def test_create_service_type_rejects_duplicate_short_code_in_scope(monkeypatch: 
         service_type="خدمات",
         service_title="توضیح",
         short_code="dup",
+        part_side="front",
         sort_order=1,
         is_system=True,
     )
@@ -187,6 +194,7 @@ def test_delete_service_type_checks_access_scope(monkeypatch: pytest.MonkeyPatch
         service_type="test",
         service_title="title",
         short_code="test",
+        part_side="front",
         sort_order=1,
         is_system=False,
     )
@@ -195,3 +203,25 @@ def test_delete_service_type_checks_access_scope(monkeypatch: pytest.MonkeyPatch
     asyncio.run(delete_service_type(existing.id, session))
 
     assert called["admin_id"] == target_admin_id
+
+
+def test_create_service_type_rejects_invalid_part_side(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_require_admin_if_present(session, admin_id):
+        return None
+
+    monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
+    payload = ServiceTypeCreate(
+        admin_id=None,
+        service_type="خدمات",
+        service_title="توضیح",
+        short_code="code",
+        part_side="left",
+        sort_order=1,
+        is_system=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(create_service_type(payload, FakeSession()))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Part side must be front or back."

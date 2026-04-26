@@ -8734,6 +8734,7 @@ function normalizeServiceTypePayload(item) {
     service_type: String(item.service_type || "").trim(),
     service_title: String(item.service_title || "").trim(),
     short_code: String(item.short_code || "").trim(),
+    part_side: normalizePartServiceSide(item.part_side),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
     is_system: !!item.is_system,
   };
@@ -8842,6 +8843,7 @@ function normalizeEditableServiceTypeRecord(item) {
     service_type: String(item.service_type || "").trim(),
     service_title: String(item.service_title || "").trim(),
     short_code: String(item.short_code || "").trim(),
+    part_side: normalizePartServiceSide(item.part_side),
     sort_order: Number(item.sort_order) || 0,
     is_system: !!item.is_system,
   });
@@ -9096,6 +9098,24 @@ function normalizeBooleanFlag(value, fallback = false) {
   if (["1", "true", "yes", "on"].includes(text)) return true;
   if (["0", "false", "no", "off"].includes(text)) return false;
   return !!fallback;
+}
+
+const PART_SERVICE_SIDE_OPTIONS = [
+  { value: "front", label: "روی قطعه" },
+  { value: "back", label: "پشت قطعه" },
+];
+
+function normalizePartServiceSide(value) {
+  return String(value || "").trim().toLowerCase() === "back" ? "back" : "front";
+}
+
+function isValidPartServiceSideValue(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text === "front" || text === "back";
+}
+
+function getPartServiceSideLabel(value) {
+  return normalizePartServiceSide(value) === "back" ? "پشت قطعه" : "روی قطعه";
 }
 
 function normalizeDuplicateValue(field, value) {
@@ -9900,6 +9920,7 @@ function buildNewServiceTypeDraft() {
     service_type: fallbackType,
     service_title: "",
     short_code: `service_type_${nextSort}`,
+    part_side: "front",
     sort_order: nextSort,
     is_system: true,
   };
@@ -12551,6 +12572,7 @@ function openServiceTypeEditor(item = null) {
         service_type: String(item.service_type || "").trim(),
         service_title: String(item.service_title || "").trim(),
         short_code: String(item.short_code || "").trim(),
+        part_side: normalizePartServiceSide(item.part_side),
         sort_order: Number(item.sort_order) || 0,
         is_system: !!item.is_system,
       }
@@ -15265,6 +15287,7 @@ function validateConstructionServiceTypes() {
     const serviceType = String(item.service_type || "").trim();
     const serviceTitle = String(item.service_title || "").trim();
     const shortCode = String(item.short_code || "").trim();
+    const partSide = normalizePartServiceSide(item.part_side);
     if (!serviceType) {
       showAlert("نوع خدمت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
       return false;
@@ -15275,6 +15298,10 @@ function validateConstructionServiceTypes() {
     }
     if (!shortCode) {
       showAlert("کد اختصاری نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!isValidPartServiceSideValue(partSide)) {
+      showAlert("محل خدمت باید روی قطعه یا پشت قطعه باشد.", { title: "اعتبارسنجی" });
       return false;
     }
   }
@@ -15346,6 +15373,7 @@ async function saveServiceTypeEditor() {
   const serviceType = String(draft.service_type || "").trim();
   const serviceTitle = String(draft.service_title || "").trim();
   const shortCode = String(draft.short_code || "").trim();
+  const partSide = normalizePartServiceSide(draft.part_side);
   if (!serviceType) {
     showAlert("نوع خدمت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
     return;
@@ -15368,6 +15396,7 @@ async function saveServiceTypeEditor() {
     showAlert("کد اختصاری در همین نوع خدمت و همین دامنه مالک تکراری است.", { title: "اعتبارسنجی" });
     return;
   }
+  draft.part_side = partSide;
   const payload = normalizeServiceTypePayload(draft);
   try {
     const res = await fetch(
@@ -17257,7 +17286,7 @@ function getConstructionCsvHeaders() {
     return ["service_type", "service_description", "service_code", "admin_mode"];
   }
   if (constructionStep.value === "service_types") {
-    return ["service_type", "service_title", "short_code", "admin_mode"];
+    return ["service_type", "service_title", "short_code", "part_side", "admin_mode"];
   }
   if (constructionStep.value === "templates") {
     return ["temp_id", "temp_title", "admin_mode"];
@@ -17325,6 +17354,7 @@ function getConstructionCsvRows(items = null) {
       String(item.service_type || "").trim(),
       String(item.service_title || "").trim(),
       String(item.short_code || "").trim(),
+      normalizePartServiceSide(item.part_side),
       item.admin_id === null ? "system" : "admin",
     ]);
   }
@@ -17636,12 +17666,13 @@ async function onConstructionImportFileChange(event) {
       });
     } else if (constructionStep.value === "service_types") {
       previewRows = rows.slice(1).map((row, index) => {
-        const adminMode = String(row[3] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const adminMode = String(row[4] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         return {
           lineNo: index + 2,
           service_type: String(row[0] || "").trim(),
           service_title: String(row[1] || "").trim(),
           short_code: String(row[2] || "").trim(),
+          part_side: normalizePartServiceSide(row[3]),
           admin_mode: adminMode,
         };
       });
@@ -17843,7 +17874,8 @@ async function onConstructionImportFileChange(event) {
           (row) =>
             !row.service_type ||
             !row.service_title ||
-            !row.short_code
+            !row.short_code ||
+            !isValidPartServiceSideValue(row.part_side)
         )
       : constructionStep.value === "templates"
       ? previewRows.find(
@@ -20951,6 +20983,7 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       service_type: String(row.service_type || "").trim(),
       service_title: String(row.service_title || "").trim(),
       short_code: String(row.short_code || "").trim(),
+      part_side: normalizePartServiceSide(row.part_side),
       sort_order: index + 1,
       is_system: adminId === null,
     };
@@ -20966,6 +20999,7 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       String(existing.service_type || "").trim() !== nextPayload.service_type ||
       String(existing.service_title || "").trim() !== nextPayload.service_title ||
       String(existing.short_code || "").trim() !== nextPayload.short_code ||
+      normalizePartServiceSide(existing.part_side) !== nextPayload.part_side ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system;
     return buildPartKindDraft(existing, {
@@ -25745,6 +25779,7 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--partServiceType">نوع خدمت</th>
                       <th class="constructionDialog__col constructionDialog__col--title">عنوان خدمات</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode">کد اختصاری</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceSide">محل خدمت</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
                   </thead>
@@ -25753,6 +25788,7 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--partServiceType">{{ row.service_type }}</td>
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.service_title }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode">{{ row.short_code }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceSide">{{ getPartServiceSideLabel(row.part_side) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "سیستم" : "ادمین" }}</td>
                     </tr>
                   </tbody>
@@ -25774,6 +25810,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--partServiceType">نوع خدمت</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceDescription">عنوان خدمات</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode">کد اختصاری</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceSide">محل خدمت</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceActions">عملیات</th>
                   </tr>
                 </thead>
@@ -25792,6 +25829,9 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--partServiceCode">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.short_code }}</span>
                     </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceSide">
+                      <span class="constructionDialog__pill">{{ getPartServiceSideLabel(item.part_side) }}</span>
+                    </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceActions">
                       <div class="constructionDialog__actionsCell constructionDialog__actionsCell--partService">
                         <button type="button" class="constructionDialog__textBtn" @click="openServiceTypeEditor(item)">ویرایش</button>
@@ -25800,7 +25840,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionServiceTypes.length">
-                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="4">هنوز خدمتی برای قطعات ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="5">هنوز خدمتی برای قطعات ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -26997,6 +27037,12 @@ onBeforeUnmount(() => {
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
             <span>کد اختصاری</span>
             <input v-model="serviceTypeEditorDraft.short_code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>محل خدمت</span>
+            <select v-model="serviceTypeEditorDraft.part_side" class="constructionDialog__input">
+              <option v-for="option in PART_SERVICE_SIDE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
           </label>
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
             <span>ترتیب</span>

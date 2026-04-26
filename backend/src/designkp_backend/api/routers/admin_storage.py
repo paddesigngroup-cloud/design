@@ -47,6 +47,7 @@ def _service_type_headers() -> list[str]:
         "service_type",
         "service_title",
         "short_code",
+        "part_side",
         "admin_mode",
     ]
 
@@ -386,6 +387,7 @@ async def _service_type_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
             row.service_type,
             row.service_title,
             row.short_code,
+            row.part_side,
             "system" if row.admin_id is None else "admin",
         ]
         for row in rows

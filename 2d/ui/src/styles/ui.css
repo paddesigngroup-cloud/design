@@ -3178,6 +3178,10 @@ option {
   width: 16%;
   min-width: 150px !important;
 }
+.constructionDialog__col--partServiceSide {
+  width: 14%;
+  min-width: 130px !important;
+}
 .constructionDialog__col--partServiceActions {
   width: 120px;
   min-width: 120px !important;
@@ -3568,6 +3572,9 @@ option {
   }
   .constructionDialog__col--partServiceCode {
     min-width: 120px !important;
+  }
+  .constructionDialog__col--partServiceSide {
+    min-width: 110px !important;
   }
   .constructionDialog__col--partServiceActions {
     width: 108px;

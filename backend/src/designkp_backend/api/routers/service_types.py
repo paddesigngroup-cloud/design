@@ -21,6 +21,7 @@ class ServiceTypeItem(BaseModel):
     service_type: str
     service_title: str
     short_code: str
+    part_side: str
     sort_order: int
     is_system: bool
 
@@ -32,6 +33,7 @@ class ServiceTypeCreate(BaseModel):
     service_type: str = Field(min_length=1, max_length=255)
     service_title: str = Field(min_length=1, max_length=255)
     short_code: str = Field(min_length=1, max_length=64)
+    part_side: str = Field(default="front", min_length=1, max_length=16)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
 
@@ -41,6 +43,7 @@ class ServiceTypeUpdate(BaseModel):
     service_type: str = Field(min_length=1, max_length=255)
     service_title: str = Field(min_length=1, max_length=255)
     short_code: str = Field(min_length=1, max_length=64)
+    part_side: str = Field(default="front", min_length=1, max_length=16)
     sort_order: int = Field(ge=0)
     is_system: bool
 
@@ -51,6 +54,13 @@ def _normalize_required_text(value: str, field: str, max_len: int) -> str:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field} is required.")
     if len(normalized) > max_len:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field} is too long.")
+    return normalized
+
+
+def _normalize_part_side(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized not in {"front", "back"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Part side must be front or back.")
     return normalized
 
 
@@ -117,6 +127,7 @@ async def create_service_type(payload: ServiceTypeCreate, session: AsyncSession 
     service_type = _normalize_required_text(payload.service_type, "Service type", 255)
     service_title = _normalize_required_text(payload.service_title, "Service title", 255)
     short_code = _normalize_required_text(payload.short_code, "Short code", 64)
+    part_side = _normalize_part_side(payload.part_side)
     await _ensure_unique_short_code(session, admin_id=payload.admin_id, service_type=service_type, short_code=short_code)
 
     item = PartServiceType(
@@ -124,6 +135,7 @@ async def create_service_type(payload: ServiceTypeCreate, session: AsyncSession 
         service_type=service_type,
         service_title=service_title,
         short_code=short_code,
+        part_side=part_side,
         sort_order=payload.sort_order if payload.sort_order is not None else await _next_sort_order(session),
         is_system=payload.is_system,
     )
@@ -151,6 +163,7 @@ async def update_service_type(
     service_type = _normalize_required_text(payload.service_type, "Service type", 255)
     service_title = _normalize_required_text(payload.service_title, "Service title", 255)
     short_code = _normalize_required_text(payload.short_code, "Short code", 64)
+    part_side = _normalize_part_side(payload.part_side)
     await _ensure_unique_short_code(
         session,
         admin_id=payload.admin_id,
@@ -163,6 +176,7 @@ async def update_service_type(
     item.service_type = service_type
     item.service_title = service_title
     item.short_code = short_code
+    item.part_side = part_side
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     try:
