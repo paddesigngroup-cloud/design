@@ -141,6 +141,8 @@ class PartFormula(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionM
     formula_cx: Mapped[str] = mapped_column(String(2048), nullable=False)
     formula_cy: Mapped[str] = mapped_column(String(2048), nullable=False)
     formula_cz: Mapped[str] = mapped_column(String(2048), nullable=False)
+    lw_frame_mapping: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    part_model_side_services: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
     door_dependent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)

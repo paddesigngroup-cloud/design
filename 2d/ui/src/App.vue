@@ -708,6 +708,10 @@ const PART_FORMULA_FIELDS = [
   { key: "formula_cy", label: "فرمول Cy" },
   { key: "formula_cz", label: "فرمول Cz" },
 ];
+const DEFAULT_PART_FORMULA_LW_FRAME_MAPPING = Object.freeze({
+  l_axis: "horizontal",
+  w_axis: "vertical",
+});
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH = "width_controler_internal_group_parts";
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_RIGHT = "width_controler_internal_group_parts_right";
 const INTERNAL_GROUP_CONTROLLER_TYPE_WIDTH_LEFT = "width_controler_internal_group_parts_left";
@@ -954,6 +958,9 @@ const partFormulaCreateDialogInitialSnapshot = ref("");
 const partFormulaFieldsDialogOpen = ref(false);
 const partFormulaFieldsDialogDraft = ref(null);
 const partFormulaFieldsDialogRowId = ref(null);
+const partFormulaModelEditorOpen = ref(false);
+const partFormulaModelEditorDraft = ref(null);
+const partFormulaModelEditorRowId = ref(null);
 const constructionLoading = ref(false);
 const constructionSavingIds = ref([]);
 const constructionDeletingIds = ref([]);
@@ -3755,6 +3762,9 @@ const constructionServiceTypes = computed(() =>
       return String(a.id || "").localeCompare(String(b.id || ""));
     })
 );
+const constructionServiceTypesById = computed(() =>
+  new Map(constructionServiceTypes.value.map((item) => [String(item.id || "").trim(), item]))
+);
 const constructionServiceTypeOptions = computed(() => {
   const labels = new Map();
   for (const item of constructionPartServices.value) {
@@ -3763,6 +3773,52 @@ const constructionServiceTypeOptions = computed(() => {
     labels.set(key, key);
   }
   return Array.from(labels.entries()).map(([value, label]) => ({ value, label }));
+});
+const constructionPartServiceDefinitionsByType = computed(() =>
+  new Map(
+    constructionPartServices.value.map((item) => [
+      String(item.service_type || "").trim(),
+      item,
+    ])
+  )
+);
+const constructionGroupedServiceTypeChoices = computed(() => {
+  const groups = new Map();
+  for (const item of constructionServiceTypes.value) {
+    const groupKey = String(item.service_type || "").trim();
+    if (!groupKey) continue;
+    if (!groups.has(groupKey)) {
+      const definition = constructionPartServiceDefinitionsByType.value.get(groupKey);
+      groups.set(groupKey, {
+        key: groupKey,
+        title: groupKey,
+        description: String(definition?.service_description || "").trim(),
+        items: [],
+        sort_order: Number(definition?.sort_order) || Number.MAX_SAFE_INTEGER,
+      });
+    }
+    groups.get(groupKey).items.push({
+      id: String(item.id || "").trim(),
+      service_type: groupKey,
+      service_title: String(item.service_title || "").trim(),
+      short_code: String(item.short_code || "").trim(),
+      part_side: normalizePartServiceSide(item.part_side),
+      sort_order: Number(item.sort_order) || 0,
+    });
+  }
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      items: group.items.sort((a, b) =>
+        a.sort_order - b.sort_order
+        || a.part_side.localeCompare(b.part_side)
+        || a.service_title.localeCompare(b.service_title, "fa")
+      ),
+    }))
+    .sort((a, b) =>
+      a.sort_order - b.sort_order
+      || a.title.localeCompare(b.title, "fa")
+    );
 });
 const constructionPartKindsById = computed(() =>
   new Map(constructionPartKinds.value.map((item) => [Number(item.part_kind_id) || 0, item]))
@@ -8252,9 +8308,23 @@ const partFormulaFieldsDialogValidationErrors = computed(() => {
   return getPartFormulaValidationErrors(draft, partFormulaFieldsDialogRowId.value)
     .filter((error) => PART_FORMULA_FIELDS.some((field) => error.startsWith(`${field.label}`) || error === `${field.label} خالی است.`));
 });
+const partFormulaModelEditorValidationErrors = computed(() => {
+  const draft = partFormulaModelEditorDraft.value;
+  if (!draft) return [];
+  return getPartFormulaValidationErrors(draft, partFormulaModelEditorRowId.value)
+    .filter((error) =>
+      error.includes("نگاشت L/W")
+      || error.includes("اضلاع مدل قطعه")
+      || error.includes("خدمت انتخاب‌شده")
+      || error.includes("فقط یک خدمت پیش‌فرض")
+    );
+});
 const isBaseFormulaBuilderApplyDisabled = computed(() => !baseFormulaBuilderDraft.value || baseFormulaBuilderValidationErrors.value.length > 0);
 const isPartFormulaCreateDialogApplyDisabled = computed(() => !partFormulaCreateDialogDraft.value || partFormulaCreateDialogValidationErrors.value.length > 0);
 const isPartFormulaFieldsDialogApplyDisabled = computed(() => !partFormulaFieldsDialogDraft.value || partFormulaFieldsDialogValidationErrors.value.length > 0);
+const activePartFormulaModelEditorPartModel = computed(() =>
+  constructionPartModelsById.value.get(String(partFormulaModelEditorDraft.value?.part_model_id || "").trim()) || null
+);
 const constructionParamGroupDuplicateState = computed(() => buildDuplicateState(editableParamGroups.value, ["param_group_id", "param_group_code"]));
 const constructionParamDuplicateState = computed(() => buildDuplicateState(editableParams.value, ["param_id", "param_code"]));
 const constructionBaseFormulaDuplicateState = computed(() => buildDuplicateState(editableBaseFormulas.value, ["fo_id", "param_formula"]));
@@ -8891,6 +8961,36 @@ function normalizeEditableServiceTypeRecord(item) {
   });
 }
 
+function normalizePartFormulaLwFrameMapping(value) {
+  const lAxis = String(value?.l_axis || DEFAULT_PART_FORMULA_LW_FRAME_MAPPING.l_axis).trim().toLowerCase();
+  const wAxis = String(value?.w_axis || DEFAULT_PART_FORMULA_LW_FRAME_MAPPING.w_axis).trim().toLowerCase();
+  if (lAxis === wAxis) {
+    return { ...DEFAULT_PART_FORMULA_LW_FRAME_MAPPING };
+  }
+  return {
+    l_axis: lAxis === "vertical" ? "vertical" : "horizontal",
+    w_axis: wAxis === "horizontal" ? "horizontal" : "vertical",
+  };
+}
+
+function normalizePartFormulaSideServices(value) {
+  if (!Array.isArray(value)) return [];
+  const normalized = [];
+  const seen = new Set();
+  for (const entry of value) {
+    const sideIndex = Number(entry?.side_index);
+    const serviceTypeId = String(entry?.service_type_id || entry?.part_service_type_id || "").trim();
+    if (!Number.isInteger(sideIndex) || sideIndex < 0 || !serviceTypeId || seen.has(sideIndex)) continue;
+    normalized.push({
+      side_index: sideIndex,
+      service_type_id: serviceTypeId,
+    });
+    seen.add(sideIndex);
+  }
+  normalized.sort((a, b) => a.side_index - b.side_index);
+  return normalized;
+}
+
 function toPersianDigits(value) {
   return String(value ?? "").replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
 }
@@ -9258,6 +9358,10 @@ function buildPartModelAngleDrafts(sideCount, defaultAngles = null, interiorAngl
   }));
 }
 
+function buildEqualPartModelAngleDrafts(sideCount, defaultAngles = null, interiorAngleSum = null) {
+  return buildPartModelAngleDrafts(sideCount, defaultAngles, interiorAngleSum);
+}
+
 function redistributePartModelAngleDrafts(sideCount, interiorAngleSum, angleDrafts, primaryIndex = 0) {
   const normalized = (Array.isArray(angleDrafts) ? angleDrafts : []).map((item, fallbackIndex) => ({
     index: Number.isInteger(Number(item?.index)) ? Number(item.index) : fallbackIndex,
@@ -9422,6 +9526,28 @@ function buildPartModelAnglePreviewRecords(sideCount, defaultAngles) {
   });
 }
 
+function scalePartModelVerticesIntoFrame(vertices, frameRect, padding = 20) {
+  const points = Array.isArray(vertices) ? vertices : [];
+  if (!points.length) return [];
+  const xs = points.map((point) => Number(point.x) || 0);
+  const ys = points.map((point) => Number(point.y) || 0);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const targetWidth = Math.max(1, Number(frameRect.width) - padding * 2);
+  const targetHeight = Math.max(1, Number(frameRect.height) - padding * 2);
+  const scale = Math.min(targetWidth / width, targetHeight / height);
+  const offsetX = Number(frameRect.x) + (Number(frameRect.width) - width * scale) / 2 - minX * scale;
+  const offsetY = Number(frameRect.y) + (Number(frameRect.height) - height * scale) / 2 - minY * scale;
+  return points.map((point) => ({
+    x: (Number(point.x) || 0) * scale + offsetX,
+    y: (Number(point.y) || 0) * scale + offsetY,
+  }));
+}
+
 function serializePartModelAnglesCsv(defaultAngles, sideCount, interiorAngleSum) {
   return normalizePartModelAngleRecords(sideCount, defaultAngles, interiorAngleSum)
     .map((item) => formatPartModelAngleNumber(item.angle_deg))
@@ -9463,6 +9589,67 @@ const partModelPreviewState = computed(() => {
   };
 });
 
+const partFormulaModelEditorPreviewState = computed(() => {
+  const model = activePartFormulaModelEditorPartModel.value;
+  const draft = partFormulaModelEditorDraft.value;
+  const viewBox = "0 0 360 260";
+  const frameRect = { x: 28, y: 36, width: 304, height: 188 };
+  const baseState = {
+    viewBox,
+    frameRect,
+    polygonPoints: "",
+    sides: [],
+    lAxis: normalizePartFormulaLwFrameMapping(draft?.lw_frame_mapping).l_axis,
+    frameLabels: [],
+  };
+  if (!model) return baseState;
+  const geometry = normalizePartModelPreviewGeometry(model.side_count, model.default_angles);
+  const vertices = scalePartModelVerticesIntoFrame(geometry.vertices, frameRect, 24);
+  const polygonPoints = vertices.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
+  const sides = vertices.map((point, index) => {
+    const nextPoint = vertices[(index + 1) % vertices.length] || point;
+    const midX = (point.x + nextPoint.x) / 2;
+    const midY = (point.y + nextPoint.y) / 2;
+    const dx = nextPoint.x - point.x;
+    const dy = nextPoint.y - point.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const normalX = -dy / len;
+    const normalY = dx / len;
+    return {
+      index,
+      x1: point.x,
+      y1: point.y,
+      x2: nextPoint.x,
+      y2: nextPoint.y,
+      labelX: midX + normalX * 16,
+      labelY: midY + normalY * 16,
+      hasService: !!getPartFormulaSideServiceValue(draft, index),
+    };
+  });
+  const lAxis = normalizePartFormulaLwFrameMapping(draft?.lw_frame_mapping).l_axis;
+  const frameLabels = lAxis === "horizontal"
+    ? [
+        { key: "l-top", text: "L", x: frameRect.x + frameRect.width / 2, y: frameRect.y - 14, tone: "is-l" },
+        { key: "l-bottom", text: "L", x: frameRect.x + frameRect.width / 2, y: frameRect.y + frameRect.height + 18, tone: "is-l" },
+        { key: "w-left", text: "W", x: frameRect.x - 14, y: frameRect.y + frameRect.height / 2, tone: "is-w" },
+        { key: "w-right", text: "W", x: frameRect.x + frameRect.width + 14, y: frameRect.y + frameRect.height / 2, tone: "is-w" },
+      ]
+    : [
+        { key: "w-top", text: "W", x: frameRect.x + frameRect.width / 2, y: frameRect.y - 14, tone: "is-w" },
+        { key: "w-bottom", text: "W", x: frameRect.x + frameRect.width / 2, y: frameRect.y + frameRect.height + 18, tone: "is-w" },
+        { key: "l-left", text: "L", x: frameRect.x - 14, y: frameRect.y + frameRect.height / 2, tone: "is-l" },
+        { key: "l-right", text: "L", x: frameRect.x + frameRect.width + 14, y: frameRect.y + frameRect.height / 2, tone: "is-l" },
+      ];
+  return {
+    viewBox,
+    frameRect,
+    polygonPoints,
+    sides,
+    lAxis,
+    frameLabels,
+  };
+});
+
 function normalizeBooleanFlag(value, fallback = false) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
@@ -9489,6 +9676,37 @@ function isValidPartServiceSideValue(value) {
 
 function getPartServiceSideLabel(value) {
   return normalizePartServiceSide(value) === "back" ? "پشت قطعه" : "روی قطعه";
+}
+
+function createEmptyPartFormulaModelEditorState() {
+  return {
+    lw_frame_mapping: { ...DEFAULT_PART_FORMULA_LW_FRAME_MAPPING },
+    part_model_side_services: [],
+  };
+}
+
+function sanitizePartFormulaModelEditorState(item, options = {}) {
+  const draft = item ? createPartFormulaDraft(item) : createEmptyPartFormulaModelEditorState();
+  draft.lw_frame_mapping = normalizePartFormulaLwFrameMapping(draft.lw_frame_mapping);
+  const sideCount = Number(constructionPartModelsById.value.get(String(draft.part_model_id || "").trim())?.side_count) || 0;
+  const normalizedServices = normalizePartFormulaSideServices(draft.part_model_side_services);
+  const validServiceIds = new Set(constructionServiceTypes.value.map((service) => String(service.id || "").trim()));
+  if (sideCount <= 0 || validServiceIds.size === 0) {
+    draft.part_model_side_services = normalizedServices;
+    return draft;
+  }
+  const pruned = normalizedServices.filter((entry) =>
+    entry.side_index >= 0
+    && entry.side_index < sideCount
+    && validServiceIds.has(String(entry.service_type_id || "").trim())
+  );
+  if (options.warn && pruned.length !== normalizedServices.length) {
+    showAlert("با تغییر مدل قطعه، برخی نسبت‌های خدمات با تعداد اضلاع جدید سازگار نبودند و پاک شدند.", {
+      title: "بازبینی اضلاع مدل قطعه",
+    });
+  }
+  draft.part_model_side_services = pruned;
+  return draft;
 }
 
 function normalizeDuplicateValue(field, value) {
@@ -9673,10 +9891,18 @@ function createBaseFormulaDraft(item, overrides = {}) {
 }
 
 function createPartFormulaDraft(item, overrides = {}) {
-  return {
-    ...item,
+  const base = {
+    ...(item || {}),
+    lw_frame_mapping: normalizePartFormulaLwFrameMapping(item?.lw_frame_mapping),
+    part_model_side_services: normalizePartFormulaSideServices(item?.part_model_side_services),
+  };
+  const next = {
+    ...base,
     ...overrides,
   };
+  next.lw_frame_mapping = normalizePartFormulaLwFrameMapping(next.lw_frame_mapping);
+  next.part_model_side_services = normalizePartFormulaSideServices(next.part_model_side_services);
+  return next;
 }
 
 function buildPartFormulaCreateDialogSnapshot(item) {
@@ -9688,6 +9914,8 @@ function buildPartFormulaCreateDialogSnapshot(item) {
     part_code: String(item?.part_code || "").trim(),
     part_title: String(item?.part_title || "").trim(),
     door_dependent: normalizeBooleanFlag(item?.door_dependent, false),
+    lw_frame_mapping: normalizePartFormulaLwFrameMapping(item?.lw_frame_mapping),
+    part_model_side_services: normalizePartFormulaSideServices(item?.part_model_side_services),
   });
 }
 
@@ -9735,6 +9963,8 @@ function buildNewPartFormulaDraft() {
     door_dependent: false,
     code: `part_${nextId}`,
     title: `قطعه ${toPersianDigits(nextId)}`,
+    lw_frame_mapping: { ...DEFAULT_PART_FORMULA_LW_FRAME_MAPPING },
+    part_model_side_services: [],
     sort_order: nextId,
     is_system: true,
     __isNew: true,
@@ -9894,6 +10124,26 @@ function getPartFormulaValidationErrors(item, currentId = null) {
   if (!Number.isInteger(partSubKindId) || partSubKindId < 1) errors.push("زیرنوع قطعه معتبر نیست.");
   if (!partCode) errors.push("کد قطعه خالی است.");
   if (!partTitle) errors.push("عنوان قطعه خالی است.");
+  const lwFrameMapping = normalizePartFormulaLwFrameMapping(item?.lw_frame_mapping);
+  if (lwFrameMapping.l_axis === lwFrameMapping.w_axis) errors.push("نگاشت L/W معتبر نیست.");
+  const sideServices = normalizePartFormulaSideServices(item?.part_model_side_services);
+  const sideCount = Number(constructionPartModelsById.value.get(partModelId)?.side_count) || 0;
+  const seenSideIndexes = new Set();
+  for (const entry of sideServices) {
+    if (!Number.isInteger(entry.side_index) || entry.side_index < 0 || entry.side_index >= sideCount) {
+      errors.push("نسبت خدمات به اضلاع مدل قطعه معتبر نیست.");
+      break;
+    }
+    if (seenSideIndexes.has(entry.side_index)) {
+      errors.push("برای هر ضلع فقط یک خدمت پیش‌فرض قابل انتخاب است.");
+      break;
+    }
+    if (!constructionServiceTypesById.value.has(String(entry.service_type_id || "").trim())) {
+      errors.push("خدمت انتخاب‌شده برای یکی از اضلاع معتبر نیست.");
+      break;
+    }
+    seenSideIndexes.add(entry.side_index);
+  }
   const scopedRows = editablePartFormulas.value.filter((row) => String(row.id) !== String(currentId));
   if (scopedRows.some((row) => Number(row.part_formula_id) === partFormulaId)) errors.push("شناسه فرمول قطعه تکراری است.");
   if (scopedRows.some((row) => String(row.part_code || "").trim().toLowerCase() === partCode.toLowerCase())) errors.push("کد قطعه تکراری است.");
@@ -9995,6 +10245,8 @@ function applyPartFormulaCreateDialog() {
   for (const field of PART_FORMULA_FIELDS) {
     normalized[field.key] = String(draft[field.key] || "").trim() || "(1)";
   }
+  normalized.lw_frame_mapping = normalizePartFormulaLwFrameMapping(draft.lw_frame_mapping);
+  normalized.part_model_side_services = normalizePartFormulaSideServices(draft.part_model_side_services);
   editablePartFormulas.value = [...editablePartFormulas.value, normalized];
   partFormulaCreateDialogOpen.value = false;
   partFormulaCreateDialogDraft.value = null;
@@ -10005,6 +10257,12 @@ function openPartFormulaFieldsDialog(item) {
   partFormulaFieldsDialogRowId.value = item?.id ?? null;
   partFormulaFieldsDialogDraft.value = createPartFormulaDraft(item);
   partFormulaFieldsDialogOpen.value = true;
+}
+
+function openPartFormulaModelEditor(item) {
+  partFormulaModelEditorRowId.value = item?.id ?? null;
+  partFormulaModelEditorDraft.value = sanitizePartFormulaModelEditorState(item);
+  partFormulaModelEditorOpen.value = true;
 }
 
 async function closePartFormulaFieldsDialog() {
@@ -10058,6 +10316,94 @@ function applyPartFormulaFieldsDialog() {
   partFormulaFieldsDialogOpen.value = false;
   partFormulaFieldsDialogDraft.value = null;
   partFormulaFieldsDialogRowId.value = null;
+}
+
+async function closePartFormulaModelEditor() {
+  const draft = partFormulaModelEditorDraft.value;
+  if (!partFormulaModelEditorOpen.value || !draft) {
+    partFormulaModelEditorOpen.value = false;
+    partFormulaModelEditorDraft.value = null;
+    partFormulaModelEditorRowId.value = null;
+    return;
+  }
+  const original = editablePartFormulas.value.find((item) => String(item.id) === String(partFormulaModelEditorRowId.value));
+  const hasChanges = !!original && JSON.stringify({
+    lw_frame_mapping: normalizePartFormulaLwFrameMapping(original.lw_frame_mapping),
+    part_model_side_services: normalizePartFormulaSideServices(original.part_model_side_services),
+  }) !== JSON.stringify({
+    lw_frame_mapping: normalizePartFormulaLwFrameMapping(draft.lw_frame_mapping),
+    part_model_side_services: normalizePartFormulaSideServices(draft.part_model_side_services),
+  });
+  if (hasChanges) {
+    const ok = await showConfirm("تغییرات ویرایشگر مدل قطعه اعمال نشده‌اند. پنجره بسته شود؟", {
+      title: "بستن ویرایش مدل قطعه",
+      confirmText: "بستن",
+      cancelText: "بازگشت",
+    });
+    if (!ok) return;
+  }
+  partFormulaModelEditorOpen.value = false;
+  partFormulaModelEditorDraft.value = null;
+  partFormulaModelEditorRowId.value = null;
+}
+
+function applyPartFormulaModelEditor() {
+  const draft = partFormulaModelEditorDraft.value;
+  if (!draft || partFormulaModelEditorValidationErrors.value.length > 0) return;
+  editablePartFormulas.value = editablePartFormulas.value.map((item) => {
+    if (String(item.id) !== String(partFormulaModelEditorRowId.value)) return item;
+    const next = createPartFormulaDraft(item, {
+      lw_frame_mapping: normalizePartFormulaLwFrameMapping(draft.lw_frame_mapping),
+      part_model_side_services: normalizePartFormulaSideServices(draft.part_model_side_services),
+    });
+    if (!next.__isNew) next.__dirty = true;
+    return next;
+  });
+  partFormulaModelEditorOpen.value = false;
+  partFormulaModelEditorDraft.value = null;
+  partFormulaModelEditorRowId.value = null;
+}
+
+function setPartFormulaFrameAxis(axis) {
+  if (!partFormulaModelEditorDraft.value) return;
+  const normalizedAxis = axis === "vertical" ? "vertical" : "horizontal";
+  partFormulaModelEditorDraft.value.lw_frame_mapping = normalizedAxis === "horizontal"
+    ? { l_axis: "horizontal", w_axis: "vertical" }
+    : { l_axis: "vertical", w_axis: "horizontal" };
+}
+
+function getPartFormulaSideServiceValue(draft, sideIndex) {
+  const row = normalizePartFormulaSideServices(draft?.part_model_side_services).find((entry) => Number(entry.side_index) === Number(sideIndex));
+  return String(row?.service_type_id || "").trim();
+}
+
+function setPartFormulaSideService(sideIndex, serviceTypeId) {
+  if (!partFormulaModelEditorDraft.value) return;
+  const normalizedServiceTypeId = String(serviceTypeId || "").trim();
+  let nextRows = normalizePartFormulaSideServices(partFormulaModelEditorDraft.value.part_model_side_services)
+    .filter((entry) => Number(entry.side_index) !== Number(sideIndex));
+  if (normalizedServiceTypeId) {
+    nextRows.push({
+      side_index: Number(sideIndex) || 0,
+      service_type_id: normalizedServiceTypeId,
+    });
+  }
+  nextRows.sort((a, b) => a.side_index - b.side_index);
+  partFormulaModelEditorDraft.value.part_model_side_services = nextRows;
+}
+
+function handlePartFormulaPartModelChange(item, nextPartModelId, options = {}) {
+  const next = sanitizePartFormulaModelEditorState(createPartFormulaDraft(item, {
+    part_model_id: String(nextPartModelId || "").trim(),
+    part_model_title: getConstructionPartModelTitle(nextPartModelId),
+  }), {
+    warn: options.warn,
+  });
+  item.part_model_id = next.part_model_id;
+  item.part_model_title = next.part_model_title;
+  item.part_model_side_services = next.part_model_side_services;
+  item.lw_frame_mapping = next.lw_frame_mapping;
+  markConstructionPartFormulaDirty(item);
 }
 
 async function closeBaseFormulaBuilder() {
@@ -16163,6 +16509,8 @@ function normalizePartFormulaPayload(item) {
     part_sub_kind_id: Number(item.part_sub_kind_id),
     part_code: String(item.part_code || "").trim(),
     part_title: String(item.part_title || "").trim(),
+    lw_frame_mapping: normalizePartFormulaLwFrameMapping(item.lw_frame_mapping),
+    part_model_side_services: normalizePartFormulaSideServices(item.part_model_side_services),
     door_dependent: normalizeBooleanFlag(item.door_dependent, false),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : Number(item.part_formula_id),
     is_system: !!item.is_system,
@@ -18778,6 +19126,8 @@ function buildImportedConstructionPartFormulaDrafts(rows) {
       door_dependent: normalizeBooleanFlag(row.door_dependent, false),
       code: String(row.part_code || "").trim(),
       title: String(row.part_title || "").trim(),
+      lw_frame_mapping: existing?.lw_frame_mapping || { ...DEFAULT_PART_FORMULA_LW_FRAME_MAPPING },
+      part_model_side_services: existing?.part_model_side_services || [],
       sort_order: index + 1,
       is_system: adminId === null,
     };
@@ -19053,12 +19403,12 @@ async function loadConstructionPartFormulas() {
       cacheTtlMs: 30000,
       abortChannel: `construction:part-formulas:${currentAdminId.value}`,
     });
-    editablePartFormulas.value = payload.map((item) => withConstructionDraftState({
+    editablePartFormulas.value = payload.map((item) => withConstructionDraftState(sanitizePartFormulaModelEditorState({
       ...item,
       part_model_id: String(item.part_model_id || "").trim(),
       part_model_title: String(item.part_model_title || "").trim(),
       door_dependent: normalizeBooleanFlag(item.door_dependent, false),
-    }));
+    })));
     constructionDeletedPartFormulaIds.value = [];
   } catch (_) {
     showAlert("خواندن جدول فرمول‌های قطعات از دیتابیس انجام نشد.", { title: "خطا" });
@@ -26788,7 +27138,7 @@ onBeforeUnmount(() => {
                       </select>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--title" :style="getConstructionPartFormulaColumnStyle('part_model_title')">
-                      <select v-model="item.part_model_id" class="constructionDialog__input" @change="item.part_model_title = getConstructionPartModelTitle(item.part_model_id); markConstructionPartFormulaDirty(item)">
+                      <select v-model="item.part_model_id" class="constructionDialog__input" @change="handlePartFormulaPartModelChange(item, item.part_model_id, { warn: true })">
                         <option value="" disabled>انتخاب مدل قطعه</option>
                         <option v-for="option in constructionPartModelOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                       </select>
@@ -26843,6 +27193,7 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--actions" :style="getConstructionPartFormulaColumnStyle('actions')">
                       <div class="constructionDialog__actionsCell">
                         <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" @click="openPartFormulaFieldsDialog(item)">فرمول های قطعه</button>
+                        <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" @click="openPartFormulaModelEditor(item)">ویرایش مدل قطعه</button>
                         <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionPartFormula(item.id)">×</button>
                         <span v-if="constructionDeletingIds.includes(String(item.id))" class="constructionDialog__saving constructionDialog__saving--compact">در حال حذف</span>
                         <span v-else-if="constructionSavingIds.includes(String(item.id))" class="constructionDialog__saving constructionDialog__saving--compact">در حال ذخیره</span>
@@ -29785,7 +30136,7 @@ onBeforeUnmount(() => {
           </label>
           <label class="formulaBuilder__field">
             <span>مدل قطعه</span>
-            <select v-model="partFormulaCreateDialogDraft.part_model_id" class="constructionDialog__input">
+            <select v-model="partFormulaCreateDialogDraft.part_model_id" class="constructionDialog__input" @change="handlePartFormulaPartModelChange(partFormulaCreateDialogDraft, partFormulaCreateDialogDraft.part_model_id, { warn: true })">
               <option value="" disabled>انتخاب مدل قطعه</option>
               <option v-for="option in constructionPartModelOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
@@ -29850,6 +30201,120 @@ onBeforeUnmount(() => {
       <div class="appDialog__actions">
         <button type="button" class="menuItem" @click="closePartFormulaFieldsDialog">انصراف</button>
         <button type="button" class="menuItem" :disabled="isPartFormulaFieldsDialogApplyDisabled" @click="applyPartFormulaFieldsDialog">اعمال</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="partFormulaModelEditorOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closePartFormulaModelEditor"></div>
+    <div class="appDialog__card appDialog__card--builder" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div>
+          <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش مدل قطعه</div>
+          <div class="formulaBuilder__subtitle">
+            {{ partFormulaModelEditorDraft ? `${partFormulaModelEditorDraft.part_title || "قطعه"} - ${partFormulaModelEditorDraft.part_code || ""}` : "نگاشت مستطیل مرجع و خدمات اضلاع مدل قطعه" }}
+          </div>
+        </div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closePartFormulaModelEditor">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        مستطیل بیرونی همان باکس مرجع L/W است. مدل قطعه داخل آن نمایش داده می‌شود و برای هر ضلع می‌توانید یک خدمت پیش‌فرض انتخاب کنید.
+      </div>
+
+      <div v-if="partFormulaModelEditorDraft" class="partFormulaModelEditor">
+        <section class="partFormulaModelEditor__previewCard">
+          <div class="partFormulaModelEditor__sectionHead">
+            <div class="partFormulaModelEditor__sectionTitle">نمای گرافیکی قطعه</div>
+            <div class="partFormulaModelEditor__sectionHint">شماره هر ضلع روی شکل نشان داده شده است.</div>
+          </div>
+          <div class="partFormulaModelEditor__canvasWrap">
+            <svg :viewBox="partFormulaModelEditorPreviewState.viewBox" class="partFormulaModelEditor__svg" aria-hidden="true">
+              <rect
+                :x="partFormulaModelEditorPreviewState.frameRect.x"
+                :y="partFormulaModelEditorPreviewState.frameRect.y"
+                :width="partFormulaModelEditorPreviewState.frameRect.width"
+                :height="partFormulaModelEditorPreviewState.frameRect.height"
+                rx="20"
+                class="partFormulaModelEditor__frame"
+              />
+              <polygon :points="partFormulaModelEditorPreviewState.polygonPoints" class="partFormulaModelEditor__shape" />
+              <g v-for="side in partFormulaModelEditorPreviewState.sides" :key="`part-formula-side-${side.index}`" class="partFormulaModelEditor__side">
+                <line :x1="side.x1" :y1="side.y1" :x2="side.x2" :y2="side.y2" :class="['partFormulaModelEditor__sideLine', side.hasService ? 'has-service' : '']" />
+                <circle :cx="side.labelX" :cy="side.labelY" r="13" :class="['partFormulaModelEditor__sideBubble', side.hasService ? 'has-service' : '']" />
+                <text :x="side.labelX" :y="side.labelY + 1" class="partFormulaModelEditor__sideLabel">{{ toPersianDigits(side.index + 1) }}</text>
+              </g>
+              <g v-for="label in partFormulaModelEditorPreviewState.frameLabels" :key="label.key">
+                <circle :cx="label.x" :cy="label.y" r="12" :class="['partFormulaModelEditor__frameLabelBubble', label.tone]" />
+                <text :x="label.x" :y="label.y + 1" class="partFormulaModelEditor__frameLabel">{{ label.text }}</text>
+              </g>
+            </svg>
+          </div>
+          <div class="partFormulaModelEditor__axisSwitch">
+            <button
+              type="button"
+              class="partFormulaModelEditor__axisBtn"
+              :class="{ 'is-active': normalizePartFormulaLwFrameMapping(partFormulaModelEditorDraft.lw_frame_mapping).l_axis === 'horizontal' }"
+              @click="setPartFormulaFrameAxis('horizontal')"
+            >
+              L افقی / W عمودی
+            </button>
+            <button
+              type="button"
+              class="partFormulaModelEditor__axisBtn"
+              :class="{ 'is-active': normalizePartFormulaLwFrameMapping(partFormulaModelEditorDraft.lw_frame_mapping).l_axis === 'vertical' }"
+              @click="setPartFormulaFrameAxis('vertical')"
+            >
+              L عمودی / W افقی
+            </button>
+          </div>
+        </section>
+
+        <section class="partFormulaModelEditor__servicesCard">
+          <div class="partFormulaModelEditor__sectionHead">
+            <div class="partFormulaModelEditor__sectionTitle">خدمات پیش‌فرض اضلاع</div>
+            <div class="partFormulaModelEditor__sectionHint">انتخاب‌ها بر اساس نوع خدمات گروه‌بندی شده‌اند و سمت روی/پشت قطعه در هر گزینه مشخص است.</div>
+          </div>
+          <div v-if="activePartFormulaModelEditorPartModel" class="partFormulaModelEditor__servicesList">
+            <article v-for="sideIndex in activePartFormulaModelEditorPartModel.side_count" :key="`part-formula-service-${sideIndex - 1}`" class="partFormulaModelEditor__serviceRow">
+              <div class="partFormulaModelEditor__serviceMeta">
+                <div class="partFormulaModelEditor__serviceTitle">ضلع {{ toPersianDigits(sideIndex) }}</div>
+                <div class="partFormulaModelEditor__serviceCaption">پیش‌فرض خدمات این ضلع را انتخاب کنید</div>
+              </div>
+              <select
+                :value="getPartFormulaSideServiceValue(partFormulaModelEditorDraft, sideIndex - 1)"
+                class="constructionDialog__input partFormulaModelEditor__select"
+                @change="setPartFormulaSideService(sideIndex - 1, $event.target.value)"
+              >
+                <option value="">بدون خدمت پیش‌فرض</option>
+                <optgroup v-for="group in constructionGroupedServiceTypeChoices" :key="group.key" :label="group.title">
+                  <option v-for="service in group.items" :key="service.id" :value="service.id">
+                    {{ `${service.service_title} - ${getPartServiceSideLabel(service.part_side)}${service.short_code ? ` (${service.short_code})` : ""}` }}
+                  </option>
+                </optgroup>
+              </select>
+              <div class="partFormulaModelEditor__selectedInfo">
+                <template v-if="constructionServiceTypesById.get(getPartFormulaSideServiceValue(partFormulaModelEditorDraft, sideIndex - 1))">
+                  <span class="constructionDialog__pill">
+                    {{ constructionServiceTypesById.get(getPartFormulaSideServiceValue(partFormulaModelEditorDraft, sideIndex - 1)).service_title }}
+                  </span>
+                  <span class="constructionDialog__pill constructionDialog__pill--mono">
+                    {{ getPartServiceSideLabel(constructionServiceTypesById.get(getPartFormulaSideServiceValue(partFormulaModelEditorDraft, sideIndex - 1)).part_side) }}
+                  </span>
+                </template>
+                <span v-else class="partFormulaModelEditor__selectedEmpty">خدمتی انتخاب نشده است.</span>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <div v-if="partFormulaModelEditorValidationErrors.length" class="formulaBuilder__errors">
+          <div v-for="error in partFormulaModelEditorValidationErrors" :key="error" class="formulaBuilder__error">{{ error }}</div>
+        </div>
+      </div>
+
+      <div class="appDialog__actions">
+        <button type="button" class="menuItem" @click="closePartFormulaModelEditor">انصراف</button>
+        <button type="button" class="menuItem" :disabled="partFormulaModelEditorValidationErrors.length > 0" @click="applyPartFormulaModelEditor">اعمال</button>
       </div>
     </div>
   </div>
@@ -32129,9 +32594,178 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.14);
 }
 
+.partFormulaModelEditor {
+  display: grid;
+  gap: 16px;
+}
+
+.partFormulaModelEditor__previewCard,
+.partFormulaModelEditor__servicesCard {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.96));
+}
+
+.partFormulaModelEditor__sectionHead {
+  display: grid;
+  gap: 4px;
+}
+
+.partFormulaModelEditor__sectionTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.partFormulaModelEditor__sectionHint,
+.partFormulaModelEditor__serviceCaption,
+.partFormulaModelEditor__selectedEmpty {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.partFormulaModelEditor__canvasWrap {
+  display: flex;
+  justify-content: center;
+}
+
+.partFormulaModelEditor__svg {
+  width: min(100%, 420px);
+  height: auto;
+  overflow: visible;
+}
+
+.partFormulaModelEditor__frame {
+  fill: rgba(255, 255, 255, 0.92);
+  stroke: rgba(15, 23, 42, 0.18);
+  stroke-width: 2.2;
+  stroke-dasharray: 7 6;
+}
+
+.partFormulaModelEditor__shape {
+  fill: rgba(14, 165, 233, 0.08);
+  stroke: #0f172a;
+  stroke-width: 2.4;
+  stroke-linejoin: round;
+}
+
+.partFormulaModelEditor__sideLine {
+  stroke: rgba(71, 85, 105, 0.65);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.partFormulaModelEditor__sideLine.has-service {
+  stroke: #0f766e;
+}
+
+.partFormulaModelEditor__sideBubble {
+  fill: rgba(255, 255, 255, 0.96);
+  stroke: rgba(100, 116, 139, 0.5);
+  stroke-width: 1.5;
+}
+
+.partFormulaModelEditor__sideBubble.has-service {
+  fill: #ecfeff;
+  stroke: #0f766e;
+}
+
+.partFormulaModelEditor__sideLabel,
+.partFormulaModelEditor__frameLabel {
+  fill: #0f172a;
+  font-size: 10px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  user-select: none;
+}
+
+.partFormulaModelEditor__frameLabelBubble {
+  fill: #fff;
+  stroke-width: 1.5;
+}
+
+.partFormulaModelEditor__frameLabelBubble.is-l {
+  stroke: #ea580c;
+  fill: #fff7ed;
+}
+
+.partFormulaModelEditor__frameLabelBubble.is-w {
+  stroke: #2563eb;
+  fill: #eff6ff;
+}
+
+.partFormulaModelEditor__axisSwitch {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.partFormulaModelEditor__axisBtn {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(255, 255, 255, 0.88);
+  color: #0f172a;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.partFormulaModelEditor__axisBtn.is-active {
+  border-color: #0f766e;
+  background: #ecfeff;
+  color: #115e59;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+.partFormulaModelEditor__servicesList {
+  display: grid;
+  gap: 12px;
+}
+
+.partFormulaModelEditor__serviceRow {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.partFormulaModelEditor__serviceMeta {
+  display: grid;
+  gap: 4px;
+}
+
+.partFormulaModelEditor__serviceTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.partFormulaModelEditor__select {
+  width: 100%;
+}
+
+.partFormulaModelEditor__selectedInfo {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 @media (max-width: 900px) {
   .partModelPreview__canvas {
     min-height: 240px;
+  }
+
+  .partFormulaModelEditor__axisSwitch {
+    flex-direction: column;
   }
 }
 </style>

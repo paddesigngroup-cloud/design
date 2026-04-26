@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from designkp_backend.api.formula_validation import validate_expression_identifiers
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.catalog import PartFormula, PartModel
+from designkp_backend.db.models.catalog import PartFormula, PartModel, PartServiceType
 from designkp_backend.services.admin_access import require_admin_if_present
 
 router = APIRouter(prefix="/part-formulas", tags=["part_formulas"])
@@ -45,6 +45,8 @@ class PartFormulaItem(BaseModel):
     formula_cx: str
     formula_cy: str
     formula_cz: str
+    lw_frame_mapping: dict[str, str]
+    part_model_side_services: list[dict[str, object]]
     door_dependent: bool
     code: str
     title: str
@@ -70,6 +72,8 @@ class PartFormulaCreate(BaseModel):
     formula_cx: str = Field(min_length=1, max_length=2048)
     formula_cy: str = Field(min_length=1, max_length=2048)
     formula_cz: str = Field(min_length=1, max_length=2048)
+    lw_frame_mapping: dict[str, str] | None = None
+    part_model_side_services: list[dict[str, object]] | None = None
     door_dependent: bool = False
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
@@ -91,9 +95,88 @@ class PartFormulaUpdate(BaseModel):
     formula_cx: str = Field(min_length=1, max_length=2048)
     formula_cy: str = Field(min_length=1, max_length=2048)
     formula_cz: str = Field(min_length=1, max_length=2048)
+    lw_frame_mapping: dict[str, str] | None = None
+    part_model_side_services: list[dict[str, object]] | None = None
     door_dependent: bool = False
     sort_order: int = Field(ge=0)
     is_system: bool
+
+
+DEFAULT_LW_FRAME_MAPPING = {
+    "l_axis": "horizontal",
+    "w_axis": "vertical",
+}
+
+
+def _normalize_lw_frame_mapping(payload_value: dict[str, str] | None) -> dict[str, str]:
+    value = dict(payload_value or {})
+    l_axis = str(value.get("l_axis") or DEFAULT_LW_FRAME_MAPPING["l_axis"]).strip().lower()
+    w_axis = str(value.get("w_axis") or DEFAULT_LW_FRAME_MAPPING["w_axis"]).strip().lower()
+    allowed = {"horizontal", "vertical"}
+    if l_axis not in allowed or w_axis not in allowed or l_axis == w_axis:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="L/W frame mapping must use opposite horizontal/vertical axes.",
+        )
+    return {
+        "l_axis": l_axis,
+        "w_axis": w_axis,
+    }
+
+
+async def _normalize_part_model_side_services(
+    session: AsyncSession,
+    *,
+    admin_id: uuid.UUID | None,
+    part_model: PartModel,
+    payload_rows: list[dict[str, object]] | None,
+) -> list[dict[str, object]]:
+    rows = payload_rows or []
+    normalized: list[dict[str, object]] = []
+    seen_indexes: set[int] = set()
+    for row in rows:
+        side_index = int(row.get("side_index") or 0)
+        if side_index < 0 or side_index >= int(part_model.side_count):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Side index {side_index} is out of range for part model side count {part_model.side_count}.",
+            )
+        if side_index in seen_indexes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Each part model side can only have one default service.",
+            )
+        raw_service_type_id = str(row.get("service_type_id") or row.get("part_service_type_id") or "").strip()
+        if not raw_service_type_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Each side service mapping must include a service type id.",
+            )
+        try:
+            service_type_id = uuid.UUID(raw_service_type_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Service type id is not a valid UUID.",
+            ) from exc
+        service_type = await session.scalar(
+            select(PartServiceType).where(
+                PartServiceType.id == service_type_id,
+                or_(PartServiceType.admin_id.is_(None), PartServiceType.admin_id == admin_id),
+            )
+        )
+        if service_type is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown service type for this owner scope: {service_type_id}",
+            )
+        normalized.append({
+            "side_index": side_index,
+            "service_type_id": str(service_type.id),
+        })
+        seen_indexes.add(side_index)
+    normalized.sort(key=lambda entry: int(entry["side_index"]))
+    return normalized
 
 
 def _to_response(item: PartFormula) -> PartFormulaItem:
@@ -115,6 +198,14 @@ def _to_response(item: PartFormula) -> PartFormulaItem:
         "formula_cx": item.formula_cx,
         "formula_cy": item.formula_cy,
         "formula_cz": item.formula_cz,
+        "lw_frame_mapping": _normalize_lw_frame_mapping(item.lw_frame_mapping),
+        "part_model_side_services": [
+            {
+                "side_index": int(entry.get("side_index", 0)),
+                "service_type_id": str(entry.get("service_type_id") or ""),
+            }
+            for entry in sorted(item.part_model_side_services or [], key=lambda row: int(row.get("side_index", 0)))
+        ],
         "door_dependent": item.door_dependent,
         "code": item.code,
         "title": item.title,
@@ -180,7 +271,14 @@ async def list_part_formulas(
 async def create_part_formula(payload: PartFormulaCreate, session: AsyncSession = Depends(get_db_session)) -> PartFormulaItem:
     await require_admin_if_present(session, payload.admin_id)
     await _validate_part_formula_expressions(session, payload.admin_id, payload)
-    await _require_visible_part_model(session, admin_id=payload.admin_id, part_model_id=payload.part_model_id)
+    part_model = await _require_visible_part_model(session, admin_id=payload.admin_id, part_model_id=payload.part_model_id)
+    lw_frame_mapping = _normalize_lw_frame_mapping(payload.lw_frame_mapping)
+    part_model_side_services = await _normalize_part_model_side_services(
+        session,
+        admin_id=payload.admin_id,
+        part_model=part_model,
+        payload_rows=payload.part_model_side_services,
+    )
     next_id = payload.part_formula_id or await _next_part_formula_id(session)
     sort_order = payload.sort_order if payload.sort_order is not None else next_id
     item = PartFormula(
@@ -199,6 +297,8 @@ async def create_part_formula(payload: PartFormulaCreate, session: AsyncSession 
         formula_cx=payload.formula_cx.strip(),
         formula_cy=payload.formula_cy.strip(),
         formula_cz=payload.formula_cz.strip(),
+        lw_frame_mapping=lw_frame_mapping,
+        part_model_side_services=part_model_side_services,
         door_dependent=payload.door_dependent,
         code=payload.part_code.strip(),
         title=payload.part_title.strip(),
@@ -222,7 +322,14 @@ async def update_part_formula(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part formula not found.")
     await require_admin_if_present(session, payload.admin_id)
     await _validate_part_formula_expressions(session, payload.admin_id, payload)
-    await _require_visible_part_model(session, admin_id=payload.admin_id, part_model_id=payload.part_model_id)
+    part_model = await _require_visible_part_model(session, admin_id=payload.admin_id, part_model_id=payload.part_model_id)
+    lw_frame_mapping = _normalize_lw_frame_mapping(payload.lw_frame_mapping)
+    part_model_side_services = await _normalize_part_model_side_services(
+        session,
+        admin_id=payload.admin_id,
+        part_model=part_model,
+        payload_rows=payload.part_model_side_services,
+    )
 
     item.admin_id = payload.admin_id
     item.part_formula_id = payload.part_formula_id
@@ -239,6 +346,8 @@ async def update_part_formula(
     item.formula_cx = payload.formula_cx.strip()
     item.formula_cy = payload.formula_cy.strip()
     item.formula_cz = payload.formula_cz.strip()
+    item.lw_frame_mapping = lw_frame_mapping
+    item.part_model_side_services = part_model_side_services
     item.door_dependent = payload.door_dependent
     item.code = payload.part_code.strip()
     item.title = payload.part_title.strip()
