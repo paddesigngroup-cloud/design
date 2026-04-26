@@ -4493,17 +4493,19 @@ function getDoorLibraryControllerValuesFromSnapshot(snapshot) {
   const frameMaxX = Number(snapshot?.frame_max_x);
   const frameMinZ = Number(snapshot?.frame_min_z);
   const frameMaxZ = Number(snapshot?.frame_max_z);
-  const resolvedFrameMinX = Number.isFinite(frameMinX) ? frameMinX : minX;
-  const resolvedFrameMaxX = Number.isFinite(frameMaxX) ? frameMaxX : maxX;
-  const resolvedFrameMinZ = Number.isFinite(frameMinZ) ? frameMinZ : minZ;
-  const resolvedFrameMaxZ = Number.isFinite(frameMaxZ) ? frameMaxZ : maxZ;
-  return {
+  const values = {
     door_width: Math.max(0, maxX - minX),
     door_height: Math.max(0, maxZ - minZ),
-    left: Math.max(0, minX - resolvedFrameMinX),
-    right: Math.max(0, resolvedFrameMaxX - maxX),
-    top: Math.max(0, resolvedFrameMaxZ - maxZ),
-    bottom_offset: Math.max(0, minZ - resolvedFrameMinZ),
+  };
+  if (![frameMinX, frameMaxX, frameMinZ, frameMaxZ].every(Number.isFinite)) {
+    return values;
+  }
+  return {
+    ...values,
+    left: Math.max(0, minX - frameMinX),
+    right: Math.max(0, frameMaxX - maxX),
+    top: Math.max(0, frameMaxZ - maxZ),
+    bottom_offset: Math.max(0, minZ - frameMinZ),
   };
 }
 function buildDoorLibraryControllerRectFromFrameValues(frame, values) {
