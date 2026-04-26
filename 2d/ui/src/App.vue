@@ -853,6 +853,7 @@ const editableSubCategoryDesigns = ref([]);
 const editableInternalPartGroups = ref([]);
 const editableDoorPartGroups = ref([]);
 const editableSubtractorPartGroups = ref([]);
+const editablePartModels = ref([]);
 const editablePartServices = ref([]);
 const editableServiceTypes = ref([]);
 const editableBaseFormulas = ref([]);
@@ -885,6 +886,8 @@ const subtractorPartGroupEditorOpen = ref(false);
 const subtractorPartGroupEditorDraft = ref(null);
 const doorPartGroupEditorOpen = ref(false);
 const doorPartGroupEditorDraft = ref(null);
+const partModelEditorOpen = ref(false);
+const partModelEditorDraft = ref(null);
 const partServiceEditorOpen = ref(false);
 const partServiceEditorDraft = ref(null);
 const serviceTypeEditorOpen = ref(false);
@@ -942,6 +945,7 @@ const DEFAULT_SUB_CATEGORY_DESIGN_OUTLINE_COLOR = "#7A4A2B";
 const constructionDeletedSubCategoryDesignIds = ref([]);
 const constructionDeletedBaseFormulaIds = ref([]);
 const constructionDeletedPartFormulaIds = ref([]);
+const constructionDeletedPartModelIds = ref([]);
 const constructionDeletedPartServiceIds = ref([]);
 const constructionDeletedServiceTypeIds = ref([]);
 const constructionImportInputEl = ref(null);
@@ -3592,6 +3596,7 @@ const constructionTables = [
   { id: "internal_part_groups", title: "گروه قطعات داخلی", status: "active" },
   { id: "door_part_groups", title: "گروه قطعات درب", status: "active" },
   { id: "hidden_handle_part_groups", title: "گروه دستگیره مخفی", status: "active" },
+  { id: "part_models", title: "مدل قطعه", status: "active" },
   { id: "part_services", title: "خدمات قطعات", status: "active" },
   { id: "service_types", title: "انواع خدمات", status: "active" },
   { id: "base_formulas", title: "فرمول های پایه", status: "active" },
@@ -3706,6 +3711,17 @@ const constructionPartServices = computed(() =>
       return String(a.id || "").localeCompare(String(b.id || ""));
     })
 );
+const constructionPartModels = computed(() =>
+  editablePartModels.value
+    .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
+    .slice()
+    .sort((a, b) => {
+      if (!!a.is_system !== !!b.is_system) return a.is_system ? -1 : 1;
+      const orderDelta = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+      if (orderDelta !== 0) return orderDelta;
+      return String(a.id || "").localeCompare(String(b.id || ""));
+    })
+);
 const constructionServiceTypes = computed(() =>
   editableServiceTypes.value
     .filter((item) => item.admin_id === null || item.admin_id === currentAdminId.value)
@@ -3781,6 +3797,7 @@ const constructionHasPendingChanges = computed(
     constructionDeletedSubCategoryIds.value.length > 0 ||
     constructionDeletedBaseFormulaIds.value.length > 0 ||
     constructionDeletedPartFormulaIds.value.length > 0 ||
+    constructionDeletedPartModelIds.value.length > 0 ||
     constructionDeletedPartServiceIds.value.length > 0 ||
     constructionDeletedServiceTypeIds.value.length > 0 ||
     editableTemplates.value.some((item) => !!item.__isNew || !!item.__dirty) ||
@@ -3790,6 +3807,7 @@ const constructionHasPendingChanges = computed(
     editableParams.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editableSubCategories.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editableBaseFormulas.value.some((item) => !!item.__isNew || !!item.__dirty) ||
+    editablePartModels.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editablePartServices.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editablePartFormulas.value.some((item) => !!item.__isNew || !!item.__dirty) ||
     editableServiceTypes.value.some((item) => !!item.__isNew || !!item.__dirty)
@@ -8226,6 +8244,7 @@ function openConstructionWizard() {
   loadConstructionInternalPartGroups();
   loadConstructionDoorPartGroups();
   loadConstructionSubtractorPartGroups();
+  loadConstructionPartModels();
   loadConstructionPartServices();
   loadConstructionServiceTypes();
   loadConstructionBaseFormulas();
@@ -8238,6 +8257,7 @@ function openConstructionWizard() {
   constructionDeletedSubCategoryIds.value = [];
   constructionDeletedBaseFormulaIds.value = [];
   constructionDeletedPartFormulaIds.value = [];
+  constructionDeletedPartModelIds.value = [];
   constructionDeletedPartServiceIds.value = [];
   constructionDeletedServiceTypeIds.value = [];
 }
@@ -8270,6 +8290,7 @@ async function closeConstructionWizard() {
     await loadConstructionInternalPartGroups();
     await loadConstructionDoorPartGroups();
     await loadConstructionSubtractorPartGroups();
+    await loadConstructionPartModels();
     await loadConstructionPartServices();
     await loadConstructionServiceTypes();
     await loadConstructionBaseFormulas();
@@ -8641,6 +8662,17 @@ function normalizePartServicePayload(item) {
   };
 }
 
+function normalizePartModelPayload(item) {
+  return {
+    admin_id: item.admin_id,
+    title: String(item.title || "").trim(),
+    side_count: Number(item.side_count),
+    interior_angle_sum: Number(item.interior_angle_sum),
+    sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
+    is_system: !!item.is_system,
+  };
+}
+
 function normalizeServiceTypePayload(item) {
   return {
     admin_id: item.admin_id,
@@ -8733,6 +8765,17 @@ function normalizeEditablePartServiceRecord(item) {
     service_type: String(item.service_type || "").trim(),
     service_description: String(item.service_description || "").trim(),
     service_code: String(item.service_code || "").trim(),
+    sort_order: Number(item.sort_order) || 0,
+    is_system: !!item.is_system,
+  });
+}
+
+function normalizeEditablePartModelRecord(item) {
+  return withConstructionDraftState({
+    ...item,
+    title: String(item.title || "").trim(),
+    side_count: Number(item.side_count) || 3,
+    interior_angle_sum: Number(item.interior_angle_sum) || Math.max(180, (Math.max(3, Number(item.side_count) || 3) - 2) * 180),
     sort_order: Number(item.sort_order) || 0,
     is_system: !!item.is_system,
   });
@@ -9700,6 +9743,20 @@ function buildNewPartServiceDraft() {
   };
 }
 
+function buildNewPartModelDraft() {
+  const nextSort = editablePartModels.value.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), 0) + 1;
+  const sideCount = 4;
+  return {
+    id: null,
+    admin_id: null,
+    title: "",
+    side_count: sideCount,
+    interior_angle_sum: (sideCount - 2) * 180,
+    sort_order: nextSort,
+    is_system: true,
+  };
+}
+
 function buildNewServiceTypeDraft() {
   const nextSort = editableServiceTypes.value.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), 0) + 1;
   const fallbackType = constructionServiceTypeOptions.value[0]?.value || "";
@@ -9760,6 +9817,11 @@ function closeDoorPartGroupEditor() {
   if (activeDoorPartGroupIconRowId.value === DOOR_PART_GROUP_EDITOR_ICON_TARGET) {
     activeDoorPartGroupIconRowId.value = null;
   }
+}
+
+function closePartModelEditor() {
+  partModelEditorOpen.value = false;
+  partModelEditorDraft.value = null;
 }
 
 function closePartServiceEditor() {
@@ -12332,6 +12394,21 @@ function openPartServiceEditor(item = null) {
   partServiceEditorOpen.value = true;
 }
 
+function openPartModelEditor(item = null) {
+  partModelEditorDraft.value = item
+    ? {
+        id: item.id,
+        admin_id: item.admin_id,
+        title: String(item.title || "").trim(),
+        side_count: Number(item.side_count) || 3,
+        interior_angle_sum: Number(item.interior_angle_sum) || 180,
+        sort_order: Number(item.sort_order) || 0,
+        is_system: !!item.is_system,
+      }
+    : buildNewPartModelDraft();
+  partModelEditorOpen.value = true;
+}
+
 function openServiceTypeEditor(item = null) {
   serviceTypeEditorDraft.value = item
     ? {
@@ -14668,6 +14745,20 @@ async function loadConstructionPartServices() {
   }
 }
 
+async function loadConstructionPartModels() {
+  try {
+    const url = `/api/part-models?admin_id=${encodeURIComponent(currentAdminId.value)}`;
+    const payload = await getJson(url, {
+      cacheTtlMs: 30000,
+      abortChannel: `construction:part-models:${currentAdminId.value}`,
+    });
+    editablePartModels.value = payload.map((item) => normalizeEditablePartModelRecord(item));
+    constructionDeletedPartModelIds.value = [];
+  } catch (_) {
+    showAlert("خواندن جدول مدل قطعه از دیتابیس انجام نشد.", { title: "خطا" });
+  }
+}
+
 async function loadConstructionServiceTypes() {
   try {
     const url = `/api/service-types?admin_id=${encodeURIComponent(currentAdminId.value)}`;
@@ -15056,6 +15147,35 @@ function validateConstructionServiceTypes() {
   return true;
 }
 
+function validateConstructionPartModels() {
+  const seen = new Set();
+  for (const item of editablePartModels.value) {
+    const title = String(item.title || "").trim();
+    const sideCount = Number(item.side_count);
+    const interiorAngleSum = Number(item.interior_angle_sum);
+    if (!title) {
+      showAlert("عنوان قطعه نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!Number.isInteger(sideCount) || sideCount < 3) {
+      showAlert("تعداد اضلاع باید عدد صحیح و حداقل ۳ باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    const expectedAngleSum = (sideCount - 2) * 180;
+    if (!Number.isInteger(interiorAngleSum) || interiorAngleSum !== expectedAngleSum) {
+      showAlert(`برای ${toPersianDigits(sideCount)} ضلع، مجموع زوایای داخلی باید ${toPersianDigits(expectedAngleSum)} باشد.`, { title: "اعتبارسنجی" });
+      return false;
+    }
+    const key = `${title.toLowerCase()}::${String(item.admin_id || "")}`;
+    if (seen.has(key)) {
+      showAlert("عنوان قطعه در همین دامنه مالک تکراری است.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    seen.add(key);
+  }
+  return true;
+}
+
 function validateConstructionPartServices() {
   for (const item of editablePartServices.value) {
     const serviceType = String(item.service_type || "").trim();
@@ -15134,6 +15254,54 @@ async function saveServiceTypeEditor() {
   }
 }
 
+async function savePartModelEditor() {
+  const draft = partModelEditorDraft.value;
+  if (!draft) return;
+  const title = String(draft.title || "").trim();
+  const sideCount = Number(draft.side_count);
+  const interiorAngleSum = Number(draft.interior_angle_sum);
+  if (!title) {
+    showAlert("عنوان قطعه نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  if (!Number.isInteger(sideCount) || sideCount < 3) {
+    showAlert("تعداد اضلاع باید عدد صحیح و حداقل ۳ باشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const expectedAngleSum = (sideCount - 2) * 180;
+  if (!Number.isInteger(interiorAngleSum) || interiorAngleSum !== expectedAngleSum) {
+    showAlert(`برای ${toPersianDigits(sideCount)} ضلع، مجموع زوایای داخلی باید ${toPersianDigits(expectedAngleSum)} باشد.`, { title: "اعتبارسنجی" });
+    return;
+  }
+  const duplicateTitle = editablePartModels.value.some((item) => (
+    String(item.title || "").trim().toLowerCase() === title.toLowerCase()
+    && String(item.admin_id || "") === String(draft.admin_id || "")
+    && String(item.id || "") !== String(draft.id || "")
+  ));
+  if (duplicateTitle) {
+    showAlert("عنوان قطعه در همین دامنه مالک تکراری است.", { title: "اعتبارسنجی" });
+    return;
+  }
+  const payload = normalizePartModelPayload(draft);
+  try {
+    const res = await fetch(
+      draft.id ? `/api/part-models/${encodeURIComponent(String(draft.id))}` : "/api/part-models",
+      {
+        method: draft.id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "ذخیره مدل قطعه انجام نشد."));
+    invalidateApiCache("/api/part-models?");
+    await loadConstructionPartModels();
+    closePartModelEditor();
+    showAlert("مدل قطعه با موفقیت ذخیره شد.", { title: "ذخیره تغییرات" });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره مدل قطعه انجام نشد.", { title: "خطا" });
+  }
+}
+
 async function deleteConstructionServiceType(id) {
   const item = editableServiceTypes.value.find((row) => String(row.id) === String(id));
   if (!item) return;
@@ -15150,6 +15318,25 @@ async function deleteConstructionServiceType(id) {
     await loadConstructionServiceTypes();
   } catch (error) {
     showAlert(error?.message || "حذف انواع خدمات انجام نشد.", { title: "خطا" });
+  }
+}
+
+async function deleteConstructionPartModel(id) {
+  const item = editablePartModels.value.find((row) => String(row.id) === String(id));
+  if (!item) return;
+  const ok = await showConfirm(`مدل قطعه «${item.title || "بدون عنوان"}» حذف شود؟`, {
+    title: "حذف مدل قطعه",
+    confirmText: "حذف",
+    cancelText: "انصراف",
+  });
+  if (!ok) return;
+  try {
+    const res = await fetch(`/api/part-models/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await readApiErrorMessage(res, "حذف مدل قطعه انجام نشد."));
+    invalidateApiCache("/api/part-models?");
+    await loadConstructionPartModels();
+  } catch (error) {
+    showAlert(error?.message || "حذف مدل قطعه انجام نشد.", { title: "خطا" });
   }
 }
 
@@ -16928,6 +17115,9 @@ function validateConstructionPartKinds() {
 }
 
 function getConstructionCsvHeaders() {
+  if (constructionStep.value === "part_models") {
+    return ["title", "side_count", "interior_angle_sum", "admin_mode"];
+  }
   if (constructionStep.value === "part_services") {
     return ["service_type", "service_description", "service_code", "admin_mode"];
   }
@@ -16976,6 +17166,15 @@ function getConstructionCsvHeaders() {
 }
 
 function getConstructionCsvRows(items = null) {
+  if (constructionStep.value === "part_models") {
+    const rows = items || constructionPartModels.value;
+    return rows.map((item) => [
+      String(item.title || "").trim(),
+      Number(item.side_count) || "",
+      Number(item.interior_angle_sum) || "",
+      item.admin_id === null ? "system" : "admin",
+    ]);
+  }
   if (constructionStep.value === "part_services") {
     const rows = items || constructionPartServices.value;
     return rows.map((item) => [
@@ -17094,6 +17293,7 @@ function getConstructionCsvRows(items = null) {
 }
 
 function getConstructionImportFileName() {
+  if (constructionStep.value === "part_models") return "part_models_excel_template.csv";
   if (constructionStep.value === "part_services") return "part_services_excel_template.csv";
   if (constructionStep.value === "service_types") return "service_types_excel_template.csv";
   if (constructionStep.value === "templates") return "templates_excel_template.csv";
@@ -17107,6 +17307,7 @@ function getConstructionImportFileName() {
 }
 
 function getConstructionImportTitle() {
+  if (constructionStep.value === "part_models") return "جدول مدل قطعه";
   if (constructionStep.value === "part_services") return "جدول خدمات قطعات";
   if (constructionStep.value === "service_types") return "جدول انواع خدمات";
   if (constructionStep.value === "templates") return "جدول تمپلیت‌ها";
@@ -17119,6 +17320,9 @@ function getConstructionImportTitle() {
 }
 
 function getConstructionImportErrorText() {
+  if (constructionStep.value === "part_models") {
+    return "خواندن فایل اکسل مدل قطعه انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
+  }
   if (constructionStep.value === "part_services") {
     return "خواندن فایل اکسل خدمات قطعات انجام نشد. فقط فایل CSV خروجی همین جدول را آپلود کنید.";
   }
@@ -17218,6 +17422,8 @@ function clearConstructionImportPreview() {
 async function downloadConstructionExcelTemplate() {
   const path = constructionStep.value === "templates"
     ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/templates/export`
+    : constructionStep.value === "part_models"
+    ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/part-models/export`
     : constructionStep.value === "part_services"
     ? `/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/tables/part-services/export`
     : constructionStep.value === "service_types"
@@ -17268,7 +17474,20 @@ async function onConstructionImportFileChange(event) {
       throw new Error("invalid-headers");
     }
     let previewRows = [];
-    if (constructionStep.value === "part_services") {
+    if (constructionStep.value === "part_models") {
+      previewRows = rows.slice(1).map((row, index) => {
+        const sideCount = Number(row[1]);
+        const defaultAngleSum = Number.isInteger(sideCount) && sideCount >= 3 ? (sideCount - 2) * 180 : Number(row[2]);
+        const adminMode = String(row[3] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        return {
+          lineNo: index + 2,
+          title: String(row[0] || "").trim(),
+          side_count: sideCount,
+          interior_angle_sum: Number(row[2]) || defaultAngleSum,
+          admin_mode: adminMode,
+        };
+      });
+    } else if (constructionStep.value === "part_services") {
       previewRows = rows.slice(1).map((row, index) => {
         const adminMode = String(row[3] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         return {
@@ -17463,7 +17682,16 @@ async function onConstructionImportFileChange(event) {
       });
     }
     if (!previewRows.length) throw new Error("empty-file");
-    const invalidRow = constructionStep.value === "part_services"
+    const invalidRow = constructionStep.value === "part_models"
+      ? previewRows.find(
+          (row) =>
+            !row.title ||
+            !Number.isInteger(row.side_count) ||
+            row.side_count < 3 ||
+            !Number.isInteger(row.interior_angle_sum) ||
+            row.interior_angle_sum !== ((row.side_count - 2) * 180)
+        )
+      : constructionStep.value === "part_services"
       ? previewRows.find(
           (row) =>
             !row.service_type ||
@@ -18385,6 +18613,63 @@ async function saveConstructionServiceTypes(options = {}) {
   }
 }
 
+async function saveConstructionPartModels(options = {}) {
+  if (!(constructionDeletedPartModelIds.value.length > 0 || editablePartModels.value.some((item) => !!item.__isNew || !!item.__dirty))) {
+    showAlert("تغییری برای ذخیره وجود ندارد.", { title: "ذخیره تغییرات" });
+    return;
+  }
+  if (!validateConstructionPartModels()) return;
+  if (!options.skipConfirm) {
+    const ok = await showConfirm("تغییرات جدول مدل قطعه در دیتابیس ذخیره شود؟", {
+      title: "ذخیره تغییرات",
+      confirmText: "ذخیره",
+      cancelText: "انصراف",
+    });
+    if (!ok) return;
+  }
+
+  const draftIds = editablePartModels.value.filter((item) => item.__isNew).map((item) => String(item.id));
+  const dirtyIds = editablePartModels.value.filter((item) => !item.__isNew && item.__dirty).map((item) => String(item.id));
+  constructionSavingIds.value = [...new Set([...draftIds, ...dirtyIds])];
+  try {
+    for (const id of constructionDeletedPartModelIds.value) {
+      const res = await fetch(`/api/part-models/${encodeURIComponent(String(id))}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "delete-failed"));
+    }
+
+    for (const item of editablePartModels.value.filter((row) => row.__isNew)) {
+      const res = await fetch("/api/part-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizePartModelPayload(item)),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "create-failed"));
+    }
+
+    for (const item of editablePartModels.value.filter((row) => !row.__isNew && row.__dirty)) {
+      const res = await fetch(`/api/part-models/${encodeURIComponent(String(item.id))}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizePartModelPayload(item)),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "save-failed"));
+    }
+
+    invalidateApiCache("/api/part-models?");
+    await loadConstructionPartModels();
+    showAlert(options.successMessage || "تغییرات جدول مدل قطعه با موفقیت ذخیره شد.", {
+      title: options.successTitle || "ذخیره تغییرات",
+    });
+  } catch (error) {
+    showAlert(error?.message || "ذخیره تغییرات جدول مدل قطعه در دیتابیس انجام نشد.", { title: "خطا" });
+    await loadConstructionPartModels();
+  } finally {
+    constructionSavingIds.value = [];
+  }
+}
+
 async function saveConstructionPartServices(options = {}) {
   if (!(constructionDeletedPartServiceIds.value.length > 0 || editablePartServices.value.some((item) => !!item.__isNew || !!item.__dirty))) {
     showAlert("تغییری برای ذخیره وجود ندارد.", { title: "ذخیره تغییرات" });
@@ -18844,6 +19129,18 @@ async function applyConstructionImportPreview() {
       skipConfirm: true,
       successTitle: "آپلود فایل",
       successMessage: "فایل اکسل انواع خدمات با موفقیت روی جدول اعمال شد.",
+    });
+    return;
+  }
+  if (constructionImportPreviewKind.value === "part_models") {
+    const { nextRows, deletedIds } = buildImportedConstructionPartModelDrafts(constructionImportPreviewRows.value);
+    editablePartModels.value = nextRows;
+    constructionDeletedPartModelIds.value = deletedIds;
+    clearConstructionImportPreview();
+    await saveConstructionPartModels({
+      skipConfirm: true,
+      successTitle: "آپلود فایل",
+      successMessage: "فایل اکسل مدل قطعه با موفقیت روی جدول اعمال شد.",
     });
     return;
   }
@@ -20533,6 +20830,55 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
   });
   const importedExistingIds = new Set(nextRows.filter((item) => !item.__isNew).map((item) => String(item.id)));
   const deletedIds = editableServiceTypes.value
+    .filter((item) => !item.__isNew && !importedExistingIds.has(String(item.id)))
+    .map((item) => String(item.id));
+  return { nextRows, deletedIds };
+}
+
+function buildImportedConstructionPartModelDrafts(rows) {
+  const existingByScopeKey = new Map(
+    editablePartModels.value.map((item) => [
+      `${String(item.title || "").trim().toLowerCase()}::${String(item.admin_id || "")}`,
+      item,
+    ])
+  );
+  const nextRows = rows.map((row, index) => {
+    const adminId = row.admin_mode === "system" ? null : currentAdminId.value;
+    const title = String(row.title || "").trim();
+    const key = `${title.toLowerCase()}::${String(adminId || "")}`;
+    const existing = existingByScopeKey.get(key);
+    const sideCount = Number(row.side_count);
+    const expectedAngleSum = (sideCount - 2) * 180;
+    const nextPayload = {
+      admin_id: adminId,
+      title,
+      side_count: sideCount,
+      interior_angle_sum: Number(row.interior_angle_sum) || expectedAngleSum,
+      sort_order: index + 1,
+      is_system: adminId === null,
+    };
+    if (!existing) {
+      return buildPartKindDraft(nextPayload, {
+        id: `draft-part-model-${Date.now()}-${index}`,
+        __isNew: true,
+        __dirty: false,
+      });
+    }
+    const changed =
+      existing.admin_id !== nextPayload.admin_id ||
+      String(existing.title || "").trim() !== nextPayload.title ||
+      Number(existing.side_count) !== nextPayload.side_count ||
+      Number(existing.interior_angle_sum) !== nextPayload.interior_angle_sum ||
+      Number(existing.sort_order) !== nextPayload.sort_order ||
+      !!existing.is_system !== nextPayload.is_system;
+    return buildPartKindDraft(existing, {
+      ...nextPayload,
+      __isNew: false,
+      __dirty: changed,
+    });
+  });
+  const importedExistingIds = new Set(nextRows.filter((item) => !item.__isNew).map((item) => String(item.id)));
+  const deletedIds = editablePartModels.value
     .filter((item) => !item.__isNew && !importedExistingIds.has(String(item.id)))
     .map((item) => String(item.id));
   return { nextRows, deletedIds };
@@ -23639,7 +23985,7 @@ onBeforeUnmount(() => {
             :class="{ 'is-disabled': !constructionHasPendingChanges || constructionSavingIds.length > 0 }"
             :disabled="!constructionHasPendingChanges || constructionSavingIds.length > 0"
             title="ذخیره تغییرات"
-            @click="constructionStep === 'templates' ? saveConstructionTemplates() : constructionStep === 'categories' ? saveConstructionCategories() : constructionStep === 'sub_categories' ? saveConstructionSubCategories() : constructionStep === 'part_kinds' ? saveConstructionPartKinds() : constructionStep === 'param_groups' ? saveConstructionParamGroups() : constructionStep === 'params' ? saveConstructionParams() : constructionStep === 'part_services' ? saveConstructionPartServices() : constructionStep === 'service_types' ? saveConstructionServiceTypes() : constructionStep === 'base_formulas' ? saveConstructionBaseFormulas() : constructionStep === 'part_formulas' ? saveConstructionPartFormulas() : null"
+            @click="constructionStep === 'templates' ? saveConstructionTemplates() : constructionStep === 'categories' ? saveConstructionCategories() : constructionStep === 'sub_categories' ? saveConstructionSubCategories() : constructionStep === 'part_kinds' ? saveConstructionPartKinds() : constructionStep === 'param_groups' ? saveConstructionParamGroups() : constructionStep === 'params' ? saveConstructionParams() : constructionStep === 'part_models' ? saveConstructionPartModels() : constructionStep === 'part_services' ? saveConstructionPartServices() : constructionStep === 'service_types' ? saveConstructionServiceTypes() : constructionStep === 'base_formulas' ? saveConstructionBaseFormulas() : constructionStep === 'part_formulas' ? saveConstructionPartFormulas() : null"
           >
             <img src="/icons/construction-save.svg" alt="ذخیره" />
           </button>
@@ -23647,7 +23993,7 @@ onBeforeUnmount(() => {
             type="button"
             class="constructionDialog__headIconBtn"
             title="دانلود اکسل"
-            :disabled="!['templates', 'categories', 'sub_categories', 'part_kinds', 'param_groups', 'params', 'part_services', 'service_types', 'base_formulas', 'part_formulas'].includes(constructionStep)"
+            :disabled="!['templates', 'categories', 'sub_categories', 'part_kinds', 'param_groups', 'params', 'part_models', 'part_services', 'service_types', 'base_formulas', 'part_formulas'].includes(constructionStep)"
             @click="downloadConstructionExcelTemplate"
           >
             <img src="/icons/construction-download.svg" alt="دانلود" />
@@ -23656,7 +24002,7 @@ onBeforeUnmount(() => {
             type="button"
             class="constructionDialog__headIconBtn"
             title="آپلود اکسل"
-            :disabled="!['templates', 'categories', 'sub_categories', 'part_kinds', 'param_groups', 'params', 'part_services', 'service_types', 'base_formulas', 'part_formulas'].includes(constructionStep)"
+            :disabled="!['templates', 'categories', 'sub_categories', 'part_kinds', 'param_groups', 'params', 'part_models', 'part_services', 'service_types', 'base_formulas', 'part_formulas'].includes(constructionStep)"
             @click="triggerConstructionImport"
           >
             <img src="/icons/construction-upload.svg" alt="آپلود" />
@@ -24993,6 +25339,109 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
+          <template v-else-if="constructionStep === 'part_models'">
+            <input
+              ref="constructionImportInputEl"
+              class="constructionDialog__fileInput"
+              type="file"
+              accept=".csv"
+              @change="onConstructionImportFileChange"
+            />
+            <div class="constructionDialog__toolbar">
+              <div class="constructionDialog__toolbarMain">
+                <div class="constructionDialog__sectionTitle">جدول مدل قطعه</div>
+                <div class="constructionDialog__sectionHint">
+                  در این جدول عنوان قطعه، تعداد اضلاع و مجموع زوایای داخلی آن را برای ادمین مدیریت می‌کنید.
+                </div>
+              </div>
+              <div class="constructionDialog__toolbarActions">
+                <button type="button" class="constructionDialog__textBtn" @click="openPartModelEditor()">افزودن مدل قطعه</button>
+              </div>
+            </div>
+
+            <div v-if="constructionImportPreviewCount && constructionImportPreviewKind === 'part_models'" class="constructionDialog__importPreview">
+              <div class="constructionDialog__importHead">
+                <div>
+                  <div class="constructionDialog__sectionTitle">پیش‌نمایش فایل اکسل</div>
+                  <div class="constructionDialog__sectionHint">
+                    فایل {{ constructionImportFileName }} خوانده شد. قبل از بروزرسانی، جدول واردشده را بررسی و سپس تایید کنید.
+                  </div>
+                </div>
+                <div class="constructionDialog__toolbarActions">
+                  <button type="button" class="constructionDialog__textBtn" @click="clearConstructionImportPreview">لغو</button>
+                  <button type="button" class="constructionDialog__textBtn is-primary" @click="applyConstructionImportPreview">
+                    تایید بروزرسانی
+                  </button>
+                </div>
+              </div>
+              <div class="constructionDialog__previewMeta">
+                <span>{{ toPersianDigits(constructionImportPreviewCount) }} ردیف</span>
+                <span>فایل CSV قابل ویرایش در Excel</span>
+              </div>
+              <div class="constructionDialog__previewTableWrap">
+                <table class="constructionDialog__table constructionDialog__table--preview">
+                  <thead>
+                    <tr>
+                      <th class="constructionDialog__col constructionDialog__col--title">عنوان قطعه</th>
+                      <th class="constructionDialog__col constructionDialog__col--id">تعداد اضلاع</th>
+                      <th class="constructionDialog__col constructionDialog__col--id">مجموع زوایای داخلی</th>
+                      <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in constructionImportPreviewRows" :key="`${row.lineNo}-${row.title}`">
+                      <td class="constructionDialog__col constructionDialog__col--title">{{ row.title }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(row.side_count) }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(row.interior_angle_sum) }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "سیستم" : "ادمین" }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="constructionDialog__summary">
+              <div class="constructionDialog__summaryItem">
+                <span class="constructionDialog__summaryValue">{{ toPersianDigits(constructionPartModels.length) }}</span>
+                <span class="constructionDialog__summaryLabel">کل مدل‌ها</span>
+              </div>
+            </div>
+
+            <div class="constructionDialog__tableWrap constructionDialog__tableWrap--partServices">
+              <table class="constructionDialog__table constructionDialog__table--partServices">
+                <thead>
+                  <tr>
+                    <th class="constructionDialog__col constructionDialog__col--title">عنوان قطعه</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">تعداد اضلاع</th>
+                    <th class="constructionDialog__col constructionDialog__col--id">مجموع زوایای داخلی</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceActions">عملیات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in constructionPartModels" :key="item.id">
+                    <td class="constructionDialog__col constructionDialog__col--title">
+                      <strong class="constructionDialog__partServiceTypeText">{{ item.title }}</strong>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.side_count) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.interior_angle_sum) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceActions">
+                      <div class="constructionDialog__actionsCell constructionDialog__actionsCell--partService">
+                        <button type="button" class="constructionDialog__textBtn" @click="openPartModelEditor(item)">ویرایش</button>
+                        <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionPartModel(item.id)">×</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="!constructionPartModels.length">
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="4">هنوز مدلی برای قطعه ثبت نشده است.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="constructionDialog__sheetHint">
+              افزودن، ویرایش و حذف مدل قطعه مستقیم روی دیتابیس اعمال می‌شود.
+            </div>
+          </template>
+
           <template v-else-if="constructionStep === 'part_services'">
             <input
               ref="constructionImportInputEl"
@@ -26262,6 +26711,61 @@ onBeforeUnmount(() => {
       </div>
       <div class="appDialog__actions">
         <button type="button" class="constructionDialog__textBtn" @click="toggleSubtractorPartGroupParamGroupsPanel">بستن</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="partModelEditorOpen && partModelEditorDraft" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closePartModelEditor"></div>
+    <div class="appDialog__card appDialog__card--builder" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش مدل قطعه</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closePartModelEditor">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        عنوان قطعه و تعداد اضلاع را ثبت کنید. مجموع زوایای داخلی باید با فرمول هندسی همان تعداد ضلع هماهنگ باشد.
+      </div>
+      <div class="subCategoryDesignEditor">
+        <div class="subCategoryDesignEditor__meta">
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>عنوان قطعه</span>
+            <input v-model="partModelEditorDraft.title" class="constructionDialog__input" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>تعداد اضلاع</span>
+            <input
+              v-model.number="partModelEditorDraft.side_count"
+              class="constructionDialog__input"
+              type="number"
+              min="3"
+              step="1"
+              @input="partModelEditorDraft.interior_angle_sum = ((Number(partModelEditorDraft.side_count) || 3) - 2) * 180"
+            />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>مجموع زوایای داخلی</span>
+            <input v-model.number="partModelEditorDraft.interior_angle_sum" class="constructionDialog__input" type="number" min="180" step="180" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>ترتیب</span>
+            <input v-model.number="partModelEditorDraft.sort_order" class="constructionDialog__input" type="number" min="0" step="1" />
+          </label>
+          <div class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>دامنه</span>
+            <button
+              type="button"
+              class="constructionDialog__scopeBtn"
+              :class="partModelEditorDraft.admin_id === null ? 'is-system' : 'is-admin'"
+              @click="partModelEditorDraft.admin_id = partModelEditorDraft.admin_id === null ? currentAdminId : null; partModelEditorDraft.is_system = partModelEditorDraft.admin_id === null"
+            >
+              {{ partModelEditorDraft.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین" }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="appDialog__actions">
+        <button type="button" class="constructionDialog__textBtn" @click="closePartModelEditor">انصراف</button>
+        <button type="button" class="constructionDialog__textBtn is-primary" @click="savePartModelEditor">ذخیره</button>
       </div>
     </div>
   </div>

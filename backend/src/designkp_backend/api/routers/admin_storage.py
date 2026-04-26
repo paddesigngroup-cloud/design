@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from designkp_backend.db.dependencies import get_db_session
-from designkp_backend.db.models.catalog import BaseFormula, Category, Param, ParamGroup, PartFormula, PartKind, PartService, PartServiceType, SubCategory, SubCategoryParamDefault, Template
+from designkp_backend.db.models.catalog import BaseFormula, Category, Param, ParamGroup, PartFormula, PartKind, PartModel, PartService, PartServiceType, SubCategory, SubCategoryParamDefault, Template
 from designkp_backend.services.admin_access import require_admin
 from designkp_backend.services.admin_storage import (
     finalize_param_group_icon,
@@ -55,6 +55,15 @@ def _part_service_headers() -> list[str]:
         "service_type",
         "service_description",
         "service_code",
+        "admin_mode",
+    ]
+
+
+def _part_model_headers() -> list[str]:
+    return [
+        "title",
+        "side_count",
+        "interior_angle_sum",
         "admin_mode",
     ]
 
@@ -398,6 +407,25 @@ async def _part_service_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
     ]
 
 
+async def _part_model_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[list[object]]:
+    rows = (
+        await session.scalars(
+            select(PartModel)
+            .where(or_(PartModel.admin_id.is_(None), PartModel.admin_id == admin_id))
+            .order_by(PartModel.sort_order.asc(), PartModel.id.asc())
+        )
+    ).all()
+    return [
+        [
+            row.title,
+            row.side_count,
+            row.interior_angle_sum,
+            "system" if row.admin_id is None else "admin",
+        ]
+        for row in rows
+    ]
+
+
 @router.get("/{admin_id}/tables/part-kinds/export")
 async def export_part_kinds(admin_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
     await require_admin(session, admin_id)
@@ -447,6 +475,19 @@ async def export_part_services(admin_id: uuid.UUID, session: AsyncSession = Depe
         content=csv_bytes(headers, rows),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="part_services_excel_template.csv"'},
+    )
+
+
+@router.get("/{admin_id}/tables/part-models/export")
+async def export_part_models(admin_id: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> Response:
+    await require_admin(session, admin_id)
+    headers = _part_model_headers()
+    rows = await _part_model_rows(session, admin_id)
+    await write_table_snapshot_async(admin_id, "part_models", headers, rows)
+    return Response(
+        content=csv_bytes(headers, rows),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="part_models_excel_template.csv"'},
     )
 
 
