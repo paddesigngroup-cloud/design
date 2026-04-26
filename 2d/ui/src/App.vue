@@ -8718,11 +8718,14 @@ function normalizePartServicePayload(item) {
 }
 
 function normalizePartModelPayload(item) {
+  const sideCount = Number(item.side_count);
+  const interiorAngleSum = Number(item.interior_angle_sum);
   return {
     admin_id: item.admin_id,
     title: String(item.title || "").trim(),
-    side_count: Number(item.side_count),
-    interior_angle_sum: Number(item.interior_angle_sum),
+    side_count: sideCount,
+    interior_angle_sum: interiorAngleSum,
+    default_angles: normalizePartModelAngleRecords(sideCount, item.default_angles, interiorAngleSum),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
     is_system: !!item.is_system,
   };
@@ -8827,11 +8830,14 @@ function normalizeEditablePartServiceRecord(item) {
 }
 
 function normalizeEditablePartModelRecord(item) {
+  const sideCount = Number(item.side_count) || 3;
+  const interiorAngleSum = Number(item.interior_angle_sum) || Math.max(180, getPartModelInteriorAngleSum(Math.max(3, sideCount)));
   return withConstructionDraftState({
     ...item,
     title: String(item.title || "").trim(),
-    side_count: Number(item.side_count) || 3,
-    interior_angle_sum: Number(item.interior_angle_sum) || Math.max(180, (Math.max(3, Number(item.side_count) || 3) - 2) * 180),
+    side_count: sideCount,
+    interior_angle_sum: interiorAngleSum,
+    default_angles: normalizePartModelAngleRecords(sideCount, item.default_angles, interiorAngleSum),
     sort_order: Number(item.sort_order) || 0,
     is_system: !!item.is_system,
   });
@@ -9088,6 +9094,179 @@ function buildPartKindDraft(item, overrides = {}) {
     ...item,
     ...overrides,
   };
+}
+
+const PART_MODEL_ANGLE_PRECISION = 6;
+const PART_MODEL_ANGLE_EPSILON = 1e-4;
+
+function roundPartModelAngle(value) {
+  return Number(Number(value || 0).toFixed(PART_MODEL_ANGLE_PRECISION));
+}
+
+function getPartModelInteriorAngleSum(sideCount) {
+  const normalized = Number(sideCount);
+  if (!Number.isInteger(normalized) || normalized < 3) return 180;
+  return (normalized - 2) * 180;
+}
+
+function buildEqualPartModelAngleValues(count, totalSum) {
+  const normalizedCount = Number(count);
+  const normalizedSum = Number(totalSum);
+  if (!Number.isInteger(normalizedCount) || normalizedCount <= 0 || !Number.isFinite(normalizedSum)) return [];
+  const baseAngle = roundPartModelAngle(normalizedSum / normalizedCount);
+  let remaining = roundPartModelAngle(normalizedSum);
+  return Array.from({ length: normalizedCount }, (_, index) => {
+    const angle = index === normalizedCount - 1 ? remaining : baseAngle;
+    remaining = roundPartModelAngle(remaining - angle);
+    return roundPartModelAngle(angle);
+  });
+}
+
+function buildPartModelAngleRecordsFromValues(values) {
+  return (Array.isArray(values) ? values : []).map((angle, index) => ({
+    index,
+    angle_deg: roundPartModelAngle(angle),
+  }));
+}
+
+function buildEqualPartModelAngleRecords(sideCount, interiorAngleSum = null) {
+  const total = Number.isFinite(Number(interiorAngleSum))
+    ? Number(interiorAngleSum)
+    : getPartModelInteriorAngleSum(sideCount);
+  return buildPartModelAngleRecordsFromValues(buildEqualPartModelAngleValues(sideCount, total));
+}
+
+function formatPartModelAngleNumber(value) {
+  const normalized = roundPartModelAngle(value);
+  return Number.isInteger(normalized) ? String(normalized) : String(normalized);
+}
+
+function normalizePartModelAngleRecords(sideCount, defaultAngles = null, interiorAngleSum = null) {
+  const normalizedSideCount = Number(sideCount);
+  const expectedAngleSum = Number.isFinite(Number(interiorAngleSum))
+    ? Number(interiorAngleSum)
+    : getPartModelInteriorAngleSum(normalizedSideCount);
+  if (!Number.isInteger(normalizedSideCount) || normalizedSideCount < 3) {
+    return buildEqualPartModelAngleRecords(3, getPartModelInteriorAngleSum(3));
+  }
+  if (!Array.isArray(defaultAngles) || defaultAngles.length !== normalizedSideCount) {
+    return buildEqualPartModelAngleRecords(normalizedSideCount, expectedAngleSum);
+  }
+  const normalized = defaultAngles
+    .map((item, fallbackIndex) => ({
+      index: Number.isInteger(Number(item?.index)) ? Number(item.index) : fallbackIndex,
+      angle_deg: roundPartModelAngle(item?.angle_deg),
+    }))
+    .sort((a, b) => a.index - b.index);
+  const indexesValid = normalized.every((item, index) => item.index === index);
+  const valuesValid = normalized.every((item) => Number.isFinite(item.angle_deg) && item.angle_deg > 0);
+  const total = roundPartModelAngle(normalized.reduce((sum, item) => sum + Number(item.angle_deg || 0), 0));
+  if (!indexesValid || !valuesValid || Math.abs(total - expectedAngleSum) > PART_MODEL_ANGLE_EPSILON) {
+    return buildEqualPartModelAngleRecords(normalizedSideCount, expectedAngleSum);
+  }
+  return normalized;
+}
+
+function validatePartModelAngleRecords(sideCount, interiorAngleSum, defaultAngles) {
+  const normalizedSideCount = Number(sideCount);
+  const expectedAngleSum = Number(interiorAngleSum);
+  if (!Array.isArray(defaultAngles) || defaultAngles.length !== normalizedSideCount) {
+    return { ok: false, error: `برای ${toPersianDigits(normalizedSideCount)} ضلع باید دقیقاً ${toPersianDigits(normalizedSideCount)} زاویه ثبت شود.` };
+  }
+  const normalized = defaultAngles
+    .map((item, fallbackIndex) => ({
+      index: Number.isInteger(Number(item?.index)) ? Number(item.index) : fallbackIndex,
+      angle_deg: roundPartModelAngle(item?.angle_deg),
+    }))
+    .sort((a, b) => a.index - b.index);
+  const seen = new Set();
+  for (const item of normalized) {
+    if (seen.has(item.index)) return { ok: false, error: "اندیس زاویه‌ها باید یکتا باشد." };
+    seen.add(item.index);
+    if (item.index < 0 || item.index >= normalizedSideCount) {
+      return { ok: false, error: "اندیس زاویه‌ها با تعداد اضلاع هماهنگ نیست." };
+    }
+    if (!Number.isFinite(item.angle_deg) || item.angle_deg <= 0) {
+      return { ok: false, error: "همه زاویه‌ها باید عددی و بزرگ‌تر از صفر باشند." };
+    }
+  }
+  if (!normalized.every((item, index) => item.index === index)) {
+    return { ok: false, error: "زاویه‌های پیش‌فرض باید برای تمام اضلاع ثبت شوند." };
+  }
+  const total = roundPartModelAngle(normalized.reduce((sum, item) => sum + Number(item.angle_deg || 0), 0));
+  if (Math.abs(total - expectedAngleSum) > PART_MODEL_ANGLE_EPSILON) {
+    return {
+      ok: false,
+      error: `جمع زاویه‌های پیش‌فرض باید ${toPersianDigits(expectedAngleSum)} باشد.`,
+    };
+  }
+  return { ok: true, angles: normalized };
+}
+
+function buildPartModelAngleDrafts(sideCount, defaultAngles = null, interiorAngleSum = null) {
+  return normalizePartModelAngleRecords(sideCount, defaultAngles, interiorAngleSum).map((item) => ({
+    index: item.index,
+    angle_deg: item.angle_deg,
+    _edited: false,
+  }));
+}
+
+function redistributePartModelAngleDrafts(sideCount, interiorAngleSum, angleDrafts, editedIndexes = []) {
+  const normalized = (Array.isArray(angleDrafts) ? angleDrafts : []).map((item, fallbackIndex) => ({
+    index: Number.isInteger(Number(item?.index)) ? Number(item.index) : fallbackIndex,
+    angle_deg: roundPartModelAngle(item?.angle_deg),
+    _edited: !!item?._edited,
+  }));
+  const editedSet = new Set((Array.isArray(editedIndexes) ? editedIndexes : []).map((value) => Number(value)));
+  const editedAngles = normalized.filter((item) => editedSet.has(item.index));
+  if (editedAngles.some((item) => !Number.isFinite(item.angle_deg) || item.angle_deg <= 0)) {
+    return { ok: false, error: "زاویه ویرایش‌شده باید عددی و بزرگ‌تر از صفر باشد." };
+  }
+  const remainingIndexes = normalized.filter((item) => !editedSet.has(item.index)).map((item) => item.index);
+  const editedTotal = roundPartModelAngle(editedAngles.reduce((sum, item) => sum + item.angle_deg, 0));
+  if (remainingIndexes.length === 0) {
+    if (Math.abs(editedTotal - Number(interiorAngleSum)) > PART_MODEL_ANGLE_EPSILON) {
+      return { ok: false, error: `جمع زاویه‌ها باید ${toPersianDigits(interiorAngleSum)} باشد.` };
+    }
+    return { ok: true, angles: normalized };
+  }
+  const remainingTotal = roundPartModelAngle(Number(interiorAngleSum) - editedTotal);
+  if (!(remainingTotal > 0)) {
+    return { ok: false, error: "جمع زاویه‌های ثابت‌شده از مجموع مجاز بیشتر شده است." };
+  }
+  const redistributedValues = buildEqualPartModelAngleValues(remainingIndexes.length, remainingTotal);
+  const redistributedByIndex = new Map(remainingIndexes.map((index, offset) => [index, redistributedValues[offset]]));
+  const nextAngles = normalized.map((item) => (
+    editedSet.has(item.index)
+      ? item
+      : {
+          ...item,
+          angle_deg: roundPartModelAngle(redistributedByIndex.get(item.index)),
+        }
+  ));
+  return { ok: true, angles: nextAngles };
+}
+
+function formatPartModelAnglesText(defaultAngles, sideCount, interiorAngleSum) {
+  return normalizePartModelAngleRecords(sideCount, defaultAngles, interiorAngleSum)
+    .map((item) => formatPartModelAngleNumber(item.angle_deg))
+    .join("، ");
+}
+
+function serializePartModelAnglesCsv(defaultAngles, sideCount, interiorAngleSum) {
+  return normalizePartModelAngleRecords(sideCount, defaultAngles, interiorAngleSum)
+    .map((item) => formatPartModelAngleNumber(item.angle_deg))
+    .join(",");
+}
+
+function parsePartModelAnglesCsv(value, sideCount, interiorAngleSum) {
+  const text = String(value ?? "").trim();
+  if (!text) return buildEqualPartModelAngleRecords(sideCount, interiorAngleSum);
+  const parts = text.split(",").map((item) => item.trim()).filter((item) => item);
+  return parts.map((item, index) => ({
+    index,
+    angle_deg: roundPartModelAngle(item),
+  }));
 }
 
 function normalizeBooleanFlag(value, fallback = false) {
@@ -9900,12 +10079,14 @@ function buildNewPartServiceDraft() {
 function buildNewPartModelDraft() {
   const nextSort = editablePartModels.value.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), 0) + 1;
   const sideCount = 4;
+  const interiorAngleSum = getPartModelInteriorAngleSum(sideCount);
   return {
     id: null,
     admin_id: null,
     title: "",
     side_count: sideCount,
-    interior_angle_sum: (sideCount - 2) * 180,
+    interior_angle_sum: interiorAngleSum,
+    default_angles: buildEqualPartModelAngleDrafts(sideCount, null, interiorAngleSum),
     sort_order: nextSort,
     is_system: true,
   };
@@ -12550,18 +12731,58 @@ function openPartServiceEditor(item = null) {
 }
 
 function openPartModelEditor(item = null) {
+  const sideCount = Number(item?.side_count) || 4;
+  const interiorAngleSum = Number(item?.interior_angle_sum) || getPartModelInteriorAngleSum(sideCount);
   partModelEditorDraft.value = item
     ? {
         id: item.id,
         admin_id: item.admin_id,
         title: String(item.title || "").trim(),
-        side_count: Number(item.side_count) || 3,
-        interior_angle_sum: Number(item.interior_angle_sum) || 180,
+        side_count: sideCount,
+        interior_angle_sum: interiorAngleSum,
+        default_angles: buildPartModelAngleDrafts(sideCount, item.default_angles, interiorAngleSum),
         sort_order: Number(item.sort_order) || 0,
         is_system: !!item.is_system,
       }
     : buildNewPartModelDraft();
   partModelEditorOpen.value = true;
+}
+
+function resetPartModelAnglesToDefault(sideCount) {
+  const draft = partModelEditorDraft.value;
+  if (!draft) return;
+  const normalizedSideCount = Math.max(3, Number(sideCount) || 3);
+  const interiorAngleSum = getPartModelInteriorAngleSum(normalizedSideCount);
+  draft.side_count = normalizedSideCount;
+  draft.interior_angle_sum = interiorAngleSum;
+  draft.default_angles = buildEqualPartModelAngleDrafts(normalizedSideCount, null, interiorAngleSum);
+}
+
+function onPartModelSideCountChange(value) {
+  const normalizedSideCount = Math.max(3, Number(value) || 3);
+  resetPartModelAnglesToDefault(normalizedSideCount);
+}
+
+function onPartModelAngleChange(angleIndex, value) {
+  const draft = partModelEditorDraft.value;
+  if (!draft) return;
+  const sideCount = Number(draft.side_count);
+  const interiorAngleSum = Number(draft.interior_angle_sum);
+  const currentAngles = buildPartModelAngleDrafts(sideCount, draft.default_angles, interiorAngleSum).map((item) => ({
+    ...item,
+    _edited: !!draft.default_angles?.find((entry) => Number(entry?.index) === item.index)?._edited,
+  }));
+  const targetIndex = currentAngles.findIndex((item) => item.index === Number(angleIndex));
+  if (targetIndex === -1) return;
+  currentAngles[targetIndex].angle_deg = roundPartModelAngle(value);
+  currentAngles[targetIndex]._edited = true;
+  const editedIndexes = currentAngles.filter((item) => item._edited).map((item) => item.index);
+  const redistributed = redistributePartModelAngleDrafts(sideCount, interiorAngleSum, currentAngles, editedIndexes);
+  if (!redistributed.ok) {
+    showAlert(redistributed.error || "تنظیم خودکار زاویه‌ها انجام نشد.", { title: "اعتبارسنجی" });
+    return;
+  }
+  draft.default_angles = redistributed.angles;
 }
 
 function openServiceTypeEditor(item = null) {
@@ -15327,6 +15548,11 @@ function validateConstructionPartModels() {
       showAlert(`برای ${toPersianDigits(sideCount)} ضلع، مجموع زوایای داخلی باید ${toPersianDigits(expectedAngleSum)} باشد.`, { title: "اعتبارسنجی" });
       return false;
     }
+    const angleValidation = validatePartModelAngleRecords(sideCount, interiorAngleSum, item.default_angles);
+    if (!angleValidation.ok) {
+      showAlert(angleValidation.error || "زاویه‌های پیش‌فرض مدل قطعه معتبر نیستند.", { title: "اعتبارسنجی" });
+      return false;
+    }
     const key = `${title.toLowerCase()}::${String(item.admin_id || "")}`;
     if (seen.has(key)) {
       showAlert("عنوان قطعه در همین دامنه مالک تکراری است.", { title: "اعتبارسنجی" });
@@ -15436,6 +15662,16 @@ async function savePartModelEditor() {
     showAlert(`برای ${toPersianDigits(sideCount)} ضلع، مجموع زوایای داخلی باید ${toPersianDigits(expectedAngleSum)} باشد.`, { title: "اعتبارسنجی" });
     return;
   }
+  const angleValidation = validatePartModelAngleRecords(sideCount, interiorAngleSum, draft.default_angles);
+  if (!angleValidation.ok) {
+    showAlert(angleValidation.error || "زاویه‌های پیش‌فرض مدل قطعه معتبر نیستند.", { title: "اعتبارسنجی" });
+    return;
+  }
+  draft.default_angles = angleValidation.angles.map((item) => ({
+    index: item.index,
+    angle_deg: item.angle_deg,
+    _edited: !!draft.default_angles?.find((entry) => Number(entry?.index) === item.index)?._edited,
+  }));
   const duplicateTitle = editablePartModels.value.some((item) => (
     String(item.title || "").trim().toLowerCase() === title.toLowerCase()
     && String(item.admin_id || "") === String(draft.admin_id || "")
@@ -17280,7 +17516,7 @@ function validateConstructionPartKinds() {
 
 function getConstructionCsvHeaders() {
   if (constructionStep.value === "part_models") {
-    return ["title", "side_count", "interior_angle_sum", "admin_mode"];
+    return ["title", "side_count", "interior_angle_sum", "default_angles", "admin_mode"];
   }
   if (constructionStep.value === "part_services") {
     return ["service_type", "service_description", "service_code", "admin_mode"];
@@ -17336,6 +17572,7 @@ function getConstructionCsvRows(items = null) {
       String(item.title || "").trim(),
       Number(item.side_count) || "",
       Number(item.interior_angle_sum) || "",
+      serializePartModelAnglesCsv(item.default_angles, Number(item.side_count), Number(item.interior_angle_sum)),
       item.admin_id === null ? "system" : "admin",
     ]);
   }
@@ -17644,12 +17881,15 @@ async function onConstructionImportFileChange(event) {
       previewRows = rows.slice(1).map((row, index) => {
         const sideCount = Number(row[1]);
         const defaultAngleSum = Number.isInteger(sideCount) && sideCount >= 3 ? (sideCount - 2) * 180 : Number(row[2]);
-        const adminMode = String(row[3] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const parsedAngles = parsePartModelAnglesCsv(row[3], sideCount, defaultAngleSum);
+        const adminMode = String(row[4] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         return {
           lineNo: index + 2,
           title: String(row[0] || "").trim(),
           side_count: sideCount,
           interior_angle_sum: Number(row[2]) || defaultAngleSum,
+          default_angles: parsedAngles,
+          default_angles_text: String(row[3] || "").trim(),
           admin_mode: adminMode,
         };
       });
@@ -17855,12 +18095,16 @@ async function onConstructionImportFileChange(event) {
     if (!previewRows.length) throw new Error("empty-file");
     const invalidRow = constructionStep.value === "part_models"
       ? previewRows.find(
-          (row) =>
-            !row.title ||
-            !Number.isInteger(row.side_count) ||
-            row.side_count < 3 ||
-            !Number.isInteger(row.interior_angle_sum) ||
-            row.interior_angle_sum !== ((row.side_count - 2) * 180)
+          (row) => {
+            if (
+              !row.title ||
+              !Number.isInteger(row.side_count) ||
+              row.side_count < 3 ||
+              !Number.isInteger(row.interior_angle_sum) ||
+              row.interior_angle_sum !== ((row.side_count - 2) * 180)
+            ) return true;
+            return !validatePartModelAngleRecords(row.side_count, row.interior_angle_sum, row.default_angles).ok;
+          }
         )
       : constructionStep.value === "part_services"
       ? previewRows.find(
@@ -21029,11 +21273,13 @@ function buildImportedConstructionPartModelDrafts(rows) {
     const existing = existingByScopeKey.get(key);
     const sideCount = Number(row.side_count);
     const expectedAngleSum = (sideCount - 2) * 180;
+    const normalizedAngles = normalizePartModelAngleRecords(sideCount, row.default_angles, Number(row.interior_angle_sum) || expectedAngleSum);
     const nextPayload = {
       admin_id: adminId,
       title,
       side_count: sideCount,
       interior_angle_sum: Number(row.interior_angle_sum) || expectedAngleSum,
+      default_angles: normalizedAngles,
       sort_order: index + 1,
       is_system: adminId === null,
     };
@@ -21049,6 +21295,8 @@ function buildImportedConstructionPartModelDrafts(rows) {
       String(existing.title || "").trim() !== nextPayload.title ||
       Number(existing.side_count) !== nextPayload.side_count ||
       Number(existing.interior_angle_sum) !== nextPayload.interior_angle_sum ||
+      serializePartModelAnglesCsv(existing.default_angles, Number(existing.side_count), Number(existing.interior_angle_sum))
+        !== serializePartModelAnglesCsv(nextPayload.default_angles, nextPayload.side_count, nextPayload.interior_angle_sum) ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system;
     return buildPartKindDraft(existing, {
@@ -25565,6 +25813,7 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--title">مدل قطعه</th>
                       <th class="constructionDialog__col constructionDialog__col--id">تعداد اضلاع</th>
                       <th class="constructionDialog__col constructionDialog__col--id">مجموع زوایای داخلی</th>
+                      <th class="constructionDialog__col constructionDialog__col--title">زاویه‌های پیش‌فرض</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
                   </thead>
@@ -25573,6 +25822,7 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--title">{{ row.title }}</td>
                       <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(row.side_count) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(row.interior_angle_sum) }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--title">{{ row.default_angles_text }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "سیستم" : "ادمین" }}</td>
                     </tr>
                   </tbody>
@@ -25594,6 +25844,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--title">مدل قطعه</th>
                     <th class="constructionDialog__col constructionDialog__col--id">تعداد اضلاع</th>
                     <th class="constructionDialog__col constructionDialog__col--id">مجموع زوایای داخلی</th>
+                    <th class="constructionDialog__col constructionDialog__col--title">زاویه‌های پیش‌فرض</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceActions">عملیات</th>
                   </tr>
                 </thead>
@@ -25604,6 +25855,7 @@ onBeforeUnmount(() => {
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.side_count) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--id">{{ toPersianDigits(item.interior_angle_sum) }}</td>
+                    <td class="constructionDialog__col constructionDialog__col--title">{{ formatPartModelAnglesText(item.default_angles, item.side_count, item.interior_angle_sum) }}</td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceActions">
                       <div class="constructionDialog__actionsCell constructionDialog__actionsCell--partService">
                         <button type="button" class="constructionDialog__textBtn" @click="openPartModelEditor(item)">ویرایش</button>
@@ -25612,7 +25864,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionPartModels.length">
-                    <td class="constructionDialog__col constructionDialog__col--title" colspan="4">هنوز مدلی برای قطعه ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--title" colspan="5">هنوز مدلی برای قطعه ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -26912,7 +27164,7 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closePartModelEditor">×</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        عنوان قطعه و تعداد اضلاع را ثبت کنید. مجموع زوایای داخلی باید با فرمول هندسی همان تعداد ضلع هماهنگ باشد.
+        عنوان قطعه و تعداد اضلاع را ثبت کنید. مجموع زوایای داخلی از روی تعداد ضلع محاسبه می‌شود و زاویه‌های ویرایش‌نشده خودکار باقیمانده را می‌گیرند.
       </div>
       <div class="subCategoryDesignEditor">
         <div class="subCategoryDesignEditor__meta">
@@ -26928,12 +27180,12 @@ onBeforeUnmount(() => {
               type="number"
               min="3"
               step="1"
-              @input="partModelEditorDraft.interior_angle_sum = ((Number(partModelEditorDraft.side_count) || 3) - 2) * 180"
+              @change="onPartModelSideCountChange(partModelEditorDraft.side_count)"
             />
           </label>
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
             <span>مجموع زوایای داخلی</span>
-            <input v-model.number="partModelEditorDraft.interior_angle_sum" class="constructionDialog__input" type="number" min="180" step="180" />
+            <input :value="partModelEditorDraft.interior_angle_sum" class="constructionDialog__input" type="number" min="180" step="180" readonly />
           </label>
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
             <span>ترتیب</span>
@@ -26950,6 +27202,23 @@ onBeforeUnmount(() => {
               {{ partModelEditorDraft.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین" }}
             </button>
           </div>
+        </div>
+        <div class="subCategoryDesignEditor__meta">
+          <label
+            v-for="angle in partModelEditorDraft.default_angles"
+            :key="`part-model-angle-${angle.index}`"
+            class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact"
+          >
+            <span>{{ `زاویه ${toPersianDigits(angle.index + 1)}` }}</span>
+            <input
+              :value="angle.angle_deg"
+              class="constructionDialog__input"
+              type="number"
+              min="0.01"
+              step="0.01"
+              @change="onPartModelAngleChange(angle.index, $event.target.value)"
+            />
+          </label>
         </div>
       </div>
       <div class="appDialog__actions">

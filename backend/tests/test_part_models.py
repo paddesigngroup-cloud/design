@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from designkp_backend.api.routers import part_models as router
 from designkp_backend.api.routers.part_models import (
@@ -68,6 +69,14 @@ def test_create_part_model_success(monkeypatch: pytest.MonkeyPatch) -> None:
         title="  شش ضلعی  ",
         side_count=6,
         interior_angle_sum=720,
+        default_angles=[
+            {"index": 0, "angle_deg": 120},
+            {"index": 1, "angle_deg": 120},
+            {"index": 2, "angle_deg": 120},
+            {"index": 3, "angle_deg": 120},
+            {"index": 4, "angle_deg": 120},
+            {"index": 5, "angle_deg": 120},
+        ],
         sort_order=None,
         is_system=True,
     )
@@ -77,6 +86,8 @@ def test_create_part_model_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.title == "شش ضلعی"
     assert result.side_count == 6
     assert result.interior_angle_sum == 720
+    assert len(result.default_angles) == 6
+    assert result.default_angles[0].angle_deg == 120
     assert result.sort_order == 7
     assert session.added is not None
 
@@ -92,6 +103,8 @@ def test_create_part_model_calculates_angle_sum_when_missing(monkeypatch: pytest
     ))
 
     assert result.interior_angle_sum == 540
+    assert len(result.default_angles) == 5
+    assert sum(item.angle_deg for item in result.default_angles) == pytest.approx(540)
 
 
 def test_update_part_model_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,6 +127,16 @@ def test_update_part_model_success(monkeypatch: pytest.MonkeyPatch) -> None:
         title="هشت ضلعی",
         side_count=8,
         interior_angle_sum=1080,
+        default_angles=[
+            {"index": 0, "angle_deg": 120},
+            {"index": 1, "angle_deg": 120},
+            {"index": 2, "angle_deg": 120},
+            {"index": 3, "angle_deg": 120},
+            {"index": 4, "angle_deg": 150},
+            {"index": 5, "angle_deg": 150},
+            {"index": 6, "angle_deg": 150},
+            {"index": 7, "angle_deg": 150},
+        ],
         sort_order=9,
         is_system=False,
     )
@@ -123,6 +146,7 @@ def test_update_part_model_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.title == "هشت ضلعی"
     assert existing.side_count == 8
     assert existing.interior_angle_sum == 1080
+    assert len(existing.default_angles) == 8
     assert existing.sort_order == 9
     assert existing.is_system is False
 
@@ -141,6 +165,83 @@ def test_create_part_model_rejects_invalid_angle_sum(monkeypatch: pytest.MonkeyP
 
     assert exc_info.value.status_code == 400
     assert "Interior angle sum must equal 180" in exc_info.value.detail
+
+
+def test_create_part_model_rejects_invalid_default_angle_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_require_admin_if_present(session, admin_id):
+        return None
+
+    monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(create_part_model(
+            PartModelCreate(
+                admin_id=None,
+                title="چهارضلعی",
+                side_count=4,
+                interior_angle_sum=360,
+                default_angles=[
+                    {"index": 0, "angle_deg": 90},
+                    {"index": 1, "angle_deg": 90},
+                ],
+                sort_order=0,
+                is_system=True,
+            ),
+            FakeSession(),
+        ))
+
+    assert exc_info.value.status_code == 400
+    assert "exactly 4 items" in exc_info.value.detail
+
+
+def test_create_part_model_rejects_invalid_default_angle_sum(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_require_admin_if_present(session, admin_id):
+        return None
+
+    monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(create_part_model(
+            PartModelCreate(
+                admin_id=None,
+                title="پنج ضلعی نامعتبر",
+                side_count=5,
+                interior_angle_sum=540,
+                default_angles=[
+                    {"index": 0, "angle_deg": 100},
+                    {"index": 1, "angle_deg": 100},
+                    {"index": 2, "angle_deg": 100},
+                    {"index": 3, "angle_deg": 100},
+                    {"index": 4, "angle_deg": 100},
+                ],
+                sort_order=0,
+                is_system=True,
+            ),
+            FakeSession(),
+        ))
+
+    assert exc_info.value.status_code == 400
+    assert "must sum to 540" in exc_info.value.detail
+
+
+def test_create_part_model_rejects_non_positive_default_angle() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        PartModelCreate(
+            admin_id=None,
+            title="چهارضلعی صفر",
+            side_count=4,
+            interior_angle_sum=360,
+            default_angles=[
+                {"index": 0, "angle_deg": 0},
+                {"index": 1, "angle_deg": 120},
+                {"index": 2, "angle_deg": 120},
+                {"index": 3, "angle_deg": 120},
+            ],
+            sort_order=0,
+            is_system=True,
+        )
+
+    assert "greater than 0" in str(exc_info.value)
 
 
 def test_list_part_models_scope_query_includes_system_and_admin(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -172,6 +273,12 @@ def test_delete_part_model_checks_access_scope(monkeypatch: pytest.MonkeyPatch) 
         title="test",
         side_count=4,
         interior_angle_sum=360,
+        default_angles=[
+            {"index": 0, "angle_deg": 90},
+            {"index": 1, "angle_deg": 90},
+            {"index": 2, "angle_deg": 90},
+            {"index": 3, "angle_deg": 90},
+        ],
         sort_order=1,
         is_system=False,
     )

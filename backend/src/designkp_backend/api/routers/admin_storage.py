@@ -66,6 +66,7 @@ def _part_model_headers() -> list[str]:
         "title",
         "side_count",
         "interior_angle_sum",
+        "default_angles",
         "admin_mode",
     ]
 
@@ -426,6 +427,7 @@ async def _part_model_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[l
             row.title,
             row.side_count,
             row.interior_angle_sum,
+            ",".join(str(angle.get("angle_deg", "")) for angle in (row.default_angles or [])),
             "system" if row.admin_id is None else "admin",
         ]
         for row in rows

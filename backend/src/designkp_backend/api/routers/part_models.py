@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -13,6 +14,13 @@ from designkp_backend.db.models.catalog import PartModel
 from designkp_backend.services.admin_access import require_admin_if_present
 
 router = APIRouter(prefix="/part-models", tags=["part_models"])
+ANGLE_EPSILON = 1e-4
+ANGLE_PRECISION = 6
+
+
+class PartModelAngleItem(BaseModel):
+    index: int = Field(ge=0, le=1000)
+    angle_deg: float = Field(gt=0, le=360000)
 
 
 class PartModelItem(BaseModel):
@@ -21,6 +29,7 @@ class PartModelItem(BaseModel):
     title: str
     side_count: int
     interior_angle_sum: int
+    default_angles: list[PartModelAngleItem]
     sort_order: int
     is_system: bool
 
@@ -32,6 +41,7 @@ class PartModelCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     side_count: int = Field(ge=3, le=1000)
     interior_angle_sum: int | None = Field(default=None, ge=180, le=360000)
+    default_angles: list[PartModelAngleItem] | None = None
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
 
@@ -41,6 +51,7 @@ class PartModelUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     side_count: int = Field(ge=3, le=1000)
     interior_angle_sum: int | None = Field(default=None, ge=180, le=360000)
+    default_angles: list[PartModelAngleItem] | None = None
     sort_order: int = Field(ge=0)
     is_system: bool
 
@@ -56,6 +67,77 @@ def _normalize_required_text(value: str, field: str, max_len: int) -> str:
 
 def _calculate_interior_angle_sum(side_count: int) -> int:
     return (int(side_count) - 2) * 180
+
+
+def _round_angle(value: float) -> float:
+    return round(float(value), ANGLE_PRECISION)
+
+
+def _build_equal_default_angles(side_count: int, interior_angle_sum: int) -> list[dict[str, float | int]]:
+    if side_count <= 0:
+        return []
+    raw_angle = float(interior_angle_sum) / float(side_count)
+    remaining = float(interior_angle_sum)
+    normalized: list[dict[str, float | int]] = []
+    for index in range(side_count):
+        angle = remaining if index == side_count - 1 else _round_angle(raw_angle)
+        angle = _round_angle(angle)
+        remaining = _round_angle(remaining - angle)
+        normalized.append({"index": index, "angle_deg": angle})
+    return normalized
+
+
+def _normalize_default_angles(
+    side_count: int,
+    interior_angle_sum: int,
+    provided_angles: list[PartModelAngleItem] | None,
+) -> list[dict[str, float | int]]:
+    if provided_angles is None:
+        return _build_equal_default_angles(side_count, interior_angle_sum)
+    if len(provided_angles) != side_count:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Default angles must contain exactly {side_count} items.",
+        )
+
+    normalized: list[dict[str, float | int]] = []
+    seen_indexes: set[int] = set()
+    for item in provided_angles:
+        index = int(item.index)
+        if index in seen_indexes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Default angles must use unique indexes.",
+            )
+        if index < 0 or index >= side_count:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Default angle index {index} is out of range for side count {side_count}.",
+            )
+        angle_deg = float(item.angle_deg)
+        if not math.isfinite(angle_deg) or angle_deg <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Default angles must be positive finite numbers.",
+            )
+        normalized.append({"index": index, "angle_deg": _round_angle(angle_deg)})
+        seen_indexes.add(index)
+
+    normalized.sort(key=lambda entry: int(entry["index"]))
+    for expected_index, entry in enumerate(normalized):
+        if int(entry["index"]) != expected_index:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Default angle indexes must cover every side in ascending order.",
+            )
+
+    total = sum(float(entry["angle_deg"]) for entry in normalized)
+    if abs(total - float(interior_angle_sum)) > ANGLE_EPSILON:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Default angles must sum to {interior_angle_sum} for side count {side_count}.",
+        )
+    return normalized
 
 
 def _normalize_interior_angle_sum(side_count: int, provided_value: int | None) -> int:
@@ -124,6 +206,7 @@ async def create_part_model(payload: PartModelCreate, session: AsyncSession = De
     await require_admin_if_present(session, payload.admin_id)
     title = _normalize_required_text(payload.title, "Part model title", 255)
     interior_angle_sum = _normalize_interior_angle_sum(payload.side_count, payload.interior_angle_sum)
+    default_angles = _normalize_default_angles(payload.side_count, interior_angle_sum, payload.default_angles)
     await _ensure_unique_title(session, admin_id=payload.admin_id, title=title)
 
     item = PartModel(
@@ -131,6 +214,7 @@ async def create_part_model(payload: PartModelCreate, session: AsyncSession = De
         title=title,
         side_count=payload.side_count,
         interior_angle_sum=interior_angle_sum,
+        default_angles=default_angles,
         sort_order=payload.sort_order if payload.sort_order is not None else await _next_sort_order(session),
         is_system=payload.is_system,
     )
@@ -157,6 +241,7 @@ async def update_part_model(
     await require_admin_if_present(session, payload.admin_id)
     title = _normalize_required_text(payload.title, "Part model title", 255)
     interior_angle_sum = _normalize_interior_angle_sum(payload.side_count, payload.interior_angle_sum)
+    default_angles = _normalize_default_angles(payload.side_count, interior_angle_sum, payload.default_angles)
     await _ensure_unique_title(
         session,
         admin_id=payload.admin_id,
@@ -168,6 +253,7 @@ async def update_part_model(
     item.title = title
     item.side_count = payload.side_count
     item.interior_angle_sum = interior_angle_sum
+    item.default_angles = default_angles
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     try:

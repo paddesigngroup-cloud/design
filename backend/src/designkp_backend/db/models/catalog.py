@@ -201,6 +201,7 @@ class PartModel(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMix
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     side_count: Mapped[int] = mapped_column(Integer, nullable=False)
     interior_angle_sum: Mapped[int] = mapped_column(Integer, nullable=False)
+    default_angles: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
