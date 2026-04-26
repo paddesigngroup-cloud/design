@@ -934,6 +934,9 @@ const baseFormulaBuilderDraft = ref(null);
 const baseFormulaBuilderTokens = ref([]);
 const baseFormulaBuilderSyncWarning = ref("");
 const baseFormulaBuilderNumberInput = ref("");
+const partFormulaCreateDialogOpen = ref(false);
+const partFormulaCreateDialogDraft = ref(null);
+const partFormulaCreateDialogInitialSnapshot = ref("");
 const partFormulaFieldsDialogOpen = ref(false);
 const partFormulaFieldsDialogDraft = ref(null);
 const partFormulaFieldsDialogRowId = ref(null);
@@ -8213,6 +8216,12 @@ const baseFormulaBuilderValidationErrors = computed(() => {
   }
   return [...new Set(errors)];
 });
+const partFormulaCreateDialogValidationErrors = computed(() => {
+  const draft = partFormulaCreateDialogDraft.value;
+  if (!draft) return [];
+  return getPartFormulaValidationErrors(draft, null)
+    .filter((error) => !PART_FORMULA_FIELDS.some((field) => error.startsWith(`${field.label}`) || error === `${field.label} خالی است.`));
+});
 const partFormulaFieldsDialogValidationErrors = computed(() => {
   const draft = partFormulaFieldsDialogDraft.value;
   if (!draft) return [];
@@ -8220,6 +8229,7 @@ const partFormulaFieldsDialogValidationErrors = computed(() => {
     .filter((error) => PART_FORMULA_FIELDS.some((field) => error.startsWith(`${field.label}`) || error === `${field.label} خالی است.`));
 });
 const isBaseFormulaBuilderApplyDisabled = computed(() => !baseFormulaBuilderDraft.value || baseFormulaBuilderValidationErrors.value.length > 0);
+const isPartFormulaCreateDialogApplyDisabled = computed(() => !partFormulaCreateDialogDraft.value || partFormulaCreateDialogValidationErrors.value.length > 0);
 const isPartFormulaFieldsDialogApplyDisabled = computed(() => !partFormulaFieldsDialogDraft.value || partFormulaFieldsDialogValidationErrors.value.length > 0);
 const constructionParamGroupDuplicateState = computed(() => buildDuplicateState(editableParamGroups.value, ["param_group_id", "param_group_code"]));
 const constructionParamDuplicateState = computed(() => buildDuplicateState(editableParams.value, ["param_id", "param_code"]));
@@ -9645,6 +9655,18 @@ function createPartFormulaDraft(item, overrides = {}) {
   };
 }
 
+function buildPartFormulaCreateDialogSnapshot(item) {
+  return JSON.stringify({
+    part_formula_id: Number(item?.part_formula_id) || 0,
+    part_kind_id: Number(item?.part_kind_id) || 0,
+    part_model_id: String(item?.part_model_id || "").trim(),
+    part_sub_kind_id: Number(item?.part_sub_kind_id) || 0,
+    part_code: String(item?.part_code || "").trim(),
+    part_title: String(item?.part_title || "").trim(),
+    door_dependent: normalizeBooleanFlag(item?.door_dependent, false),
+  });
+}
+
 function getDefaultConstructionPartModelId() {
   const preferred = constructionPartModels.value.find((item) => String(item.title || "").trim() === "مربع مستطیل");
   if (preferred?.id) return String(preferred.id);
@@ -9907,6 +9929,52 @@ function openBaseFormulaBuilder(item, mode = "edit", options = {}) {
   baseFormulaBuilderTokens.value = [];
   baseFormulaBuilderOpen.value = true;
   syncBaseFormulaBuilderFromFormulaText({ silent: true });
+}
+
+async function closePartFormulaCreateDialog() {
+  const draft = partFormulaCreateDialogDraft.value;
+  if (!partFormulaCreateDialogOpen.value || !draft) {
+    partFormulaCreateDialogOpen.value = false;
+    partFormulaCreateDialogDraft.value = null;
+    partFormulaCreateDialogInitialSnapshot.value = "";
+    return;
+  }
+  const hasChanges = buildPartFormulaCreateDialogSnapshot(draft) !== partFormulaCreateDialogInitialSnapshot.value;
+  if (hasChanges) {
+    const ok = await showConfirm("تغییرات قطعه جدید اعمال نشده‌اند. پنجره بسته شود؟", {
+      title: "بستن افزودن قطعه",
+      confirmText: "بستن",
+      cancelText: "بازگشت",
+    });
+    if (!ok) return;
+  }
+  partFormulaCreateDialogOpen.value = false;
+  partFormulaCreateDialogDraft.value = null;
+  partFormulaCreateDialogInitialSnapshot.value = "";
+}
+
+function applyPartFormulaCreateDialog() {
+  const draft = partFormulaCreateDialogDraft.value;
+  if (!draft || partFormulaCreateDialogValidationErrors.value.length > 0) return;
+  const normalized = createPartFormulaDraft(draft, {
+    part_model_id: String(draft.part_model_id || "").trim(),
+    part_model_title: getConstructionPartModelTitle(draft.part_model_id),
+    part_code: String(draft.part_code || "").trim(),
+    part_title: String(draft.part_title || "").trim(),
+    code: String(draft.part_code || "").trim(),
+    title: String(draft.part_title || "").trim(),
+    sort_order: Number.isFinite(Number(draft.sort_order)) ? Number(draft.sort_order) : Number(draft.part_formula_id),
+    is_system: draft.admin_id === null,
+    __isNew: true,
+    __dirty: false,
+  });
+  for (const field of PART_FORMULA_FIELDS) {
+    normalized[field.key] = String(draft[field.key] || "").trim() || "(1)";
+  }
+  editablePartFormulas.value = [...editablePartFormulas.value, normalized];
+  partFormulaCreateDialogOpen.value = false;
+  partFormulaCreateDialogDraft.value = null;
+  partFormulaCreateDialogInitialSnapshot.value = "";
 }
 
 function openPartFormulaFieldsDialog(item) {
@@ -19119,10 +19187,10 @@ function addConstructionBaseFormula() {
 }
 
 function addConstructionPartFormula() {
-  openBaseFormulaBuilder(buildNewPartFormulaDraft(), "create", {
-    entity: "part_formulas",
-    field: "formula_l",
-  });
+  const draft = buildNewPartFormulaDraft();
+  partFormulaCreateDialogDraft.value = createPartFormulaDraft(draft);
+  partFormulaCreateDialogInitialSnapshot.value = buildPartFormulaCreateDialogSnapshot(draft);
+  partFormulaCreateDialogOpen.value = true;
 }
 
 async function readApiErrorMessage(response, fallbackMessage) {
@@ -26591,7 +26659,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="constructionDialog__toolbarActions">
-                <button type="button" class="constructionDialog__textBtn" @click="addConstructionPartFormula">افزودن فرمول قطعه</button>
+                <button type="button" class="constructionDialog__textBtn" @click="addConstructionPartFormula">افزودن قطعه</button>
               </div>
             </div>
 
@@ -29648,6 +29716,83 @@ onBeforeUnmount(() => {
       <div class="appDialog__actions">
         <button type="button" class="menuItem" @click="closeBaseFormulaBuilder">انصراف</button>
         <button type="button" class="menuItem" :disabled="isBaseFormulaBuilderApplyDisabled" @click="applyBaseFormulaBuilder">اعمال</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="partFormulaCreateDialogOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closePartFormulaCreateDialog"></div>
+    <div class="appDialog__card appDialog__card--builder" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">افزودن قطعه</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closePartFormulaCreateDialog">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        مشخصات اصلی قطعه را ثبت کنید. فرمول‌های این قطعه فعلاً با مقدار پیش‌فرض `1` ساخته می‌شوند و بعداً از دکمه «فرمول های قطعه» قابل ویرایش هستند.
+      </div>
+
+      <div v-if="partFormulaCreateDialogDraft" class="formulaBuilder">
+        <div class="formulaBuilder__meta formulaBuilder__meta--part">
+          <label class="formulaBuilder__field">
+            <span>شناسه</span>
+            <input v-model.number="partFormulaCreateDialogDraft.part_formula_id" class="constructionDialog__input" type="number" min="1" step="1" />
+          </label>
+          <label class="formulaBuilder__field">
+            <span>نوع قطعه</span>
+            <select v-model.number="partFormulaCreateDialogDraft.part_kind_id" class="constructionDialog__input">
+              <option v-for="option in constructionPartKindOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+          <label class="formulaBuilder__field">
+            <span>نوع قطعه</span>
+            <button
+              type="button"
+              class="constructionDialog__scopeBtn"
+              :class="getConstructionPartKindScopeTone(partFormulaCreateDialogDraft.part_kind_id)"
+              @click="toggleConstructionPartKindInternalById(partFormulaCreateDialogDraft.part_kind_id)"
+            >
+              {{ getConstructionPartKindInternalLabel(partFormulaCreateDialogDraft.part_kind_id) }}
+            </button>
+          </label>
+          <label class="formulaBuilder__field">
+            <span>مدل قطعه</span>
+            <select v-model="partFormulaCreateDialogDraft.part_model_id" class="constructionDialog__input">
+              <option value="" disabled>انتخاب مدل قطعه</option>
+              <option v-for="option in constructionPartModelOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+          <label class="formulaBuilder__field">
+            <span>زیرنوع</span>
+            <input v-model.number="partFormulaCreateDialogDraft.part_sub_kind_id" class="constructionDialog__input" type="number" min="1" step="1" />
+          </label>
+          <label class="formulaBuilder__field">
+            <span>کد قطعه</span>
+            <input v-model="partFormulaCreateDialogDraft.part_code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
+          </label>
+          <label class="formulaBuilder__field">
+            <span>عنوان قطعه</span>
+            <input v-model="partFormulaCreateDialogDraft.part_title" class="constructionDialog__input" type="text" />
+          </label>
+          <label class="formulaBuilder__field">
+            <span>وابستگی درب</span>
+            <button
+              type="button"
+              class="constructionDialog__scopeBtn"
+              :class="normalizeBooleanFlag(partFormulaCreateDialogDraft.door_dependent, false) ? 'is-admin' : 'is-system'"
+              @click="partFormulaCreateDialogDraft.door_dependent = !normalizeBooleanFlag(partFormulaCreateDialogDraft.door_dependent, false)"
+            >
+              {{ normalizeBooleanFlag(partFormulaCreateDialogDraft.door_dependent, false) ? "بله" : "خیر" }}
+            </button>
+          </label>
+        </div>
+        <div v-if="partFormulaCreateDialogValidationErrors.length" class="formulaBuilder__errors">
+          <div v-for="error in partFormulaCreateDialogValidationErrors" :key="error" class="formulaBuilder__error">{{ error }}</div>
+        </div>
+      </div>
+
+      <div class="appDialog__actions">
+        <button type="button" class="menuItem" @click="closePartFormulaCreateDialog">انصراف</button>
+        <button type="button" class="menuItem" :disabled="isPartFormulaCreateDialogApplyDisabled" @click="applyPartFormulaCreateDialog">اعمال</button>
       </div>
     </div>
   </div>
