@@ -932,6 +932,9 @@ const baseFormulaBuilderDraft = ref(null);
 const baseFormulaBuilderTokens = ref([]);
 const baseFormulaBuilderSyncWarning = ref("");
 const baseFormulaBuilderNumberInput = ref("");
+const partFormulaFieldsDialogOpen = ref(false);
+const partFormulaFieldsDialogDraft = ref(null);
+const partFormulaFieldsDialogRowId = ref(null);
 const constructionLoading = ref(false);
 const constructionSavingIds = ref([]);
 const constructionDeletingIds = ref([]);
@@ -8195,7 +8198,14 @@ const baseFormulaBuilderValidationErrors = computed(() => {
   }
   return [...new Set(errors)];
 });
+const partFormulaFieldsDialogValidationErrors = computed(() => {
+  const draft = partFormulaFieldsDialogDraft.value;
+  if (!draft) return [];
+  return getPartFormulaValidationErrors(draft, partFormulaFieldsDialogRowId.value)
+    .filter((error) => PART_FORMULA_FIELDS.some((field) => error.startsWith(`${field.label}`) || error === `${field.label} خالی است.`));
+});
 const isBaseFormulaBuilderApplyDisabled = computed(() => !baseFormulaBuilderDraft.value || baseFormulaBuilderValidationErrors.value.length > 0);
+const isPartFormulaFieldsDialogApplyDisabled = computed(() => !partFormulaFieldsDialogDraft.value || partFormulaFieldsDialogValidationErrors.value.length > 0);
 const constructionParamGroupDuplicateState = computed(() => buildDuplicateState(editableParamGroups.value, ["param_group_id", "param_group_code"]));
 const constructionParamDuplicateState = computed(() => buildDuplicateState(editableParams.value, ["param_id", "param_code"]));
 const constructionBaseFormulaDuplicateState = computed(() => buildDuplicateState(editableBaseFormulas.value, ["fo_id", "param_formula"]));
@@ -8207,6 +8217,36 @@ const baseFormulaCodeWidthCh = computed(() => {
     : [];
   return Math.max(3, ...liveCodes, ...previewCodes);
 });
+function getMaxColumnLength(values, minimum = 0) {
+  return Math.max(minimum, ...values.map((value) => String(value ?? "").trim().length));
+}
+const constructionPartFormulaColumnWidths = computed(() => {
+  const rows = constructionPartFormulas.value;
+  const partKindLabels = constructionPartKindOptions.value.map((item) => item.label);
+  return {
+    part_formula_id: getMaxColumnLength(["شناسه", ...rows.map((item) => item.part_formula_id)], 2),
+    part_kind_id: getMaxColumnLength(["نوع قطعه", ...partKindLabels], 6),
+    part_scope: getMaxColumnLength(["نوع قطعه", ...rows.map((item) => getConstructionPartKindInternalLabel(item.part_kind_id))], 5),
+    part_sub_kind_id: getMaxColumnLength(["زیرنوع", ...rows.map((item) => item.part_sub_kind_id)], 3),
+    part_code: getMaxColumnLength(["کد قطعه", ...rows.map((item) => item.part_code)], 8),
+    part_title: getMaxColumnLength(["عنوان قطعه", ...rows.map((item) => item.part_title)], 10),
+    door_dependent: getMaxColumnLength(["وابستگی درب", ...rows.map((item) => normalizeBooleanFlag(item.door_dependent, false) ? "بله" : "خیر")], 7),
+    owner: getMaxColumnLength(["مالک", ...rows.map((item) => item.admin_id || "SYSTEM")], 8),
+    record_scope: getMaxColumnLength(["نوع رکورد", ...rows.map((item) => item.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین")], 11),
+    actions: getMaxColumnLength(["عملیات", "فرمول های قطعه"], 14),
+  };
+});
+function getConstructionPartFormulaColumnStyle(columnKey) {
+  const widths = constructionPartFormulaColumnWidths.value;
+  const ch = Math.max(4, Number(widths?.[columnKey]) || 8);
+  const extraPx = columnKey === "actions" ? 44 : columnKey === "owner" ? 32 : 24;
+  const size = `calc(${ch}ch + ${extraPx}px)`;
+  return {
+    width: size,
+    minWidth: size,
+    maxWidth: size,
+  };
+}
 const partFormulaKnownCodes = computed(() => new Set([
   ...formulaBuilderAvailableParams.value.map((item) => item.value),
   ...formulaBuilderAvailableBaseFormulas.value.map((item) => item.value),
@@ -9480,6 +9520,65 @@ function openBaseFormulaBuilder(item, mode = "edit", options = {}) {
   syncBaseFormulaBuilderFromFormulaText({ silent: true });
 }
 
+function openPartFormulaFieldsDialog(item) {
+  partFormulaFieldsDialogRowId.value = item?.id ?? null;
+  partFormulaFieldsDialogDraft.value = createPartFormulaDraft(item);
+  partFormulaFieldsDialogOpen.value = true;
+}
+
+async function closePartFormulaFieldsDialog() {
+  const draft = partFormulaFieldsDialogDraft.value;
+  if (!partFormulaFieldsDialogOpen.value || !draft) {
+    partFormulaFieldsDialogOpen.value = false;
+    return;
+  }
+  const original = editablePartFormulas.value.find((item) => String(item.id) === String(partFormulaFieldsDialogRowId.value));
+  const hasChanges = !!original && JSON.stringify(
+    PART_FORMULA_FIELDS.reduce((acc, field) => ({ ...acc, [field.key]: String(original[field.key] || "").trim() }), {})
+  ) !== JSON.stringify(
+    PART_FORMULA_FIELDS.reduce((acc, field) => ({ ...acc, [field.key]: String(draft[field.key] || "").trim() }), {})
+  );
+  if (hasChanges) {
+    const ok = await showConfirm("تغییرات فرمول‌های قطعه اعمال نشده‌اند. پنجره بسته شود؟", {
+      title: "بستن ویرایش فرمول‌ها",
+      confirmText: "بستن",
+      cancelText: "بازگشت",
+    });
+    if (!ok) return;
+  }
+  partFormulaFieldsDialogOpen.value = false;
+  partFormulaFieldsDialogDraft.value = null;
+  partFormulaFieldsDialogRowId.value = null;
+}
+
+function openPartFormulaFieldBuilder(fieldKey) {
+  if (!partFormulaFieldsDialogDraft.value) return;
+  openBaseFormulaBuilder(partFormulaFieldsDialogDraft.value, "edit", {
+    entity: "part_formulas",
+    field: fieldKey,
+  });
+}
+
+function applyPartFormulaFieldsDialog() {
+  const draft = partFormulaFieldsDialogDraft.value;
+  if (!draft) return;
+  const errors = getPartFormulaValidationErrors(draft, partFormulaFieldsDialogRowId.value)
+    .filter((error) => PART_FORMULA_FIELDS.some((field) => error.startsWith(`${field.label}`) || error === `${field.label} خالی است.`));
+  if (errors.length > 0) return;
+  editablePartFormulas.value = editablePartFormulas.value.map((item) => {
+    if (String(item.id) !== String(partFormulaFieldsDialogRowId.value)) return item;
+    const next = createPartFormulaDraft(item);
+    for (const field of PART_FORMULA_FIELDS) {
+      next[field.key] = String(draft[field.key] || "").trim();
+    }
+    if (!next.__isNew) next.__dirty = true;
+    return next;
+  });
+  partFormulaFieldsDialogOpen.value = false;
+  partFormulaFieldsDialogDraft.value = null;
+  partFormulaFieldsDialogRowId.value = null;
+}
+
 async function closeBaseFormulaBuilder() {
   const draft = baseFormulaBuilderDraft.value;
   if (!baseFormulaBuilderOpen.value || !draft) {
@@ -9550,6 +9649,8 @@ function applyBaseFormulaBuilder() {
   const draft = baseFormulaBuilderDraft.value;
   if (!draft || baseFormulaBuilderValidationErrors.value.length > 0) return;
   if (baseFormulaBuilderEntity.value === "part_formulas") {
+    const hasPartFormulaFieldsDialogParent = partFormulaFieldsDialogOpen.value
+      && String(partFormulaFieldsDialogRowId.value) === String(baseFormulaBuilderTargetRowId.value);
     const normalized = createPartFormulaDraft(draft, {
       part_code: String(draft.part_code || "").trim(),
       part_title: String(draft.part_title || "").trim(),
@@ -9560,6 +9661,9 @@ function applyBaseFormulaBuilder() {
     });
     for (const field of PART_FORMULA_FIELDS) {
       normalized[field.key] = String(draft[field.key] || "").trim();
+    }
+    if (hasPartFormulaFieldsDialogParent && partFormulaFieldsDialogDraft.value) {
+      partFormulaFieldsDialogDraft.value = createPartFormulaDraft(partFormulaFieldsDialogDraft.value, normalized);
     }
     if (baseFormulaBuilderMode.value === "create") {
       editablePartFormulas.value = [...editablePartFormulas.value, normalized];
@@ -26005,33 +26109,32 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="constructionDialog__tableWrap">
-              <table class="constructionDialog__table">
+              <table class="constructionDialog__table constructionDialog__table--partFormulas">
                 <thead>
                   <tr>
-                    <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
-                    <th class="constructionDialog__col constructionDialog__col--id">نوع قطعه</th>
-                    <th class="constructionDialog__col constructionDialog__col--scope">نوع قطعه</th>
-                    <th class="constructionDialog__col constructionDialog__col--id">زیرنوع</th>
-                    <th class="constructionDialog__col constructionDialog__col--code">کد قطعه</th>
-                    <th class="constructionDialog__col constructionDialog__col--title">عنوان قطعه</th>
-                    <th v-for="field in PART_FORMULA_FIELDS" :key="field.key" class="constructionDialog__col constructionDialog__col--formulaExpr">{{ field.label }}</th>
-                    <th class="constructionDialog__col constructionDialog__col--scope">وابستگی درب</th>
-                    <th class="constructionDialog__col constructionDialog__col--owner">مالک</th>
-                    <th class="constructionDialog__col constructionDialog__col--scope">نوع رکورد</th>
-                    <th class="constructionDialog__col constructionDialog__col--actions">عملیات</th>
+                    <th class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_formula_id')">شناسه</th>
+                    <th class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_kind_id')">نوع قطعه</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope" :style="getConstructionPartFormulaColumnStyle('part_scope')">نوع قطعه</th>
+                    <th class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_sub_kind_id')">زیرنوع</th>
+                    <th class="constructionDialog__col constructionDialog__col--code" :style="getConstructionPartFormulaColumnStyle('part_code')">کد قطعه</th>
+                    <th class="constructionDialog__col constructionDialog__col--title" :style="getConstructionPartFormulaColumnStyle('part_title')">عنوان قطعه</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope" :style="getConstructionPartFormulaColumnStyle('door_dependent')">وابستگی درب</th>
+                    <th class="constructionDialog__col constructionDialog__col--owner" :style="getConstructionPartFormulaColumnStyle('owner')">مالک</th>
+                    <th class="constructionDialog__col constructionDialog__col--scope" :style="getConstructionPartFormulaColumnStyle('record_scope')">نوع رکورد</th>
+                    <th class="constructionDialog__col constructionDialog__col--actions" :style="getConstructionPartFormulaColumnStyle('actions')">عملیات</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="item in constructionPartFormulas" :key="item.id">
-                    <td class="constructionDialog__col constructionDialog__col--id">
+                    <td class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_formula_id')">
                       <input v-model.number="item.part_formula_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionPartFormulaDirty(item)" />
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--id">
+                    <td class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_kind_id')">
                       <select v-model.number="item.part_kind_id" class="constructionDialog__input" @change="markConstructionPartFormulaDirty(item)">
                         <option v-for="option in constructionPartKindOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                       </select>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--scope">
+                    <td class="constructionDialog__col constructionDialog__col--scope" :style="getConstructionPartFormulaColumnStyle('part_scope')">
                       <button
                         type="button"
                         class="constructionDialog__scopeBtn"
@@ -26041,10 +26144,10 @@ onBeforeUnmount(() => {
                         {{ getConstructionPartKindInternalLabel(item.part_kind_id) }}
                       </button>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--id">
+                    <td class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_sub_kind_id')">
                       <input v-model.number="item.part_sub_kind_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionPartFormulaDirty(item)" />
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--code">
+                    <td class="constructionDialog__col constructionDialog__col--code" :style="getConstructionPartFormulaColumnStyle('part_code')">
                       <input
                         v-model="item.part_code"
                         :class="[
@@ -26056,16 +26159,10 @@ onBeforeUnmount(() => {
                         @input="markConstructionPartFormulaDirty(item)"
                       />
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--title">
+                    <td class="constructionDialog__col constructionDialog__col--title" :style="getConstructionPartFormulaColumnStyle('part_title')">
                       <input v-model="item.part_title" class="constructionDialog__input" type="text" @input="markConstructionPartFormulaDirty(item)" />
                     </td>
-                    <td v-for="field in PART_FORMULA_FIELDS" :key="field.key" class="constructionDialog__col constructionDialog__col--formulaExpr">
-                      <button type="button" class="constructionDialog__formulaBtn" @click="openBaseFormulaBuilder(item, 'edit', { entity: 'part_formulas', field: field.key })">
-                        <span class="constructionDialog__formulaBtnText">{{ item[field.key] }}</span>
-                        <span class="constructionDialog__formulaBtnAction">ویرایش {{ field.label }}</span>
-                      </button>
-                    </td>
-                    <td class="constructionDialog__col constructionDialog__col--scope">
+                    <td class="constructionDialog__col constructionDialog__col--scope" :style="getConstructionPartFormulaColumnStyle('door_dependent')">
                       <button
                         type="button"
                         class="constructionDialog__scopeBtn"
@@ -26075,16 +26172,17 @@ onBeforeUnmount(() => {
                         {{ normalizeBooleanFlag(item.door_dependent, false) ? "بله" : "خیر" }}
                       </button>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--owner">
+                    <td class="constructionDialog__col constructionDialog__col--owner" :style="getConstructionPartFormulaColumnStyle('owner')">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.admin_id || "SYSTEM" }}</span>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--scope">
+                    <td class="constructionDialog__col constructionDialog__col--scope" :style="getConstructionPartFormulaColumnStyle('record_scope')">
                       <button type="button" class="constructionDialog__scopeBtn" :class="item.admin_id === null ? 'is-system' : 'is-admin'" @click="toggleConstructionPartFormulaScope(item)">
                         {{ item.admin_id === null ? "پیش‌فرض" : "اختصاصی ادمین" }}
                       </button>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--actions">
+                    <td class="constructionDialog__col constructionDialog__col--actions" :style="getConstructionPartFormulaColumnStyle('actions')">
                       <div class="constructionDialog__actionsCell">
+                        <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" @click="openPartFormulaFieldsDialog(item)">فرمول های قطعه</button>
                         <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionPartFormula(item.id)">×</button>
                         <span v-if="constructionDeletingIds.includes(String(item.id))" class="constructionDialog__saving constructionDialog__saving--compact">در حال حذف</span>
                         <span v-else-if="constructionSavingIds.includes(String(item.id))" class="constructionDialog__saving constructionDialog__saving--compact">در حال ذخیره</span>
@@ -28803,7 +28901,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <div v-if="baseFormulaBuilderOpen" class="appDialog" role="dialog" aria-modal="true">
+  <div v-if="baseFormulaBuilderOpen" class="appDialog appDialog--stacked" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeBaseFormulaBuilder"></div>
     <div class="appDialog__card appDialog__card--builder" dir="rtl">
       <div class="formulaBuilder__head">
@@ -28932,6 +29030,39 @@ onBeforeUnmount(() => {
       <div class="appDialog__actions">
         <button type="button" class="menuItem" @click="closeBaseFormulaBuilder">انصراف</button>
         <button type="button" class="menuItem" :disabled="isBaseFormulaBuilderApplyDisabled" @click="applyBaseFormulaBuilder">اعمال</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="partFormulaFieldsDialogOpen" class="appDialog" role="dialog" aria-modal="true">
+    <div class="appDialog__backdrop" @click="closePartFormulaFieldsDialog"></div>
+    <div class="appDialog__card appDialog__card--builder" dir="rtl">
+      <div class="formulaBuilder__head">
+        <div class="constructionDialog__sectionTitle formulaBuilder__title">فرمول های قطعه</div>
+        <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closePartFormulaFieldsDialog">×</button>
+      </div>
+      <div class="constructionDialog__sectionHint">
+        {{ partFormulaFieldsDialogDraft ? `${partFormulaFieldsDialogDraft.part_title || "قطعه"} - ${partFormulaFieldsDialogDraft.part_code || ""}` : "فرمول‌های ابعاد و مختصات این قطعه را در یک پنجره جدا ویرایش کنید." }}
+      </div>
+
+      <div v-if="partFormulaFieldsDialogDraft" class="formulaBuilder partFormulaFieldsDialog">
+        <div class="partFormulaFieldsDialog__grid">
+          <article v-for="field in PART_FORMULA_FIELDS" :key="field.key" class="partFormulaFieldsDialog__card">
+            <div class="partFormulaFieldsDialog__cardHead">
+              <div class="partFormulaFieldsDialog__label">{{ field.label }}</div>
+              <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" @click="openPartFormulaFieldBuilder(field.key)">سازنده فرمول</button>
+            </div>
+            <div class="formulaBuilder__preview partFormulaFieldsDialog__preview">{{ partFormulaFieldsDialogDraft[field.key] || `${field.label} هنوز ثبت نشده است.` }}</div>
+          </article>
+        </div>
+        <div v-if="partFormulaFieldsDialogValidationErrors.length" class="formulaBuilder__errors">
+          <div v-for="error in partFormulaFieldsDialogValidationErrors" :key="error" class="formulaBuilder__error">{{ error }}</div>
+        </div>
+      </div>
+
+      <div class="appDialog__actions">
+        <button type="button" class="menuItem" @click="closePartFormulaFieldsDialog">انصراف</button>
+        <button type="button" class="menuItem" :disabled="isPartFormulaFieldsDialogApplyDisabled" @click="applyPartFormulaFieldsDialog">اعمال</button>
       </div>
     </div>
   </div>
