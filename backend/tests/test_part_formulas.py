@@ -14,11 +14,15 @@ class FakeSession:
     def __init__(self, item=None) -> None:
         self.item = item
         self.added = None
+        self.part_model = SimpleNamespace(id=uuid.uuid4(), title="مربع مستطیل", admin_id=None)
 
     def add(self, item) -> None:
         self.added = item
 
     async def commit(self) -> None:
+        if self.added is not None and getattr(self.added, "id", None) is None:
+            self.added.id = uuid.uuid4()
+            self.added.part_model = self.part_model
         return None
 
     async def refresh(self, item) -> None:
@@ -32,12 +36,20 @@ class FakeSession:
         text = str(stmt)
         if "max(part_formulas.part_formula_id)" in text:
             return 11
+        if "FROM part_models" in text:
+            return self.part_model
+        if "part_formulas.id" in text:
+            target = self.added or self.item
+            if target is not None and not getattr(target, "part_model", None):
+                target.part_model = self.part_model
+            return target
         return None
 
 
 def _payload_kwargs() -> dict[str, object]:
     return {
         "part_kind_id": 6,
+        "part_model_id": uuid.uuid4(),
         "part_sub_kind_id": 1,
         "part_code": "door_left",
         "part_title": "درب چپ",
@@ -75,6 +87,7 @@ def test_create_part_formula_persists_door_dependent(monkeypatch: pytest.MonkeyP
 
     assert result.door_dependent is True
     assert session.added.door_dependent is True
+    assert session.added.part_model_id == payload.part_model_id
 
 
 def test_update_part_formula_persists_door_dependent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,6 +104,7 @@ def test_update_part_formula_persists_door_dependent(monkeypatch: pytest.MonkeyP
         admin_id=None,
         part_formula_id=12,
         part_kind_id=6,
+        part_model_id=uuid.uuid4(),
         part_sub_kind_id=1,
         part_code="door_left",
         part_title="درب چپ",
@@ -119,3 +133,4 @@ def test_update_part_formula_persists_door_dependent(monkeypatch: pytest.MonkeyP
 
     assert result.door_dependent is True
     assert existing.door_dependent is True
+    assert existing.part_model_id == payload.part_model_id

@@ -3754,6 +3754,17 @@ const constructionPartKindOptions = computed(() =>
     label: `${toPersianDigits(item.part_kind_id)} - ${String(item.org_part_kind_title || item.title || "").trim()}`,
   }))
 );
+const constructionPartModelsById = computed(() =>
+  new Map(constructionPartModels.value.map((item) => [String(item.id || "").trim(), item]))
+);
+const constructionPartModelOptions = computed(() =>
+  constructionPartModels.value
+    .map((item) => ({
+      value: String(item.id || "").trim(),
+      label: String(item.title || "").trim(),
+    }))
+    .filter((item) => item.value && item.label)
+);
 const constructionInternalPartKindOptions = computed(() =>
   constructionPartKinds.value
     .filter((item) => isInternalPartKind(item))
@@ -8223,9 +8234,11 @@ function getMaxColumnLength(values, minimum = 0) {
 const constructionPartFormulaColumnWidths = computed(() => {
   const rows = constructionPartFormulas.value;
   const partKindLabels = constructionPartKindOptions.value.map((item) => item.label);
+  const partModelLabels = rows.map((item) => getConstructionPartModelTitle(item.part_model_id) || item.part_model_title || "");
   return {
     part_formula_id: getMaxColumnLength(["شناسه", ...rows.map((item) => item.part_formula_id)], 2),
     part_kind_id: getMaxColumnLength(["نوع قطعه", ...partKindLabels], 6),
+    part_model_title: getMaxColumnLength(["مدل قطعه", ...partModelLabels], 8),
     part_scope: getMaxColumnLength(["نوع قطعه", ...rows.map((item) => getConstructionPartKindInternalLabel(item.part_kind_id))], 5),
     part_sub_kind_id: getMaxColumnLength(["زیرنوع", ...rows.map((item) => item.part_sub_kind_id)], 3),
     part_code: getMaxColumnLength(["کد قطعه", ...rows.map((item) => item.part_code)], 8),
@@ -9271,6 +9284,16 @@ function createPartFormulaDraft(item, overrides = {}) {
   };
 }
 
+function getDefaultConstructionPartModelId() {
+  const preferred = constructionPartModels.value.find((item) => String(item.title || "").trim() === "مربع مستطیل");
+  if (preferred?.id) return String(preferred.id);
+  return String(constructionPartModels.value[0]?.id || "").trim();
+}
+
+function getConstructionPartModelTitle(partModelId) {
+  return String(constructionPartModelsById.value.get(String(partModelId || "").trim())?.title || "").trim();
+}
+
 function buildNewBaseFormulaDraft() {
   const nextId = editableBaseFormulas.value.reduce((max, item) => Math.max(max, Number(item.fo_id) || 0), 0) + 1;
   return createBaseFormulaDraft({
@@ -9291,11 +9314,14 @@ function buildNewBaseFormulaDraft() {
 function buildNewPartFormulaDraft() {
   const nextId = editablePartFormulas.value.reduce((max, item) => Math.max(max, Number(item.part_formula_id) || 0), 0) + 1;
   const defaultPartKindId = Number(constructionPartKinds.value[0]?.part_kind_id) || 1;
+  const defaultPartModelId = getDefaultConstructionPartModelId();
   const basePayload = {
     id: `draft-part-formula-row-${Date.now()}-${nextId}`,
     admin_id: null,
     part_formula_id: nextId,
     part_kind_id: defaultPartKindId,
+    part_model_id: defaultPartModelId,
+    part_model_title: getConstructionPartModelTitle(defaultPartModelId),
     part_sub_kind_id: nextId,
     part_code: `part_${nextId}`,
     part_title: `قطعه ${toPersianDigits(nextId)}`,
@@ -9451,11 +9477,13 @@ function getPartFormulaValidationErrors(item, currentId = null) {
   const errors = [];
   const partFormulaId = Number(item?.part_formula_id);
   const partKindId = Number(item?.part_kind_id);
+  const partModelId = String(item?.part_model_id || "").trim();
   const partSubKindId = Number(item?.part_sub_kind_id);
   const partCode = String(item?.part_code || "").trim();
   const partTitle = String(item?.part_title || "").trim();
   if (!Number.isInteger(partFormulaId) || partFormulaId < 1) errors.push("شناسه فرمول قطعه معتبر نیست.");
   if (!Number.isInteger(partKindId) || partKindId < 1) errors.push("نوع قطعه معتبر نیست.");
+  if (!partModelId || !constructionPartModelsById.value.has(partModelId)) errors.push("مدل قطعه معتبر نیست.");
   if (!Number.isInteger(partSubKindId) || partSubKindId < 1) errors.push("زیرنوع قطعه معتبر نیست.");
   if (!partCode) errors.push("کد قطعه خالی است.");
   if (!partTitle) errors.push("عنوان قطعه خالی است.");
@@ -15547,6 +15575,7 @@ function normalizePartFormulaPayload(item) {
     admin_id: item.admin_id,
     part_formula_id: Number(item.part_formula_id),
     part_kind_id: Number(item.part_kind_id),
+    part_model_id: String(item.part_model_id || "").trim(),
     part_sub_kind_id: Number(item.part_sub_kind_id),
     part_code: String(item.part_code || "").trim(),
     part_title: String(item.part_title || "").trim(),
@@ -17255,7 +17284,7 @@ function getConstructionCsvHeaders() {
     ];
   }
   if (constructionStep.value === "part_formulas") {
-    return ["part_formula_id", "part_kind_id", "part_sub_kind_id", "part_code", "part_title", ...PART_FORMULA_FIELDS.map((item) => item.key), "door_dependent", "admin_mode"];
+    return ["part_formula_id", "part_kind_id", "part_model_title", "part_sub_kind_id", "part_code", "part_title", ...PART_FORMULA_FIELDS.map((item) => item.key), "door_dependent", "admin_mode"];
   }
   if (constructionStep.value === "base_formulas") {
     return ["fo_id", "param_formula", "formula", "admin_mode"];
@@ -17344,6 +17373,7 @@ function getConstructionCsvRows(items = null) {
     return rows.map((item) => [
       Number(item.part_formula_id) || "",
       Number(item.part_kind_id) || "",
+      String(getConstructionPartModelTitle(item.part_model_id) || item.part_model_title || "").trim(),
       Number(item.part_sub_kind_id) || "",
       String(item.part_code || "").trim(),
       String(item.part_title || "").trim(),
@@ -17674,25 +17704,29 @@ async function onConstructionImportFileChange(event) {
         };
       });
     } else if (constructionStep.value === "part_formulas") {
-      const adminModeIndex = 6 + PART_FORMULA_FIELDS.length;
+      const adminModeIndex = 7 + PART_FORMULA_FIELDS.length;
       previewRows = rows.slice(1).map((row, index) => {
         const adminMode = String(row[adminModeIndex] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const partModelTitle = String(row[2] || "").trim();
+        const matchingPartModel = constructionPartModels.value.find((item) => String(item.title || "").trim() === partModelTitle) || null;
         return {
           lineNo: index + 2,
           part_formula_id: Number(row[0]),
           part_kind_id: Number(row[1]),
-          part_sub_kind_id: Number(row[2]),
-          part_code: String(row[3] || "").trim(),
-          part_title: String(row[4] || "").trim(),
-          formula_l: String(row[5] || "").trim(),
-          formula_w: String(row[6] || "").trim(),
-          formula_width: String(row[7] || "").trim(),
-          formula_depth: String(row[8] || "").trim(),
-          formula_height: String(row[9] || "").trim(),
-          formula_cx: String(row[10] || "").trim(),
-          formula_cy: String(row[11] || "").trim(),
-          formula_cz: String(row[12] || "").trim(),
-          door_dependent: normalizeBooleanFlag(row[13], false),
+          part_model_id: String(matchingPartModel?.id || "").trim(),
+          part_model_title: partModelTitle,
+          part_sub_kind_id: Number(row[3]),
+          part_code: String(row[4] || "").trim(),
+          part_title: String(row[5] || "").trim(),
+          formula_l: String(row[6] || "").trim(),
+          formula_w: String(row[7] || "").trim(),
+          formula_width: String(row[8] || "").trim(),
+          formula_depth: String(row[9] || "").trim(),
+          formula_height: String(row[10] || "").trim(),
+          formula_cx: String(row[11] || "").trim(),
+          formula_cy: String(row[12] || "").trim(),
+          formula_cz: String(row[13] || "").trim(),
+          door_dependent: normalizeBooleanFlag(row[14], false),
           admin_mode: adminMode,
         };
       });
@@ -17843,6 +17877,7 @@ async function onConstructionImportFileChange(event) {
             row.part_formula_id < 1 ||
             !Number.isInteger(row.part_kind_id) ||
             row.part_kind_id < 1 ||
+            !row.part_model_id ||
             !Number.isInteger(row.part_sub_kind_id) ||
             row.part_sub_kind_id < 1 ||
             !row.part_code ||
@@ -18140,6 +18175,8 @@ function buildImportedConstructionPartFormulaDrafts(rows) {
       admin_id: adminId,
       part_formula_id: Number(row.part_formula_id),
       part_kind_id: Number(row.part_kind_id),
+      part_model_id: String(row.part_model_id || "").trim(),
+      part_model_title: String(row.part_model_title || "").trim(),
       part_sub_kind_id: Number(row.part_sub_kind_id),
       part_code: String(row.part_code || "").trim(),
       part_title: String(row.part_title || "").trim(),
@@ -18163,6 +18200,7 @@ function buildImportedConstructionPartFormulaDrafts(rows) {
       existing.admin_id !== nextPayload.admin_id ||
       Number(existing.part_formula_id) !== nextPayload.part_formula_id ||
       Number(existing.part_kind_id) !== nextPayload.part_kind_id ||
+      String(existing.part_model_id || "").trim() !== nextPayload.part_model_id ||
       Number(existing.part_sub_kind_id) !== nextPayload.part_sub_kind_id ||
       String(existing.part_code || "").trim() !== nextPayload.part_code ||
       String(existing.part_title || "").trim() !== nextPayload.part_title ||
@@ -18422,6 +18460,8 @@ async function loadConstructionPartFormulas() {
     });
     editablePartFormulas.value = payload.map((item) => withConstructionDraftState({
       ...item,
+      part_model_id: String(item.part_model_id || "").trim(),
+      part_model_title: String(item.part_model_title || "").trim(),
       door_dependent: normalizeBooleanFlag(item.door_dependent, false),
     }));
     constructionDeletedPartFormulaIds.value = [];
@@ -25455,7 +25495,7 @@ onBeforeUnmount(() => {
               <div class="constructionDialog__toolbarMain">
                 <div class="constructionDialog__sectionTitle">جدول مدل قطعه</div>
                 <div class="constructionDialog__sectionHint">
-                  در این جدول عنوان قطعه، تعداد اضلاع و مجموع زوایای داخلی آن را برای ادمین مدیریت می‌کنید.
+                  در این جدول مدل قطعه، تعداد اضلاع و مجموع زوایای داخلی آن را برای ادمین مدیریت می‌کنید.
                 </div>
               </div>
               <div class="constructionDialog__toolbarActions">
@@ -25486,7 +25526,7 @@ onBeforeUnmount(() => {
                 <table class="constructionDialog__table constructionDialog__table--preview">
                   <thead>
                     <tr>
-                      <th class="constructionDialog__col constructionDialog__col--title">عنوان قطعه</th>
+                      <th class="constructionDialog__col constructionDialog__col--title">مدل قطعه</th>
                       <th class="constructionDialog__col constructionDialog__col--id">تعداد اضلاع</th>
                       <th class="constructionDialog__col constructionDialog__col--id">مجموع زوایای داخلی</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
@@ -25515,7 +25555,7 @@ onBeforeUnmount(() => {
               <table class="constructionDialog__table constructionDialog__table--partServices">
                 <thead>
                   <tr>
-                    <th class="constructionDialog__col constructionDialog__col--title">عنوان قطعه</th>
+                    <th class="constructionDialog__col constructionDialog__col--title">مدل قطعه</th>
                     <th class="constructionDialog__col constructionDialog__col--id">تعداد اضلاع</th>
                     <th class="constructionDialog__col constructionDialog__col--id">مجموع زوایای داخلی</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceActions">عملیات</th>
@@ -26068,6 +26108,7 @@ onBeforeUnmount(() => {
                     <tr>
                       <th class="constructionDialog__col constructionDialog__col--id">شناسه</th>
                       <th class="constructionDialog__col constructionDialog__col--id">نوع قطعه</th>
+                      <th class="constructionDialog__col constructionDialog__col--title">مدل قطعه</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">داخلی</th>
                       <th class="constructionDialog__col constructionDialog__col--id">زیرنوع</th>
                       <th class="constructionDialog__col constructionDialog__col--code">کد قطعه</th>
@@ -26080,6 +26121,7 @@ onBeforeUnmount(() => {
                     <tr v-for="row in constructionImportPreviewRows" :key="`${row.lineNo}-${row.part_formula_id}`">
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.part_formula_id }}</td>
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.part_kind_id }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--title">{{ row.part_model_title }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ getConstructionPartKindInternalLabel(row.part_kind_id) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--id">{{ row.part_sub_kind_id }}</td>
                       <td class="constructionDialog__col constructionDialog__col--code">{{ row.part_code }}</td>
@@ -26114,6 +26156,7 @@ onBeforeUnmount(() => {
                   <tr>
                     <th class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_formula_id')">شناسه</th>
                     <th class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_kind_id')">نوع قطعه</th>
+                    <th class="constructionDialog__col constructionDialog__col--title" :style="getConstructionPartFormulaColumnStyle('part_model_title')">مدل قطعه</th>
                     <th class="constructionDialog__col constructionDialog__col--scope" :style="getConstructionPartFormulaColumnStyle('part_scope')">نوع قطعه</th>
                     <th class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_sub_kind_id')">زیرنوع</th>
                     <th class="constructionDialog__col constructionDialog__col--code" :style="getConstructionPartFormulaColumnStyle('part_code')">کد قطعه</th>
@@ -26132,6 +26175,12 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_kind_id')">
                       <select v-model.number="item.part_kind_id" class="constructionDialog__input" @change="markConstructionPartFormulaDirty(item)">
                         <option v-for="option in constructionPartKindOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                      </select>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--title" :style="getConstructionPartFormulaColumnStyle('part_model_title')">
+                      <select v-model="item.part_model_id" class="constructionDialog__input" @change="item.part_model_title = getConstructionPartModelTitle(item.part_model_id); markConstructionPartFormulaDirty(item)">
+                        <option value="" disabled>انتخاب مدل قطعه</option>
+                        <option v-for="option in constructionPartModelOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                       </select>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--scope" :style="getConstructionPartFormulaColumnStyle('part_scope')">
@@ -26826,7 +26875,7 @@ onBeforeUnmount(() => {
       <div class="subCategoryDesignEditor">
         <div class="subCategoryDesignEditor__meta">
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
-            <span>عنوان قطعه</span>
+            <span>مدل قطعه</span>
             <input v-model="partModelEditorDraft.title" class="constructionDialog__input" type="text" />
           </label>
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">

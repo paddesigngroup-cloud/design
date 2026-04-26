@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import BaseFormula, Category, Param, ParamGroup, PartFormula, PartKind, PartModel, PartService, PartServiceType, SubCategory, SubCategoryParamDefault, Template
@@ -94,6 +95,7 @@ def _part_formula_headers() -> list[str]:
     return [
         "part_formula_id",
         "part_kind_id",
+        "part_model_title",
         "part_sub_kind_id",
         "part_code",
         "part_title",
@@ -241,6 +243,7 @@ async def _part_formula_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
     rows = (
         await session.scalars(
             select(PartFormula)
+            .options(selectinload(PartFormula.part_model))
             .where(or_(PartFormula.admin_id.is_(None), PartFormula.admin_id == admin_id))
             .order_by(PartFormula.sort_order.asc(), PartFormula.part_formula_id.asc())
         )
@@ -249,6 +252,7 @@ async def _part_formula_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
         [
             row.part_formula_id,
             row.part_kind_id,
+            row.part_model.title if row.part_model else "",
             row.part_sub_kind_id,
             row.part_code,
             row.part_title,

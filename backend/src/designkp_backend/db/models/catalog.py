@@ -124,6 +124,12 @@ class PartFormula(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionM
     )
     part_formula_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
     part_kind_id: Mapped[int] = mapped_column(ForeignKey("part_kinds.part_kind_id", ondelete="RESTRICT"), nullable=False, index=True)
+    part_model_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("part_models.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     part_sub_kind_id: Mapped[int] = mapped_column(Integer, nullable=False)
     part_code: Mapped[str] = mapped_column(String(64), nullable=False)
     part_title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -143,6 +149,7 @@ class PartFormula(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionM
 
     admin: Mapped["Admin | None"] = relationship(back_populates="part_formulas")
     part_kind: Mapped["PartKind"] = relationship()
+    part_model: Mapped["PartModel"] = relationship()
 
 
 class PartService(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMixin, Base):
