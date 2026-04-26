@@ -3329,6 +3329,36 @@ option {
 .constructionDialog__input.is-unique {
   color: #1f8f4d;
 }
+.constructionDialog__input--scopeStructural {
+  color: #21543a;
+  background: rgba(186, 226, 204, 0.72);
+  border-color: rgba(71, 143, 94, 0.24);
+}
+.constructionDialog__input--scopeInternal {
+  color: #9a4d00;
+  background: rgba(255, 220, 179, 0.8);
+  border-color: rgba(220, 132, 20, 0.24);
+}
+.constructionDialog__input--scopeDoor {
+  color: #1f4f8d;
+  background: rgba(196, 224, 255, 0.8);
+  border-color: rgba(82, 139, 218, 0.26);
+}
+.constructionDialog__input--scopeSubtractor {
+  color: #4b5563;
+  background: rgba(229, 231, 235, 0.9);
+  border-color: rgba(156, 163, 175, 0.35);
+}
+.constructionDialog__input--boolTrue {
+  color: #2a5e41;
+  background: rgba(214, 242, 225, 0.88);
+  border-color: rgba(99, 180, 129, 0.28);
+}
+.constructionDialog__input--boolFalse {
+  color: #8f3b5a;
+  background: rgba(247, 214, 226, 0.88);
+  border-color: rgba(215, 133, 170, 0.28);
+}
 .constructionDialog__input--mono {
   direction: ltr;
   text-align: center;

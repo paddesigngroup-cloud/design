@@ -395,6 +395,20 @@ function getPartScopeTone(scope) {
   return "is-system";
 }
 
+function getConstructionPartScopeInputTone(scope) {
+  const normalized = normalizePartScope(scope);
+  if (normalized === "internal") return "constructionDialog__input--scopeInternal";
+  if (normalized === "door") return "constructionDialog__input--scopeDoor";
+  if (normalized === "subtractor") return "constructionDialog__input--scopeSubtractor";
+  return "constructionDialog__input--scopeStructural";
+}
+
+function getConstructionBooleanInputTone(value) {
+  return normalizeBooleanFlag(value, false)
+    ? "constructionDialog__input--boolTrue"
+    : "constructionDialog__input--boolFalse";
+}
+
 function nextPartScope(scope) {
   const normalized = normalizePartScope(scope);
   if (normalized === "structural") return "internal";
@@ -3759,6 +3773,16 @@ const constructionPartKindOptions = computed(() =>
     label: `${toPersianDigits(item.part_kind_id)} - ${String(item.org_part_kind_title || item.title || "").trim()}`,
   }))
 );
+const constructionPartScopeOptions = [
+  { value: "structural", label: "سازه" },
+  { value: "internal", label: "داخلی" },
+  { value: "door", label: "درب" },
+  { value: "subtractor", label: "دستگیره مخفی" },
+];
+const booleanDropdownOptions = [
+  { value: false, label: "خیر" },
+  { value: true, label: "بله" },
+];
 const constructionPartModelsById = computed(() =>
   new Map(constructionPartModels.value.map((item) => [String(item.id || "").trim(), item]))
 );
@@ -8251,7 +8275,7 @@ const constructionPartFormulaColumnWidths = computed(() => {
   const partModelLabels = rows.map((item) => getConstructionPartModelTitle(item.part_model_id) || item.part_model_title || "");
   return {
     part_formula_id: getMaxColumnLength(["شناسه", ...rows.map((item) => item.part_formula_id)], 2),
-    part_kind_id: getMaxColumnLength(["نوع قطعه", ...partKindLabels], 6),
+    part_kind_id: getMaxColumnLength(["انواع قطعات", ...partKindLabels], 6),
     part_model_title: getMaxColumnLength(["مدل قطعه", ...partModelLabels], 8),
     part_scope: getMaxColumnLength(["نوع قطعه", ...rows.map((item) => getConstructionPartKindInternalLabel(item.part_kind_id))], 5),
     part_sub_kind_id: getMaxColumnLength(["زیرنوع", ...rows.map((item) => item.part_sub_kind_id)], 3),
@@ -15582,6 +15606,13 @@ async function toggleConstructionPartKindInternalById(partKindId) {
   if (!target) return;
   const currentScope = normalizePartScope(target.part_scope);
   const nextValue = nextPartScope(currentScope);
+  return updateConstructionPartKindScopeById(partKindId, nextValue);
+}
+
+async function updateConstructionPartKindScopeById(partKindId, scope) {
+  const target = editablePartKinds.value.find((item) => Number(item.part_kind_id) === Number(partKindId));
+  if (!target) return;
+  const nextValue = normalizePartScope(scope);
   if (target.__isNew) {
     target.part_scope = nextValue;
     return;
@@ -25167,14 +25198,13 @@ onBeforeUnmount(() => {
                       />
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--scope">
-                      <button
-                        type="button"
-                        class="constructionDialog__scopeBtn"
-                        :class="getPartScopeTone(item.part_scope)"
-                        @click="item.part_scope = nextPartScope(item.part_scope); markConstructionPartKindDirty(item)"
+                      <select
+                        v-model="item.part_scope"
+                        :class="['constructionDialog__input', getConstructionPartScopeInputTone(item.part_scope)]"
+                        @change="item.part_scope = normalizePartScope(item.part_scope); markConstructionPartKindDirty(item)"
                       >
-                        {{ getPartScopeLabel(item.part_scope) }}
-                      </button>
+                        <option v-for="option in constructionPartScopeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                      </select>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--owner">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">
@@ -26735,7 +26765,7 @@ onBeforeUnmount(() => {
                 <thead>
                   <tr>
                     <th class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_formula_id')">شناسه</th>
-                    <th class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_kind_id')">نوع قطعه</th>
+                    <th class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_kind_id')">انواع قطعات</th>
                     <th class="constructionDialog__col constructionDialog__col--title" :style="getConstructionPartFormulaColumnStyle('part_model_title')">مدل قطعه</th>
                     <th class="constructionDialog__col constructionDialog__col--scope" :style="getConstructionPartFormulaColumnStyle('part_scope')">نوع قطعه</th>
                     <th class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_sub_kind_id')">زیرنوع</th>
@@ -26764,14 +26794,16 @@ onBeforeUnmount(() => {
                       </select>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--scope" :style="getConstructionPartFormulaColumnStyle('part_scope')">
-                      <button
-                        type="button"
-                        class="constructionDialog__scopeBtn"
-                        :class="getConstructionPartKindScopeTone(item.part_kind_id)"
-                        @click="toggleConstructionPartKindInternalById(item.part_kind_id)"
+                      <select
+                        :value="normalizePartScope(constructionPartKindsById.get(Number(item.part_kind_id) || 0)?.part_scope)"
+                        :class="[
+                          'constructionDialog__input',
+                          getConstructionPartScopeInputTone(constructionPartKindsById.get(Number(item.part_kind_id) || 0)?.part_scope)
+                        ]"
+                        @change="updateConstructionPartKindScopeById(item.part_kind_id, $event.target.value)"
                       >
-                        {{ getConstructionPartKindInternalLabel(item.part_kind_id) }}
-                      </button>
+                        <option v-for="option in constructionPartScopeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                      </select>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--id" :style="getConstructionPartFormulaColumnStyle('part_sub_kind_id')">
                       <input v-model.number="item.part_sub_kind_id" class="constructionDialog__input" type="number" min="1" step="1" @input="markConstructionPartFormulaDirty(item)" />
@@ -26792,14 +26824,13 @@ onBeforeUnmount(() => {
                       <input v-model="item.part_title" class="constructionDialog__input" type="text" @input="markConstructionPartFormulaDirty(item)" />
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--scope" :style="getConstructionPartFormulaColumnStyle('door_dependent')">
-                      <button
-                        type="button"
-                        class="constructionDialog__scopeBtn"
-                        :class="normalizeBooleanFlag(item.door_dependent, false) ? 'is-admin' : 'is-system'"
-                        @click="item.door_dependent = !normalizeBooleanFlag(item.door_dependent, false); markConstructionPartFormulaDirty(item)"
+                      <select
+                        :value="String(normalizeBooleanFlag(item.door_dependent, false))"
+                        :class="['constructionDialog__input', getConstructionBooleanInputTone(item.door_dependent)]"
+                        @change="item.door_dependent = $event.target.value === 'true'; markConstructionPartFormulaDirty(item)"
                       >
-                        {{ normalizeBooleanFlag(item.door_dependent, false) ? "بله" : "خیر" }}
-                      </button>
+                        <option v-for="option in booleanDropdownOptions" :key="String(option.value)" :value="String(option.value)">{{ option.label }}</option>
+                      </select>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--owner" :style="getConstructionPartFormulaColumnStyle('owner')">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.admin_id || "SYSTEM" }}</span>
@@ -29620,21 +29651,20 @@ onBeforeUnmount(() => {
             <input v-model.number="baseFormulaBuilderDraft.part_formula_id" class="constructionDialog__input" type="number" min="1" step="1" />
           </label>
           <label class="formulaBuilder__field">
-            <span>نوع قطعه</span>
+            <span>انواع قطعات</span>
             <select v-model.number="baseFormulaBuilderDraft.part_kind_id" class="constructionDialog__input">
               <option v-for="option in constructionPartKindOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
           <label class="formulaBuilder__field">
             <span>نوع قطعه</span>
-            <button
-              type="button"
-              class="constructionDialog__scopeBtn"
-              :class="getConstructionPartKindScopeTone(baseFormulaBuilderDraft.part_kind_id)"
-              @click="toggleConstructionPartKindInternalById(baseFormulaBuilderDraft.part_kind_id)"
+            <select
+              :value="normalizePartScope(constructionPartKindsById.get(Number(baseFormulaBuilderDraft.part_kind_id) || 0)?.part_scope)"
+              class="constructionDialog__input"
+              @change="updateConstructionPartKindScopeById(baseFormulaBuilderDraft.part_kind_id, $event.target.value)"
             >
-              {{ getConstructionPartKindInternalLabel(baseFormulaBuilderDraft.part_kind_id) }}
-            </button>
+              <option v-for="option in constructionPartScopeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
           </label>
           <label class="formulaBuilder__field">
             <span>زیرنوع</span>
@@ -29738,21 +29768,20 @@ onBeforeUnmount(() => {
             <input v-model.number="partFormulaCreateDialogDraft.part_formula_id" class="constructionDialog__input" type="number" min="1" step="1" />
           </label>
           <label class="formulaBuilder__field">
-            <span>نوع قطعه</span>
+            <span>انواع قطعات</span>
             <select v-model.number="partFormulaCreateDialogDraft.part_kind_id" class="constructionDialog__input">
               <option v-for="option in constructionPartKindOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
           <label class="formulaBuilder__field">
             <span>نوع قطعه</span>
-            <button
-              type="button"
-              class="constructionDialog__scopeBtn"
-              :class="getConstructionPartKindScopeTone(partFormulaCreateDialogDraft.part_kind_id)"
-              @click="toggleConstructionPartKindInternalById(partFormulaCreateDialogDraft.part_kind_id)"
+            <select
+              :value="normalizePartScope(constructionPartKindsById.get(Number(partFormulaCreateDialogDraft.part_kind_id) || 0)?.part_scope)"
+              class="constructionDialog__input"
+              @change="updateConstructionPartKindScopeById(partFormulaCreateDialogDraft.part_kind_id, $event.target.value)"
             >
-              {{ getConstructionPartKindInternalLabel(partFormulaCreateDialogDraft.part_kind_id) }}
-            </button>
+              <option v-for="option in constructionPartScopeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
           </label>
           <label class="formulaBuilder__field">
             <span>مدل قطعه</span>
@@ -29775,14 +29804,9 @@ onBeforeUnmount(() => {
           </label>
           <label class="formulaBuilder__field">
             <span>وابستگی درب</span>
-            <button
-              type="button"
-              class="constructionDialog__scopeBtn"
-              :class="normalizeBooleanFlag(partFormulaCreateDialogDraft.door_dependent, false) ? 'is-admin' : 'is-system'"
-              @click="partFormulaCreateDialogDraft.door_dependent = !normalizeBooleanFlag(partFormulaCreateDialogDraft.door_dependent, false)"
-            >
-              {{ normalizeBooleanFlag(partFormulaCreateDialogDraft.door_dependent, false) ? "بله" : "خیر" }}
-            </button>
+            <select v-model="partFormulaCreateDialogDraft.door_dependent" class="constructionDialog__input">
+              <option v-for="option in booleanDropdownOptions" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
+            </select>
           </label>
         </div>
         <div v-if="partFormulaCreateDialogValidationErrors.length" class="formulaBuilder__errors">
