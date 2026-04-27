@@ -2509,7 +2509,11 @@ async def resolve_subtractor_instance_preview(
         inherited_values=inherited_values,
         param_values=normalized_input_values,
     )
-    merged_meta = _merge_param_meta_layers(copied_meta, group_meta, _normalize_param_meta(param_meta))
+    merged_meta = _merge_param_meta_layers(
+        _normalize_param_meta(param_meta),
+        copied_meta,
+        group_meta,
+    )
     effective_numeric_params = {
         str(key): float(value)
         for key, value in dict(base_numeric_params or resolved_context.sub_category_numeric_params).items()

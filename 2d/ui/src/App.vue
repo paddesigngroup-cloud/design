@@ -7387,15 +7387,17 @@ function buildSubtractorInstanceGroups(instance) {
     const groupId = String(meta?.group_id || "").trim() || "__ungrouped__";
     const sourceParamGroup = constructionSubCategoryParamTree.value.find((row) => String(row.id) === groupId);
     const baseLabel = constructionSubCategoryParamMetaByCode.value[code]?.label || code;
-    const groupOverride = normalizeInternalPartGroupParamOverride(sourceGroup?.param_overrides?.[code], baseLabel);
-    const subCategoryOverride = normalizeInternalPartGroupParamOverride(subCategoryOverrides?.[code], baseLabel);
+    const rawGroupOverride = sourceGroup?.param_overrides?.[code] || {};
+    const rawSubCategoryOverride = subCategoryOverrides?.[code] || {};
+    const groupOverride = normalizeInternalPartGroupParamOverride(rawGroupOverride, baseLabel);
+    const subCategoryOverride = normalizeInternalPartGroupParamOverride(rawSubCategoryOverride, baseLabel);
     const fallbackOverride = {
-      ...subCategoryOverride,
       ...groupOverride,
-      display_title: groupOverride.display_title || subCategoryOverride.display_title || baseLabel,
-      description_text: groupOverride.description_text || subCategoryOverride.description_text || "",
-      icon_path: groupOverride.icon_path || subCategoryOverride.icon_path || "",
-      input_mode: groupOverride.input_mode === "binary" || subCategoryOverride.input_mode === "binary" ? "binary" : "value",
+      ...subCategoryOverride,
+      display_title: String(rawSubCategoryOverride.display_title || rawGroupOverride.display_title || meta?.label || baseLabel).trim() || code,
+      description_text: String(rawSubCategoryOverride.description_text || rawGroupOverride.description_text || meta?.description_text || "").trim(),
+      icon_path: subCategoryOverride.icon_path || groupOverride.icon_path || "",
+      input_mode: subCategoryOverride.input_mode === "binary" || groupOverride.input_mode === "binary" ? "binary" : "value",
     };
     const groupIconFileName = normalizeIconFileName(meta?.group_icon_path || sourceGroup?.icon_path) || sourceParamGroup?.iconFileName || "";
     if (!groupsById.has(groupId)) {
@@ -17478,6 +17480,7 @@ function buildInternalPartGroupDefaultsGroups(row) {
 
 function buildSubtractorPartGroupDefaultsGroups(row) {
   if (!row) return [];
+  const subCategoryOverrides = activeSubtractorLibrarySubCategory.value?.param_overrides || {};
   const selectedParamGroupIds = new Set(
     (Array.isArray(row.param_groups) ? row.param_groups : [])
       .filter((group) => group?.enabled !== false && Number(group?.param_group_id) > 0)
@@ -17492,19 +17495,40 @@ function buildSubtractorPartGroupDefaultsGroups(row) {
       items: group.items.map((column) => {
         const baseLabel = column.label || column.key;
         const override = normalizeInternalPartGroupParamOverride(row.param_overrides?.[column.key], baseLabel);
-        const displayTitle = String(override.display_title || baseLabel).trim() || column.key;
-        const descriptionText = String(override.description_text || "").trim();
-        const inputMode = override.input_mode === "binary" ? "binary" : "value";
+        const fallback = normalizeInternalPartGroupParamOverride(subCategoryOverrides?.[column.key], baseLabel);
+        const resolved = {
+          ...override,
+          ...fallback,
+          display_title: fallback.display_title || override.display_title || baseLabel,
+          description_text: fallback.description_text || override.description_text || "",
+          icon_path: fallback.icon_path || override.icon_path || "",
+          input_mode: fallback.input_mode === "binary" || override.input_mode === "binary" ? "binary" : "value",
+          binary_off_label: (
+            (String(fallback.binary_off_label || "").trim() || "0") !== "0"
+              ? fallback.binary_off_label
+              : (String(override.binary_off_label || "").trim() || "0")
+          ) || "0",
+          binary_on_label: (
+            (String(fallback.binary_on_label || "").trim() || "1") !== "1"
+              ? fallback.binary_on_label
+              : (String(override.binary_on_label || "").trim() || "1")
+          ) || "1",
+          binary_off_icon_path: fallback.binary_off_icon_path || override.binary_off_icon_path || "",
+          binary_on_icon_path: fallback.binary_on_icon_path || override.binary_on_icon_path || "",
+        };
+        const displayTitle = String(resolved.display_title || baseLabel).trim() || column.key;
+        const descriptionText = String(resolved.description_text || "").trim();
+        const inputMode = resolved.input_mode === "binary" ? "binary" : "value";
         return {
           ...column,
           displayTitle,
           descriptionText,
-          iconUrl: getSubCategoryDefaultIconUrl(override.icon_path),
+          iconUrl: getSubCategoryDefaultIconUrl(resolved.icon_path),
           inputMode,
-          binaryOffLabel: String(override.binary_off_label || "").trim() || "0",
-          binaryOnLabel: String(override.binary_on_label || "").trim() || "1",
-          binaryOffIconUrl: getSubCategoryDefaultIconUrl(override.binary_off_icon_path),
-          binaryOnIconUrl: getSubCategoryDefaultIconUrl(override.binary_on_icon_path),
+          binaryOffLabel: String(resolved.binary_off_label || "").trim() || "0",
+          binaryOnLabel: String(resolved.binary_on_label || "").trim() || "1",
+          binaryOffIconUrl: getSubCategoryDefaultIconUrl(resolved.binary_off_icon_path),
+          binaryOnIconUrl: getSubCategoryDefaultIconUrl(resolved.binary_on_icon_path),
         };
       }),
     }))
