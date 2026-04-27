@@ -5630,6 +5630,28 @@ const doorLibraryFrontCanvasScene = computed(() => {
       cursor: null,
     };
   }
+  const structureFingerprint = [
+    buildFront2dProjectedLineFingerprint(
+      (doorLibraryFrontView.value?.outer || []).map((line) => ({
+        x1: Number(line?.ax) || 0,
+        y1: -(Number(line?.az) || 0),
+        x2: Number(line?.bx) || 0,
+        y2: -(Number(line?.bz) || 0),
+      }))
+    ),
+    buildFront2dProjectedLineFingerprint(
+      (doorLibraryFrontView.value?.inner || []).map((line) => ({
+        x1: Number(line?.ax) || 0,
+        y1: -(Number(line?.az) || 0),
+        x2: Number(line?.bx) || 0,
+        y2: -(Number(line?.bz) || 0),
+      }))
+    ),
+  ].join("|");
+  const entitiesFingerprint = [
+    Number(doorLibraryPreviewInstances2d.value?.length || 0),
+    ...doorLibraryPreviewInstances2d.value.map((instance) => buildInteriorLibraryFrontInstanceRenderFingerprint(instance)),
+  ].join("|");
   return {
   renderToken: [
     String(doorLibraryFrontSvgViewBox.value || ""),
@@ -5639,21 +5661,15 @@ const doorLibraryFrontCanvasScene = computed(() => {
     String(doorLibraryCurrentSnapPoint.value ? `${doorLibraryCurrentSnapPoint.value.x}:${doorLibraryCurrentSnapPoint.value.y}:${doorLibraryCurrentSnapPoint.value.kind}` : ""),
     Number(doorLibraryRenderedAnnotations.value?.dimensions?.length || 0),
     doorLibraryRenderedAnnotations.value?.draftDimension ? "draft" : "nodraft",
-    Number(doorLibraryFrontView.value?.inner?.length || 0),
-    Number(doorLibraryPreviewInstances2d.value?.length || 0),
+    structureFingerprint,
+    entitiesFingerprint,
     Number(doorLibraryPersistedControllerOverlays.value?.length || 0),
     isDoorLibraryPendingControllerActive.value ? "pending" : "idle",
   ].join("|"),
   renderTokens: {
     viewport: String(doorLibraryFrontSvgViewBox.value || ""),
-    structure: [
-      Number(doorLibraryFrontView.value?.inner?.length || 0),
-      Number(doorLibraryFrontView.value?.outer?.length || 0),
-    ].join("|"),
-    entities: [
-      Number(doorLibraryPreviewInstances2d.value?.length || 0),
-      ...doorLibraryPreviewInstances2d.value.map((instance) => `${instance.id}:${instance.outerLines?.length || 0}:${instance.innerLines?.length || 0}`),
-    ].join("|"),
+    structure: structureFingerprint,
+    entities: entitiesFingerprint,
     dynamic: [
       String(doorLibraryHoveredInstanceId.value || ""),
       (doorLibrarySelectedInstanceIds.value || []).join(","),
