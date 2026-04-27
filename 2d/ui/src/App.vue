@@ -3600,6 +3600,8 @@ const paramGroupIconInputEl = ref(null);
 const internalPartGroupIconInputEl = ref(null);
 const subtractorPartGroupIconInputEl = ref(null);
 const doorPartGroupIconInputEl = ref(null);
+const serviceTypeIconInputEl = ref(null);
+const partServiceIconInputEl = ref(null);
 const constructionImportPreviewRows = ref([]);
 const constructionImportFileName = ref("");
 const constructionImportPreviewKind = ref(null);
@@ -3611,6 +3613,8 @@ const constructionUploadingIconRowId = ref(null);
 const constructionUploadingInternalPartGroupIconRowId = ref(null);
 const constructionUploadingSubtractorPartGroupIconRowId = ref(null);
 const constructionUploadingDoorPartGroupIconRowId = ref(null);
+const constructionUploadingPartServiceIconRowId = ref(null);
+const constructionUploadingServiceTypeIconRowId = ref(null);
 const INTERNAL_PART_GROUP_EDITOR_ICON_TARGET = "__internal-part-group-editor__";
 const SUBTRACTOR_PART_GROUP_EDITOR_ICON_TARGET = "__subtractor-part-group-editor__";
 const DOOR_PART_GROUP_EDITOR_ICON_TARGET = "__door-part-group-editor__";
@@ -8818,6 +8822,7 @@ function normalizePartServicePayload(item) {
     service_type: String(item.service_type || "").trim(),
     service_description: String(item.service_description || "").trim(),
     service_code: String(item.service_code || "").trim(),
+    icon_path: normalizeIconFileName(item.icon_path),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
     is_system: !!item.is_system,
   };
@@ -8843,6 +8848,7 @@ function normalizeServiceTypePayload(item) {
     service_type: String(item.service_type || "").trim(),
     service_title: String(item.service_title || "").trim(),
     short_code: String(item.short_code || "").trim(),
+    icon_path: normalizeIconFileName(item.icon_path),
     part_side: normalizePartServiceSide(item.part_side),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
     is_system: !!item.is_system,
@@ -8930,6 +8936,7 @@ function normalizeEditablePartServiceRecord(item) {
     service_type: String(item.service_type || "").trim(),
     service_description: String(item.service_description || "").trim(),
     service_code: String(item.service_code || "").trim(),
+    icon_path: normalizeIconFileName(item.icon_path) || "",
     sort_order: Number(item.sort_order) || 0,
     is_system: !!item.is_system,
   });
@@ -8955,6 +8962,7 @@ function normalizeEditableServiceTypeRecord(item) {
     service_type: String(item.service_type || "").trim(),
     service_title: String(item.service_title || "").trim(),
     short_code: String(item.short_code || "").trim(),
+    icon_path: normalizeIconFileName(item.icon_path) || "",
     part_side: normalizePartServiceSide(item.part_side),
     sort_order: Number(item.sort_order) || 0,
     is_system: !!item.is_system,
@@ -9073,6 +9081,14 @@ function isUploadingSubtractorPartGroupEditorIcon() {
 
 function isUploadingDoorPartGroupEditorIcon() {
   return String(constructionUploadingDoorPartGroupIconRowId.value || "") === DOOR_PART_GROUP_EDITOR_ICON_TARGET;
+}
+
+function isUploadingPartServiceEditorIcon() {
+  return String(constructionUploadingPartServiceIconRowId.value || "") === "part-service-editor";
+}
+
+function isUploadingServiceTypeEditorIcon() {
+  return String(constructionUploadingServiceTypeIconRowId.value || "") === "service-type-editor";
 }
 
 function getSubCategoryDefaultIconUrl(fileName) {
@@ -10699,6 +10715,7 @@ function buildNewServiceTypeDraft() {
     service_type: fallbackType,
     service_title: "",
     short_code: `service_type_${nextSort}`,
+    icon_path: "",
     part_side: "front",
     sort_order: nextSort,
     is_system: true,
@@ -10761,11 +10778,13 @@ function closePartModelEditor() {
 }
 
 function closePartServiceEditor() {
+  constructionUploadingPartServiceIconRowId.value = null;
   partServiceEditorOpen.value = false;
   partServiceEditorDraft.value = null;
 }
 
 function closeServiceTypeEditor() {
+  constructionUploadingServiceTypeIconRowId.value = null;
   serviceTypeEditorOpen.value = false;
   serviceTypeEditorDraft.value = null;
 }
@@ -13323,11 +13342,45 @@ function openPartServiceEditor(item = null) {
         service_type: String(item.service_type || "").trim(),
         service_description: String(item.service_description || "").trim(),
         service_code: String(item.service_code || "").trim(),
+        icon_path: normalizeIconFileName(item.icon_path) || "",
         sort_order: Number(item.sort_order) || 0,
         is_system: !!item.is_system,
       }
     : buildNewPartServiceDraft();
   partServiceEditorOpen.value = true;
+}
+
+function triggerPartServiceIconUpload() {
+  if (!partServiceEditorDraft.value || isUploadingPartServiceEditorIcon()) return;
+  constructionUploadingPartServiceIconRowId.value = "part-service-editor";
+  partServiceIconInputEl.value?.click?.();
+}
+
+async function onPartServiceIconFileChange(event) {
+  const file = event?.target?.files?.[0];
+  const item = partServiceEditorDraft.value;
+  if (!file || !item) return;
+  const previousIconFileName = normalizeIconFileName(item.icon_path);
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const slugHint = encodeURIComponent(String(item.service_code || item.service_description || item.service_type || "part-service"));
+    const res = await fetch(`/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/param-group-icons?slug_hint=${slugHint}`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) throw new Error("upload-failed");
+    const payload = await res.json();
+    if (isStagedParamGroupIcon(previousIconFileName)) {
+      await discardStagedParamGroupIcon(previousIconFileName);
+    }
+    item.icon_path = normalizeIconFileName(payload.file_name || payload.icon_path);
+  } catch (_) {
+    showAlert("آپلود آیکون انجام نشد. فقط فایل تصویری معتبر با اندازه استاندارد قابل قبول است.", { title: "آیکون انواع خدمات" });
+  } finally {
+    constructionUploadingPartServiceIconRowId.value = null;
+    if (partServiceIconInputEl.value) partServiceIconInputEl.value.value = "";
+  }
 }
 
 function openPartModelEditor(item = null) {
@@ -13449,12 +13502,46 @@ function openServiceTypeEditor(item = null) {
         service_type: String(item.service_type || "").trim(),
         service_title: String(item.service_title || "").trim(),
         short_code: String(item.short_code || "").trim(),
+        icon_path: normalizeIconFileName(item.icon_path) || "",
         part_side: normalizePartServiceSide(item.part_side),
         sort_order: Number(item.sort_order) || 0,
         is_system: !!item.is_system,
       }
     : buildNewServiceTypeDraft();
   serviceTypeEditorOpen.value = true;
+}
+
+function triggerServiceTypeIconUpload() {
+  if (!serviceTypeEditorDraft.value || isUploadingServiceTypeEditorIcon()) return;
+  constructionUploadingServiceTypeIconRowId.value = "service-type-editor";
+  serviceTypeIconInputEl.value?.click?.();
+}
+
+async function onServiceTypeIconFileChange(event) {
+  const file = event?.target?.files?.[0];
+  const item = serviceTypeEditorDraft.value;
+  if (!file || !item) return;
+  const previousIconFileName = normalizeIconFileName(item.icon_path);
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const slugHint = encodeURIComponent(String(item.short_code || item.service_title || item.service_type || "service-type"));
+    const res = await fetch(`/api/admin-storage/${encodeURIComponent(currentAdminId.value)}/param-group-icons?slug_hint=${slugHint}`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) throw new Error("upload-failed");
+    const payload = await res.json();
+    if (isStagedParamGroupIcon(previousIconFileName)) {
+      await discardStagedParamGroupIcon(previousIconFileName);
+    }
+    item.icon_path = normalizeIconFileName(payload.file_name || payload.icon_path);
+  } catch (_) {
+    showAlert("آپلود آیکون انجام نشد. فقط فایل تصویری معتبر با اندازه استاندارد قابل قبول است.", { title: "آیکون نوع خدمات" });
+  } finally {
+    constructionUploadingServiceTypeIconRowId.value = null;
+    if (serviceTypeIconInputEl.value) serviceTypeIconInputEl.value.value = "";
+  }
 }
 
 function togglePartFormulaInDoorGroup(partFormulaId) {
@@ -26542,6 +26629,13 @@ onBeforeUnmount(() => {
 
           <template v-else-if="constructionStep === 'part_services'">
             <input
+              ref="partServiceIconInputEl"
+              class="constructionDialog__fileInput"
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp"
+              @change="onPartServiceIconFileChange"
+            />
+            <input
               ref="constructionImportInputEl"
               class="constructionDialog__fileInput"
               type="file"
@@ -26612,6 +26706,7 @@ onBeforeUnmount(() => {
               <table class="constructionDialog__table constructionDialog__table--partServices">
                 <thead>
                   <tr>
+                    <th class="constructionDialog__col constructionDialog__col--icon">آیکون</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceType">نوع خدمات</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceDescription">شرح خدمات</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode">کد خدمات</th>
@@ -26620,6 +26715,11 @@ onBeforeUnmount(() => {
                 </thead>
                 <tbody>
                   <tr v-for="item in constructionPartServices" :key="item.id">
+                    <td class="constructionDialog__col constructionDialog__col--icon">
+                      <div class="constructionDialog__iconCell">
+                        <span class="constructionDialog__iconFileName">{{ normalizeIconFileName(item.icon_path) || "-" }}</span>
+                      </div>
+                    </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceType">
                       <div class="constructionDialog__partServiceTypeCell">
                         <strong class="constructionDialog__partServiceTypeText">{{ item.service_type }}</strong>
@@ -26641,7 +26741,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionPartServices.length">
-                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="4">هنوز نوع خدمتی برای قطعات ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="5">هنوز نوع خدمتی برای قطعات ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -26725,6 +26825,7 @@ onBeforeUnmount(() => {
               <table class="constructionDialog__table constructionDialog__table--partServices">
                 <thead>
                   <tr>
+                    <th class="constructionDialog__col constructionDialog__col--icon">آیکون</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceType">نوع خدمت</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceDescription">عنوان خدمات</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode">کد اختصاری</th>
@@ -26734,6 +26835,11 @@ onBeforeUnmount(() => {
                 </thead>
                 <tbody>
                   <tr v-for="item in constructionServiceTypes" :key="item.id">
+                    <td class="constructionDialog__col constructionDialog__col--icon">
+                      <div class="constructionDialog__iconCell">
+                        <span class="constructionDialog__iconFileName">{{ normalizeIconFileName(item.icon_path) || "-" }}</span>
+                      </div>
+                    </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceType">
                       <div class="constructionDialog__partServiceTypeCell">
                         <strong class="constructionDialog__partServiceTypeText">{{ item.service_type }}</strong>
@@ -26758,7 +26864,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionServiceTypes.length">
-                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="5">هنوز خدمتی برای قطعات ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="6">هنوز خدمتی برای قطعات ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -27933,6 +28039,13 @@ onBeforeUnmount(() => {
   <div v-if="partServiceEditorOpen && partServiceEditorDraft" class="appDialog" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closePartServiceEditor"></div>
     <div class="appDialog__card appDialog__card--builder" dir="rtl">
+      <input
+        ref="partServiceIconInputEl"
+        class="constructionDialog__fileInput"
+        type="file"
+        accept=".png,.jpg,.jpeg,.webp"
+        @change="onPartServiceIconFileChange"
+      />
       <div class="formulaBuilder__head">
         <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش انواع خدمات</div>
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closePartServiceEditor">×</button>
@@ -27953,6 +28066,23 @@ onBeforeUnmount(() => {
               class="constructionDialog__input constructionDialog__textarea"
               rows="4"
             ></textarea>
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>آیکون خدمات</span>
+            <div class="constructionDialog__iconCell">
+              <button
+                type="button"
+                class="constructionDialog__miniBtn constructionDialog__iconUploadBtn"
+                :class="[hasConstructionItemIcon(partServiceEditorDraft) ? 'is-filled' : 'is-empty', isUploadingPartServiceEditorIcon() ? 'is-loading' : '']"
+                :title="isUploadingPartServiceEditorIcon() ? 'در حال آپلود آیکون...' : getConstructionItemIconTooltip(partServiceEditorDraft)"
+                :disabled="isUploadingPartServiceEditorIcon()"
+                @click="triggerPartServiceIconUpload"
+              >
+                <span v-if="isUploadingPartServiceEditorIcon()" class="constructionDialog__spinner"></span>
+                <span v-else>↑</span>
+              </button>
+              <span class="constructionDialog__iconFileName">{{ normalizeIconFileName(partServiceEditorDraft.icon_path) || "بدون آیکون" }}</span>
+            </div>
           </label>
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
             <span>کد خدمات</span>
@@ -27985,6 +28115,13 @@ onBeforeUnmount(() => {
   <div v-if="serviceTypeEditorOpen && serviceTypeEditorDraft" class="appDialog" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closeServiceTypeEditor"></div>
     <div class="appDialog__card appDialog__card--builder" dir="rtl">
+      <input
+        ref="serviceTypeIconInputEl"
+        class="constructionDialog__fileInput"
+        type="file"
+        accept=".png,.jpg,.jpeg,.webp"
+        @change="onServiceTypeIconFileChange"
+      />
       <div class="formulaBuilder__head">
         <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش خدمات قطعات</div>
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closeServiceTypeEditor">×</button>
@@ -28004,6 +28141,23 @@ onBeforeUnmount(() => {
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
             <span>عنوان خدمات</span>
             <input v-model="serviceTypeEditorDraft.service_title" class="constructionDialog__input" type="text" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
+            <span>آیکون خدمات</span>
+            <div class="constructionDialog__iconCell">
+              <button
+                type="button"
+                class="constructionDialog__miniBtn constructionDialog__iconUploadBtn"
+                :class="[hasConstructionItemIcon(serviceTypeEditorDraft) ? 'is-filled' : 'is-empty', isUploadingServiceTypeEditorIcon() ? 'is-loading' : '']"
+                :title="isUploadingServiceTypeEditorIcon() ? 'در حال آپلود آیکون...' : getConstructionItemIconTooltip(serviceTypeEditorDraft)"
+                :disabled="isUploadingServiceTypeEditorIcon()"
+                @click="triggerServiceTypeIconUpload"
+              >
+                <span v-if="isUploadingServiceTypeEditorIcon()" class="constructionDialog__spinner"></span>
+                <span v-else>↑</span>
+              </button>
+              <span class="constructionDialog__iconFileName">{{ normalizeIconFileName(serviceTypeEditorDraft.icon_path) || "بدون آیکون" }}</span>
+            </div>
           </label>
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
             <span>کد اختصاری</span>

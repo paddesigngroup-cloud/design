@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import PartService
 from designkp_backend.services.admin_access import require_admin_if_present
+from designkp_backend.services.admin_storage import delete_final_icon, finalize_param_group_icon, normalize_icon_file_name
 
 router = APIRouter(prefix="/part-services", tags=["part_services"])
 
@@ -21,6 +22,7 @@ class PartServiceItem(BaseModel):
     service_type: str
     service_description: str
     service_code: str
+    icon_path: str | None
     sort_order: int
     is_system: bool
 
@@ -32,6 +34,7 @@ class PartServiceCreate(BaseModel):
     service_type: str = Field(min_length=1, max_length=255)
     service_description: str = Field(min_length=1, max_length=4000)
     service_code: str = Field(min_length=1, max_length=64)
+    icon_path: str | None = Field(default=None, max_length=255)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
 
@@ -41,6 +44,7 @@ class PartServiceUpdate(BaseModel):
     service_type: str = Field(min_length=1, max_length=255)
     service_description: str = Field(min_length=1, max_length=4000)
     service_code: str = Field(min_length=1, max_length=64)
+    icon_path: str | None = Field(default=None, max_length=255)
     sort_order: int = Field(ge=0)
     is_system: bool
 
@@ -88,7 +92,9 @@ async def _ensure_unique_service_code(
 
 
 def _to_response(item: PartService) -> PartServiceItem:
-    return PartServiceItem.model_validate(item)
+    payload = PartServiceItem.model_validate(item).model_dump()
+    payload["icon_path"] = normalize_icon_file_name(payload.get("icon_path"))
+    return PartServiceItem.model_validate(payload)
 
 
 @router.get("", response_model=list[PartServiceItem])
@@ -113,12 +119,14 @@ async def create_part_service(payload: PartServiceCreate, session: AsyncSession 
     service_description = _normalize_required_text(payload.service_description, "Service description", 4000)
     service_code = _normalize_required_text(payload.service_code, "Service code", 64)
     await _ensure_unique_service_code(session, admin_id=payload.admin_id, service_code=service_code)
+    final_icon_file_name = finalize_param_group_icon(payload.admin_id, payload.icon_path) if payload.admin_id else normalize_icon_file_name(payload.icon_path)
 
     item = PartService(
         admin_id=payload.admin_id,
         service_type=service_type,
         service_description=service_description,
         service_code=service_code,
+        icon_path=final_icon_file_name,
         sort_order=payload.sort_order if payload.sort_order is not None else await _next_sort_order(session),
         is_system=payload.is_system,
     )
@@ -152,11 +160,27 @@ async def update_part_service(
         service_code=service_code,
         exclude_id=item.id,
     )
+    previous_admin_id = item.admin_id
+    previous_icon_file_name = item.icon_path
+    next_admin_id = payload.admin_id
+    if next_admin_id:
+        next_icon_file_name = finalize_param_group_icon(
+            next_admin_id,
+            payload.icon_path,
+            previous_file_name=previous_icon_file_name if previous_admin_id == next_admin_id else None,
+        )
+        if previous_admin_id and previous_admin_id != next_admin_id and previous_icon_file_name:
+            delete_final_icon(previous_admin_id, previous_icon_file_name)
+    else:
+        next_icon_file_name = normalize_icon_file_name(payload.icon_path)
+        if previous_admin_id and previous_icon_file_name:
+            delete_final_icon(previous_admin_id, previous_icon_file_name)
 
-    item.admin_id = payload.admin_id
+    item.admin_id = next_admin_id
     item.service_type = service_type
     item.service_description = service_description
     item.service_code = service_code
+    item.icon_path = next_icon_file_name
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     try:
@@ -175,6 +199,8 @@ async def delete_part_service(part_service_id: uuid.UUID, session: AsyncSession 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part service not found.")
 
     await require_admin_if_present(session, item.admin_id)
+    if item.admin_id and item.icon_path:
+        delete_final_icon(item.admin_id, item.icon_path)
     await session.delete(item)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

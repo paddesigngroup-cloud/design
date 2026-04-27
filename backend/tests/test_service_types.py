@@ -62,12 +62,14 @@ def test_create_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
+    monkeypatch.setattr(router, "finalize_param_group_icon", lambda admin_id, icon_path, previous_file_name=None: f"final::{icon_path}")
     session = FakeSession()
     payload = ServiceTypeCreate(
         admin_id=None,
         service_type="  برش CNC  ",
         service_title="  دورو  ",
         short_code="  dr  ",
+        icon_path=" icon.webp ",
         part_side="  back  ",
         sort_order=None,
         is_system=True,
@@ -78,6 +80,7 @@ def test_create_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.service_type == "برش CNC"
     assert result.service_title == "دورو"
     assert result.short_code == "dr"
+    assert result.icon_path == "icon.webp"
     assert result.part_side == "back"
     assert result.sort_order == 4
     assert session.added is not None
@@ -88,12 +91,14 @@ def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
+    monkeypatch.setattr(router, "finalize_param_group_icon", lambda admin_id, icon_path, previous_file_name=None: f"final::{icon_path}")
     existing = SimpleNamespace(
         id=uuid.uuid4(),
         admin_id=None,
         service_type="قدیمی",
         service_title="قدیمی",
         short_code="old_code",
+        icon_path=None,
         part_side="front",
         sort_order=1,
         is_system=True,
@@ -104,6 +109,7 @@ def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
         service_type="مونتاژ",
         service_title="مونتاژ بدنه",
         short_code="asm",
+        icon_path="assembly.webp",
         part_side="back",
         sort_order=8,
         is_system=False,
@@ -114,6 +120,7 @@ def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.service_type == "مونتاژ"
     assert existing.service_title == "مونتاژ بدنه"
     assert existing.short_code == "asm"
+    assert existing.icon_path == "assembly.webp"
     assert existing.part_side == "back"
     assert existing.sort_order == 8
     assert existing.is_system is False
@@ -129,6 +136,7 @@ def test_create_service_type_rejects_blank_trimmed_fields(monkeypatch: pytest.Mo
         service_type="   ",
         service_title="عنوان",
         short_code="code",
+        icon_path=None,
         part_side="front",
         sort_order=0,
         is_system=True,
@@ -153,6 +161,7 @@ def test_create_service_type_rejects_duplicate_short_code_in_scope(monkeypatch: 
         service_type="خدمات",
         service_title="توضیح",
         short_code="dup",
+        icon_path=None,
         part_side="front",
         sort_order=1,
         is_system=True,
@@ -194,6 +203,7 @@ def test_delete_service_type_checks_access_scope(monkeypatch: pytest.MonkeyPatch
         service_type="test",
         service_title="title",
         short_code="test",
+        icon_path="icon.webp",
         part_side="front",
         sort_order=1,
         is_system=False,
@@ -215,6 +225,7 @@ def test_create_service_type_rejects_invalid_part_side(monkeypatch: pytest.Monke
         service_type="خدمات",
         service_title="توضیح",
         short_code="code",
+        icon_path=None,
         part_side="left",
         sort_order=1,
         is_system=True,
@@ -225,3 +236,35 @@ def test_create_service_type_rejects_invalid_part_side(monkeypatch: pytest.Monke
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "Part side must be front or back."
+
+
+def test_delete_service_type_removes_owned_icon(monkeypatch: pytest.MonkeyPatch) -> None:
+    deleted = {"admin_id": None, "icon_path": None}
+
+    async def fake_require_admin_if_present(session, admin_id):
+        return None
+
+    def fake_delete_final_icon(admin_id, icon_path):
+        deleted["admin_id"] = admin_id
+        deleted["icon_path"] = icon_path
+
+    monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
+    monkeypatch.setattr(router, "delete_final_icon", fake_delete_final_icon)
+    target_admin_id = uuid.uuid4()
+    existing = SimpleNamespace(
+        id=uuid.uuid4(),
+        admin_id=target_admin_id,
+        service_type="test",
+        service_title="title",
+        short_code="test",
+        icon_path="icon.webp",
+        part_side="front",
+        sort_order=1,
+        is_system=False,
+    )
+    session = FakeSession(item=existing)
+
+    asyncio.run(delete_service_type(existing.id, session))
+
+    assert deleted["admin_id"] == target_admin_id
+    assert deleted["icon_path"] == "icon.webp"

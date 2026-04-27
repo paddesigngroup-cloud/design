@@ -166,6 +166,7 @@ class PartService(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionM
     service_type: Mapped[str] = mapped_column(String(255), nullable=False)
     service_description: Mapped[str] = mapped_column(Text, nullable=False)
     service_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
@@ -184,6 +185,7 @@ class PartServiceType(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Vers
     service_type: Mapped[str] = mapped_column(String(255), nullable=False)
     service_title: Mapped[str] = mapped_column(String(255), nullable=False)
     short_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     part_side: Mapped[str] = mapped_column(String(16), nullable=False, default="front", server_default="front")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
