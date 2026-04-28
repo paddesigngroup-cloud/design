@@ -57,7 +57,7 @@ class FakeSession:
         return SimpleNamespace(all=lambda: [])
 
 
-def test_create_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_service_type_success_without_subtraction(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_require_admin_if_present(session, admin_id):
         return None
 
@@ -70,7 +70,11 @@ def test_create_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
         service_title="  دورو  ",
         short_code="  dr  ",
         icon_path=" icon.webp ",
-        part_side="  back  ",
+        has_subtraction=False,
+        service_location="back",
+        drill_pattern="point",
+        subtraction_shape="circle",
+        shape_angles=[],
         axis_to_opposite_edge_distance=12.5,
         axis_to_aligned_edge_distance=8,
         working_diameter=35,
@@ -85,7 +89,11 @@ def test_create_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.service_title == "دورو"
     assert result.short_code == "dr"
     assert result.icon_path == "icon.webp"
-    assert result.part_side == "back"
+    assert result.has_subtraction is False
+    assert result.service_location is None
+    assert result.drill_pattern is None
+    assert result.subtraction_shape is None
+    assert result.shape_angles is None
     assert result.axis_to_opposite_edge_distance == 12.5
     assert result.axis_to_aligned_edge_distance == 8
     assert result.working_diameter == 35
@@ -94,7 +102,7 @@ def test_create_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert session.added is not None
 
 
-def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_require_admin_if_present(session, admin_id):
         return None
 
@@ -107,7 +115,11 @@ def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
         service_title="قدیمی",
         short_code="old_code",
         icon_path=None,
-        part_side="front",
+        has_subtraction=False,
+        service_location=None,
+        drill_pattern=None,
+        subtraction_shape=None,
+        shape_angles=None,
         axis_to_opposite_edge_distance=None,
         axis_to_aligned_edge_distance=None,
         working_diameter=None,
@@ -122,7 +134,11 @@ def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
         service_title="مونتاژ بدنه",
         short_code="asm",
         icon_path="assembly.webp",
-        part_side="back",
+        has_subtraction=True,
+        service_location="thickness",
+        drill_pattern="linear",
+        subtraction_shape="circle",
+        shape_angles=[],
         axis_to_opposite_edge_distance=4,
         axis_to_aligned_edge_distance=6.5,
         working_diameter=12,
@@ -137,7 +153,11 @@ def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert existing.service_title == "مونتاژ بدنه"
     assert existing.short_code == "asm"
     assert existing.icon_path == "assembly.webp"
-    assert existing.part_side == "back"
+    assert existing.has_subtraction is True
+    assert existing.service_location == "thickness"
+    assert existing.drill_pattern == "linear"
+    assert existing.subtraction_shape == "circle"
+    assert existing.shape_angles == []
     assert existing.axis_to_opposite_edge_distance == 4
     assert existing.axis_to_aligned_edge_distance == 6.5
     assert existing.working_diameter == 12
@@ -157,11 +177,7 @@ def test_create_service_type_rejects_blank_trimmed_fields(monkeypatch: pytest.Mo
         service_title="عنوان",
         short_code="code",
         icon_path=None,
-        part_side="front",
-        axis_to_opposite_edge_distance=None,
-        axis_to_aligned_edge_distance=None,
-        working_diameter=None,
-        working_depth=None,
+        has_subtraction=False,
         sort_order=0,
         is_system=True,
     )
@@ -186,11 +202,7 @@ def test_create_service_type_rejects_duplicate_short_code_in_scope(monkeypatch: 
         service_title="توضیح",
         short_code="dup",
         icon_path=None,
-        part_side="front",
-        axis_to_opposite_edge_distance=None,
-        axis_to_aligned_edge_distance=None,
-        working_diameter=None,
-        working_depth=None,
+        has_subtraction=False,
         sort_order=1,
         is_system=True,
     )
@@ -232,7 +244,11 @@ def test_delete_service_type_checks_access_scope(monkeypatch: pytest.MonkeyPatch
         service_title="title",
         short_code="test",
         icon_path="icon.webp",
-        part_side="front",
+        has_subtraction=False,
+        service_location=None,
+        drill_pattern=None,
+        subtraction_shape=None,
+        shape_angles=None,
         axis_to_opposite_edge_distance=None,
         axis_to_aligned_edge_distance=None,
         working_diameter=None,
@@ -247,7 +263,7 @@ def test_delete_service_type_checks_access_scope(monkeypatch: pytest.MonkeyPatch
     assert called["admin_id"] == target_admin_id
 
 
-def test_create_service_type_rejects_invalid_part_side(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_service_type_rejects_invalid_service_location(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_require_admin_if_present(session, admin_id):
         return None
 
@@ -258,11 +274,11 @@ def test_create_service_type_rejects_invalid_part_side(monkeypatch: pytest.Monke
         service_title="توضیح",
         short_code="code",
         icon_path=None,
-        part_side="left",
-        axis_to_opposite_edge_distance=None,
-        axis_to_aligned_edge_distance=None,
-        working_diameter=None,
-        working_depth=None,
+        has_subtraction=True,
+        service_location="left",
+        drill_pattern="point",
+        subtraction_shape="circle",
+        shape_angles=[],
         sort_order=1,
         is_system=True,
     )
@@ -271,7 +287,96 @@ def test_create_service_type_rejects_invalid_part_side(monkeypatch: pytest.Monke
         asyncio.run(create_service_type(payload, FakeSession()))
 
     assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "Part side must be front or back."
+    assert exc_info.value.detail == "Service location must be front, back, or thickness."
+
+
+def test_create_service_type_rejects_invalid_drill_pattern(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_require_admin_if_present(session, admin_id):
+        return None
+
+    monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
+    payload = ServiceTypeCreate(
+        admin_id=None,
+        service_type="خدمات",
+        service_title="توضیح",
+        short_code="code",
+        icon_path=None,
+        has_subtraction=True,
+        service_location="front",
+        drill_pattern="curve",
+        subtraction_shape="circle",
+        shape_angles=[],
+        sort_order=1,
+        is_system=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(create_service_type(payload, FakeSession()))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Drill pattern must be point or linear."
+
+
+def test_create_service_type_rejects_invalid_triangle_angles(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_require_admin_if_present(session, admin_id):
+        return None
+
+    monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
+    payload = ServiceTypeCreate(
+        admin_id=None,
+        service_type="خدمات",
+        service_title="توضیح",
+        short_code="tri",
+        icon_path=None,
+        has_subtraction=True,
+        service_location="front",
+        drill_pattern="point",
+        subtraction_shape="triangle",
+        shape_angles=[
+            {"index": 0, "angle_deg": 50},
+            {"index": 1, "angle_deg": 50},
+            {"index": 2, "angle_deg": 50},
+        ],
+        sort_order=1,
+        is_system=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(create_service_type(payload, FakeSession()))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Triangle shape angles must sum to 180."
+
+
+def test_create_service_type_rejects_invalid_rectangle_angle_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_require_admin_if_present(session, admin_id):
+        return None
+
+    monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
+    payload = ServiceTypeCreate(
+        admin_id=None,
+        service_type="خدمات",
+        service_title="توضیح",
+        short_code="rect",
+        icon_path=None,
+        has_subtraction=True,
+        service_location="back",
+        drill_pattern="linear",
+        subtraction_shape="rectangle",
+        shape_angles=[
+            {"index": 0, "angle_deg": 90},
+            {"index": 1, "angle_deg": 90},
+            {"index": 2, "angle_deg": 90},
+        ],
+        sort_order=1,
+        is_system=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(create_service_type(payload, FakeSession()))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Rectangle shape must contain exactly 4 angles."
 
 
 def test_delete_service_type_removes_owned_icon(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -294,7 +399,11 @@ def test_delete_service_type_removes_owned_icon(monkeypatch: pytest.MonkeyPatch)
         service_title="title",
         short_code="test",
         icon_path="icon.webp",
-        part_side="front",
+        has_subtraction=False,
+        service_location=None,
+        drill_pattern=None,
+        subtraction_shape=None,
+        shape_angles=None,
         axis_to_opposite_edge_distance=None,
         axis_to_aligned_edge_distance=None,
         working_diameter=None,

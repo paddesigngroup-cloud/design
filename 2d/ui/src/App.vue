@@ -3806,7 +3806,7 @@ const constructionGroupedServiceTypeChoices = computed(() => {
       service_type: groupKey,
       service_title: String(item.service_title || "").trim(),
       short_code: String(item.short_code || "").trim(),
-      part_side: normalizePartServiceSide(item.part_side),
+      service_location: normalizeServiceLocation(item.service_location),
       sort_order: Number(item.sort_order) || 0,
     });
   }
@@ -3815,7 +3815,7 @@ const constructionGroupedServiceTypeChoices = computed(() => {
       ...group,
       items: group.items.sort((a, b) =>
         a.sort_order - b.sort_order
-        || a.part_side.localeCompare(b.part_side)
+        || a.service_location.localeCompare(b.service_location)
         || a.service_title.localeCompare(b.service_title, "fa")
       ),
     }))
@@ -8397,7 +8397,10 @@ const constructionServiceTypeColumnWidths = computed(() => {
     service_type: getMaxColumnLength(rows.map((item) => item.service_type), 6),
     service_title: getMaxColumnLength(rows.map((item) => item.service_title), 6),
     short_code: getMaxColumnLength(rows.map((item) => item.short_code), 3),
-    part_side: getMaxColumnLength(rows.map((item) => getPartServiceSideLabel(item.part_side)), 5),
+    has_subtraction: getMaxColumnLength(rows.map((item) => getSubtractionToggleLabel(item.has_subtraction)), 4),
+    service_location: getMaxColumnLength(rows.map((item) => getServiceLocationLabel(item.service_location)), 6),
+    drill_pattern: getMaxColumnLength(rows.map((item) => getDrillPatternLabel(item.drill_pattern)), 4),
+    subtraction_shape: getMaxColumnLength(rows.map((item) => getSubtractionShapeLabel(item.subtraction_shape)), 4),
     axis_to_opposite_edge_distance: getMaxColumnLength(rows.map((item) => item.axis_to_opposite_edge_distance ?? "-"), 3),
     axis_to_aligned_edge_distance: getMaxColumnLength(rows.map((item) => item.axis_to_aligned_edge_distance ?? "-"), 3),
     working_diameter: getMaxColumnLength(rows.map((item) => item.working_diameter ?? "-"), 3),
@@ -8899,7 +8902,13 @@ function normalizeServiceTypePayload(item) {
     service_title: String(item.service_title || "").trim(),
     short_code: String(item.short_code || "").trim(),
     icon_path: normalizeIconFileName(item.icon_path),
-    part_side: normalizePartServiceSide(item.part_side),
+    has_subtraction: normalizeBooleanFlag(item.has_subtraction, false),
+    service_location: normalizeBooleanFlag(item.has_subtraction, false) ? normalizeServiceLocation(item.service_location) : null,
+    drill_pattern: normalizeBooleanFlag(item.has_subtraction, false) ? normalizeDrillPattern(item.drill_pattern) : null,
+    subtraction_shape: normalizeBooleanFlag(item.has_subtraction, false) ? normalizeSubtractionShape(item.subtraction_shape) : null,
+    shape_angles: normalizeBooleanFlag(item.has_subtraction, false)
+      ? normalizeServiceTypeShapeAngles(item.subtraction_shape, item.shape_angles)
+      : null,
     axis_to_opposite_edge_distance: normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance),
     axis_to_aligned_edge_distance: normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance),
     working_diameter: normalizeOptionalMeasurement(item.working_diameter),
@@ -9011,13 +9020,18 @@ function normalizeEditablePartModelRecord(item) {
 }
 
 function normalizeEditableServiceTypeRecord(item) {
+  const shape = normalizeSubtractionShape(item.subtraction_shape);
   return withConstructionDraftState({
     ...item,
     service_type: String(item.service_type || "").trim(),
     service_title: String(item.service_title || "").trim(),
     short_code: String(item.short_code || "").trim(),
     icon_path: normalizeIconFileName(item.icon_path) || "",
-    part_side: normalizePartServiceSide(item.part_side),
+    has_subtraction: normalizeBooleanFlag(item.has_subtraction, false),
+    service_location: normalizeServiceLocation(item.service_location),
+    drill_pattern: normalizeDrillPattern(item.drill_pattern),
+    subtraction_shape: shape,
+    shape_angles: normalizeServiceTypeShapeAngleDrafts(shape, item.shape_angles),
     axis_to_opposite_edge_distance: normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance),
     axis_to_aligned_edge_distance: normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance),
     working_diameter: normalizeOptionalMeasurement(item.working_diameter),
@@ -9876,6 +9890,40 @@ const partFormulaModelEditorPreviewState = computed(() => {
   };
 });
 
+const serviceTypeEditorPreviewState = computed(() => {
+  const draft = serviceTypeEditorDraft.value;
+  const viewBox = "0 0 360 240";
+  const frameRect = { x: 52, y: 34, width: 256, height: 156 };
+  const safeLocation = draft ? normalizeServiceLocation(draft.service_location) : "front";
+  const safePattern = draft ? normalizeDrillPattern(draft.drill_pattern) : "point";
+  const safeShape = draft ? normalizeSubtractionShape(draft.subtraction_shape) : "circle";
+  const geometry = normalizePartModelPreviewGeometry(
+    Math.max(3, getServiceTypeShapeSideCount(safeShape) || 4),
+    safeShape === "circle" ? null : normalizeServiceTypeShapeAngles(safeShape, draft?.shape_angles)
+  );
+  const polygonVertices = safeShape === "circle" ? [] : scalePartModelVerticesIntoFrame(geometry.vertices, frameRect, 42);
+  const polygonPoints = polygonVertices.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
+  const centerX = frameRect.x + (frameRect.width / 2);
+  const centerY = frameRect.y + (frameRect.height / 2);
+  const offsetX = Math.max(-72, Math.min(72, (Number(draft?.axis_to_aligned_edge_distance) || 0) * 2));
+  const offsetY = Math.max(-54, Math.min(54, (Number(draft?.axis_to_opposite_edge_distance) || 0) * -2));
+  const previewCenter = { x: centerX + offsetX, y: centerY + offsetY };
+  return {
+    viewBox,
+    frameRect,
+    location: safeLocation,
+    pattern: safePattern,
+    shape: safeShape,
+    polygonPoints,
+    polygonVertices,
+    previewCenter,
+    circleRadius: Math.max(10, Math.min(44, Number(draft?.working_diameter) || 18)),
+    linearWidth: Math.max(34, Math.min(118, (Number(draft?.working_diameter) || 18) * 2.2)),
+    linearHeight: Math.max(10, Math.min(36, Number(draft?.working_depth) || 12)),
+    depthValue: Number(draft?.working_depth) || 0,
+  };
+});
+
 function normalizeBooleanFlag(value, fallback = false) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
@@ -9886,22 +9934,106 @@ function normalizeBooleanFlag(value, fallback = false) {
   return !!fallback;
 }
 
-const PART_SERVICE_SIDE_OPTIONS = [
-  { value: "front", label: "روی قطعه" },
-  { value: "back", label: "پشت قطعه" },
+const SERVICE_LOCATION_OPTIONS = [
+  { value: "front", label: "روی قطعه", icon: "face-front" },
+  { value: "back", label: "پشت قطعه", icon: "face-back" },
+  { value: "thickness", label: "ضخامت قطعه", icon: "face-thickness" },
+];
+const DRILL_PATTERN_OPTIONS = [
+  { value: "point", label: "نقطه‌ای", icon: "drill-point" },
+  { value: "linear", label: "خطی", icon: "drill-linear" },
+];
+const SUBTRACTION_SHAPE_OPTIONS = [
+  { value: "circle", label: "دایره" },
+  { value: "triangle", label: "مثلث" },
+  { value: "rectangle", label: "مستطیل" },
 ];
 
-function normalizePartServiceSide(value) {
-  return String(value || "").trim().toLowerCase() === "back" ? "back" : "front";
-}
-
-function isValidPartServiceSideValue(value) {
+function normalizeServiceLocation(value) {
   const text = String(value || "").trim().toLowerCase();
-  return text === "front" || text === "back";
+  if (text === "back") return "back";
+  if (text === "thickness") return "thickness";
+  return "front";
 }
 
-function getPartServiceSideLabel(value) {
-  return normalizePartServiceSide(value) === "back" ? "پشت قطعه" : "روی قطعه";
+function isValidServiceLocation(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text === "front" || text === "back" || text === "thickness";
+}
+
+function getServiceLocationLabel(value) {
+  const normalized = normalizeServiceLocation(value);
+  if (normalized === "back") return "پشت قطعه";
+  if (normalized === "thickness") return "ضخامت قطعه";
+  return "روی قطعه";
+}
+
+function normalizeDrillPattern(value) {
+  return String(value || "").trim().toLowerCase() === "linear" ? "linear" : "point";
+}
+
+function isValidDrillPattern(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text === "point" || text === "linear";
+}
+
+function getDrillPatternLabel(value) {
+  return normalizeDrillPattern(value) === "linear" ? "خطی" : "نقطه‌ای";
+}
+
+function normalizeSubtractionShape(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "triangle") return "triangle";
+  if (text === "rectangle") return "rectangle";
+  return "circle";
+}
+
+function isValidSubtractionShape(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text === "circle" || text === "triangle" || text === "rectangle";
+}
+
+function getSubtractionShapeLabel(value) {
+  const normalized = normalizeSubtractionShape(value);
+  if (normalized === "triangle") return "مثلث";
+  if (normalized === "rectangle") return "مستطیل";
+  return "دایره";
+}
+
+function getSubtractionToggleLabel(value) {
+  return normalizeBooleanFlag(value, false) ? "دارد" : "ندارد";
+}
+
+function getServiceTypeShapeSideCount(shape) {
+  const normalized = normalizeSubtractionShape(shape);
+  if (normalized === "triangle") return 3;
+  if (normalized === "rectangle") return 4;
+  return 0;
+}
+
+function getServiceTypeShapeAngleSum(shape) {
+  const normalized = normalizeSubtractionShape(shape);
+  if (normalized === "triangle") return 180;
+  if (normalized === "rectangle") return 360;
+  return 0;
+}
+
+function normalizeServiceTypeShapeAngles(shape, angles) {
+  const sideCount = getServiceTypeShapeSideCount(shape);
+  if (!sideCount) return [];
+  return normalizePartModelAngleRecords(sideCount, angles, getServiceTypeShapeAngleSum(shape));
+}
+
+function normalizeServiceTypeShapeAngleDrafts(shape, angles) {
+  const sideCount = getServiceTypeShapeSideCount(shape);
+  if (!sideCount) return [];
+  return buildPartModelAngleDrafts(sideCount, angles, getServiceTypeShapeAngleSum(shape));
+}
+
+function validateServiceTypeShapeAngles(shape, angles) {
+  const sideCount = getServiceTypeShapeSideCount(shape);
+  if (!sideCount) return { ok: true, angles: [] };
+  return validatePartModelAngleRecords(sideCount, getServiceTypeShapeAngleSum(shape), angles);
 }
 
 function createEmptyPartFormulaModelEditorState() {
@@ -10926,7 +11058,11 @@ function buildNewServiceTypeDraft() {
     service_title: "",
     short_code: `service_type_${nextSort}`,
     icon_path: "",
-    part_side: "front",
+    has_subtraction: false,
+    service_location: "front",
+    drill_pattern: "point",
+    subtraction_shape: "circle",
+    shape_angles: [],
     axis_to_opposite_edge_distance: null,
     axis_to_aligned_edge_distance: null,
     working_diameter: null,
@@ -13717,12 +13853,66 @@ function openServiceTypeEditor(item = null) {
         service_title: String(item.service_title || "").trim(),
         short_code: String(item.short_code || "").trim(),
         icon_path: normalizeIconFileName(item.icon_path) || "",
-        part_side: normalizePartServiceSide(item.part_side),
+        has_subtraction: normalizeBooleanFlag(item.has_subtraction, false),
+        service_location: normalizeServiceLocation(item.service_location),
+        drill_pattern: normalizeDrillPattern(item.drill_pattern),
+        subtraction_shape: normalizeSubtractionShape(item.subtraction_shape),
+        shape_angles: normalizeServiceTypeShapeAngleDrafts(item.subtraction_shape, item.shape_angles),
+        axis_to_opposite_edge_distance: normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance),
+        axis_to_aligned_edge_distance: normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance),
+        working_diameter: normalizeOptionalMeasurement(item.working_diameter),
+        working_depth: normalizeOptionalMeasurement(item.working_depth),
         sort_order: Number(item.sort_order) || 0,
         is_system: !!item.is_system,
       }
     : buildNewServiceTypeDraft();
   serviceTypeEditorOpen.value = true;
+}
+
+function onServiceTypeSubtractionShapeChange(value) {
+  if (!serviceTypeEditorDraft.value) return;
+  const shape = normalizeSubtractionShape(value);
+  serviceTypeEditorDraft.value.subtraction_shape = shape;
+  serviceTypeEditorDraft.value.shape_angles = normalizeServiceTypeShapeAngleDrafts(shape, serviceTypeEditorDraft.value.shape_angles);
+}
+
+function onServiceTypeShapeAngleInput(angleIndex, value) {
+  const draft = serviceTypeEditorDraft.value;
+  if (!draft) return;
+  const target = draft.shape_angles?.find((item) => Number(item?.index) === Number(angleIndex));
+  if (!target) return;
+  target._draft_text = String(value ?? "");
+}
+
+function onServiceTypeShapeAngleChange(angleIndex, value = null) {
+  const draft = serviceTypeEditorDraft.value;
+  if (!draft) return;
+  const targetDraft = draft.shape_angles?.find((item) => Number(item?.index) === Number(angleIndex));
+  const parsedValue = Number(normalizeLocalizedNumberText(value ?? targetDraft?._draft_text));
+  if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
+    showAlert("زاویه باید عددی و بزرگ‌تر از صفر باشد.", { title: "اعتبارسنجی" });
+    if (targetDraft) targetDraft._draft_text = formatPartModelAngleNumber(targetDraft.angle_deg);
+    return;
+  }
+  const sideCount = getServiceTypeShapeSideCount(draft.subtraction_shape);
+  const interiorAngleSum = getServiceTypeShapeAngleSum(draft.subtraction_shape);
+  const currentAngles = (Array.isArray(draft.shape_angles) ? draft.shape_angles : []).map((item, fallbackIndex) => ({
+    index: Number.isInteger(Number(item?.index)) ? Number(item.index) : fallbackIndex,
+    angle_deg: roundPartModelAngle(item?.angle_deg),
+    _edited: !!item?._edited,
+    _draft_text: String(item?._draft_text ?? formatPartModelAngleNumber(item?.angle_deg)),
+  }));
+  const targetIndex = currentAngles.findIndex((item) => item.index === Number(angleIndex));
+  if (targetIndex === -1 || sideCount <= 0) return;
+  const maxAllowedForPrimary = roundPartModelAngle(interiorAngleSum - ((currentAngles.length - 1) * PART_MODEL_MIN_ANGLE));
+  currentAngles[targetIndex].angle_deg = roundPartModelAngle(Math.min(parsedValue, maxAllowedForPrimary));
+  currentAngles[targetIndex]._edited = true;
+  const redistributed = redistributePartModelAngleDrafts(sideCount, interiorAngleSum, currentAngles, angleIndex);
+  if (!redistributed.ok) {
+    if (targetDraft) targetDraft._draft_text = formatPartModelAngleNumber(targetDraft.angle_deg);
+    return;
+  }
+  draft.shape_angles = syncPartModelAngleDraftTexts(redistributed.angles);
 }
 
 function triggerServiceTypeIconUpload() {
@@ -16472,7 +16662,10 @@ function validateConstructionServiceTypes() {
     const serviceType = String(item.service_type || "").trim();
     const serviceTitle = String(item.service_title || "").trim();
     const shortCode = String(item.short_code || "").trim();
-    const partSide = normalizePartServiceSide(item.part_side);
+    const hasSubtraction = normalizeBooleanFlag(item.has_subtraction, false);
+    const serviceLocation = normalizeServiceLocation(item.service_location);
+    const drillPattern = normalizeDrillPattern(item.drill_pattern);
+    const subtractionShape = normalizeSubtractionShape(item.subtraction_shape);
     const axisToOppositeEdgeDistance = normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance);
     const axisToAlignedEdgeDistance = normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance);
     const workingDiameter = normalizeOptionalMeasurement(item.working_diameter);
@@ -16489,10 +16682,6 @@ function validateConstructionServiceTypes() {
       showAlert("کد اختصاری نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
       return false;
     }
-    if (!isValidPartServiceSideValue(partSide)) {
-      showAlert("محل خدمت باید روی قطعه یا پشت قطعه باشد.", { title: "اعتبارسنجی" });
-      return false;
-    }
     if (
       (axisToOppositeEdgeDistance != null && axisToOppositeEdgeDistance < 0) ||
       (axisToAlignedEdgeDistance != null && axisToAlignedEdgeDistance < 0) ||
@@ -16500,6 +16689,24 @@ function validateConstructionServiceTypes() {
       (workingDepth != null && workingDepth < 0)
     ) {
       showAlert("مقادیر ابعادی خدمت باید صفر یا بزرگ‌تر باشند.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!hasSubtraction) continue;
+    if (!isValidServiceLocation(serviceLocation)) {
+      showAlert("محل خدمت باید روی قطعه، پشت قطعه یا ضخامت قطعه باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!isValidDrillPattern(drillPattern)) {
+      showAlert("نوع سوراخکاری باید نقطه‌ای یا خطی باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!isValidSubtractionShape(subtractionShape)) {
+      showAlert("شکل سابترکشن باید دایره، مثلث یا مستطیل باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    const angleValidation = validateServiceTypeShapeAngles(subtractionShape, item.shape_angles);
+    if (!angleValidation.ok) {
+      showAlert(angleValidation.error || "زاویه‌های شکل سابترکشن معتبر نیستند.", { title: "اعتبارسنجی" });
       return false;
     }
   }
@@ -16576,7 +16783,10 @@ async function saveServiceTypeEditor() {
   const serviceType = String(draft.service_type || "").trim();
   const serviceTitle = String(draft.service_title || "").trim();
   const shortCode = String(draft.short_code || "").trim();
-  const partSide = normalizePartServiceSide(draft.part_side);
+  const hasSubtraction = normalizeBooleanFlag(draft.has_subtraction, false);
+  const serviceLocation = normalizeServiceLocation(draft.service_location);
+  const drillPattern = normalizeDrillPattern(draft.drill_pattern);
+  const subtractionShape = normalizeSubtractionShape(draft.subtraction_shape);
   const axisToOppositeEdgeDistance = normalizeOptionalMeasurement(draft.axis_to_opposite_edge_distance);
   const axisToAlignedEdgeDistance = normalizeOptionalMeasurement(draft.axis_to_aligned_edge_distance);
   const workingDiameter = normalizeOptionalMeasurement(draft.working_diameter);
@@ -16603,6 +16813,26 @@ async function saveServiceTypeEditor() {
     showAlert("کد اختصاری در همین نوع خدمت و همین دامنه مالک تکراری است.", { title: "اعتبارسنجی" });
     return;
   }
+  if (hasSubtraction) {
+    if (!isValidServiceLocation(serviceLocation)) {
+      showAlert("محل خدمت معتبر نیست.", { title: "اعتبارسنجی" });
+      return;
+    }
+    if (!isValidDrillPattern(drillPattern)) {
+      showAlert("نوع سوراخکاری معتبر نیست.", { title: "اعتبارسنجی" });
+      return;
+    }
+    if (!isValidSubtractionShape(subtractionShape)) {
+      showAlert("شکل سابترکشن معتبر نیست.", { title: "اعتبارسنجی" });
+      return;
+    }
+    const angleValidation = validateServiceTypeShapeAngles(subtractionShape, draft.shape_angles);
+    if (!angleValidation.ok) {
+      showAlert(angleValidation.error || "زاویه‌های شکل سابترکشن معتبر نیستند.", { title: "اعتبارسنجی" });
+      return;
+    }
+    draft.shape_angles = syncPartModelAngleDraftTexts(angleValidation.angles);
+  }
   if (
     (axisToOppositeEdgeDistance != null && axisToOppositeEdgeDistance < 0) ||
     (axisToAlignedEdgeDistance != null && axisToAlignedEdgeDistance < 0) ||
@@ -16612,7 +16842,11 @@ async function saveServiceTypeEditor() {
     showAlert("مقادیر ابعادی خدمت باید صفر یا بزرگ‌تر باشند.", { title: "اعتبارسنجی" });
     return;
   }
-  draft.part_side = partSide;
+  draft.has_subtraction = hasSubtraction;
+  draft.service_location = hasSubtraction ? serviceLocation : null;
+  draft.drill_pattern = hasSubtraction ? drillPattern : null;
+  draft.subtraction_shape = hasSubtraction ? subtractionShape : null;
+  draft.shape_angles = hasSubtraction ? draft.shape_angles : [];
   draft.axis_to_opposite_edge_distance = axisToOppositeEdgeDistance;
   draft.axis_to_aligned_edge_distance = axisToAlignedEdgeDistance;
   draft.working_diameter = workingDiameter;
@@ -18544,7 +18778,11 @@ function getConstructionCsvHeaders() {
       "service_type",
       "service_title",
       "short_code",
-      "part_side",
+      "has_subtraction",
+      "service_location",
+      "drill_pattern",
+      "subtraction_shape",
+      "shape_angles",
       "axis_to_opposite_edge_distance",
       "axis_to_aligned_edge_distance",
       "working_diameter",
@@ -18619,7 +18857,13 @@ function getConstructionCsvRows(items = null) {
       String(item.service_type || "").trim(),
       String(item.service_title || "").trim(),
       String(item.short_code || "").trim(),
-      normalizePartServiceSide(item.part_side),
+      normalizeBooleanFlag(item.has_subtraction, false) ? 1 : 0,
+      normalizeBooleanFlag(item.has_subtraction, false) ? normalizeServiceLocation(item.service_location) : "",
+      normalizeBooleanFlag(item.has_subtraction, false) ? normalizeDrillPattern(item.drill_pattern) : "",
+      normalizeBooleanFlag(item.has_subtraction, false) ? normalizeSubtractionShape(item.subtraction_shape) : "",
+      normalizeBooleanFlag(item.has_subtraction, false)
+        ? normalizeServiceTypeShapeAngles(item.subtraction_shape, item.shape_angles).map((entry) => formatPartModelAngleNumber(entry.angle_deg)).join(",")
+        : "",
       normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance) ?? "",
       normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance) ?? "",
       normalizeOptionalMeasurement(item.working_diameter) ?? "",
@@ -18938,17 +19182,23 @@ async function onConstructionImportFileChange(event) {
       });
     } else if (constructionStep.value === "service_types") {
       previewRows = rows.slice(1).map((row, index) => {
-        const adminMode = String(row[8] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const adminMode = String(row[12] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const hasSubtraction = normalizeBooleanFlag(row[3], false);
+        const subtractionShape = normalizeSubtractionShape(row[6]);
         return {
           lineNo: index + 2,
           service_type: String(row[0] || "").trim(),
           service_title: String(row[1] || "").trim(),
           short_code: String(row[2] || "").trim(),
-          part_side: normalizePartServiceSide(row[3]),
-          axis_to_opposite_edge_distance: normalizeOptionalMeasurement(row[4]),
-          axis_to_aligned_edge_distance: normalizeOptionalMeasurement(row[5]),
-          working_diameter: normalizeOptionalMeasurement(row[6]),
-          working_depth: normalizeOptionalMeasurement(row[7]),
+          has_subtraction: hasSubtraction,
+          service_location: hasSubtraction ? normalizeServiceLocation(row[4]) : null,
+          drill_pattern: hasSubtraction ? normalizeDrillPattern(row[5]) : null,
+          subtraction_shape: hasSubtraction ? subtractionShape : null,
+          shape_angles: hasSubtraction ? normalizeServiceTypeShapeAngleDrafts(subtractionShape, parsePartModelAnglesCsv(row[7], getServiceTypeShapeSideCount(subtractionShape), getServiceTypeShapeAngleSum(subtractionShape))) : [],
+          axis_to_opposite_edge_distance: normalizeOptionalMeasurement(row[8]),
+          axis_to_aligned_edge_distance: normalizeOptionalMeasurement(row[9]),
+          working_diameter: normalizeOptionalMeasurement(row[10]),
+          working_depth: normalizeOptionalMeasurement(row[11]),
           admin_mode: adminMode,
         };
       });
@@ -19155,7 +19405,10 @@ async function onConstructionImportFileChange(event) {
             !row.service_type ||
             !row.service_title ||
             !row.short_code ||
-            !isValidPartServiceSideValue(row.part_side) ||
+            (normalizeBooleanFlag(row.has_subtraction, false) && !isValidServiceLocation(row.service_location)) ||
+            (normalizeBooleanFlag(row.has_subtraction, false) && !isValidDrillPattern(row.drill_pattern)) ||
+            (normalizeBooleanFlag(row.has_subtraction, false) && !isValidSubtractionShape(row.subtraction_shape)) ||
+            (normalizeBooleanFlag(row.has_subtraction, false) && !validateServiceTypeShapeAngles(row.subtraction_shape, row.shape_angles).ok) ||
             (row.axis_to_opposite_edge_distance != null && row.axis_to_opposite_edge_distance < 0) ||
             (row.axis_to_aligned_edge_distance != null && row.axis_to_aligned_edge_distance < 0) ||
             (row.working_diameter != null && row.working_diameter < 0) ||
@@ -22269,7 +22522,13 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       service_type: String(row.service_type || "").trim(),
       service_title: String(row.service_title || "").trim(),
       short_code: String(row.short_code || "").trim(),
-      part_side: normalizePartServiceSide(row.part_side),
+      has_subtraction: normalizeBooleanFlag(row.has_subtraction, false),
+      service_location: normalizeBooleanFlag(row.has_subtraction, false) ? normalizeServiceLocation(row.service_location) : null,
+      drill_pattern: normalizeBooleanFlag(row.has_subtraction, false) ? normalizeDrillPattern(row.drill_pattern) : null,
+      subtraction_shape: normalizeBooleanFlag(row.has_subtraction, false) ? normalizeSubtractionShape(row.subtraction_shape) : null,
+      shape_angles: normalizeBooleanFlag(row.has_subtraction, false)
+        ? normalizeServiceTypeShapeAngleDrafts(row.subtraction_shape, row.shape_angles)
+        : [],
       axis_to_opposite_edge_distance: normalizeOptionalMeasurement(row.axis_to_opposite_edge_distance),
       axis_to_aligned_edge_distance: normalizeOptionalMeasurement(row.axis_to_aligned_edge_distance),
       working_diameter: normalizeOptionalMeasurement(row.working_diameter),
@@ -22289,7 +22548,12 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       String(existing.service_type || "").trim() !== nextPayload.service_type ||
       String(existing.service_title || "").trim() !== nextPayload.service_title ||
       String(existing.short_code || "").trim() !== nextPayload.short_code ||
-      normalizePartServiceSide(existing.part_side) !== nextPayload.part_side ||
+      normalizeBooleanFlag(existing.has_subtraction, false) !== nextPayload.has_subtraction ||
+      normalizeServiceLocation(existing.service_location) !== normalizeServiceLocation(nextPayload.service_location) ||
+      normalizeDrillPattern(existing.drill_pattern) !== normalizeDrillPattern(nextPayload.drill_pattern) ||
+      normalizeSubtractionShape(existing.subtraction_shape) !== normalizeSubtractionShape(nextPayload.subtraction_shape) ||
+      JSON.stringify(normalizeServiceTypeShapeAngles(existing.subtraction_shape, existing.shape_angles))
+        !== JSON.stringify(normalizeServiceTypeShapeAngles(nextPayload.subtraction_shape, nextPayload.shape_angles)) ||
       normalizeOptionalMeasurement(existing.axis_to_opposite_edge_distance) !== nextPayload.axis_to_opposite_edge_distance ||
       normalizeOptionalMeasurement(existing.axis_to_aligned_edge_distance) !== nextPayload.axis_to_aligned_edge_distance ||
       normalizeOptionalMeasurement(existing.working_diameter) !== nextPayload.working_diameter ||
@@ -27093,7 +27357,10 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--partServiceType" :style="getConstructionServiceTypeColumnStyle('service_type')">نوع خدمت</th>
                       <th class="constructionDialog__col constructionDialog__col--title" :style="getConstructionServiceTypeColumnStyle('service_title')">عنوان خدمات</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">کد اختصاری</th>
-                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('part_side')">محل خدمت</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">سابترکشن</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">محل خدمت</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('drill_pattern')">نوع سوراخکاری</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">شکل</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه ظلع مقابل</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">فاصله آکس تا لبه ضلع موافق</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">قطر کارگیر</th>
@@ -27106,7 +27373,10 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--partServiceType" :style="getConstructionServiceTypeColumnStyle('service_type')">{{ row.service_type }}</td>
                       <td class="constructionDialog__col constructionDialog__col--title" :style="getConstructionServiceTypeColumnStyle('service_title')">{{ row.service_title }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">{{ row.short_code }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('part_side')">{{ getPartServiceSideLabel(row.part_side) }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">{{ getSubtractionToggleLabel(row.has_subtraction) }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">{{ row.has_subtraction ? getServiceLocationLabel(row.service_location) : "-" }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('drill_pattern')">{{ row.has_subtraction ? getDrillPatternLabel(row.drill_pattern) : "-" }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">{{ row.has_subtraction ? getSubtractionShapeLabel(row.subtraction_shape) : "-" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">{{ row.axis_to_opposite_edge_distance ?? "-" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">{{ row.axis_to_aligned_edge_distance ?? "-" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">{{ row.working_diameter ?? "-" }}</td>
@@ -27133,8 +27403,11 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--partServiceType" :style="getConstructionServiceTypeColumnStyle('service_type')">نوع خدمت</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceDescription" :style="getConstructionServiceTypeColumnStyle('service_title')">عنوان خدمات</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">کد اختصاری</th>
-                    <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('part_side')">محل خدمت</th>
-                    <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه ظلع مقابل</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">سابترکشن</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">محل خدمت</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('drill_pattern')">نوع سوراخکاری</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">شکل</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه ظلع مقابل</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">فاصله آکس تا لبه ضلع موافق</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">قطر کارگیر</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">عمق کارگیر</th>
@@ -27161,8 +27434,17 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.short_code }}</span>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('part_side')">
-                      <span class="constructionDialog__pill">{{ getPartServiceSideLabel(item.part_side) }}</span>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">
+                      <span class="constructionDialog__pill">{{ getSubtractionToggleLabel(item.has_subtraction) }}</span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">
+                      <span class="constructionDialog__pill">{{ item.has_subtraction ? getServiceLocationLabel(item.service_location) : "-" }}</span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('drill_pattern')">
+                      <span class="constructionDialog__pill">{{ item.has_subtraction ? getDrillPatternLabel(item.drill_pattern) : "-" }}</span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">
+                      <span class="constructionDialog__pill">{{ item.has_subtraction ? getSubtractionShapeLabel(item.subtraction_shape) : "-" }}</span>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.axis_to_opposite_edge_distance ?? "-" }}</span>
@@ -27184,7 +27466,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionServiceTypes.length">
-                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="10">هنوز خدمتی برای قطعات ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="13">هنوز خدمتی برای قطعات ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -28449,8 +28731,8 @@ onBeforeUnmount(() => {
       <div class="constructionDialog__sectionHint">
         نوع خدمت را از جدول انواع خدمات انتخاب کنید و سپس عنوان خدمت و کد اختصاری را ثبت کنید.
       </div>
-      <div class="subCategoryDesignEditor">
-        <div class="subCategoryDesignEditor__meta">
+      <div class="serviceTypeEditor">
+        <div class="subCategoryDesignEditor__meta serviceTypeEditor__meta">
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--wide">
             <span>نوع خدمت</span>
             <select v-model="serviceTypeEditorDraft.service_type" class="constructionDialog__input">
@@ -28484,28 +28766,6 @@ onBeforeUnmount(() => {
             <input v-model="serviceTypeEditorDraft.short_code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
           </label>
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-            <span>محل خدمت</span>
-            <select v-model="serviceTypeEditorDraft.part_side" class="constructionDialog__input">
-              <option v-for="option in PART_SERVICE_SIDE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
-            </select>
-          </label>
-          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-            <span>فاصله آکس تا لبه ظلع مقابل</span>
-            <input v-model.number="serviceTypeEditorDraft.axis_to_opposite_edge_distance" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
-          </label>
-          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-            <span>فاصله آکس تا لبه ضلع موافق</span>
-            <input v-model.number="serviceTypeEditorDraft.axis_to_aligned_edge_distance" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
-          </label>
-          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-            <span>قطر کارگیر</span>
-            <input v-model.number="serviceTypeEditorDraft.working_diameter" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
-          </label>
-          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-            <span>عمق کارگیر</span>
-            <input v-model.number="serviceTypeEditorDraft.working_depth" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
-          </label>
-          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
             <span>ترتیب</span>
             <input v-model.number="serviceTypeEditorDraft.sort_order" class="constructionDialog__input" type="number" min="0" step="1" />
           </label>
@@ -28521,6 +28781,167 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
+
+        <section class="serviceTypeEditor__drillCard">
+          <div class="serviceTypeEditor__sectionHead">
+            <div class="serviceTypeEditor__sectionTitle">اطلاعات سوراخکاری</div>
+            <div class="serviceTypeEditor__sectionHint">وقتی سابترکشن فعال باشد، محل خدمت، نوع سوراخکاری، شکل و پیش‌نمایش در همین بخش مدیریت می‌شوند.</div>
+          </div>
+
+          <div class="serviceTypeEditor__toggleRow">
+            <span class="serviceTypeEditor__label">سابترکشن</span>
+            <div class="serviceTypeEditor__segmented">
+              <button type="button" class="serviceTypeEditor__segBtn" :class="{ 'is-active': !serviceTypeEditorDraft.has_subtraction }" @click="serviceTypeEditorDraft.has_subtraction = false">ندارد</button>
+              <button type="button" class="serviceTypeEditor__segBtn" :class="{ 'is-active': serviceTypeEditorDraft.has_subtraction }" @click="serviceTypeEditorDraft.has_subtraction = true">دارد</button>
+            </div>
+          </div>
+
+          <div v-if="serviceTypeEditorDraft.has_subtraction" class="serviceTypeEditor__drillGrid">
+            <div class="serviceTypeEditor__fields">
+              <div class="serviceTypeEditor__fieldBlock">
+                <span class="serviceTypeEditor__label">محل خدمت</span>
+                <div class="serviceTypeEditor__segmented serviceTypeEditor__segmented--rich">
+                  <button
+                    v-for="option in SERVICE_LOCATION_OPTIONS"
+                    :key="option.value"
+                    type="button"
+                    class="serviceTypeEditor__segBtn serviceTypeEditor__segBtn--rich"
+                    :class="{ 'is-active': serviceTypeEditorDraft.service_location === option.value }"
+                    @click="serviceTypeEditorDraft.service_location = option.value"
+                  >
+                    <span class="serviceTypeEditor__segIcon" :class="`is-${option.icon}`"></span>
+                    <span>{{ option.label }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="serviceTypeEditor__fieldBlock">
+                <span class="serviceTypeEditor__label">نوع سوراخکاری</span>
+                <div class="serviceTypeEditor__segmented serviceTypeEditor__segmented--rich">
+                  <button
+                    v-for="option in DRILL_PATTERN_OPTIONS"
+                    :key="option.value"
+                    type="button"
+                    class="serviceTypeEditor__segBtn serviceTypeEditor__segBtn--rich"
+                    :class="{ 'is-active': serviceTypeEditorDraft.drill_pattern === option.value }"
+                    @click="serviceTypeEditorDraft.drill_pattern = option.value"
+                  >
+                    <span class="serviceTypeEditor__segIcon" :class="`is-${option.icon}`"></span>
+                    <span>{{ option.label }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="serviceTypeEditor__fieldBlock">
+                <span class="serviceTypeEditor__label">شکل سابترکشن</span>
+                <div class="serviceTypeEditor__segmented">
+                  <button
+                    v-for="option in SUBTRACTION_SHAPE_OPTIONS"
+                    :key="option.value"
+                    type="button"
+                    class="serviceTypeEditor__segBtn"
+                    :class="{ 'is-active': serviceTypeEditorDraft.subtraction_shape === option.value }"
+                    @click="onServiceTypeSubtractionShapeChange(option.value)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="serviceTypeEditor__measureGrid">
+                <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+                  <span>فاصله آکس تا لبه ظلع مقابل</span>
+                  <input v-model.number="serviceTypeEditorDraft.axis_to_opposite_edge_distance" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
+                </label>
+                <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+                  <span>فاصله آکس تا لبه ضلع موافق</span>
+                  <input v-model.number="serviceTypeEditorDraft.axis_to_aligned_edge_distance" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
+                </label>
+                <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+                  <span>قطر کارگیر</span>
+                  <input v-model.number="serviceTypeEditorDraft.working_diameter" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
+                </label>
+                <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+                  <span>عمق کارگیر</span>
+                  <input v-model.number="serviceTypeEditorDraft.working_depth" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
+                </label>
+              </div>
+
+              <div v-if="['triangle', 'rectangle'].includes(serviceTypeEditorDraft.subtraction_shape)" class="serviceTypeEditor__angleEditor">
+                <div class="serviceTypeEditor__label">زاویه‌های شکل</div>
+                <div class="serviceTypeEditor__angleFields">
+                  <label
+                    v-for="angle in serviceTypeEditorDraft.shape_angles"
+                    :key="`service-type-angle-${angle.index}`"
+                    class="serviceTypeEditor__angleField"
+                  >
+                    <span>{{ `زاویه ${toPersianDigits(angle.index + 1)}` }}</span>
+                    <input
+                      :value="angle._draft_text ?? formatPartModelAngleNumber(angle.angle_deg)"
+                      class="constructionDialog__input constructionDialog__input--mono"
+                      type="text"
+                      inputmode="decimal"
+                      @input="onServiceTypeShapeAngleInput(angle.index, $event.target.value)"
+                      @change="onServiceTypeShapeAngleChange(angle.index, $event.target.value)"
+                      @blur="onServiceTypeShapeAngleChange(angle.index, $event.target.value)"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="serviceTypeEditor__previewCard">
+              <div class="serviceTypeEditor__label">پیش‌نمایش</div>
+              <svg :viewBox="serviceTypeEditorPreviewState.viewBox" class="serviceTypeEditor__previewSvg" aria-hidden="true">
+                <rect :x="serviceTypeEditorPreviewState.frameRect.x" :y="serviceTypeEditorPreviewState.frameRect.y" :width="serviceTypeEditorPreviewState.frameRect.width" :height="serviceTypeEditorPreviewState.frameRect.height" rx="24" class="serviceTypeEditor__previewFrame" />
+                <rect
+                  v-if="serviceTypeEditorPreviewState.location !== 'thickness'"
+                  :x="serviceTypeEditorPreviewState.frameRect.x"
+                  :y="serviceTypeEditorPreviewState.frameRect.y"
+                  :width="serviceTypeEditorPreviewState.frameRect.width"
+                  :height="serviceTypeEditorPreviewState.frameRect.height"
+                  rx="24"
+                  :class="['serviceTypeEditor__previewFace', serviceTypeEditorPreviewState.location === 'back' ? 'is-back' : 'is-front']"
+                />
+                <rect
+                  v-else
+                  :x="serviceTypeEditorPreviewState.frameRect.x + serviceTypeEditorPreviewState.frameRect.width - 28"
+                  :y="serviceTypeEditorPreviewState.frameRect.y"
+                  width="28"
+                  :height="serviceTypeEditorPreviewState.frameRect.height"
+                  rx="14"
+                  class="serviceTypeEditor__previewThickness"
+                />
+                <circle
+                  v-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'point'"
+                  :cx="serviceTypeEditorPreviewState.previewCenter.x"
+                  :cy="serviceTypeEditorPreviewState.previewCenter.y"
+                  :r="serviceTypeEditorPreviewState.circleRadius"
+                  class="serviceTypeEditor__previewShape"
+                />
+                <rect
+                  v-else-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'linear'"
+                  :x="serviceTypeEditorPreviewState.previewCenter.x - (serviceTypeEditorPreviewState.linearWidth / 2)"
+                  :y="serviceTypeEditorPreviewState.previewCenter.y - (serviceTypeEditorPreviewState.linearHeight / 2)"
+                  :width="serviceTypeEditorPreviewState.linearWidth"
+                  :height="serviceTypeEditorPreviewState.linearHeight"
+                  :rx="serviceTypeEditorPreviewState.linearHeight / 2"
+                  class="serviceTypeEditor__previewShape"
+                />
+                <polygon
+                  v-else-if="serviceTypeEditorPreviewState.shape !== 'circle'"
+                  :points="serviceTypeEditorPreviewState.polygonPoints"
+                  class="serviceTypeEditor__previewShape"
+                />
+              </svg>
+              <div class="serviceTypeEditor__previewMeta">
+                <span>{{ getServiceLocationLabel(serviceTypeEditorDraft.service_location) }}</span>
+                <span>{{ getDrillPatternLabel(serviceTypeEditorDraft.drill_pattern) }}</span>
+                <span>{{ getSubtractionShapeLabel(serviceTypeEditorDraft.subtraction_shape) }}</span>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
       <div class="appDialog__actions">
         <button type="button" class="constructionDialog__textBtn" @click="closeServiceTypeEditor">انصراف</button>
@@ -30778,7 +31199,7 @@ onBeforeUnmount(() => {
                 <option value="">بدون خدمت پیش‌فرض</option>
                 <optgroup v-for="group in constructionGroupedServiceTypeChoices" :key="group.key" :label="group.title">
                   <option v-for="service in group.items" :key="service.id" :value="service.id">
-                    {{ `${service.service_title} - ${getPartServiceSideLabel(service.part_side)}${service.short_code ? ` (${service.short_code})` : ""}` }}
+                    {{ `${service.service_title} - ${getServiceLocationLabel(service.service_location)}${service.short_code ? ` (${service.short_code})` : ""}` }}
                   </option>
                 </optgroup>
               </select>
@@ -30788,7 +31209,7 @@ onBeforeUnmount(() => {
                     {{ constructionServiceTypesById.get(getPartFormulaSideServiceValue(partFormulaModelEditorDraft, sideIndex - 1)).service_title }}
                   </span>
                   <span class="constructionDialog__pill constructionDialog__pill--mono">
-                    {{ getPartServiceSideLabel(constructionServiceTypesById.get(getPartFormulaSideServiceValue(partFormulaModelEditorDraft, sideIndex - 1)).part_side) }}
+                    {{ getServiceLocationLabel(constructionServiceTypesById.get(getPartFormulaSideServiceValue(partFormulaModelEditorDraft, sideIndex - 1)).service_location) }}
                   </span>
                 </template>
                 <span v-else class="partFormulaModelEditor__selectedEmpty">خدمتی انتخاب نشده است.</span>
@@ -33249,6 +33670,236 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
+.serviceTypeEditor {
+  display: grid;
+  gap: 16px;
+}
+
+.serviceTypeEditor__meta {
+  align-items: end;
+}
+
+.serviceTypeEditor__drillCard {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
+}
+
+.serviceTypeEditor__sectionHead,
+.serviceTypeEditor__fieldBlock,
+.serviceTypeEditor__previewCard {
+  display: grid;
+  gap: 8px;
+}
+
+.serviceTypeEditor__sectionTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.serviceTypeEditor__sectionHint,
+.serviceTypeEditor__previewMeta,
+.serviceTypeEditor__label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.serviceTypeEditor__toggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.serviceTypeEditor__segmented {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.serviceTypeEditor__segmented--rich {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+}
+
+.serviceTypeEditor__segBtn {
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  background: rgba(255, 255, 255, 0.9);
+  color: #0f172a;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.serviceTypeEditor__segBtn--rich {
+  border-radius: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.serviceTypeEditor__segBtn.is-active {
+  border-color: #0f766e;
+  background: #ecfeff;
+  color: #115e59;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+.serviceTypeEditor__segIcon {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  display: inline-block;
+}
+
+.serviceTypeEditor__segIcon::before,
+.serviceTypeEditor__segIcon::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+}
+
+.serviceTypeEditor__segIcon.is-face-front::before {
+  inset: 3px;
+  border: 1.8px solid #0f766e;
+  background: rgba(20, 184, 166, 0.16);
+}
+
+.serviceTypeEditor__segIcon.is-face-back::before {
+  inset: 3px;
+  border: 1.8px dashed #0f766e;
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.serviceTypeEditor__segIcon.is-face-thickness::before {
+  inset: 3px 11px 3px 3px;
+  border: 1.8px solid #0f766e;
+  background: rgba(20, 184, 166, 0.14);
+}
+
+.serviceTypeEditor__segIcon.is-face-thickness::after {
+  inset: 3px 3px 3px 11px;
+  background: rgba(15, 118, 110, 0.26);
+}
+
+.serviceTypeEditor__segIcon.is-drill-point::before {
+  inset: 4px;
+  border: 2px solid #2563eb;
+}
+
+.serviceTypeEditor__segIcon.is-drill-point::after {
+  width: 5px;
+  height: 5px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: #2563eb;
+}
+
+.serviceTypeEditor__segIcon.is-drill-linear::before {
+  left: 2px;
+  right: 2px;
+  top: 8px;
+  height: 4px;
+  background: #2563eb;
+}
+
+.serviceTypeEditor__segIcon.is-drill-linear::after {
+  width: 18px;
+  height: 18px;
+  left: 1px;
+  top: 1px;
+  border: 1.6px dashed rgba(37, 99, 235, 0.45);
+}
+
+.serviceTypeEditor__drillGrid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.9fr);
+  align-items: start;
+}
+
+.serviceTypeEditor__fields,
+.serviceTypeEditor__measureGrid,
+.serviceTypeEditor__angleFields {
+  display: grid;
+  gap: 12px;
+}
+
+.serviceTypeEditor__measureGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.serviceTypeEditor__angleFields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.serviceTypeEditor__angleField {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.serviceTypeEditor__previewCard {
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.serviceTypeEditor__previewSvg {
+  width: 100%;
+  height: auto;
+}
+
+.serviceTypeEditor__previewFrame {
+  fill: rgba(248, 250, 252, 0.92);
+  stroke: rgba(15, 23, 42, 0.16);
+  stroke-width: 2;
+}
+
+.serviceTypeEditor__previewFace {
+  stroke: transparent;
+}
+
+.serviceTypeEditor__previewFace.is-front {
+  fill: rgba(20, 184, 166, 0.16);
+}
+
+.serviceTypeEditor__previewFace.is-back {
+  fill: rgba(59, 130, 246, 0.14);
+}
+
+.serviceTypeEditor__previewThickness {
+  fill: rgba(249, 115, 22, 0.18);
+  stroke: rgba(194, 65, 12, 0.38);
+  stroke-width: 1.6;
+}
+
+.serviceTypeEditor__previewShape {
+  fill: rgba(15, 23, 42, 0.12);
+  stroke: #0f172a;
+  stroke-width: 2.2;
+  stroke-linejoin: round;
+}
+
+.serviceTypeEditor__previewMeta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 900px) {
   .partModelPreview__canvas {
     min-height: 240px;
@@ -33256,6 +33907,12 @@ onBeforeUnmount(() => {
 
   .partFormulaModelEditor__axisSwitch {
     flex-direction: column;
+  }
+
+  .serviceTypeEditor__drillGrid,
+  .serviceTypeEditor__measureGrid,
+  .serviceTypeEditor__angleFields {
+    grid-template-columns: 1fr;
   }
 }
 </style>

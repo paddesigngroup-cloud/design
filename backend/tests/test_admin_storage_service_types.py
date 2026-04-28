@@ -43,6 +43,19 @@ def test_export_service_types_returns_csv_and_snapshot(monkeypatch: pytest.Monke
                 service_type="برش CNC",
                 service_title="دورو",
                 short_code="dr",
+                has_subtraction=True,
+                service_location="front",
+                drill_pattern="point",
+                subtraction_shape="triangle",
+                shape_angles=[
+                    {"index": 0, "angle_deg": 60},
+                    {"index": 1, "angle_deg": 60},
+                    {"index": 2, "angle_deg": 60},
+                ],
+                axis_to_opposite_edge_distance=12,
+                axis_to_aligned_edge_distance=8,
+                working_diameter=35,
+                working_depth=14,
                 sort_order=1,
                 id=uuid.uuid4(),
             )
@@ -53,8 +66,36 @@ def test_export_service_types_returns_csv_and_snapshot(monkeypatch: pytest.Monke
     body = response.body.decode("utf-8-sig")
 
     assert response.headers["Content-Disposition"] == 'attachment; filename="part_services_excel_template.csv"'
-    assert "service_type,service_title,short_code,admin_mode" in body
-    assert "برش CNC,دورو,dr,system" in body
+    assert "service_type,service_title,short_code,has_subtraction,service_location,drill_pattern,subtraction_shape,shape_angles" in body
+    assert "برش CNC,دورو,dr,1,front,point,triangle,\"60,60,60\",12,8,35,14,system" in body
     assert called["table_name"] == "service_types"
-    assert called["headers"] == ["service_type", "service_title", "short_code", "admin_mode"]
-    assert called["rows"] == [["برش CNC", "دورو", "dr", "system"]]
+    assert called["headers"] == [
+        "service_type",
+        "service_title",
+        "short_code",
+        "has_subtraction",
+        "service_location",
+        "drill_pattern",
+        "subtraction_shape",
+        "shape_angles",
+        "axis_to_opposite_edge_distance",
+        "axis_to_aligned_edge_distance",
+        "working_diameter",
+        "working_depth",
+        "admin_mode",
+    ]
+    assert called["rows"] == [[
+        "برش CNC",
+        "دورو",
+        "dr",
+        1,
+        "front",
+        "point",
+        "triangle",
+        "60,60,60",
+        12,
+        8,
+        35,
+        14,
+        "system",
+    ]]

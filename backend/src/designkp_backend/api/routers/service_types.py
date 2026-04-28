@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -14,6 +15,13 @@ from designkp_backend.services.admin_access import require_admin_if_present
 from designkp_backend.services.admin_storage import delete_final_icon, finalize_param_group_icon, normalize_icon_file_name
 
 router = APIRouter(prefix="/service-types", tags=["service_types"])
+ANGLE_EPSILON = 1e-4
+ANGLE_PRECISION = 6
+
+
+class ServiceTypeAngleItem(BaseModel):
+    index: int = Field(ge=0, le=1000)
+    angle_deg: float = Field(gt=0, le=360000)
 
 
 class ServiceTypeItem(BaseModel):
@@ -23,7 +31,11 @@ class ServiceTypeItem(BaseModel):
     service_title: str
     short_code: str
     icon_path: str | None
-    part_side: str
+    has_subtraction: bool
+    service_location: str | None
+    drill_pattern: str | None
+    subtraction_shape: str | None
+    shape_angles: list[ServiceTypeAngleItem] | None
     axis_to_opposite_edge_distance: float | None
     axis_to_aligned_edge_distance: float | None
     working_diameter: float | None
@@ -40,7 +52,11 @@ class ServiceTypeCreate(BaseModel):
     service_title: str = Field(min_length=1, max_length=255)
     short_code: str = Field(min_length=1, max_length=64)
     icon_path: str | None = Field(default=None, max_length=255)
-    part_side: str = Field(default="front", min_length=1, max_length=16)
+    has_subtraction: bool = False
+    service_location: str | None = Field(default=None, min_length=1, max_length=16)
+    drill_pattern: str | None = Field(default=None, min_length=1, max_length=16)
+    subtraction_shape: str | None = Field(default=None, min_length=1, max_length=16)
+    shape_angles: list[ServiceTypeAngleItem] | None = None
     axis_to_opposite_edge_distance: float | None = Field(default=None, ge=0)
     axis_to_aligned_edge_distance: float | None = Field(default=None, ge=0)
     working_diameter: float | None = Field(default=None, ge=0)
@@ -55,7 +71,11 @@ class ServiceTypeUpdate(BaseModel):
     service_title: str = Field(min_length=1, max_length=255)
     short_code: str = Field(min_length=1, max_length=64)
     icon_path: str | None = Field(default=None, max_length=255)
-    part_side: str = Field(default="front", min_length=1, max_length=16)
+    has_subtraction: bool = False
+    service_location: str | None = Field(default=None, min_length=1, max_length=16)
+    drill_pattern: str | None = Field(default=None, min_length=1, max_length=16)
+    subtraction_shape: str | None = Field(default=None, min_length=1, max_length=16)
+    shape_angles: list[ServiceTypeAngleItem] | None = None
     axis_to_opposite_edge_distance: float | None = Field(default=None, ge=0)
     axis_to_aligned_edge_distance: float | None = Field(default=None, ge=0)
     working_diameter: float | None = Field(default=None, ge=0)
@@ -73,10 +93,49 @@ def _normalize_required_text(value: str, field: str, max_len: int) -> str:
     return normalized
 
 
-def _normalize_part_side(value: str) -> str:
+def _round_angle(value: float) -> float:
+    return round(float(value), ANGLE_PRECISION)
+
+
+def _normalize_service_location(value: str | None) -> str | None:
+    if value is None:
+        return None
     normalized = str(value or "").strip().lower()
-    if normalized not in {"front", "back"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Part side must be front or back.")
+    if not normalized:
+        return None
+    if normalized not in {"front", "back", "thickness"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Service location must be front, back, or thickness.",
+        )
+    return normalized
+
+
+def _normalize_drill_pattern(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized not in {"point", "linear"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Drill pattern must be point or linear.",
+        )
+    return normalized
+
+
+def _normalize_subtraction_shape(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized not in {"circle", "triangle", "rectangle"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Subtraction shape must be circle, triangle, or rectangle.",
+        )
     return normalized
 
 
@@ -87,6 +146,94 @@ def _normalize_optional_measurement(value: float | None) -> float | None:
     if normalized < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Measurements must be zero or greater.")
     return normalized
+
+
+def _normalize_shape_angles(
+    shape: str | None,
+    provided_angles: list[ServiceTypeAngleItem] | None,
+) -> list[dict[str, float | int]] | None:
+    if shape is None:
+        return None
+    if shape == "circle":
+        return []
+    expected_count = 3 if shape == "triangle" else 4
+    expected_sum = 180 if shape == "triangle" else 360
+    if provided_angles is None or len(provided_angles) != expected_count:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{shape.title()} shape must contain exactly {expected_count} angles.",
+        )
+    normalized: list[dict[str, float | int]] = []
+    seen_indexes: set[int] = set()
+    for item in provided_angles:
+        index = int(item.index)
+        if index in seen_indexes:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Shape angles must use unique indexes.")
+        if index < 0 or index >= expected_count:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Shape angle index {index} is out of range for {shape}.",
+            )
+        angle_deg = float(item.angle_deg)
+        if not math.isfinite(angle_deg) or angle_deg <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Shape angles must be positive finite numbers.")
+        normalized.append({"index": index, "angle_deg": _round_angle(angle_deg)})
+        seen_indexes.add(index)
+    normalized.sort(key=lambda entry: int(entry["index"]))
+    for expected_index, entry in enumerate(normalized):
+        if int(entry["index"]) != expected_index:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Shape angle indexes must cover every side in ascending order.",
+            )
+    total = sum(float(entry["angle_deg"]) for entry in normalized)
+    if abs(total - float(expected_sum)) > ANGLE_EPSILON:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{shape.title()} shape angles must sum to {expected_sum}.",
+        )
+    return normalized
+
+
+def _normalize_subtraction_payload(payload: ServiceTypeCreate | ServiceTypeUpdate) -> dict[str, object]:
+    has_subtraction = bool(payload.has_subtraction)
+    axis_to_opposite_edge_distance = _normalize_optional_measurement(payload.axis_to_opposite_edge_distance)
+    axis_to_aligned_edge_distance = _normalize_optional_measurement(payload.axis_to_aligned_edge_distance)
+    working_diameter = _normalize_optional_measurement(payload.working_diameter)
+    working_depth = _normalize_optional_measurement(payload.working_depth)
+    if not has_subtraction:
+        return {
+            "has_subtraction": False,
+            "service_location": None,
+            "drill_pattern": None,
+            "subtraction_shape": None,
+            "shape_angles": None,
+            "axis_to_opposite_edge_distance": axis_to_opposite_edge_distance,
+            "axis_to_aligned_edge_distance": axis_to_aligned_edge_distance,
+            "working_diameter": working_diameter,
+            "working_depth": working_depth,
+        }
+    service_location = _normalize_service_location(payload.service_location)
+    drill_pattern = _normalize_drill_pattern(payload.drill_pattern)
+    subtraction_shape = _normalize_subtraction_shape(payload.subtraction_shape)
+    if service_location is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service location is required when subtraction is enabled.")
+    if drill_pattern is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Drill pattern is required when subtraction is enabled.")
+    if subtraction_shape is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Subtraction shape is required when subtraction is enabled.")
+    shape_angles = _normalize_shape_angles(subtraction_shape, payload.shape_angles)
+    return {
+        "has_subtraction": True,
+        "service_location": service_location,
+        "drill_pattern": drill_pattern,
+        "subtraction_shape": subtraction_shape,
+        "shape_angles": shape_angles,
+        "axis_to_opposite_edge_distance": axis_to_opposite_edge_distance,
+        "axis_to_aligned_edge_distance": axis_to_aligned_edge_distance,
+        "working_diameter": working_diameter,
+        "working_depth": working_depth,
+    }
 
 
 async def _next_sort_order(session: AsyncSession) -> int:
@@ -154,11 +301,7 @@ async def create_service_type(payload: ServiceTypeCreate, session: AsyncSession 
     service_type = _normalize_required_text(payload.service_type, "Service type", 255)
     service_title = _normalize_required_text(payload.service_title, "Service title", 255)
     short_code = _normalize_required_text(payload.short_code, "Short code", 64)
-    part_side = _normalize_part_side(payload.part_side)
-    axis_to_opposite_edge_distance = _normalize_optional_measurement(payload.axis_to_opposite_edge_distance)
-    axis_to_aligned_edge_distance = _normalize_optional_measurement(payload.axis_to_aligned_edge_distance)
-    working_diameter = _normalize_optional_measurement(payload.working_diameter)
-    working_depth = _normalize_optional_measurement(payload.working_depth)
+    subtraction_payload = _normalize_subtraction_payload(payload)
     await _ensure_unique_short_code(session, admin_id=payload.admin_id, service_type=service_type, short_code=short_code)
     final_icon_file_name = finalize_param_group_icon(payload.admin_id, payload.icon_path) if payload.admin_id else normalize_icon_file_name(payload.icon_path)
 
@@ -168,11 +311,15 @@ async def create_service_type(payload: ServiceTypeCreate, session: AsyncSession 
         service_title=service_title,
         short_code=short_code,
         icon_path=final_icon_file_name,
-        part_side=part_side,
-        axis_to_opposite_edge_distance=axis_to_opposite_edge_distance,
-        axis_to_aligned_edge_distance=axis_to_aligned_edge_distance,
-        working_diameter=working_diameter,
-        working_depth=working_depth,
+        has_subtraction=bool(subtraction_payload["has_subtraction"]),
+        service_location=subtraction_payload["service_location"],
+        drill_pattern=subtraction_payload["drill_pattern"],
+        subtraction_shape=subtraction_payload["subtraction_shape"],
+        shape_angles=subtraction_payload["shape_angles"],
+        axis_to_opposite_edge_distance=subtraction_payload["axis_to_opposite_edge_distance"],
+        axis_to_aligned_edge_distance=subtraction_payload["axis_to_aligned_edge_distance"],
+        working_diameter=subtraction_payload["working_diameter"],
+        working_depth=subtraction_payload["working_depth"],
         sort_order=payload.sort_order if payload.sort_order is not None else await _next_sort_order(session),
         is_system=payload.is_system,
     )
@@ -200,11 +347,7 @@ async def update_service_type(
     service_type = _normalize_required_text(payload.service_type, "Service type", 255)
     service_title = _normalize_required_text(payload.service_title, "Service title", 255)
     short_code = _normalize_required_text(payload.short_code, "Short code", 64)
-    part_side = _normalize_part_side(payload.part_side)
-    axis_to_opposite_edge_distance = _normalize_optional_measurement(payload.axis_to_opposite_edge_distance)
-    axis_to_aligned_edge_distance = _normalize_optional_measurement(payload.axis_to_aligned_edge_distance)
-    working_diameter = _normalize_optional_measurement(payload.working_diameter)
-    working_depth = _normalize_optional_measurement(payload.working_depth)
+    subtraction_payload = _normalize_subtraction_payload(payload)
     await _ensure_unique_short_code(
         session,
         admin_id=payload.admin_id,
@@ -233,11 +376,15 @@ async def update_service_type(
     item.service_title = service_title
     item.short_code = short_code
     item.icon_path = next_icon_file_name
-    item.part_side = part_side
-    item.axis_to_opposite_edge_distance = axis_to_opposite_edge_distance
-    item.axis_to_aligned_edge_distance = axis_to_aligned_edge_distance
-    item.working_diameter = working_diameter
-    item.working_depth = working_depth
+    item.has_subtraction = bool(subtraction_payload["has_subtraction"])
+    item.service_location = subtraction_payload["service_location"]
+    item.drill_pattern = subtraction_payload["drill_pattern"]
+    item.subtraction_shape = subtraction_payload["subtraction_shape"]
+    item.shape_angles = subtraction_payload["shape_angles"]
+    item.axis_to_opposite_edge_distance = subtraction_payload["axis_to_opposite_edge_distance"]
+    item.axis_to_aligned_edge_distance = subtraction_payload["axis_to_aligned_edge_distance"]
+    item.working_diameter = subtraction_payload["working_diameter"]
+    item.working_depth = subtraction_payload["working_depth"]
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     try:
