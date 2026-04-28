@@ -2912,57 +2912,57 @@ option {
   border-inline-start: 1px solid rgba(148, 156, 166, 0.18);
 }
 .constructionDialog__col--id {
-  min-width: 46px !important;
-  width: 46px;
-  max-width: 54px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__col--uiOrder {
-  min-width: 58px !important;
-  width: 58px;
-  max-width: 66px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__col--actions {
-  min-width: 52px !important;
-  width: 52px;
-  max-width: 60px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__col--owner {
-  min-width: 106px !important;
-  width: 106px;
-  max-width: 120px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__col--scope {
-  min-width: 72px !important;
-  width: 72px;
-  max-width: 86px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__col--icon {
-  min-width: 46px !important;
-  width: 46px;
-  max-width: 54px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__col--code {
-  min-width: 132px !important;
-  width: max-content;
+  min-width: unset !important;
+  width: auto !important;
 }
 .constructionDialog__col--title {
-  min-width: 220px !important;
-  width: max-content;
+  min-width: unset !important;
+  width: auto !important;
 }
 .constructionDialog__col--defaults {
-  min-width: 112px !important;
-  width: 112px;
-  max-width: 132px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__col--outlineColor {
-  min-width: 148px !important;
-  width: 148px;
-  max-width: 164px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__col--preview {
-  min-width: 168px !important;
-  width: 168px;
-  max-width: 188px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__col--formulaCode {
   min-width: 0 !important;
@@ -2970,8 +2970,19 @@ option {
   white-space: nowrap;
 }
 .constructionDialog__col--formulaExpr {
-  min-width: 150px !important;
-  max-width: 50px !important;
+  min-width: unset !important;
+  max-width: none !important;
+}
+.constructionDialog__table td .constructionDialog__input,
+.constructionDialog__table td .constructionDialog__scopeBtn,
+.constructionDialog__table td .constructionDialog__pill,
+.constructionDialog__table td .constructionDialog__textBtn,
+.constructionDialog__table td .constructionDialog__defaultsBtn,
+.constructionDialog__table td .constructionDialog__formulaBtn {
+  width: max-content;
+  min-width: 0;
+  max-width: none;
+  margin-inline: auto;
 }
 .constructionDialog__formulaBtn {
   width: 100%;
@@ -3223,42 +3234,42 @@ option {
   padding: 8px 8px;
 }
 .constructionDialog__table--subDesigns {
-  width: 100%;
-  min-width: 980px;
-  table-layout: fixed;
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
 }
 .constructionDialog__table--subDesigns .constructionDialog__col--owner {
-  min-width: 92px !important;
-  width: 92px;
-  max-width: 96px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__table--subDesigns .constructionDialog__col--scope {
-  min-width: 92px !important;
-  width: 92px;
-  max-width: 96px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__table--subDesigns .constructionDialog__col--id {
-  min-width: 58px !important;
-  width: 58px;
-  max-width: 62px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__table--subDesigns .constructionDialog__col--code {
-  min-width: 116px !important;
-  width: 116px;
-  max-width: 132px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__table--subDesigns .constructionDialog__col--title {
-  min-width: 150px !important;
+  min-width: unset !important;
 }
 .constructionDialog__table--subDesigns .constructionDialog__col--preview {
-  min-width: 134px !important;
-  width: 134px;
-  max-width: 146px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__table--subDesigns .constructionDialog__col--actions {
-  min-width: 102px !important;
-  width: 102px;
-  max-width: 112px !important;
+  min-width: unset !important;
+  width: auto !important;
+  max-width: none !important;
 }
 .constructionDialog__table--subDesigns .constructionDialog__scopeBtn {
   width: 100%;
@@ -3379,7 +3390,9 @@ option {
 }
 .constructionDialog__col--code .constructionDialog__input,
 .constructionDialog__col--title .constructionDialog__input {
-  min-width: max-content;
+  width: max-content;
+  min-width: 0;
+  max-width: none;
 }
 .constructionDialog__colorEditor {
   display: flex;
@@ -3492,6 +3505,22 @@ option {
 .constructionDialog__col--uiOrder .constructionDialog__input {
   padding-inline: 4px;
 }
+.constructionDialog__col--id,
+.constructionDialog__col--uiOrder {
+  white-space: nowrap;
+}
+.constructionDialog__col--id .constructionDialog__input {
+  width: 6ch;
+  min-width: 6ch;
+  max-width: 6ch;
+  margin-inline: auto;
+}
+.constructionDialog__col--uiOrder .constructionDialog__input {
+  width: 7ch;
+  min-width: 7ch;
+  max-width: 7ch;
+  margin-inline: auto;
+}
 .constructionDialog__pill {
   display: inline-flex;
   align-items: center;
@@ -3511,7 +3540,7 @@ option {
   font-family: Vazirmatn, sans-serif;
 }
 .constructionDialog__ownerBadge {
-  min-width: 78px;
+  min-width: unset;
   white-space: nowrap;
   font-size: 11px;
   font-weight: 800;
