@@ -8889,15 +8889,14 @@ const SERVICE_TYPE_MEASUREMENT_FIELDS = [
 ];
 
 function normalizeServiceTypeMeasurement(value) {
-  if (value === "" || value == null) return null;
+  if (value === "" || value == null) return 0;
   const normalized = Number(value);
-  if (!Number.isFinite(normalized)) return null;
+  if (!Number.isFinite(normalized)) return 0;
   return Number(normalized.toFixed(1));
 }
 
 function formatServiceTypeMeasurementForDisplay(valueMm, unit = currentEditorDisplayUnit.value) {
   const numericMm = normalizeServiceTypeMeasurement(valueMm);
-  if (numericMm == null) return "";
   const normalizedUnit = normalizeParamDisplayUnit(unit);
   if (normalizedUnit === "mm") return trimInteriorControllerDisplayNumber(numericMm, 1);
   if (normalizedUnit === "inch") return trimInteriorControllerDisplayNumber(numericMm / 25.4, 3);
@@ -8906,9 +8905,9 @@ function formatServiceTypeMeasurementForDisplay(valueMm, unit = currentEditorDis
 
 function parseServiceTypeMeasurementDisplayToMm(value, unit = currentEditorDisplayUnit.value) {
   const text = String(value ?? "").trim();
-  if (!text) return null;
+  if (!text) return 0;
   const numericMm = parseInteriorControllerInputToMm(text, unit);
-  if (!Number.isFinite(numericMm)) return null;
+  if (!Number.isFinite(numericMm)) return 0;
   return normalizeServiceTypeMeasurement(numericMm);
 }
 
@@ -8928,7 +8927,7 @@ function syncServiceTypeMeasurementDraftTexts(draft, force = false) {
 
 function getServiceTypeMeasurementDisplayText(valueMm) {
   const text = formatServiceTypeMeasurementForDisplay(valueMm);
-  return text || "-";
+  return text || "0";
 }
 
 function normalizePartModelPayload(item) {
@@ -11113,10 +11112,10 @@ function buildNewServiceTypeDraft() {
     drill_pattern: "point",
     subtraction_shape: "circle",
     shape_angles: [],
-    axis_to_opposite_edge_distance: null,
-    axis_to_aligned_edge_distance: null,
-    working_diameter: null,
-    working_depth: null,
+    axis_to_opposite_edge_distance: 0,
+    axis_to_aligned_edge_distance: 0,
+    working_diameter: 0,
+    working_depth: 0,
     sort_order: nextSort,
     is_system: true,
   }, true);
@@ -13932,11 +13931,11 @@ function onServiceTypeMeasurementInput(fieldName, value) {
   const textKey = getServiceTypeMeasurementDraftTextKey(fieldName);
   draft[textKey] = value;
   if (!String(value ?? "").trim()) {
-    draft[fieldName] = null;
+    draft[fieldName] = 0;
     return;
   }
   const parsed = parseServiceTypeMeasurementDisplayToMm(value);
-  if (parsed != null) draft[fieldName] = parsed;
+  draft[fieldName] = parsed;
 }
 
 function onServiceTypeMeasurementChange(fieldName, value) {
@@ -13945,15 +13944,11 @@ function onServiceTypeMeasurementChange(fieldName, value) {
   const textKey = getServiceTypeMeasurementDraftTextKey(fieldName);
   const text = String(value ?? "").trim();
   if (!text) {
-    draft[fieldName] = null;
-    draft[textKey] = "";
+    draft[fieldName] = 0;
+    draft[textKey] = formatServiceTypeMeasurementForDisplay(0);
     return;
   }
   const parsed = parseServiceTypeMeasurementDisplayToMm(text);
-  if (parsed == null) {
-    draft[textKey] = formatServiceTypeMeasurementForDisplay(draft[fieldName]);
-    return;
-  }
   draft[fieldName] = parsed;
   draft[textKey] = formatServiceTypeMeasurementForDisplay(parsed);
 }

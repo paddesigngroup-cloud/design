@@ -97,7 +97,7 @@ def test_create_service_type_success_without_subtraction(monkeypatch: pytest.Mon
     assert result.axis_to_opposite_edge_distance == 12.5
     assert result.axis_to_aligned_edge_distance == 8
     assert result.working_diameter == 35
-    assert result.working_depth == 14.25
+    assert result.working_depth == 14.2
     assert result.sort_order == 4
     assert session.added is not None
 
@@ -120,10 +120,10 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
         drill_pattern=None,
         subtraction_shape=None,
         shape_angles=None,
-        axis_to_opposite_edge_distance=None,
-        axis_to_aligned_edge_distance=None,
-        working_diameter=None,
-        working_depth=None,
+        axis_to_opposite_edge_distance=0,
+        axis_to_aligned_edge_distance=0,
+        working_diameter=0,
+        working_depth=0,
         sort_order=1,
         is_system=True,
     )
@@ -249,10 +249,10 @@ def test_delete_service_type_checks_access_scope(monkeypatch: pytest.MonkeyPatch
         drill_pattern=None,
         subtraction_shape=None,
         shape_angles=None,
-        axis_to_opposite_edge_distance=None,
-        axis_to_aligned_edge_distance=None,
-        working_diameter=None,
-        working_depth=None,
+        axis_to_opposite_edge_distance=0,
+        axis_to_aligned_edge_distance=0,
+        working_diameter=0,
+        working_depth=0,
         sort_order=1,
         is_system=False,
     )
@@ -404,10 +404,10 @@ def test_delete_service_type_removes_owned_icon(monkeypatch: pytest.MonkeyPatch)
         drill_pattern=None,
         subtraction_shape=None,
         shape_angles=None,
-        axis_to_opposite_edge_distance=None,
-        axis_to_aligned_edge_distance=None,
-        working_diameter=None,
-        working_depth=None,
+        axis_to_opposite_edge_distance=0,
+        axis_to_aligned_edge_distance=0,
+        working_diameter=0,
+        working_depth=0,
         sort_order=1,
         is_system=False,
     )

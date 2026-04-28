@@ -36,10 +36,10 @@ class ServiceTypeItem(BaseModel):
     drill_pattern: str | None
     subtraction_shape: str | None
     shape_angles: list[ServiceTypeAngleItem] | None
-    axis_to_opposite_edge_distance: float | None
-    axis_to_aligned_edge_distance: float | None
-    working_diameter: float | None
-    working_depth: float | None
+    axis_to_opposite_edge_distance: float
+    axis_to_aligned_edge_distance: float
+    working_diameter: float
+    working_depth: float
     sort_order: int
     is_system: bool
 
@@ -57,10 +57,10 @@ class ServiceTypeCreate(BaseModel):
     drill_pattern: str | None = Field(default=None, min_length=1, max_length=16)
     subtraction_shape: str | None = Field(default=None, min_length=1, max_length=16)
     shape_angles: list[ServiceTypeAngleItem] | None = None
-    axis_to_opposite_edge_distance: float | None = Field(default=None, ge=0)
-    axis_to_aligned_edge_distance: float | None = Field(default=None, ge=0)
-    working_diameter: float | None = Field(default=None, ge=0)
-    working_depth: float | None = Field(default=None, ge=0)
+    axis_to_opposite_edge_distance: float = Field(default=0, ge=0)
+    axis_to_aligned_edge_distance: float = Field(default=0, ge=0)
+    working_diameter: float = Field(default=0, ge=0)
+    working_depth: float = Field(default=0, ge=0)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
 
@@ -76,10 +76,10 @@ class ServiceTypeUpdate(BaseModel):
     drill_pattern: str | None = Field(default=None, min_length=1, max_length=16)
     subtraction_shape: str | None = Field(default=None, min_length=1, max_length=16)
     shape_angles: list[ServiceTypeAngleItem] | None = None
-    axis_to_opposite_edge_distance: float | None = Field(default=None, ge=0)
-    axis_to_aligned_edge_distance: float | None = Field(default=None, ge=0)
-    working_diameter: float | None = Field(default=None, ge=0)
-    working_depth: float | None = Field(default=None, ge=0)
+    axis_to_opposite_edge_distance: float = Field(default=0, ge=0)
+    axis_to_aligned_edge_distance: float = Field(default=0, ge=0)
+    working_diameter: float = Field(default=0, ge=0)
+    working_depth: float = Field(default=0, ge=0)
     sort_order: int = Field(ge=0)
     is_system: bool
 
@@ -139,13 +139,13 @@ def _normalize_subtraction_shape(value: str | None) -> str | None:
     return normalized
 
 
-def _normalize_optional_measurement(value: float | None) -> float | None:
+def _normalize_optional_measurement(value: float | None) -> float:
     if value is None:
-        return None
+        return 0.0
     normalized = float(value)
     if normalized < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Measurements must be zero or greater.")
-    return normalized
+    return round(normalized, 1)
 
 
 def _normalize_shape_angles(
