@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -187,6 +187,10 @@ class PartServiceType(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Vers
     short_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     part_side: Mapped[str] = mapped_column(String(16), nullable=False, default="front", server_default="front")
+    axis_to_opposite_edge_distance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    axis_to_aligned_edge_distance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    working_diameter: Mapped[float | None] = mapped_column(Float, nullable=True)
+    working_depth: Mapped[float | None] = mapped_column(Float, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 

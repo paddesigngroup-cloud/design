@@ -3153,12 +3153,14 @@ option {
   min-height: 0;
 }
 .constructionDialog__table--partServices {
-  table-layout: fixed;
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
 }
 .constructionDialog__table--partServices th,
 .constructionDialog__table--partServices td {
-  padding: 14px 16px;
-  vertical-align: top;
+  padding: 12px 10px;
+  vertical-align: middle;
 }
 .constructionDialog__table--partServices tbody tr {
   background: rgba(255, 255, 255, 0.74);
@@ -3167,24 +3169,24 @@ option {
   background: rgba(255, 248, 250, 0.96);
 }
 .constructionDialog__col--partServiceType {
-  width: 24%;
-  min-width: 180px !important;
+  width: auto !important;
+  min-width: unset !important;
 }
 .constructionDialog__col--partServiceDescription {
-  width: 56%;
-  min-width: 320px !important;
+  width: auto !important;
+  min-width: unset !important;
 }
 .constructionDialog__col--partServiceCode {
-  width: 16%;
-  min-width: 150px !important;
+  width: auto !important;
+  min-width: unset !important;
 }
 .constructionDialog__col--partServiceSide {
-  width: 14%;
-  min-width: 130px !important;
+  width: auto !important;
+  min-width: unset !important;
 }
 .constructionDialog__col--partServiceActions {
-  width: 120px;
-  min-width: 120px !important;
+  width: auto !important;
+  min-width: unset !important;
 }
 .constructionDialog__partServiceTypeCell,
 .constructionDialog__partServiceDescriptionCell {
@@ -3196,9 +3198,9 @@ option {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 52px;
-  padding: 10px 12px;
-  border-radius: 16px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: 14px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(249, 240, 243, 0.96));
   border: 1px solid rgba(123, 59, 83, 0.12);
   color: #4d2031;
@@ -3581,38 +3583,22 @@ option {
   justify-content: center;
   align-items: center;
   gap: 8px;
-  min-height: 52px;
+  min-height: 40px;
 }
 .constructionDialog__table--partServices .constructionDialog__pill--mono {
-  min-width: 88px;
+  min-width: unset;
   justify-content: center;
-  padding-inline: 14px;
+  padding-inline: 10px;
   font-size: 13px;
 }
 @media (max-width: 960px) {
   .constructionDialog__table--partServices th,
   .constructionDialog__table--partServices td {
-    padding: 12px 10px;
-  }
-  .constructionDialog__col--partServiceType {
-    min-width: 150px !important;
-  }
-  .constructionDialog__col--partServiceDescription {
-    min-width: 240px !important;
-  }
-  .constructionDialog__col--partServiceCode {
-    min-width: 120px !important;
-  }
-  .constructionDialog__col--partServiceSide {
-    min-width: 110px !important;
-  }
-  .constructionDialog__col--partServiceActions {
-    width: 108px;
-    min-width: 108px !important;
+    padding: 10px 8px;
   }
   .constructionDialog__partServiceTypeText {
     font-size: 14px;
-    min-height: 46px;
+    min-height: 38px;
   }
   .constructionDialog__partServiceDescriptionText {
     font-size: 14px;

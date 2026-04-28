@@ -24,6 +24,10 @@ class ServiceTypeItem(BaseModel):
     short_code: str
     icon_path: str | None
     part_side: str
+    axis_to_opposite_edge_distance: float | None
+    axis_to_aligned_edge_distance: float | None
+    working_diameter: float | None
+    working_depth: float | None
     sort_order: int
     is_system: bool
 
@@ -37,6 +41,10 @@ class ServiceTypeCreate(BaseModel):
     short_code: str = Field(min_length=1, max_length=64)
     icon_path: str | None = Field(default=None, max_length=255)
     part_side: str = Field(default="front", min_length=1, max_length=16)
+    axis_to_opposite_edge_distance: float | None = Field(default=None, ge=0)
+    axis_to_aligned_edge_distance: float | None = Field(default=None, ge=0)
+    working_diameter: float | None = Field(default=None, ge=0)
+    working_depth: float | None = Field(default=None, ge=0)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
 
@@ -48,6 +56,10 @@ class ServiceTypeUpdate(BaseModel):
     short_code: str = Field(min_length=1, max_length=64)
     icon_path: str | None = Field(default=None, max_length=255)
     part_side: str = Field(default="front", min_length=1, max_length=16)
+    axis_to_opposite_edge_distance: float | None = Field(default=None, ge=0)
+    axis_to_aligned_edge_distance: float | None = Field(default=None, ge=0)
+    working_diameter: float | None = Field(default=None, ge=0)
+    working_depth: float | None = Field(default=None, ge=0)
     sort_order: int = Field(ge=0)
     is_system: bool
 
@@ -65,6 +77,15 @@ def _normalize_part_side(value: str) -> str:
     normalized = str(value or "").strip().lower()
     if normalized not in {"front", "back"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Part side must be front or back.")
+    return normalized
+
+
+def _normalize_optional_measurement(value: float | None) -> float | None:
+    if value is None:
+        return None
+    normalized = float(value)
+    if normalized < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Measurements must be zero or greater.")
     return normalized
 
 
@@ -134,6 +155,10 @@ async def create_service_type(payload: ServiceTypeCreate, session: AsyncSession 
     service_title = _normalize_required_text(payload.service_title, "Service title", 255)
     short_code = _normalize_required_text(payload.short_code, "Short code", 64)
     part_side = _normalize_part_side(payload.part_side)
+    axis_to_opposite_edge_distance = _normalize_optional_measurement(payload.axis_to_opposite_edge_distance)
+    axis_to_aligned_edge_distance = _normalize_optional_measurement(payload.axis_to_aligned_edge_distance)
+    working_diameter = _normalize_optional_measurement(payload.working_diameter)
+    working_depth = _normalize_optional_measurement(payload.working_depth)
     await _ensure_unique_short_code(session, admin_id=payload.admin_id, service_type=service_type, short_code=short_code)
     final_icon_file_name = finalize_param_group_icon(payload.admin_id, payload.icon_path) if payload.admin_id else normalize_icon_file_name(payload.icon_path)
 
@@ -144,6 +169,10 @@ async def create_service_type(payload: ServiceTypeCreate, session: AsyncSession 
         short_code=short_code,
         icon_path=final_icon_file_name,
         part_side=part_side,
+        axis_to_opposite_edge_distance=axis_to_opposite_edge_distance,
+        axis_to_aligned_edge_distance=axis_to_aligned_edge_distance,
+        working_diameter=working_diameter,
+        working_depth=working_depth,
         sort_order=payload.sort_order if payload.sort_order is not None else await _next_sort_order(session),
         is_system=payload.is_system,
     )
@@ -172,6 +201,10 @@ async def update_service_type(
     service_title = _normalize_required_text(payload.service_title, "Service title", 255)
     short_code = _normalize_required_text(payload.short_code, "Short code", 64)
     part_side = _normalize_part_side(payload.part_side)
+    axis_to_opposite_edge_distance = _normalize_optional_measurement(payload.axis_to_opposite_edge_distance)
+    axis_to_aligned_edge_distance = _normalize_optional_measurement(payload.axis_to_aligned_edge_distance)
+    working_diameter = _normalize_optional_measurement(payload.working_diameter)
+    working_depth = _normalize_optional_measurement(payload.working_depth)
     await _ensure_unique_short_code(
         session,
         admin_id=payload.admin_id,
@@ -201,6 +234,10 @@ async def update_service_type(
     item.short_code = short_code
     item.icon_path = next_icon_file_name
     item.part_side = part_side
+    item.axis_to_opposite_edge_distance = axis_to_opposite_edge_distance
+    item.axis_to_aligned_edge_distance = axis_to_aligned_edge_distance
+    item.working_diameter = working_diameter
+    item.working_depth = working_depth
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     try:

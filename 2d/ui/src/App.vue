@@ -8390,6 +8390,32 @@ function getConstructionPartFormulaColumnStyle(columnKey) {
     maxWidth: size,
   };
 }
+const constructionServiceTypeColumnWidths = computed(() => {
+  const rows = constructionServiceTypes.value;
+  return {
+    icon: getMaxColumnLength(rows.map((item) => normalizeIconFileName(item.icon_path) || "-"), 1),
+    service_type: getMaxColumnLength(rows.map((item) => item.service_type), 6),
+    service_title: getMaxColumnLength(rows.map((item) => item.service_title), 6),
+    short_code: getMaxColumnLength(rows.map((item) => item.short_code), 3),
+    part_side: getMaxColumnLength(rows.map((item) => getPartServiceSideLabel(item.part_side)), 5),
+    axis_to_opposite_edge_distance: getMaxColumnLength(rows.map((item) => item.axis_to_opposite_edge_distance ?? "-"), 3),
+    axis_to_aligned_edge_distance: getMaxColumnLength(rows.map((item) => item.axis_to_aligned_edge_distance ?? "-"), 3),
+    working_diameter: getMaxColumnLength(rows.map((item) => item.working_diameter ?? "-"), 3),
+    working_depth: getMaxColumnLength(rows.map((item) => item.working_depth ?? "-"), 3),
+    actions: getMaxColumnLength(["ویرایش"], 6),
+  };
+});
+function getConstructionServiceTypeColumnStyle(columnKey) {
+  const widths = constructionServiceTypeColumnWidths.value;
+  const ch = Math.max(5, Number(widths?.[columnKey]) || 8);
+  const extraPx = columnKey === "actions" ? 44 : columnKey === "icon" ? 36 : 24;
+  const size = `calc(${ch}ch + ${extraPx}px)`;
+  return {
+    width: size,
+    minWidth: size,
+    maxWidth: size,
+  };
+}
 const partFormulaKnownCodes = computed(() => new Set([
   ...formulaBuilderAvailableParams.value.map((item) => item.value),
   ...formulaBuilderAvailableBaseFormulas.value.map((item) => item.value),
@@ -8846,6 +8872,12 @@ function normalizePartServicePayload(item) {
   };
 }
 
+function normalizeOptionalMeasurement(value) {
+  if (value === "" || value == null) return null;
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
 function normalizePartModelPayload(item) {
   const sideCount = Number(item.side_count);
   const interiorAngleSum = Number(item.interior_angle_sum);
@@ -8868,6 +8900,10 @@ function normalizeServiceTypePayload(item) {
     short_code: String(item.short_code || "").trim(),
     icon_path: normalizeIconFileName(item.icon_path),
     part_side: normalizePartServiceSide(item.part_side),
+    axis_to_opposite_edge_distance: normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance),
+    axis_to_aligned_edge_distance: normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance),
+    working_diameter: normalizeOptionalMeasurement(item.working_diameter),
+    working_depth: normalizeOptionalMeasurement(item.working_depth),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
     is_system: !!item.is_system,
   };
@@ -8982,6 +9018,10 @@ function normalizeEditableServiceTypeRecord(item) {
     short_code: String(item.short_code || "").trim(),
     icon_path: normalizeIconFileName(item.icon_path) || "",
     part_side: normalizePartServiceSide(item.part_side),
+    axis_to_opposite_edge_distance: normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance),
+    axis_to_aligned_edge_distance: normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance),
+    working_diameter: normalizeOptionalMeasurement(item.working_diameter),
+    working_depth: normalizeOptionalMeasurement(item.working_depth),
     sort_order: Number(item.sort_order) || 0,
     is_system: !!item.is_system,
   });
@@ -10887,6 +10927,10 @@ function buildNewServiceTypeDraft() {
     short_code: `service_type_${nextSort}`,
     icon_path: "",
     part_side: "front",
+    axis_to_opposite_edge_distance: null,
+    axis_to_aligned_edge_distance: null,
+    working_diameter: null,
+    working_depth: null,
     sort_order: nextSort,
     is_system: true,
   };
@@ -16429,6 +16473,10 @@ function validateConstructionServiceTypes() {
     const serviceTitle = String(item.service_title || "").trim();
     const shortCode = String(item.short_code || "").trim();
     const partSide = normalizePartServiceSide(item.part_side);
+    const axisToOppositeEdgeDistance = normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance);
+    const axisToAlignedEdgeDistance = normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance);
+    const workingDiameter = normalizeOptionalMeasurement(item.working_diameter);
+    const workingDepth = normalizeOptionalMeasurement(item.working_depth);
     if (!serviceType) {
       showAlert("نوع خدمت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
       return false;
@@ -16443,6 +16491,15 @@ function validateConstructionServiceTypes() {
     }
     if (!isValidPartServiceSideValue(partSide)) {
       showAlert("محل خدمت باید روی قطعه یا پشت قطعه باشد.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (
+      (axisToOppositeEdgeDistance != null && axisToOppositeEdgeDistance < 0) ||
+      (axisToAlignedEdgeDistance != null && axisToAlignedEdgeDistance < 0) ||
+      (workingDiameter != null && workingDiameter < 0) ||
+      (workingDepth != null && workingDepth < 0)
+    ) {
+      showAlert("مقادیر ابعادی خدمت باید صفر یا بزرگ‌تر باشند.", { title: "اعتبارسنجی" });
       return false;
     }
   }
@@ -16520,6 +16577,10 @@ async function saveServiceTypeEditor() {
   const serviceTitle = String(draft.service_title || "").trim();
   const shortCode = String(draft.short_code || "").trim();
   const partSide = normalizePartServiceSide(draft.part_side);
+  const axisToOppositeEdgeDistance = normalizeOptionalMeasurement(draft.axis_to_opposite_edge_distance);
+  const axisToAlignedEdgeDistance = normalizeOptionalMeasurement(draft.axis_to_aligned_edge_distance);
+  const workingDiameter = normalizeOptionalMeasurement(draft.working_diameter);
+  const workingDepth = normalizeOptionalMeasurement(draft.working_depth);
   if (!serviceType) {
     showAlert("نوع خدمت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
     return;
@@ -16542,7 +16603,20 @@ async function saveServiceTypeEditor() {
     showAlert("کد اختصاری در همین نوع خدمت و همین دامنه مالک تکراری است.", { title: "اعتبارسنجی" });
     return;
   }
+  if (
+    (axisToOppositeEdgeDistance != null && axisToOppositeEdgeDistance < 0) ||
+    (axisToAlignedEdgeDistance != null && axisToAlignedEdgeDistance < 0) ||
+    (workingDiameter != null && workingDiameter < 0) ||
+    (workingDepth != null && workingDepth < 0)
+  ) {
+    showAlert("مقادیر ابعادی خدمت باید صفر یا بزرگ‌تر باشند.", { title: "اعتبارسنجی" });
+    return;
+  }
   draft.part_side = partSide;
+  draft.axis_to_opposite_edge_distance = axisToOppositeEdgeDistance;
+  draft.axis_to_aligned_edge_distance = axisToAlignedEdgeDistance;
+  draft.working_diameter = workingDiameter;
+  draft.working_depth = workingDepth;
   const payload = normalizeServiceTypePayload(draft);
   try {
     const res = await fetch(
@@ -18466,7 +18540,17 @@ function getConstructionCsvHeaders() {
     return ["service_type", "service_description", "service_code", "admin_mode"];
   }
   if (constructionStep.value === "service_types") {
-    return ["service_type", "service_title", "short_code", "part_side", "admin_mode"];
+    return [
+      "service_type",
+      "service_title",
+      "short_code",
+      "part_side",
+      "axis_to_opposite_edge_distance",
+      "axis_to_aligned_edge_distance",
+      "working_diameter",
+      "working_depth",
+      "admin_mode",
+    ];
   }
   if (constructionStep.value === "templates") {
     return ["temp_id", "temp_title", "admin_mode"];
@@ -18536,6 +18620,10 @@ function getConstructionCsvRows(items = null) {
       String(item.service_title || "").trim(),
       String(item.short_code || "").trim(),
       normalizePartServiceSide(item.part_side),
+      normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance) ?? "",
+      normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance) ?? "",
+      normalizeOptionalMeasurement(item.working_diameter) ?? "",
+      normalizeOptionalMeasurement(item.working_depth) ?? "",
       item.admin_id === null ? "system" : "admin",
     ]);
   }
@@ -18850,13 +18938,17 @@ async function onConstructionImportFileChange(event) {
       });
     } else if (constructionStep.value === "service_types") {
       previewRows = rows.slice(1).map((row, index) => {
-        const adminMode = String(row[4] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const adminMode = String(row[8] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         return {
           lineNo: index + 2,
           service_type: String(row[0] || "").trim(),
           service_title: String(row[1] || "").trim(),
           short_code: String(row[2] || "").trim(),
           part_side: normalizePartServiceSide(row[3]),
+          axis_to_opposite_edge_distance: normalizeOptionalMeasurement(row[4]),
+          axis_to_aligned_edge_distance: normalizeOptionalMeasurement(row[5]),
+          working_diameter: normalizeOptionalMeasurement(row[6]),
+          working_depth: normalizeOptionalMeasurement(row[7]),
           admin_mode: adminMode,
         };
       });
@@ -19063,7 +19155,11 @@ async function onConstructionImportFileChange(event) {
             !row.service_type ||
             !row.service_title ||
             !row.short_code ||
-            !isValidPartServiceSideValue(row.part_side)
+            !isValidPartServiceSideValue(row.part_side) ||
+            (row.axis_to_opposite_edge_distance != null && row.axis_to_opposite_edge_distance < 0) ||
+            (row.axis_to_aligned_edge_distance != null && row.axis_to_aligned_edge_distance < 0) ||
+            (row.working_diameter != null && row.working_diameter < 0) ||
+            (row.working_depth != null && row.working_depth < 0)
         )
       : constructionStep.value === "templates"
       ? previewRows.find(
@@ -22174,6 +22270,10 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       service_title: String(row.service_title || "").trim(),
       short_code: String(row.short_code || "").trim(),
       part_side: normalizePartServiceSide(row.part_side),
+      axis_to_opposite_edge_distance: normalizeOptionalMeasurement(row.axis_to_opposite_edge_distance),
+      axis_to_aligned_edge_distance: normalizeOptionalMeasurement(row.axis_to_aligned_edge_distance),
+      working_diameter: normalizeOptionalMeasurement(row.working_diameter),
+      working_depth: normalizeOptionalMeasurement(row.working_depth),
       sort_order: index + 1,
       is_system: adminId === null,
     };
@@ -22190,6 +22290,10 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       String(existing.service_title || "").trim() !== nextPayload.service_title ||
       String(existing.short_code || "").trim() !== nextPayload.short_code ||
       normalizePartServiceSide(existing.part_side) !== nextPayload.part_side ||
+      normalizeOptionalMeasurement(existing.axis_to_opposite_edge_distance) !== nextPayload.axis_to_opposite_edge_distance ||
+      normalizeOptionalMeasurement(existing.axis_to_aligned_edge_distance) !== nextPayload.axis_to_aligned_edge_distance ||
+      normalizeOptionalMeasurement(existing.working_diameter) !== nextPayload.working_diameter ||
+      normalizeOptionalMeasurement(existing.working_depth) !== nextPayload.working_depth ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system;
     return buildPartKindDraft(existing, {
@@ -26005,7 +26109,7 @@ onBeforeUnmount(() => {
                         {{ normalizeBooleanFlag(item.show_in_order_attrs, true) ? "نمایش" : "مخفی" }}
                       </button>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--icon">
+                    <td class="constructionDialog__col constructionDialog__col--icon" :style="getConstructionServiceTypeColumnStyle('icon')">
                       <div class="constructionDialog__iconCell">
                         <button
                           type="button"
@@ -26912,12 +27016,12 @@ onBeforeUnmount(() => {
                         <span class="constructionDialog__iconFileName">{{ normalizeIconFileName(item.icon_path) || "-" }}</span>
                       </div>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--partServiceType">
+                    <td class="constructionDialog__col constructionDialog__col--partServiceType" :style="getConstructionServiceTypeColumnStyle('service_type')">
                       <div class="constructionDialog__partServiceTypeCell">
                         <strong class="constructionDialog__partServiceTypeText">{{ item.service_type }}</strong>
                       </div>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription">
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" :style="getConstructionServiceTypeColumnStyle('service_title')">
                       <div class="constructionDialog__partServiceDescriptionCell">
                         <div class="constructionDialog__partServiceDescriptionText">{{ item.service_description }}</div>
                       </div>
@@ -26986,19 +27090,27 @@ onBeforeUnmount(() => {
                 <table class="constructionDialog__table constructionDialog__table--preview">
                   <thead>
                     <tr>
-                      <th class="constructionDialog__col constructionDialog__col--partServiceType">نوع خدمت</th>
-                      <th class="constructionDialog__col constructionDialog__col--title">عنوان خدمات</th>
-                      <th class="constructionDialog__col constructionDialog__col--partServiceCode">کد اختصاری</th>
-                      <th class="constructionDialog__col constructionDialog__col--partServiceSide">محل خدمت</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceType" :style="getConstructionServiceTypeColumnStyle('service_type')">نوع خدمت</th>
+                      <th class="constructionDialog__col constructionDialog__col--title" :style="getConstructionServiceTypeColumnStyle('service_title')">عنوان خدمات</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">کد اختصاری</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('part_side')">محل خدمت</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه ظلع مقابل</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">فاصله آکس تا لبه ضلع موافق</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">قطر کارگیر</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">عمق کارگیر</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr v-for="row in constructionImportPreviewRows" :key="`${row.lineNo}-${row.service_type}-${row.short_code}`">
-                      <td class="constructionDialog__col constructionDialog__col--partServiceType">{{ row.service_type }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--title">{{ row.service_title }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--partServiceCode">{{ row.short_code }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--partServiceSide">{{ getPartServiceSideLabel(row.part_side) }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceType" :style="getConstructionServiceTypeColumnStyle('service_type')">{{ row.service_type }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--title" :style="getConstructionServiceTypeColumnStyle('service_title')">{{ row.service_title }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">{{ row.short_code }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('part_side')">{{ getPartServiceSideLabel(row.part_side) }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">{{ row.axis_to_opposite_edge_distance ?? "-" }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">{{ row.axis_to_aligned_edge_distance ?? "-" }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">{{ row.working_diameter ?? "-" }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">{{ row.working_depth ?? "-" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "سیستم" : "ادمین" }}</td>
                     </tr>
                   </tbody>
@@ -27017,38 +27129,54 @@ onBeforeUnmount(() => {
               <table class="constructionDialog__table constructionDialog__table--partServices">
                 <thead>
                   <tr>
-                    <th class="constructionDialog__col constructionDialog__col--icon">آیکون</th>
-                    <th class="constructionDialog__col constructionDialog__col--partServiceType">نوع خدمت</th>
-                    <th class="constructionDialog__col constructionDialog__col--partServiceDescription">عنوان خدمات</th>
-                    <th class="constructionDialog__col constructionDialog__col--partServiceCode">کد اختصاری</th>
-                    <th class="constructionDialog__col constructionDialog__col--partServiceSide">محل خدمت</th>
-                    <th class="constructionDialog__col constructionDialog__col--partServiceActions">عملیات</th>
+                    <th class="constructionDialog__col constructionDialog__col--icon" :style="getConstructionServiceTypeColumnStyle('icon')">آیکون</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceType" :style="getConstructionServiceTypeColumnStyle('service_type')">نوع خدمت</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceDescription" :style="getConstructionServiceTypeColumnStyle('service_title')">عنوان خدمات</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">کد اختصاری</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('part_side')">محل خدمت</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه ظلع مقابل</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">فاصله آکس تا لبه ضلع موافق</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">قطر کارگیر</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">عمق کارگیر</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceActions" :style="getConstructionServiceTypeColumnStyle('actions')">عملیات</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="item in constructionServiceTypes" :key="item.id">
-                    <td class="constructionDialog__col constructionDialog__col--icon">
+                    <td class="constructionDialog__col constructionDialog__col--icon" :style="getConstructionServiceTypeColumnStyle('icon')">
                       <div class="constructionDialog__iconCell">
                         <span class="constructionDialog__iconFileName">{{ normalizeIconFileName(item.icon_path) || "-" }}</span>
                       </div>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--partServiceType">
+                    <td class="constructionDialog__col constructionDialog__col--partServiceType" :style="getConstructionServiceTypeColumnStyle('service_type')">
                       <div class="constructionDialog__partServiceTypeCell">
                         <strong class="constructionDialog__partServiceTypeText">{{ item.service_type }}</strong>
                       </div>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription">
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" :style="getConstructionServiceTypeColumnStyle('service_title')">
                       <div class="constructionDialog__partServiceDescriptionCell">
                         <div class="constructionDialog__partServiceDescriptionText">{{ item.service_title }}</div>
                       </div>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--partServiceCode">
+                    <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.short_code }}</span>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--partServiceSide">
+                    <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('part_side')">
                       <span class="constructionDialog__pill">{{ getPartServiceSideLabel(item.part_side) }}</span>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--partServiceActions">
+                    <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.axis_to_opposite_edge_distance ?? "-" }}</span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.axis_to_aligned_edge_distance ?? "-" }}</span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.working_diameter ?? "-" }}</span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.working_depth ?? "-" }}</span>
+                    </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceActions" :style="getConstructionServiceTypeColumnStyle('actions')">
                       <div class="constructionDialog__actionsCell constructionDialog__actionsCell--partService">
                         <button type="button" class="constructionDialog__textBtn" @click="openServiceTypeEditor(item)">ویرایش</button>
                         <button type="button" class="constructionDialog__iconBtn" title="حذف" @click="deleteConstructionServiceType(item.id)">×</button>
@@ -27056,7 +27184,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionServiceTypes.length">
-                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="6">هنوز خدمتی برای قطعات ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="10">هنوز خدمتی برای قطعات ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -28360,6 +28488,22 @@ onBeforeUnmount(() => {
             <select v-model="serviceTypeEditorDraft.part_side" class="constructionDialog__input">
               <option v-for="option in PART_SERVICE_SIDE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>فاصله آکس تا لبه ظلع مقابل</span>
+            <input v-model.number="serviceTypeEditorDraft.axis_to_opposite_edge_distance" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>فاصله آکس تا لبه ضلع موافق</span>
+            <input v-model.number="serviceTypeEditorDraft.axis_to_aligned_edge_distance" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>قطر کارگیر</span>
+            <input v-model.number="serviceTypeEditorDraft.working_diameter" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
+          </label>
+          <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>عمق کارگیر</span>
+            <input v-model.number="serviceTypeEditorDraft.working_depth" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
           </label>
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
             <span>ترتیب</span>

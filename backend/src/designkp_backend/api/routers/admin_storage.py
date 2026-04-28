@@ -48,6 +48,10 @@ def _service_type_headers() -> list[str]:
         "service_title",
         "short_code",
         "part_side",
+        "axis_to_opposite_edge_distance",
+        "axis_to_aligned_edge_distance",
+        "working_diameter",
+        "working_depth",
         "admin_mode",
     ]
 
@@ -389,6 +393,10 @@ async def _service_type_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
             row.service_title,
             row.short_code,
             row.part_side,
+            row.axis_to_opposite_edge_distance if row.axis_to_opposite_edge_distance is not None else "",
+            row.axis_to_aligned_edge_distance if row.axis_to_aligned_edge_distance is not None else "",
+            row.working_diameter if row.working_diameter is not None else "",
+            row.working_depth if row.working_depth is not None else "",
             "system" if row.admin_id is None else "admin",
         ]
         for row in rows

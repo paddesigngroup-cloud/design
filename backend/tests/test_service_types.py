@@ -71,6 +71,10 @@ def test_create_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
         short_code="  dr  ",
         icon_path=" icon.webp ",
         part_side="  back  ",
+        axis_to_opposite_edge_distance=12.5,
+        axis_to_aligned_edge_distance=8,
+        working_diameter=35,
+        working_depth=14.25,
         sort_order=None,
         is_system=True,
     )
@@ -82,6 +86,10 @@ def test_create_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.short_code == "dr"
     assert result.icon_path == "icon.webp"
     assert result.part_side == "back"
+    assert result.axis_to_opposite_edge_distance == 12.5
+    assert result.axis_to_aligned_edge_distance == 8
+    assert result.working_diameter == 35
+    assert result.working_depth == 14.25
     assert result.sort_order == 4
     assert session.added is not None
 
@@ -100,6 +108,10 @@ def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
         short_code="old_code",
         icon_path=None,
         part_side="front",
+        axis_to_opposite_edge_distance=None,
+        axis_to_aligned_edge_distance=None,
+        working_diameter=None,
+        working_depth=None,
         sort_order=1,
         is_system=True,
     )
@@ -111,6 +123,10 @@ def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
         short_code="asm",
         icon_path="assembly.webp",
         part_side="back",
+        axis_to_opposite_edge_distance=4,
+        axis_to_aligned_edge_distance=6.5,
+        working_diameter=12,
+        working_depth=7,
         sort_order=8,
         is_system=False,
     )
@@ -122,6 +138,10 @@ def test_update_service_type_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert existing.short_code == "asm"
     assert existing.icon_path == "assembly.webp"
     assert existing.part_side == "back"
+    assert existing.axis_to_opposite_edge_distance == 4
+    assert existing.axis_to_aligned_edge_distance == 6.5
+    assert existing.working_diameter == 12
+    assert existing.working_depth == 7
     assert existing.sort_order == 8
     assert existing.is_system is False
 
@@ -138,6 +158,10 @@ def test_create_service_type_rejects_blank_trimmed_fields(monkeypatch: pytest.Mo
         short_code="code",
         icon_path=None,
         part_side="front",
+        axis_to_opposite_edge_distance=None,
+        axis_to_aligned_edge_distance=None,
+        working_diameter=None,
+        working_depth=None,
         sort_order=0,
         is_system=True,
     )
@@ -163,6 +187,10 @@ def test_create_service_type_rejects_duplicate_short_code_in_scope(monkeypatch: 
         short_code="dup",
         icon_path=None,
         part_side="front",
+        axis_to_opposite_edge_distance=None,
+        axis_to_aligned_edge_distance=None,
+        working_diameter=None,
+        working_depth=None,
         sort_order=1,
         is_system=True,
     )
@@ -205,6 +233,10 @@ def test_delete_service_type_checks_access_scope(monkeypatch: pytest.MonkeyPatch
         short_code="test",
         icon_path="icon.webp",
         part_side="front",
+        axis_to_opposite_edge_distance=None,
+        axis_to_aligned_edge_distance=None,
+        working_diameter=None,
+        working_depth=None,
         sort_order=1,
         is_system=False,
     )
@@ -227,6 +259,10 @@ def test_create_service_type_rejects_invalid_part_side(monkeypatch: pytest.Monke
         short_code="code",
         icon_path=None,
         part_side="left",
+        axis_to_opposite_edge_distance=None,
+        axis_to_aligned_edge_distance=None,
+        working_diameter=None,
+        working_depth=None,
         sort_order=1,
         is_system=True,
     )
@@ -259,6 +295,10 @@ def test_delete_service_type_removes_owned_icon(monkeypatch: pytest.MonkeyPatch)
         short_code="test",
         icon_path="icon.webp",
         part_side="front",
+        axis_to_opposite_edge_distance=None,
+        axis_to_aligned_edge_distance=None,
+        working_diameter=None,
+        working_depth=None,
         sort_order=1,
         is_system=False,
     )
