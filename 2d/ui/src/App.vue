@@ -8401,10 +8401,10 @@ const constructionServiceTypeColumnWidths = computed(() => {
     service_location: getMaxColumnLength(rows.map((item) => getServiceLocationLabel(item.service_location)), 6),
     drill_pattern: getMaxColumnLength(rows.map((item) => getDrillPatternLabel(item.drill_pattern)), 4),
     subtraction_shape: getMaxColumnLength(rows.map((item) => getSubtractionShapeLabel(item.subtraction_shape)), 4),
-    axis_to_opposite_edge_distance: getMaxColumnLength(rows.map((item) => item.axis_to_opposite_edge_distance ?? "-"), 3),
-    axis_to_aligned_edge_distance: getMaxColumnLength(rows.map((item) => item.axis_to_aligned_edge_distance ?? "-"), 3),
-    working_diameter: getMaxColumnLength(rows.map((item) => item.working_diameter ?? "-"), 3),
-    working_depth: getMaxColumnLength(rows.map((item) => item.working_depth ?? "-"), 3),
+    axis_to_opposite_edge_distance: getMaxColumnLength(rows.map((item) => getServiceTypeMeasurementDisplayText(item.axis_to_opposite_edge_distance)), 3),
+    axis_to_aligned_edge_distance: getMaxColumnLength(rows.map((item) => getServiceTypeMeasurementDisplayText(item.axis_to_aligned_edge_distance)), 3),
+    working_diameter: getMaxColumnLength(rows.map((item) => getServiceTypeMeasurementDisplayText(item.working_diameter)), 3),
+    working_depth: getMaxColumnLength(rows.map((item) => getServiceTypeMeasurementDisplayText(item.working_depth)), 3),
     actions: getMaxColumnLength(["ویرایش"], 6),
   };
 });
@@ -8881,6 +8881,56 @@ function normalizeOptionalMeasurement(value) {
   return Number.isFinite(normalized) ? normalized : null;
 }
 
+const SERVICE_TYPE_MEASUREMENT_FIELDS = [
+  "axis_to_opposite_edge_distance",
+  "axis_to_aligned_edge_distance",
+  "working_diameter",
+  "working_depth",
+];
+
+function normalizeServiceTypeMeasurement(value) {
+  if (value === "" || value == null) return null;
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized)) return null;
+  return Number(normalized.toFixed(1));
+}
+
+function formatServiceTypeMeasurementForDisplay(valueMm, unit = currentEditorDisplayUnit.value) {
+  const numericMm = normalizeServiceTypeMeasurement(valueMm);
+  if (numericMm == null) return "";
+  const normalizedUnit = normalizeParamDisplayUnit(unit);
+  if (normalizedUnit === "mm") return trimInteriorControllerDisplayNumber(numericMm, 1);
+  if (normalizedUnit === "inch") return trimInteriorControllerDisplayNumber(numericMm / 25.4, 3);
+  return trimInteriorControllerDisplayNumber(numericMm / 10, 2);
+}
+
+function parseServiceTypeMeasurementDisplayToMm(value, unit = currentEditorDisplayUnit.value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const numericMm = parseInteriorControllerInputToMm(text, unit);
+  if (!Number.isFinite(numericMm)) return null;
+  return normalizeServiceTypeMeasurement(numericMm);
+}
+
+function getServiceTypeMeasurementDraftTextKey(fieldName) {
+  return `_${String(fieldName)}_display_text`;
+}
+
+function syncServiceTypeMeasurementDraftTexts(draft, force = false) {
+  if (!draft || typeof draft !== "object") return draft;
+  for (const fieldName of SERVICE_TYPE_MEASUREMENT_FIELDS) {
+    const textKey = getServiceTypeMeasurementDraftTextKey(fieldName);
+    if (!force && String(draft[textKey] ?? "").trim()) continue;
+    draft[textKey] = formatServiceTypeMeasurementForDisplay(draft[fieldName]);
+  }
+  return draft;
+}
+
+function getServiceTypeMeasurementDisplayText(valueMm) {
+  const text = formatServiceTypeMeasurementForDisplay(valueMm);
+  return text || "-";
+}
+
 function normalizePartModelPayload(item) {
   const sideCount = Number(item.side_count);
   const interiorAngleSum = Number(item.interior_angle_sum);
@@ -8909,10 +8959,10 @@ function normalizeServiceTypePayload(item) {
     shape_angles: normalizeBooleanFlag(item.has_subtraction, false)
       ? normalizeServiceTypeShapeAngles(item.subtraction_shape, item.shape_angles)
       : null,
-    axis_to_opposite_edge_distance: normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance),
-    axis_to_aligned_edge_distance: normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance),
-    working_diameter: normalizeOptionalMeasurement(item.working_diameter),
-    working_depth: normalizeOptionalMeasurement(item.working_depth),
+    axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance),
+    axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance),
+    working_diameter: normalizeServiceTypeMeasurement(item.working_diameter),
+    working_depth: normalizeServiceTypeMeasurement(item.working_depth),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
     is_system: !!item.is_system,
   };
@@ -9021,7 +9071,7 @@ function normalizeEditablePartModelRecord(item) {
 
 function normalizeEditableServiceTypeRecord(item) {
   const shape = normalizeSubtractionShape(item.subtraction_shape);
-  return withConstructionDraftState({
+  return syncServiceTypeMeasurementDraftTexts(withConstructionDraftState({
     ...item,
     service_type: String(item.service_type || "").trim(),
     service_title: String(item.service_title || "").trim(),
@@ -9032,13 +9082,13 @@ function normalizeEditableServiceTypeRecord(item) {
     drill_pattern: normalizeDrillPattern(item.drill_pattern),
     subtraction_shape: shape,
     shape_angles: normalizeServiceTypeShapeAngleDrafts(shape, item.shape_angles),
-    axis_to_opposite_edge_distance: normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance),
-    axis_to_aligned_edge_distance: normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance),
-    working_diameter: normalizeOptionalMeasurement(item.working_diameter),
-    working_depth: normalizeOptionalMeasurement(item.working_depth),
+    axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance),
+    axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance),
+    working_diameter: normalizeServiceTypeMeasurement(item.working_diameter),
+    working_depth: normalizeServiceTypeMeasurement(item.working_depth),
     sort_order: Number(item.sort_order) || 0,
     is_system: !!item.is_system,
-  });
+  }));
 }
 
 function normalizePartFormulaLwFrameMapping(value) {
@@ -9893,7 +9943,7 @@ const partFormulaModelEditorPreviewState = computed(() => {
 const serviceTypeEditorPreviewState = computed(() => {
   const draft = serviceTypeEditorDraft.value;
   const viewBox = "0 0 360 240";
-  const frameRect = { x: 52, y: 34, width: 256, height: 156 };
+  const frameRect = { x: 34, y: 22, width: 292, height: 182 };
   const safeLocation = draft ? normalizeServiceLocation(draft.service_location) : "front";
   const safePattern = draft ? normalizeDrillPattern(draft.drill_pattern) : "point";
   const safeShape = draft ? normalizeSubtractionShape(draft.subtraction_shape) : "circle";
@@ -11051,7 +11101,7 @@ function buildNewPartModelDraft() {
 function buildNewServiceTypeDraft() {
   const nextSort = editableServiceTypes.value.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), 0) + 1;
   const fallbackType = constructionServiceTypeOptions.value[0]?.value || "";
-  return {
+  return syncServiceTypeMeasurementDraftTexts({
     id: null,
     admin_id: null,
     service_type: fallbackType,
@@ -11069,7 +11119,7 @@ function buildNewServiceTypeDraft() {
     working_depth: null,
     sort_order: nextSort,
     is_system: true,
-  };
+  }, true);
 }
 
 function resetSubCategoryDesignEditorState() {
@@ -13845,7 +13895,7 @@ function onPartModelAngleChange(angleIndex, value = null) {
 }
 
 function openServiceTypeEditor(item = null) {
-  serviceTypeEditorDraft.value = item
+  serviceTypeEditorDraft.value = syncServiceTypeMeasurementDraftTexts(item
     ? {
         id: item.id,
         admin_id: item.admin_id,
@@ -13858,14 +13908,14 @@ function openServiceTypeEditor(item = null) {
         drill_pattern: normalizeDrillPattern(item.drill_pattern),
         subtraction_shape: normalizeSubtractionShape(item.subtraction_shape),
         shape_angles: normalizeServiceTypeShapeAngleDrafts(item.subtraction_shape, item.shape_angles),
-        axis_to_opposite_edge_distance: normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance),
-        axis_to_aligned_edge_distance: normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance),
-        working_diameter: normalizeOptionalMeasurement(item.working_diameter),
-        working_depth: normalizeOptionalMeasurement(item.working_depth),
+        axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance),
+        axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance),
+        working_diameter: normalizeServiceTypeMeasurement(item.working_diameter),
+        working_depth: normalizeServiceTypeMeasurement(item.working_depth),
         sort_order: Number(item.sort_order) || 0,
         is_system: !!item.is_system,
       }
-    : buildNewServiceTypeDraft();
+    : buildNewServiceTypeDraft(), true);
   serviceTypeEditorOpen.value = true;
 }
 
@@ -13874,6 +13924,38 @@ function onServiceTypeSubtractionShapeChange(value) {
   const shape = normalizeSubtractionShape(value);
   serviceTypeEditorDraft.value.subtraction_shape = shape;
   serviceTypeEditorDraft.value.shape_angles = normalizeServiceTypeShapeAngleDrafts(shape, serviceTypeEditorDraft.value.shape_angles);
+}
+
+function onServiceTypeMeasurementInput(fieldName, value) {
+  const draft = serviceTypeEditorDraft.value;
+  if (!draft) return;
+  const textKey = getServiceTypeMeasurementDraftTextKey(fieldName);
+  draft[textKey] = value;
+  if (!String(value ?? "").trim()) {
+    draft[fieldName] = null;
+    return;
+  }
+  const parsed = parseServiceTypeMeasurementDisplayToMm(value);
+  if (parsed != null) draft[fieldName] = parsed;
+}
+
+function onServiceTypeMeasurementChange(fieldName, value) {
+  const draft = serviceTypeEditorDraft.value;
+  if (!draft) return;
+  const textKey = getServiceTypeMeasurementDraftTextKey(fieldName);
+  const text = String(value ?? "").trim();
+  if (!text) {
+    draft[fieldName] = null;
+    draft[textKey] = "";
+    return;
+  }
+  const parsed = parseServiceTypeMeasurementDisplayToMm(text);
+  if (parsed == null) {
+    draft[textKey] = formatServiceTypeMeasurementForDisplay(draft[fieldName]);
+    return;
+  }
+  draft[fieldName] = parsed;
+  draft[textKey] = formatServiceTypeMeasurementForDisplay(parsed);
 }
 
 function onServiceTypeShapeAngleInput(angleIndex, value) {
@@ -16666,10 +16748,10 @@ function validateConstructionServiceTypes() {
     const serviceLocation = normalizeServiceLocation(item.service_location);
     const drillPattern = normalizeDrillPattern(item.drill_pattern);
     const subtractionShape = normalizeSubtractionShape(item.subtraction_shape);
-    const axisToOppositeEdgeDistance = normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance);
-    const axisToAlignedEdgeDistance = normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance);
-    const workingDiameter = normalizeOptionalMeasurement(item.working_diameter);
-    const workingDepth = normalizeOptionalMeasurement(item.working_depth);
+    const axisToOppositeEdgeDistance = normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance);
+    const axisToAlignedEdgeDistance = normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance);
+    const workingDiameter = normalizeServiceTypeMeasurement(item.working_diameter);
+    const workingDepth = normalizeServiceTypeMeasurement(item.working_depth);
     if (!serviceType) {
       showAlert("نوع خدمت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
       return false;
@@ -16780,6 +16862,9 @@ function validateConstructionPartServices() {
 async function saveServiceTypeEditor() {
   const draft = serviceTypeEditorDraft.value;
   if (!draft) return;
+  for (const fieldName of SERVICE_TYPE_MEASUREMENT_FIELDS) {
+    onServiceTypeMeasurementChange(fieldName, draft[getServiceTypeMeasurementDraftTextKey(fieldName)] ?? "");
+  }
   const serviceType = String(draft.service_type || "").trim();
   const serviceTitle = String(draft.service_title || "").trim();
   const shortCode = String(draft.short_code || "").trim();
@@ -16787,10 +16872,10 @@ async function saveServiceTypeEditor() {
   const serviceLocation = normalizeServiceLocation(draft.service_location);
   const drillPattern = normalizeDrillPattern(draft.drill_pattern);
   const subtractionShape = normalizeSubtractionShape(draft.subtraction_shape);
-  const axisToOppositeEdgeDistance = normalizeOptionalMeasurement(draft.axis_to_opposite_edge_distance);
-  const axisToAlignedEdgeDistance = normalizeOptionalMeasurement(draft.axis_to_aligned_edge_distance);
-  const workingDiameter = normalizeOptionalMeasurement(draft.working_diameter);
-  const workingDepth = normalizeOptionalMeasurement(draft.working_depth);
+  const axisToOppositeEdgeDistance = normalizeServiceTypeMeasurement(draft.axis_to_opposite_edge_distance);
+  const axisToAlignedEdgeDistance = normalizeServiceTypeMeasurement(draft.axis_to_aligned_edge_distance);
+  const workingDiameter = normalizeServiceTypeMeasurement(draft.working_diameter);
+  const workingDepth = normalizeServiceTypeMeasurement(draft.working_depth);
   if (!serviceType) {
     showAlert("نوع خدمت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
     return;
@@ -16851,6 +16936,7 @@ async function saveServiceTypeEditor() {
   draft.axis_to_aligned_edge_distance = axisToAlignedEdgeDistance;
   draft.working_diameter = workingDiameter;
   draft.working_depth = workingDepth;
+  syncServiceTypeMeasurementDraftTexts(draft, true);
   const payload = normalizeServiceTypePayload(draft);
   try {
     const res = await fetch(
@@ -18864,10 +18950,10 @@ function getConstructionCsvRows(items = null) {
       normalizeBooleanFlag(item.has_subtraction, false)
         ? normalizeServiceTypeShapeAngles(item.subtraction_shape, item.shape_angles).map((entry) => formatPartModelAngleNumber(entry.angle_deg)).join(",")
         : "",
-      normalizeOptionalMeasurement(item.axis_to_opposite_edge_distance) ?? "",
-      normalizeOptionalMeasurement(item.axis_to_aligned_edge_distance) ?? "",
-      normalizeOptionalMeasurement(item.working_diameter) ?? "",
-      normalizeOptionalMeasurement(item.working_depth) ?? "",
+      normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance) ?? "",
+      normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance) ?? "",
+      normalizeServiceTypeMeasurement(item.working_diameter) ?? "",
+      normalizeServiceTypeMeasurement(item.working_depth) ?? "",
       item.admin_id === null ? "system" : "admin",
     ]);
   }
@@ -19195,10 +19281,10 @@ async function onConstructionImportFileChange(event) {
           drill_pattern: hasSubtraction ? normalizeDrillPattern(row[5]) : null,
           subtraction_shape: hasSubtraction ? subtractionShape : null,
           shape_angles: hasSubtraction ? normalizeServiceTypeShapeAngleDrafts(subtractionShape, parsePartModelAnglesCsv(row[7], getServiceTypeShapeSideCount(subtractionShape), getServiceTypeShapeAngleSum(subtractionShape))) : [],
-          axis_to_opposite_edge_distance: normalizeOptionalMeasurement(row[8]),
-          axis_to_aligned_edge_distance: normalizeOptionalMeasurement(row[9]),
-          working_diameter: normalizeOptionalMeasurement(row[10]),
-          working_depth: normalizeOptionalMeasurement(row[11]),
+          axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(row[8]),
+          axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(row[9]),
+          working_diameter: normalizeServiceTypeMeasurement(row[10]),
+          working_depth: normalizeServiceTypeMeasurement(row[11]),
           admin_mode: adminMode,
         };
       });
@@ -22529,10 +22615,10 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       shape_angles: normalizeBooleanFlag(row.has_subtraction, false)
         ? normalizeServiceTypeShapeAngleDrafts(row.subtraction_shape, row.shape_angles)
         : [],
-      axis_to_opposite_edge_distance: normalizeOptionalMeasurement(row.axis_to_opposite_edge_distance),
-      axis_to_aligned_edge_distance: normalizeOptionalMeasurement(row.axis_to_aligned_edge_distance),
-      working_diameter: normalizeOptionalMeasurement(row.working_diameter),
-      working_depth: normalizeOptionalMeasurement(row.working_depth),
+      axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(row.axis_to_opposite_edge_distance),
+      axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(row.axis_to_aligned_edge_distance),
+      working_diameter: normalizeServiceTypeMeasurement(row.working_diameter),
+      working_depth: normalizeServiceTypeMeasurement(row.working_depth),
       sort_order: index + 1,
       is_system: adminId === null,
     };
@@ -22554,10 +22640,10 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       normalizeSubtractionShape(existing.subtraction_shape) !== normalizeSubtractionShape(nextPayload.subtraction_shape) ||
       JSON.stringify(normalizeServiceTypeShapeAngles(existing.subtraction_shape, existing.shape_angles))
         !== JSON.stringify(normalizeServiceTypeShapeAngles(nextPayload.subtraction_shape, nextPayload.shape_angles)) ||
-      normalizeOptionalMeasurement(existing.axis_to_opposite_edge_distance) !== nextPayload.axis_to_opposite_edge_distance ||
-      normalizeOptionalMeasurement(existing.axis_to_aligned_edge_distance) !== nextPayload.axis_to_aligned_edge_distance ||
-      normalizeOptionalMeasurement(existing.working_diameter) !== nextPayload.working_diameter ||
-      normalizeOptionalMeasurement(existing.working_depth) !== nextPayload.working_depth ||
+      normalizeServiceTypeMeasurement(existing.axis_to_opposite_edge_distance) !== nextPayload.axis_to_opposite_edge_distance ||
+      normalizeServiceTypeMeasurement(existing.axis_to_aligned_edge_distance) !== nextPayload.axis_to_aligned_edge_distance ||
+      normalizeServiceTypeMeasurement(existing.working_diameter) !== nextPayload.working_diameter ||
+      normalizeServiceTypeMeasurement(existing.working_depth) !== nextPayload.working_depth ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system;
     return buildPartKindDraft(existing, {
@@ -23846,6 +23932,10 @@ const currentEditorDisplayUnit = computed(() => {
   return currentEditorDisplayUnitState.value === "mm" || currentEditorDisplayUnitState.value === "inch"
     ? currentEditorDisplayUnitState.value
     : "cm";
+});
+watch(currentEditorDisplayUnit, () => {
+  if (!serviceTypeEditorDraft.value) return;
+  syncServiceTypeMeasurementDraftTexts(serviceTypeEditorDraft.value, true);
 });
 const widgetPreviewWalls2d = computed(() => ({
   nodes: [],
@@ -27377,10 +27467,10 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">{{ row.has_subtraction ? getServiceLocationLabel(row.service_location) : "-" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('drill_pattern')">{{ row.has_subtraction ? getDrillPatternLabel(row.drill_pattern) : "-" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">{{ row.has_subtraction ? getSubtractionShapeLabel(row.subtraction_shape) : "-" }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">{{ row.axis_to_opposite_edge_distance ?? "-" }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">{{ row.axis_to_aligned_edge_distance ?? "-" }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">{{ row.working_diameter ?? "-" }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">{{ row.working_depth ?? "-" }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">{{ getServiceTypeMeasurementDisplayText(row.axis_to_opposite_edge_distance) }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">{{ getServiceTypeMeasurementDisplayText(row.axis_to_aligned_edge_distance) }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">{{ getServiceTypeMeasurementDisplayText(row.working_diameter) }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">{{ getServiceTypeMeasurementDisplayText(row.working_depth) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "سیستم" : "ادمین" }}</td>
                     </tr>
                   </tbody>
@@ -27447,16 +27537,16 @@ onBeforeUnmount(() => {
                       <span class="constructionDialog__pill">{{ item.has_subtraction ? getSubtractionShapeLabel(item.subtraction_shape) : "-" }}</span>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">
-                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.axis_to_opposite_edge_distance ?? "-" }}</span>
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getServiceTypeMeasurementDisplayText(item.axis_to_opposite_edge_distance) }}</span>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">
-                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.axis_to_aligned_edge_distance ?? "-" }}</span>
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getServiceTypeMeasurementDisplayText(item.axis_to_aligned_edge_distance) }}</span>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">
-                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.working_diameter ?? "-" }}</span>
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getServiceTypeMeasurementDisplayText(item.working_diameter) }}</span>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">
-                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.working_depth ?? "-" }}</span>
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getServiceTypeMeasurementDisplayText(item.working_depth) }}</span>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceActions" :style="getConstructionServiceTypeColumnStyle('actions')">
                       <div class="constructionDialog__actionsCell constructionDialog__actionsCell--partService">
@@ -28800,17 +28890,63 @@ onBeforeUnmount(() => {
             <div class="serviceTypeEditor__fields">
               <div class="serviceTypeEditor__fieldBlock">
                 <span class="serviceTypeEditor__label">محل خدمت</span>
-                <div class="serviceTypeEditor__segmented serviceTypeEditor__segmented--rich">
+                <div class="serviceTypeEditor__locationGrid">
                   <button
                     v-for="option in SERVICE_LOCATION_OPTIONS"
                     :key="option.value"
                     type="button"
-                    class="serviceTypeEditor__segBtn serviceTypeEditor__segBtn--rich"
+                    class="serviceTypeEditor__locationCard"
                     :class="{ 'is-active': serviceTypeEditorDraft.service_location === option.value }"
                     @click="serviceTypeEditorDraft.service_location = option.value"
                   >
-                    <span class="serviceTypeEditor__segIcon" :class="`is-${option.icon}`"></span>
-                    <span>{{ option.label }}</span>
+                    <svg :viewBox="serviceTypeEditorPreviewState.viewBox" class="serviceTypeEditor__locationSvg" aria-hidden="true">
+                      <rect
+                        v-if="option.value !== 'thickness'"
+                        :x="serviceTypeEditorPreviewState.frameRect.x"
+                        :y="serviceTypeEditorPreviewState.frameRect.y"
+                        :width="serviceTypeEditorPreviewState.frameRect.width"
+                        :height="serviceTypeEditorPreviewState.frameRect.height"
+                        class="serviceTypeEditor__previewFrame"
+                      />
+                      <rect
+                        v-if="option.value !== 'thickness'"
+                        :x="serviceTypeEditorPreviewState.frameRect.x"
+                        :y="serviceTypeEditorPreviewState.frameRect.y"
+                        :width="serviceTypeEditorPreviewState.frameRect.width"
+                        :height="serviceTypeEditorPreviewState.frameRect.height"
+                        :class="['serviceTypeEditor__previewFace', option.value === 'back' ? 'is-back' : 'is-front']"
+                      />
+                      <rect
+                        v-else
+                        :x="serviceTypeEditorPreviewState.frameRect.x + (serviceTypeEditorPreviewState.frameRect.width * 0.08)"
+                        :y="serviceTypeEditorPreviewState.previewCenter.y - 18"
+                        :width="serviceTypeEditorPreviewState.frameRect.width * 0.84"
+                        height="36"
+                        class="serviceTypeEditor__previewThickness"
+                      />
+                      <circle
+                        v-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'point'"
+                        :cx="serviceTypeEditorPreviewState.previewCenter.x"
+                        :cy="serviceTypeEditorPreviewState.previewCenter.y"
+                        :r="serviceTypeEditorPreviewState.circleRadius"
+                        class="serviceTypeEditor__previewShape"
+                      />
+                      <rect
+                        v-else-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'linear'"
+                        :x="serviceTypeEditorPreviewState.previewCenter.x - (serviceTypeEditorPreviewState.linearWidth / 2)"
+                        :y="serviceTypeEditorPreviewState.previewCenter.y - (serviceTypeEditorPreviewState.linearHeight / 2)"
+                        :width="serviceTypeEditorPreviewState.linearWidth"
+                        :height="serviceTypeEditorPreviewState.linearHeight"
+                        :rx="serviceTypeEditorPreviewState.linearHeight / 2"
+                        class="serviceTypeEditor__previewShape"
+                      />
+                      <polygon
+                        v-else-if="serviceTypeEditorPreviewState.shape !== 'circle'"
+                        :points="serviceTypeEditorPreviewState.polygonPoints"
+                        class="serviceTypeEditor__previewShape"
+                      />
+                    </svg>
+                    <span class="serviceTypeEditor__locationLabel">{{ option.label }}</span>
                   </button>
                 </div>
               </div>
@@ -28850,20 +28986,52 @@ onBeforeUnmount(() => {
 
               <div class="serviceTypeEditor__measureGrid">
                 <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-                  <span>فاصله آکس تا لبه ظلع مقابل</span>
-                  <input v-model.number="serviceTypeEditorDraft.axis_to_opposite_edge_distance" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
+                  <span>{{ `فاصله آکس تا لبه ظلع مقابل (${getCurrentParamLengthUnitLabel()})` }}</span>
+                  <input
+                    :value="serviceTypeEditorDraft._axis_to_opposite_edge_distance_display_text ?? ''"
+                    class="constructionDialog__input constructionDialog__input--mono"
+                    type="text"
+                    inputmode="decimal"
+                    @input="onServiceTypeMeasurementInput('axis_to_opposite_edge_distance', $event.target.value)"
+                    @change="onServiceTypeMeasurementChange('axis_to_opposite_edge_distance', $event.target.value)"
+                    @blur="onServiceTypeMeasurementChange('axis_to_opposite_edge_distance', $event.target.value)"
+                  />
                 </label>
                 <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-                  <span>فاصله آکس تا لبه ضلع موافق</span>
-                  <input v-model.number="serviceTypeEditorDraft.axis_to_aligned_edge_distance" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
+                  <span>{{ `فاصله آکس تا لبه ضلع موافق (${getCurrentParamLengthUnitLabel()})` }}</span>
+                  <input
+                    :value="serviceTypeEditorDraft._axis_to_aligned_edge_distance_display_text ?? ''"
+                    class="constructionDialog__input constructionDialog__input--mono"
+                    type="text"
+                    inputmode="decimal"
+                    @input="onServiceTypeMeasurementInput('axis_to_aligned_edge_distance', $event.target.value)"
+                    @change="onServiceTypeMeasurementChange('axis_to_aligned_edge_distance', $event.target.value)"
+                    @blur="onServiceTypeMeasurementChange('axis_to_aligned_edge_distance', $event.target.value)"
+                  />
                 </label>
                 <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-                  <span>قطر کارگیر</span>
-                  <input v-model.number="serviceTypeEditorDraft.working_diameter" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
+                  <span>{{ `قطر کارگیر (${getCurrentParamLengthUnitLabel()})` }}</span>
+                  <input
+                    :value="serviceTypeEditorDraft._working_diameter_display_text ?? ''"
+                    class="constructionDialog__input constructionDialog__input--mono"
+                    type="text"
+                    inputmode="decimal"
+                    @input="onServiceTypeMeasurementInput('working_diameter', $event.target.value)"
+                    @change="onServiceTypeMeasurementChange('working_diameter', $event.target.value)"
+                    @blur="onServiceTypeMeasurementChange('working_diameter', $event.target.value)"
+                  />
                 </label>
                 <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-                  <span>عمق کارگیر</span>
-                  <input v-model.number="serviceTypeEditorDraft.working_depth" class="constructionDialog__input constructionDialog__input--mono" type="number" min="0" step="any" />
+                  <span>{{ `عمق کارگیر (${getCurrentParamLengthUnitLabel()})` }}</span>
+                  <input
+                    :value="serviceTypeEditorDraft._working_depth_display_text ?? ''"
+                    class="constructionDialog__input constructionDialog__input--mono"
+                    type="text"
+                    inputmode="decimal"
+                    @input="onServiceTypeMeasurementInput('working_depth', $event.target.value)"
+                    @change="onServiceTypeMeasurementChange('working_depth', $event.target.value)"
+                    @blur="onServiceTypeMeasurementChange('working_depth', $event.target.value)"
+                  />
                 </label>
               </div>
 
@@ -28890,55 +29058,10 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="serviceTypeEditor__previewCard">
-              <div class="serviceTypeEditor__label">پیش‌نمایش</div>
-              <svg :viewBox="serviceTypeEditorPreviewState.viewBox" class="serviceTypeEditor__previewSvg" aria-hidden="true">
-                <rect :x="serviceTypeEditorPreviewState.frameRect.x" :y="serviceTypeEditorPreviewState.frameRect.y" :width="serviceTypeEditorPreviewState.frameRect.width" :height="serviceTypeEditorPreviewState.frameRect.height" rx="24" class="serviceTypeEditor__previewFrame" />
-                <rect
-                  v-if="serviceTypeEditorPreviewState.location !== 'thickness'"
-                  :x="serviceTypeEditorPreviewState.frameRect.x"
-                  :y="serviceTypeEditorPreviewState.frameRect.y"
-                  :width="serviceTypeEditorPreviewState.frameRect.width"
-                  :height="serviceTypeEditorPreviewState.frameRect.height"
-                  rx="24"
-                  :class="['serviceTypeEditor__previewFace', serviceTypeEditorPreviewState.location === 'back' ? 'is-back' : 'is-front']"
-                />
-                <rect
-                  v-else
-                  :x="serviceTypeEditorPreviewState.frameRect.x + serviceTypeEditorPreviewState.frameRect.width - 28"
-                  :y="serviceTypeEditorPreviewState.frameRect.y"
-                  width="28"
-                  :height="serviceTypeEditorPreviewState.frameRect.height"
-                  rx="14"
-                  class="serviceTypeEditor__previewThickness"
-                />
-                <circle
-                  v-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'point'"
-                  :cx="serviceTypeEditorPreviewState.previewCenter.x"
-                  :cy="serviceTypeEditorPreviewState.previewCenter.y"
-                  :r="serviceTypeEditorPreviewState.circleRadius"
-                  class="serviceTypeEditor__previewShape"
-                />
-                <rect
-                  v-else-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'linear'"
-                  :x="serviceTypeEditorPreviewState.previewCenter.x - (serviceTypeEditorPreviewState.linearWidth / 2)"
-                  :y="serviceTypeEditorPreviewState.previewCenter.y - (serviceTypeEditorPreviewState.linearHeight / 2)"
-                  :width="serviceTypeEditorPreviewState.linearWidth"
-                  :height="serviceTypeEditorPreviewState.linearHeight"
-                  :rx="serviceTypeEditorPreviewState.linearHeight / 2"
-                  class="serviceTypeEditor__previewShape"
-                />
-                <polygon
-                  v-else-if="serviceTypeEditorPreviewState.shape !== 'circle'"
-                  :points="serviceTypeEditorPreviewState.polygonPoints"
-                  class="serviceTypeEditor__previewShape"
-                />
-              </svg>
-              <div class="serviceTypeEditor__previewMeta">
-                <span>{{ getServiceLocationLabel(serviceTypeEditorDraft.service_location) }}</span>
-                <span>{{ getDrillPatternLabel(serviceTypeEditorDraft.drill_pattern) }}</span>
-                <span>{{ getSubtractionShapeLabel(serviceTypeEditorDraft.subtraction_shape) }}</span>
-              </div>
+            <div class="serviceTypeEditor__previewMeta">
+              <span>{{ getServiceLocationLabel(serviceTypeEditorDraft.service_location) }}</span>
+              <span>{{ getDrillPatternLabel(serviceTypeEditorDraft.drill_pattern) }}</span>
+              <span>{{ getSubtractionShapeLabel(serviceTypeEditorDraft.subtraction_shape) }}</span>
             </div>
           </div>
         </section>
@@ -33689,8 +33812,7 @@ onBeforeUnmount(() => {
 }
 
 .serviceTypeEditor__sectionHead,
-.serviceTypeEditor__fieldBlock,
-.serviceTypeEditor__previewCard {
+.serviceTypeEditor__fieldBlock {
   display: grid;
   gap: 8px;
 }
@@ -33727,6 +33849,12 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
 }
 
+.serviceTypeEditor__locationGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .serviceTypeEditor__segBtn {
   border: 1px solid rgba(148, 163, 184, 0.42);
   background: rgba(255, 255, 255, 0.9);
@@ -33753,6 +33881,39 @@ onBeforeUnmount(() => {
   background: #ecfeff;
   color: #115e59;
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+.serviceTypeEditor__locationCard {
+  display: grid;
+  gap: 10px;
+  padding: 0px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.serviceTypeEditor__locationCard.is-active {
+  border-color: #0f766e;
+  background: #ecfeff;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+.serviceTypeEditor__locationSvg {
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  margin-top: 0px;
+  margin-bottom: -24px;
+  overflow: hidden;
+}
+
+.serviceTypeEditor__locationLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+  text-align: center;
 }
 
 .serviceTypeEditor__segIcon {
@@ -33825,7 +33986,7 @@ onBeforeUnmount(() => {
 .serviceTypeEditor__drillGrid {
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.9fr);
+  grid-template-columns: 1fr;
   align-items: start;
 }
 
@@ -33849,18 +34010,6 @@ onBeforeUnmount(() => {
   gap: 6px;
   font-size: 12px;
   color: #334155;
-}
-
-.serviceTypeEditor__previewCard {
-  padding: 14px;
-  border-radius: 18px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(255, 255, 255, 0.76);
-}
-
-.serviceTypeEditor__previewSvg {
-  width: 100%;
-  height: auto;
 }
 
 .serviceTypeEditor__previewFrame {
@@ -33909,6 +34058,7 @@ onBeforeUnmount(() => {
     flex-direction: column;
   }
 
+  .serviceTypeEditor__locationGrid,
   .serviceTypeEditor__drillGrid,
   .serviceTypeEditor__measureGrid,
   .serviceTypeEditor__angleFields {
