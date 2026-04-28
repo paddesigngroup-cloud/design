@@ -9475,26 +9475,119 @@ function buildRegularPartModelPreviewGeometry(sideCount) {
   return { vertices, isFallback: true };
 }
 
+function solvePartModelPreviewEdgeLengths(directions) {
+  const dirs = Array.isArray(directions) ? directions : [];
+  const count = dirs.length;
+  if (count < 3) return Array.from({ length: count }, () => 1);
+  const templates = [
+    Array.from({ length: count }, () => 1),
+    Array.from({ length: count }, (_, index) => 1 + ((index % 2) * 0.45)),
+    Array.from({ length: count }, (_, index) => 0.85 + (index / Math.max(1, count - 1)) * 0.8),
+    Array.from({ length: count }, (_, index) => 0.9 + ((((index + 3) * 37) % 11) / 10)),
+  ];
+  for (const template of templates) {
+    for (let firstIndex = 0; firstIndex < count - 1; firstIndex += 1) {
+      for (let secondIndex = firstIndex + 1; secondIndex < count; secondIndex += 1) {
+        const firstDir = dirs[firstIndex] || { x: 0, y: 0 };
+        const secondDir = dirs[secondIndex] || { x: 0, y: 0 };
+        const determinant = (firstDir.x * secondDir.y) - (firstDir.y * secondDir.x);
+        if (Math.abs(determinant) <= 1e-6) continue;
+        let targetX = 0;
+        let targetY = 0;
+        const candidate = template.slice();
+        for (let index = 0; index < count; index += 1) {
+          if (index === firstIndex || index === secondIndex) continue;
+          targetX -= (candidate[index] || 0) * (dirs[index]?.x || 0);
+          targetY -= (candidate[index] || 0) * (dirs[index]?.y || 0);
+        }
+        const firstLength = ((targetX * secondDir.y) - (targetY * secondDir.x)) / determinant;
+        const secondLength = ((firstDir.x * targetY) - (firstDir.y * targetX)) / determinant;
+        if (firstLength > 0.05 && secondLength > 0.05) {
+          candidate[firstIndex] = firstLength;
+          candidate[secondIndex] = secondLength;
+          return candidate;
+        }
+      }
+    }
+  }
+  return Array.from({ length: count }, () => 1);
+}
+
 function buildPartModelPreviewGeometry(sideCount, defaultAngles) {
   const normalizedAngles = normalizePartModelAngleRecords(sideCount, defaultAngles, getPartModelInteriorAngleSum(sideCount));
   const normalizedSideCount = Math.max(3, Number(sideCount) || normalizedAngles.length || 3);
-  const base = buildRegularPartModelPreviewGeometry(normalizedSideCount);
-  const expectedAngle = getPartModelInteriorAngleSum(normalizedSideCount) / normalizedSideCount;
-  const vertices = base.vertices.map((point, index) => {
-    const angleDeg = Number(normalizedAngles[index]?.angle_deg);
-    if (!Number.isFinite(angleDeg)) return point;
-    const dx = point.x;
-    const dy = point.y;
-    const len = Math.hypot(dx, dy) || 1;
-    // Sharper angles push outward; wider angles pull inward.
-    const normalizedDelta = (angleDeg - expectedAngle) / Math.max(expectedAngle, 1);
-    const radialFactor = Math.max(0.62, Math.min(1.38, 1 - (normalizedDelta * 0.72)));
-    return {
-      x: (dx / len) * radialFactor,
-      y: (dy / len) * radialFactor,
-    };
-  });
-  return { vertices, isFallback: false };
+  if (normalizedSideCount < 3) {
+    return buildRegularPartModelPreviewGeometry(normalizedSideCount);
+  }
+  const directions = [{ x: 1, y: 0 }];
+  let headingDeg = 0;
+  for (let edgeIndex = 1; edgeIndex < normalizedSideCount; edgeIndex += 1) {
+    const interiorAngle = Number(normalizedAngles[edgeIndex]?.angle_deg);
+    if (!Number.isFinite(interiorAngle)) {
+      return buildRegularPartModelPreviewGeometry(normalizedSideCount);
+    }
+    headingDeg += 180 - interiorAngle;
+    const headingRad = (headingDeg * Math.PI) / 180;
+    directions.push({
+      x: Math.cos(headingRad),
+      y: Math.sin(headingRad),
+    });
+  }
+  if (directions.length !== normalizedSideCount) {
+    return buildRegularPartModelPreviewGeometry(normalizedSideCount);
+  }
+  const edgeLengths = solvePartModelPreviewEdgeLengths(directions);
+  const vertices = [{ x: 0, y: 0 }];
+  for (let edgeIndex = 0; edgeIndex < normalizedSideCount - 1; edgeIndex += 1) {
+    const current = vertices[vertices.length - 1] || { x: 0, y: 0 };
+    const direction = directions[edgeIndex] || { x: 1, y: 0 };
+    const length = Math.max(0.05, Number(edgeLengths[edgeIndex]) || 1);
+    vertices.push({
+      x: current.x + direction.x * length,
+      y: current.y + direction.y * length,
+    });
+  }
+  if (vertices.length !== normalizedSideCount) {
+    return buildRegularPartModelPreviewGeometry(normalizedSideCount);
+  }
+  const lastStart = vertices[vertices.length - 1] || { x: 0, y: 0 };
+  const lastDirection = directions[normalizedSideCount - 1] || { x: 1, y: 0 };
+  const lastLength = Math.max(0.05, Number(edgeLengths[normalizedSideCount - 1]) || 1);
+  const closureVector = {
+    x: (lastStart.x + (lastDirection.x * lastLength)) - vertices[0].x,
+    y: (lastStart.y + (lastDirection.y * lastLength)) - vertices[0].y,
+  };
+  if (Math.hypot(closureVector.x, closureVector.y) > 0.25) {
+    return buildRegularPartModelPreviewGeometry(normalizedSideCount);
+  }
+
+  const centroid = vertices.reduce(
+    (acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }),
+    { x: 0, y: 0 }
+  );
+  centroid.x /= vertices.length || 1;
+  centroid.y /= vertices.length || 1;
+  const centeredVertices = vertices.map((point) => ({
+    x: point.x - centroid.x,
+    y: point.y - centroid.y,
+  }));
+  const first = centeredVertices[0] || { x: 0, y: 0 };
+  const second = centeredVertices[1] || { x: 1, y: 0 };
+  const rotationRad = -Math.atan2(second.y - first.y, second.x - first.x);
+  const cos = Math.cos(rotationRad);
+  const sin = Math.sin(rotationRad);
+  const rotatedVertices = centeredVertices.map((point) => ({
+    x: point.x * cos - point.y * sin,
+    y: point.x * sin + point.y * cos,
+  }));
+  const ys = rotatedVertices.map((point) => point.y);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const uprightVertices = rotatedVertices.map((point) => ({
+    x: point.x,
+    y: point.y - ((minY + maxY) / 2),
+  }));
+  return { vertices: uprightVertices, isFallback: false };
 }
 
 function normalizePartModelPreviewGeometry(sideCount, defaultAngles) {
@@ -9533,29 +9626,88 @@ function normalizePartModelPreviewGeometry(sideCount, defaultAngles) {
   };
 }
 
+function getPartModelPreviewSignedArea(vertices) {
+  const points = Array.isArray(vertices) ? vertices : [];
+  if (points.length < 3) return 0;
+  let area = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index] || { x: 0, y: 0 };
+    const next = points[(index + 1) % points.length] || current;
+    area += (current.x * next.y) - (next.x * current.y);
+  }
+  return area / 2;
+}
+
+function isPointInsidePartModelPreviewPolygon(point, vertices) {
+  const pts = Array.isArray(vertices) ? vertices : [];
+  if (pts.length < 3 || !point) return false;
+  let inside = false;
+  for (let index = 0, prevIndex = pts.length - 1; index < pts.length; prevIndex = index, index += 1) {
+    const a = pts[index] || { x: 0, y: 0 };
+    const b = pts[prevIndex] || { x: 0, y: 0 };
+    const intersects = ((a.y > point.y) !== (b.y > point.y))
+      && (point.x < (((b.x - a.x) * (point.y - a.y)) / ((b.y - a.y) || Number.EPSILON)) + a.x);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function normalizePositiveAngleRad(value) {
+  let result = Number(value) || 0;
+  while (result < 0) result += Math.PI * 2;
+  while (result >= Math.PI * 2) result -= Math.PI * 2;
+  return result;
+}
+
 function buildPartModelAnglePreviewRecords(sideCount, defaultAngles) {
   const geometry = normalizePartModelPreviewGeometry(sideCount, defaultAngles);
   const vertices = geometry.vertices || [];
   return vertices.map((vertex, index) => {
     const prev = vertices[(index - 1 + vertices.length) % vertices.length] || vertex;
     const next = vertices[(index + 1) % vertices.length] || vertex;
-    const dx = vertex.x - geometry.center.x;
-    const dy = vertex.y - geometry.center.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len;
-    const uy = dy / len;
-    const labelX = vertex.x + ux * 24;
-    const labelY = vertex.y + uy * 24;
-    const startX = vertex.x + (prev.x - vertex.x) * 0.18;
-    const startY = vertex.y + (prev.y - vertex.y) * 0.18;
-    const endX = vertex.x + (next.x - vertex.x) * 0.18;
-    const endY = vertex.y + (next.y - vertex.y) * 0.18;
+    const angleValue = roundPartModelAngle(defaultAngles?.find((entry) => Number(entry?.index) === index)?.angle_deg);
+    const interiorAngleDeg = Number.isFinite(angleValue) ? angleValue : 0;
+    const interiorAngleRad = Math.max(0.0001, (interiorAngleDeg * Math.PI) / 180);
+    const prevAngle = Math.atan2(prev.y - vertex.y, prev.x - vertex.x);
+    const nextAngle = Math.atan2(next.y - vertex.y, next.x - vertex.x);
+    const startAngle = prevAngle;
+    const radius = interiorAngleDeg > 180 ? 22 : 16;
+    const clockwiseSweepRad = normalizePositiveAngleRad(nextAngle - startAngle);
+    const counterClockwiseSweepRad = (Math.PI * 2) - clockwiseSweepRad;
+    const useClockwise = Math.abs(clockwiseSweepRad - interiorAngleRad) <= Math.abs(counterClockwiseSweepRad - interiorAngleRad);
+    const finalSweepRad = useClockwise ? clockwiseSweepRad : counterClockwiseSweepRad;
+    const clockwiseMidAngle = startAngle + (clockwiseSweepRad / 2);
+    const counterClockwiseMidAngle = startAngle - (counterClockwiseSweepRad / 2);
+    const sampleRadius = Math.max(8, radius * 0.7);
+    const clockwiseSample = {
+      x: vertex.x + Math.cos(clockwiseMidAngle) * sampleRadius,
+      y: vertex.y + Math.sin(clockwiseMidAngle) * sampleRadius,
+    };
+    const counterClockwiseSample = {
+      x: vertex.x + Math.cos(counterClockwiseMidAngle) * sampleRadius,
+      y: vertex.y + Math.sin(counterClockwiseMidAngle) * sampleRadius,
+    };
+    const clockwiseInside = isPointInsidePartModelPreviewPolygon(clockwiseSample, vertices);
+    const counterClockwiseInside = isPointInsidePartModelPreviewPolygon(counterClockwiseSample, vertices);
+    const resolvedClockwise = clockwiseInside !== counterClockwiseInside ? clockwiseInside : useClockwise;
+    const resolvedSweepRad = resolvedClockwise ? clockwiseSweepRad : counterClockwiseSweepRad;
+    const endAngle = nextAngle;
+    const startX = vertex.x + Math.cos(startAngle) * radius;
+    const startY = vertex.y + Math.sin(startAngle) * radius;
+    const endX = vertex.x + Math.cos(endAngle) * radius;
+    const endY = vertex.y + Math.sin(endAngle) * radius;
+    const largeArcFlag = resolvedSweepRad > Math.PI ? 1 : 0;
+    const sweepFlag = resolvedClockwise ? 1 : 0;
+    const midAngle = resolvedClockwise ? clockwiseMidAngle : counterClockwiseMidAngle;
+    const labelRadius = interiorAngleDeg > 180 ? radius + 14 : radius + 12;
+    const labelX = vertex.x + Math.cos(midAngle) * labelRadius;
+    const labelY = vertex.y + Math.sin(midAngle) * labelRadius;
     return {
       index,
       vertex,
       labelX,
       labelY,
-      highlightPath: `M ${startX.toFixed(2)} ${startY.toFixed(2)} L ${vertex.x.toFixed(2)} ${vertex.y.toFixed(2)} L ${endX.toFixed(2)} ${endY.toFixed(2)}`,
+      highlightPath: `M ${startX.toFixed(2)} ${startY.toFixed(2)} A ${radius.toFixed(2)} ${radius.toFixed(2)} 0 ${largeArcFlag} ${sweepFlag} ${endX.toFixed(2)} ${endY.toFixed(2)}`,
     };
   });
 }

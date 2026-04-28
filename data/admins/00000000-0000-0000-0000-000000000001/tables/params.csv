@@ -173,7 +173,7 @@
 165,5,p_bo_bar,punch_bottom_bar,کسر_پایین_قید,29,3,system
 166,5,p_fr_bar,push_front_bar,هل_دادن_قید_به_جلو,29,3,system
 168,5,ri_o_bar,right_offset_bar,فاصله_راست_قید,29,5,system
-170,1,le_o_bar,left_offset_bar,فاصله_چپ_قید,29,6,system
+170,5,le_o_bar,left_offset_bar,فاصله_چپ_قید,29,6,system
 174,6,d_t_g,door_top_gap,بادخور_بالا_درب,30,1,system
 175,6,d_b_g,door_bottom_gap,بادخور_پایین_درب,30,2,system
 176,6,d_l_g,door_left_gap,بادخور_چپ_درب,30,3,system
@@ -186,3 +186,10 @@
 185,6,d_r_a,door_right_adding,افزایش_راست_درب,32,2,system
 186,6,d_b_a,door_bottom_adding,افزایش_پایین_درب,32,3,system
 187,6,d_t_a,door_top_adding,افزایش_بالا_درب,32,4,system
+188,11,ha_w,handless_width,عرض_دستگیره_مخفی,33,1,system
+189,11,ha_h,handless_height,ارتفاع_دستگیره_مخفی,33,2,system
+190,11,ha_d,handless_depth,عمق_دستگیره_مخفی,33,3,system
+191,11,ha_t_o,handless_top_offset,فاصله_تا_بالا_دستگیره مخفی,33,4,system
+192,11,ha_l_o,handless_left_offset,فاصله_تا_چپ_دستگیره مخفی,33,5,system
+193,11,ha_r_o,handless_right_offset,فاصله_تا_راست_دستگیره مخفی,33,6,system
+194,11,p_f_ha,push_front_handless,جلو_دادن_دستگیره_مخفی_به_داخل,33,7,system

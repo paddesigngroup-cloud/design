@@ -22,12 +22,13 @@
 24,width stretcher drawer,تیرک عرضی کشو,staged-width-stretcher-drawer-fe03855a6c7c.webp,20,0,system
 25,depth stretcher drawer,تیرک عمقی کشو,staged-depth-stretcher-drawer-df17578ceb10.webp,21,0,system
 7,door preferences,تنظیمات درب,door-properties-767330f806b3.webp,22,0,system
-9,panel,پنل نما,staged-door-gap-d2e3d438f9ea.webp,23,1,system
-26,toe kick,پاخور,staged-door-adding-e31dc8e211cd.webp,24,0,system
-27,frame,قاب,staged-door-reducing-206c5585f423.webp,25,0,system
-11,counter,صفحه,staged-panel-e874a719c668.webp,26,1,system
-28,partition,جداکننده,staged-toe-kick-12d888a73b4b.webp,27,0,system
-29,bar,قید,staged-frame-f543f4871467.webp,28,0,system
-30,door gap,بادخور درب,staged-counter-d7c177d68cd1.webp,29,0,system
-31,door adding,افزایش درب,staged-partition-fcce7420042a.webp,30,0,system
-32,door reducing,کسر درب,staged-bar-aa8931a8c8aa.webp,31,0,system
+9,panel,پنل نما,staged-panel-f8dd6dc32e9c.webp,23,1,system
+26,toe kick,پاخور,staged-toe-kick-ca7aa36d19a4.webp,24,0,system
+27,frame,قاب,staged-frame-f43a221ba7b1.webp,25,0,system
+11,counter,صفحه,staged-counter-c28f87958941.webp,26,1,system
+28,partition,جداکننده,staged-partition-1b710a3faf0e.webp,27,0,system
+29,bar,قید,staged-bar-a38fc0ba25e0.webp,28,0,system
+30,door gap,بادخور درب,staged-door-gap-15a66bc73e85.webp,29,0,system
+31,door reducing,کسر درب,staged-door-adding-5e4c81107e8d.webp,30,0,system
+32,door adding,افزایش درب,staged-door-reducing-6a29cc13e347.webp,31,0,system
+33,handleless,دستگیره مخفی,staged-handleless-cac8e87c0de2.webp,32,0,system
