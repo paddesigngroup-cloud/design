@@ -8897,6 +8897,7 @@ function normalizeServiceTypeMeasurement(value) {
 
 function formatServiceTypeMeasurementForDisplay(valueMm, unit = currentEditorDisplayUnit.value) {
   const numericMm = normalizeServiceTypeMeasurement(valueMm);
+  if (numericMm === 0) return "0";
   const normalizedUnit = normalizeParamDisplayUnit(unit);
   if (normalizedUnit === "mm") return trimInteriorControllerDisplayNumber(numericMm, 1);
   if (normalizedUnit === "inch") return trimInteriorControllerDisplayNumber(numericMm / 25.4, 3);
@@ -9943,33 +9944,153 @@ const serviceTypeEditorPreviewState = computed(() => {
   const draft = serviceTypeEditorDraft.value;
   const viewBox = "0 0 360 240";
   const frameRect = { x: 34, y: 22, width: 292, height: 182 };
+  const previewPartWidthMm = 300;
+  const previewPartHeightMm = 200;
+  const previewPartThicknessMm = 16;
+  const previewFaceAspect = previewPartWidthMm / previewPartHeightMm;
+  const faceWidth = Math.min(frameRect.width - 24, (frameRect.height - 24) * previewFaceAspect);
+  const faceHeight = faceWidth / previewFaceAspect;
+  const faceRect = {
+    x: frameRect.x + ((frameRect.width - faceWidth) / 2),
+    y: frameRect.y + ((frameRect.height - faceHeight) / 2),
+    width: faceWidth,
+    height: faceHeight,
+  };
   const safeLocation = draft ? normalizeServiceLocation(draft.service_location) : "front";
   const safePattern = draft ? normalizeDrillPattern(draft.drill_pattern) : "point";
   const safeShape = draft ? normalizeSubtractionShape(draft.subtraction_shape) : "circle";
+  const selectedProjection = safeLocation === "thickness" ? "thickness" : "face";
+  const workingDepth = Math.max(0, Number(draft?.working_depth) || 0);
+  const workingDiameter = Math.max(0, Number(draft?.working_diameter) || 0);
+  const hasVisibleSubtraction = workingDiameter > 0;
+  const axisAligned = Math.max(0, Number(draft?.axis_to_aligned_edge_distance) || 0);
+  const axisOpposite = Math.max(0, Number(draft?.axis_to_opposite_edge_distance) || 0);
+  const scaleAxisX = Math.min(faceRect.width, (axisAligned / previewPartWidthMm) * faceRect.width);
+  const scaleAxisY = Math.min(faceRect.height, (axisOpposite / previewPartHeightMm) * faceRect.height);
+  const scaleDiameterFace = Math.min(faceRect.height, (workingDiameter / previewPartHeightMm) * faceRect.height);
+  const scaleDiameterThickness = Math.min(thicknessRectHeightSafe(), (workingDiameter / previewPartHeightMm) * faceRect.height);
+  const scaleDepth = Math.min(1, workingDepth / previewPartThicknessMm);
   const geometry = normalizePartModelPreviewGeometry(
     Math.max(3, getServiceTypeShapeSideCount(safeShape) || 4),
     safeShape === "circle" ? null : normalizeServiceTypeShapeAngles(safeShape, draft?.shape_angles)
   );
-  const polygonVertices = safeShape === "circle" ? [] : scalePartModelVerticesIntoFrame(geometry.vertices, frameRect, 42);
-  const polygonPoints = polygonVertices.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
-  const centerX = frameRect.x + (frameRect.width / 2);
-  const centerY = frameRect.y + (frameRect.height / 2);
-  const offsetX = Math.max(-72, Math.min(72, (Number(draft?.axis_to_aligned_edge_distance) || 0) * 2));
-  const offsetY = Math.max(-54, Math.min(54, (Number(draft?.axis_to_opposite_edge_distance) || 0) * -2));
-  const previewCenter = { x: centerX + offsetX, y: centerY + offsetY };
+  function thicknessRectHeightSafe() {
+    return Math.max(12, (previewPartThicknessMm / previewPartHeightMm) * faceRect.height);
+  }
+  const anchorX = Math.max(
+    faceRect.x,
+    faceRect.x + faceRect.width - scaleAxisX
+  );
+  const anchorY = Math.min(
+    faceRect.y + faceRect.height,
+    faceRect.y + scaleAxisY
+  );
+  const frontBackAnchor = { x: anchorX, y: anchorY };
+  const thicknessRectHeight = thicknessRectHeightSafe();
+  const thicknessAnchor = {
+    x: faceRect.x + faceRect.width,
+    y: Math.max(frameRect.y + 18, Math.min(frameRect.y + frameRect.height - 18, anchorY)),
+  };
+  const thicknessRect = {
+    x: faceRect.x + 8,
+    y: Math.max(frameRect.y + 24, Math.min(frameRect.y + frameRect.height - thicknessRectHeight - 24, anchorY - (thicknessRectHeight / 2))),
+    width: faceRect.width * 0.72,
+    height: thicknessRectHeight,
+  };
+  const faceShapeFrame = {
+    x: Math.max(faceRect.x + 4, Math.min(faceRect.x + faceRect.width - 64, frontBackAnchor.x - 28)),
+    y: Math.max(faceRect.y + 4, Math.min(faceRect.y + faceRect.height - 64, frontBackAnchor.y - 28)),
+    width: 68,
+    height: 68,
+  };
+  const thicknessShapeFrame = {
+    x: Math.max(frameRect.x + frameRect.width - 88, Math.min(frameRect.x + frameRect.width - 44, thicknessAnchor.x - 22)),
+    y: Math.max(frameRect.y + 6, Math.min(frameRect.y + frameRect.height - 64, thicknessAnchor.y - 22)),
+    width: 44,
+    height: 44,
+  };
+  const facePolygonVertices = safeShape === "circle" ? [] : scalePartModelVerticesIntoFrame(geometry.vertices, faceShapeFrame, 6);
+  const thicknessPolygonVertices = safeShape === "circle" ? [] : scalePartModelVerticesIntoFrame(geometry.vertices, thicknessShapeFrame, 4);
+  const facePolygonPoints = facePolygonVertices.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
+  const thicknessPolygonPoints = thicknessPolygonVertices.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
+  const faceTraceLine = {
+    x1: Math.max(faceRect.x + 4, frontBackAnchor.x - 18),
+    y1: frontBackAnchor.y,
+    x2: Math.min(faceRect.x + faceRect.width - 4, frontBackAnchor.x + 18),
+    y2: frontBackAnchor.y,
+  };
+  const thicknessTraceLine = {
+    x1: Math.max(thicknessRect.x, thicknessAnchor.x - 30),
+    y1: thicknessAnchor.y,
+    x2: Math.min(thicknessRect.x + thicknessRect.width, thicknessAnchor.x),
+    y2: thicknessAnchor.y,
+  };
+  const faceTraceRectHeight = 18 + (scaleDepth * 56);
+  const faceTraceRect = {
+    x: Math.max(faceRect.x + 4, Math.min(faceRect.x + faceRect.width - 16, frontBackAnchor.x - 7)),
+    y: Math.max(faceRect.y + 4, Math.min(faceRect.y + faceRect.height - faceTraceRectHeight - 4, frontBackAnchor.y - (faceTraceRectHeight / 2))),
+    width: 14,
+    height: faceTraceRectHeight,
+  };
+  const faceCircleCenter = {
+    x: frontBackAnchor.x,
+    y: frontBackAnchor.y,
+  };
+  const thicknessCircleCenter = {
+    x: thicknessShapeFrame.x + (thicknessShapeFrame.width / 2),
+    y: thicknessShapeFrame.y + (thicknessShapeFrame.height / 2),
+  };
+  const faceLinearRect = {
+    x: Math.max(faceRect.x + 4, Math.min(faceRect.x + faceRect.width - 24, frontBackAnchor.x - 8)),
+    y: Math.max(faceRect.y + 4, Math.min(faceRect.y + faceRect.height - 48, frontBackAnchor.y - 22)),
+    width: 16,
+    height: Math.max(12, scaleDiameterFace),
+  };
+  const thicknessLinearRect = {
+    x: Math.max(thicknessRect.x + thicknessRect.width - 18, Math.min(thicknessRect.x + thicknessRect.width - 10, thicknessAnchor.x - 5)),
+    y: Math.max(frameRect.y + 10, Math.min(frameRect.y + frameRect.height - 54, thicknessAnchor.y - 22)),
+    width: 10,
+    height: Math.max(12, Math.min(thicknessRect.height + 14, scaleDiameterThickness + 8)),
+  };
+  const projectionModes = hasVisibleSubtraction
+    ? {
+        front: selectedProjection === "face"
+          ? "face-shape"
+          : (workingDepth > 0 ? "face-trace-rect" : "face-trace-line"),
+        back: selectedProjection === "face"
+          ? "face-shape"
+          : (workingDepth > 0 ? "face-trace-rect" : "face-trace-line"),
+        thickness: selectedProjection === "thickness" ? "thickness-shape" : "thickness-trace-line",
+      }
+    : {
+        front: null,
+        back: null,
+        thickness: null,
+      };
   return {
     viewBox,
     frameRect,
-    location: safeLocation,
+    faceRect,
+    selectedLocation: safeLocation,
     pattern: safePattern,
     shape: safeShape,
-    polygonPoints,
-    polygonVertices,
-    previewCenter,
-    circleRadius: Math.max(10, Math.min(44, Number(draft?.working_diameter) || 18)),
-    linearWidth: Math.max(34, Math.min(118, (Number(draft?.working_diameter) || 18) * 2.2)),
-    linearHeight: Math.max(10, Math.min(36, Number(draft?.working_depth) || 12)),
-    depthValue: Number(draft?.working_depth) || 0,
+    sharedAnchor: { x: frontBackAnchor.x, y: frontBackAnchor.y },
+    frontBackAnchor,
+    thicknessAnchor,
+    thicknessRect,
+    facePolygonPoints,
+    thicknessPolygonPoints,
+    faceCircleCenter,
+    thicknessCircleCenter,
+    faceLinearRect,
+    thicknessLinearRect,
+    faceTraceLine,
+    thicknessTraceLine,
+    faceTraceRect,
+    projectionModes,
+    hasVisibleSubtraction,
+    circleRadius: Math.max(5, scaleDiameterFace / 2),
+    thicknessCircleRadius: Math.max(4, Math.min((thicknessRect.height / 2) - 2, scaleDiameterThickness / 2)),
   };
 });
 
@@ -28895,50 +29016,100 @@ onBeforeUnmount(() => {
                     @click="serviceTypeEditorDraft.service_location = option.value"
                   >
                     <svg :viewBox="serviceTypeEditorPreviewState.viewBox" class="serviceTypeEditor__locationSvg" aria-hidden="true">
+                      <template v-if="option.value !== 'thickness'">
+                        <rect
+                          :x="serviceTypeEditorPreviewState.faceRect.x"
+                          :y="serviceTypeEditorPreviewState.faceRect.y"
+                          :width="serviceTypeEditorPreviewState.faceRect.width"
+                          :height="serviceTypeEditorPreviewState.faceRect.height"
+                          class="serviceTypeEditor__previewFrame"
+                        />
+                        <rect
+                          :x="serviceTypeEditorPreviewState.faceRect.x"
+                          :y="serviceTypeEditorPreviewState.faceRect.y"
+                          :width="serviceTypeEditorPreviewState.faceRect.width"
+                          :height="serviceTypeEditorPreviewState.faceRect.height"
+                          :class="['serviceTypeEditor__previewFace', option.value === 'back' ? 'is-back' : 'is-front']"
+                        />
+                      </template>
                       <rect
-                        v-if="option.value !== 'thickness'"
-                        :x="serviceTypeEditorPreviewState.frameRect.x"
-                        :y="serviceTypeEditorPreviewState.frameRect.y"
-                        :width="serviceTypeEditorPreviewState.frameRect.width"
-                        :height="serviceTypeEditorPreviewState.frameRect.height"
-                        class="serviceTypeEditor__previewFrame"
-                      />
-                      <rect
-                        v-if="option.value !== 'thickness'"
-                        :x="serviceTypeEditorPreviewState.frameRect.x"
-                        :y="serviceTypeEditorPreviewState.frameRect.y"
-                        :width="serviceTypeEditorPreviewState.frameRect.width"
-                        :height="serviceTypeEditorPreviewState.frameRect.height"
-                        :class="['serviceTypeEditor__previewFace', option.value === 'back' ? 'is-back' : 'is-front']"
-                      />
-                      <rect
-                        v-else
-                        :x="serviceTypeEditorPreviewState.frameRect.x + (serviceTypeEditorPreviewState.frameRect.width * 0.08)"
-                        :y="serviceTypeEditorPreviewState.previewCenter.y - 18"
-                        :width="serviceTypeEditorPreviewState.frameRect.width * 0.84"
-                        height="36"
+                        v-if="option.value === 'thickness'"
+                        :x="serviceTypeEditorPreviewState.thicknessRect.x"
+                        :y="serviceTypeEditorPreviewState.thicknessRect.y"
+                        :width="serviceTypeEditorPreviewState.thicknessRect.width"
+                        :height="serviceTypeEditorPreviewState.thicknessRect.height"
                         class="serviceTypeEditor__previewThickness"
                       />
-                      <circle
-                        v-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'point'"
-                        :cx="serviceTypeEditorPreviewState.previewCenter.x"
-                        :cy="serviceTypeEditorPreviewState.previewCenter.y"
-                        :r="serviceTypeEditorPreviewState.circleRadius"
-                        class="serviceTypeEditor__previewShape"
+                      <template v-if="serviceTypeEditorPreviewState.projectionModes[option.value] === 'face-shape'">
+                        <circle
+                          v-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'point'"
+                          :cx="serviceTypeEditorPreviewState.faceCircleCenter.x"
+                          :cy="serviceTypeEditorPreviewState.faceCircleCenter.y"
+                          :r="serviceTypeEditorPreviewState.circleRadius"
+                          class="serviceTypeEditor__previewShape"
+                        />
+                        <rect
+                          v-else-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'linear'"
+                          :x="serviceTypeEditorPreviewState.faceLinearRect.x"
+                          :y="serviceTypeEditorPreviewState.faceLinearRect.y"
+                          :width="serviceTypeEditorPreviewState.faceLinearRect.width"
+                          :height="serviceTypeEditorPreviewState.faceLinearRect.height"
+                          rx="8"
+                          class="serviceTypeEditor__previewShape"
+                        />
+                        <polygon
+                          v-else
+                          :points="serviceTypeEditorPreviewState.facePolygonPoints"
+                          class="serviceTypeEditor__previewShape"
+                        />
+                      </template>
+                      <template v-else-if="serviceTypeEditorPreviewState.projectionModes[option.value] === 'thickness-shape'">
+                        <circle
+                          v-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'point'"
+                          :cx="serviceTypeEditorPreviewState.thicknessCircleCenter.x"
+                          :cy="serviceTypeEditorPreviewState.thicknessCircleCenter.y"
+                          :r="serviceTypeEditorPreviewState.thicknessCircleRadius"
+                          class="serviceTypeEditor__previewShape"
+                        />
+                        <rect
+                          v-else-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'linear'"
+                          :x="serviceTypeEditorPreviewState.thicknessLinearRect.x"
+                          :y="serviceTypeEditorPreviewState.thicknessLinearRect.y"
+                          :width="serviceTypeEditorPreviewState.thicknessLinearRect.width"
+                          :height="serviceTypeEditorPreviewState.thicknessLinearRect.height"
+                          rx="6"
+                          class="serviceTypeEditor__previewShape"
+                        />
+                        <polygon
+                          v-else
+                          :points="serviceTypeEditorPreviewState.thicknessPolygonPoints"
+                          class="serviceTypeEditor__previewShape"
+                        />
+                      </template>
+                      <line
+                        v-else-if="serviceTypeEditorPreviewState.projectionModes[option.value] === 'face-trace-line'"
+                        :x1="serviceTypeEditorPreviewState.faceTraceLine.x1"
+                        :y1="serviceTypeEditorPreviewState.faceTraceLine.y1"
+                        :x2="serviceTypeEditorPreviewState.faceTraceLine.x2"
+                        :y2="serviceTypeEditorPreviewState.faceTraceLine.y2"
+                        class="serviceTypeEditor__previewTraceLine"
                       />
                       <rect
-                        v-else-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'linear'"
-                        :x="serviceTypeEditorPreviewState.previewCenter.x - (serviceTypeEditorPreviewState.linearWidth / 2)"
-                        :y="serviceTypeEditorPreviewState.previewCenter.y - (serviceTypeEditorPreviewState.linearHeight / 2)"
-                        :width="serviceTypeEditorPreviewState.linearWidth"
-                        :height="serviceTypeEditorPreviewState.linearHeight"
-                        :rx="serviceTypeEditorPreviewState.linearHeight / 2"
-                        class="serviceTypeEditor__previewShape"
+                        v-else-if="serviceTypeEditorPreviewState.projectionModes[option.value] === 'face-trace-rect'"
+                        :x="serviceTypeEditorPreviewState.faceTraceRect.x"
+                        :y="serviceTypeEditorPreviewState.faceTraceRect.y"
+                        :width="serviceTypeEditorPreviewState.faceTraceRect.width"
+                        :height="serviceTypeEditorPreviewState.faceTraceRect.height"
+                        rx="4"
+                        class="serviceTypeEditor__previewTraceRect"
                       />
-                      <polygon
-                        v-else-if="serviceTypeEditorPreviewState.shape !== 'circle'"
-                        :points="serviceTypeEditorPreviewState.polygonPoints"
-                        class="serviceTypeEditor__previewShape"
+                      <line
+                        v-else-if="serviceTypeEditorPreviewState.projectionModes[option.value] === 'thickness-trace-line'"
+                        :x1="serviceTypeEditorPreviewState.thicknessTraceLine.x1"
+                        :y1="serviceTypeEditorPreviewState.thicknessTraceLine.y1"
+                        :x2="serviceTypeEditorPreviewState.thicknessTraceLine.x2"
+                        :y2="serviceTypeEditorPreviewState.thicknessTraceLine.y2"
+                        class="serviceTypeEditor__previewTraceLine"
                       />
                     </svg>
                     <span class="serviceTypeEditor__locationLabel">{{ option.label }}</span>
@@ -34036,6 +34207,18 @@ onBeforeUnmount(() => {
   stroke: #0f172a;
   stroke-width: 2.2;
   stroke-linejoin: round;
+}
+
+.serviceTypeEditor__previewTraceLine {
+  stroke: rgba(249, 115, 22, 0.95);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.serviceTypeEditor__previewTraceRect {
+  fill: rgba(249, 115, 22, 0.24);
+  stroke: rgba(249, 115, 22, 0.95);
+  stroke-width: 1.8;
 }
 
 .serviceTypeEditor__previewMeta {
