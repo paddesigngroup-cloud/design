@@ -9944,8 +9944,8 @@ const serviceTypeEditorPreviewState = computed(() => {
   const draft = serviceTypeEditorDraft.value;
   const viewBox = "0 0 360 240";
   const frameRect = { x: 34, y: 22, width: 292, height: 182 };
-  const previewPartWidthMm = 300;
-  const previewPartHeightMm = 200;
+  const previewPartWidthMm = 100;
+  const previewPartHeightMm = 100;
   const previewPartThicknessMm = 16;
   const previewFaceAspect = previewPartWidthMm / previewPartHeightMm;
   const faceWidth = Math.min(frameRect.width - 24, (frameRect.height - 24) * previewFaceAspect);
@@ -9987,14 +9987,17 @@ const serviceTypeEditorPreviewState = computed(() => {
   );
   const frontBackAnchor = { x: anchorX, y: anchorY };
   const thicknessRectHeight = thicknessRectHeightSafe();
+  const thicknessRectWidth = faceRect.width;
+  const thicknessRectX = faceRect.x;
+  const thicknessRectY = frameRect.y + ((frameRect.height - thicknessRectHeight) / 2);
   const thicknessAnchor = {
-    x: faceRect.x + faceRect.width,
-    y: Math.max(frameRect.y + 18, Math.min(frameRect.y + frameRect.height - 18, anchorY)),
+    x: thicknessRectX + thicknessRectWidth,
+    y: thicknessRectY,
   };
   const thicknessRect = {
-    x: faceRect.x + 8,
-    y: Math.max(frameRect.y + 24, Math.min(frameRect.y + frameRect.height - thicknessRectHeight - 24, anchorY - (thicknessRectHeight / 2))),
-    width: faceRect.width * 0.72,
+    x: thicknessRectX,
+    y: thicknessRectY,
+    width: thicknessRectWidth,
     height: thicknessRectHeight,
   };
   const faceShapeFrame = {
@@ -10004,8 +10007,8 @@ const serviceTypeEditorPreviewState = computed(() => {
     height: 68,
   };
   const thicknessShapeFrame = {
-    x: Math.max(frameRect.x + frameRect.width - 88, Math.min(frameRect.x + frameRect.width - 44, thicknessAnchor.x - 22)),
-    y: Math.max(frameRect.y + 6, Math.min(frameRect.y + frameRect.height - 64, thicknessAnchor.y - 22)),
+    x: Math.max(thicknessRect.x + thicknessRect.width - 44, Math.min(thicknessRect.x + thicknessRect.width - 44, thicknessAnchor.x - 22)),
+    y: Math.max(thicknessRect.y - 22, Math.min(thicknessRect.y + thicknessRect.height - 22, thicknessAnchor.y - 22)),
     width: 44,
     height: 44,
   };
@@ -10037,8 +10040,8 @@ const serviceTypeEditorPreviewState = computed(() => {
     y: frontBackAnchor.y,
   };
   const thicknessCircleCenter = {
-    x: thicknessShapeFrame.x + (thicknessShapeFrame.width / 2),
-    y: thicknessShapeFrame.y + (thicknessShapeFrame.height / 2),
+    x: thicknessAnchor.x,
+    y: thicknessAnchor.y,
   };
   const faceLinearRect = {
     x: Math.max(faceRect.x + 4, Math.min(faceRect.x + faceRect.width - 24, frontBackAnchor.x - 8)),
@@ -34236,7 +34239,6 @@ onBeforeUnmount(() => {
     flex-direction: column;
   }
 
-  .serviceTypeEditor__locationGrid,
   .serviceTypeEditor__drillGrid,
   .serviceTypeEditor__measureGrid,
   .serviceTypeEditor__angleFields {
