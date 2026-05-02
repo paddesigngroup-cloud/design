@@ -10218,6 +10218,66 @@ const SUBTRACTION_SHAPE_OPTIONS = [
   { value: "rectangle", label: "مستطیل" },
 ];
 
+function getAllowedServiceLocationsForDrillPattern(pattern) {
+  return normalizeDrillPattern(pattern) === "linear"
+    ? ["thickness"]
+    : ["front", "back"];
+}
+
+function getAllowedSubtractionShapesForServiceRule(pattern, location) {
+  return normalizeDrillPattern(pattern) === "linear" && normalizeServiceLocation(location) === "thickness"
+    ? ["circle", "triangle", "rectangle"]
+    : ["circle"];
+}
+
+function isServiceTypeLocationAllowedForDrillPattern(pattern, location) {
+  return getAllowedServiceLocationsForDrillPattern(pattern).includes(normalizeServiceLocation(location));
+}
+
+function isServiceTypeShapeAllowedForRule(pattern, location, shape) {
+  return getAllowedSubtractionShapesForServiceRule(pattern, location).includes(normalizeSubtractionShape(shape));
+}
+
+function canonicalizeServiceTypeRuleState(input) {
+  let drillPattern = normalizeDrillPattern(input?.drill_pattern);
+  let serviceLocation = normalizeServiceLocation(input?.service_location);
+  if (!isServiceTypeLocationAllowedForDrillPattern(drillPattern, serviceLocation)) {
+    serviceLocation = getAllowedServiceLocationsForDrillPattern(drillPattern)[0];
+  }
+
+  if (drillPattern === "point" && serviceLocation !== "front" && serviceLocation !== "back") {
+    serviceLocation = "front";
+  }
+  if (drillPattern === "linear") {
+    serviceLocation = "thickness";
+  }
+
+  const allowedShapes = getAllowedSubtractionShapesForServiceRule(drillPattern, serviceLocation);
+  const subtractionShape = allowedShapes.includes(normalizeSubtractionShape(input?.subtraction_shape))
+    ? normalizeSubtractionShape(input?.subtraction_shape)
+    : allowedShapes[0];
+  return {
+    drill_pattern: drillPattern,
+    service_location: serviceLocation,
+    subtraction_shape: subtractionShape,
+  };
+}
+
+function applyServiceTypeEditorRuleConstraints(draft) {
+  if (!draft || normalizeBooleanFlag(draft.has_subtraction, false) === false) return draft;
+  const normalized = canonicalizeServiceTypeRuleState(draft);
+  draft.drill_pattern = normalized.drill_pattern;
+  draft.service_location = normalized.service_location;
+  if (draft.subtraction_shape !== normalized.subtraction_shape) {
+    draft.subtraction_shape = normalized.subtraction_shape;
+    draft.shape_angles = normalizeServiceTypeShapeAngleDrafts(normalized.subtraction_shape, draft.shape_angles);
+  } else {
+    draft.subtraction_shape = normalized.subtraction_shape;
+    draft.shape_angles = normalizeServiceTypeShapeAngleDrafts(normalized.subtraction_shape, draft.shape_angles);
+  }
+  return draft;
+}
+
 function normalizeServiceLocation(value) {
   const text = String(value || "").trim().toLowerCase();
   if (text === "back") return "back";
@@ -14136,15 +14196,36 @@ function openServiceTypeEditor(item = null) {
         is_system: !!item.is_system,
       }
     : buildNewServiceTypeDraft(), true);
+  applyServiceTypeEditorRuleConstraints(serviceTypeEditorDraft.value);
   serviceTypeEditorPreviewPartDraft.value = buildServiceTypePreviewPartDraft();
   serviceTypeEditorOpen.value = true;
 }
 
 function onServiceTypeSubtractionShapeChange(value) {
   if (!serviceTypeEditorDraft.value) return;
+  if (!isServiceTypeShapeAllowedForRule(
+    serviceTypeEditorDraft.value.drill_pattern,
+    serviceTypeEditorDraft.value.service_location,
+    value
+  )) return;
   const shape = normalizeSubtractionShape(value);
   serviceTypeEditorDraft.value.subtraction_shape = shape;
   serviceTypeEditorDraft.value.shape_angles = normalizeServiceTypeShapeAngleDrafts(shape, serviceTypeEditorDraft.value.shape_angles);
+}
+
+function onServiceTypeDrillPatternChange(value) {
+  if (!serviceTypeEditorDraft.value) return;
+  serviceTypeEditorDraft.value.drill_pattern = normalizeDrillPattern(value);
+  applyServiceTypeEditorRuleConstraints(serviceTypeEditorDraft.value);
+}
+
+function onServiceTypeLocationChange(value) {
+  if (!serviceTypeEditorDraft.value) return;
+  serviceTypeEditorDraft.value.service_location = normalizeServiceLocation(value);
+  serviceTypeEditorDraft.value.drill_pattern = serviceTypeEditorDraft.value.service_location === "thickness"
+    ? "linear"
+    : "point";
+  applyServiceTypeEditorRuleConstraints(serviceTypeEditorDraft.value);
 }
 
 function onServiceTypeMeasurementInput(fieldName, value) {
@@ -17106,6 +17187,7 @@ function validateConstructionPartServices() {
 async function saveServiceTypeEditor() {
   const draft = serviceTypeEditorDraft.value;
   if (!draft) return;
+  applyServiceTypeEditorRuleConstraints(draft);
   for (const fieldName of SERVICE_TYPE_MEASUREMENT_FIELDS) {
     onServiceTypeMeasurementChange(fieldName, draft[getServiceTypeMeasurementDraftTextKey(fieldName)] ?? "");
   }
@@ -17180,6 +17262,7 @@ async function saveServiceTypeEditor() {
   draft.axis_to_aligned_edge_distance = axisToAlignedEdgeDistance;
   draft.working_diameter = workingDiameter;
   draft.working_depth = workingDepth;
+  applyServiceTypeEditorRuleConstraints(draft);
   syncServiceTypeMeasurementDraftTexts(draft, true);
   const payload = normalizeServiceTypePayload(draft);
   try {
@@ -29129,22 +29212,50 @@ onBeforeUnmount(() => {
             <span class="serviceTypeEditor__label">سابترکشن</span>
             <div class="serviceTypeEditor__segmented">
               <button type="button" class="serviceTypeEditor__segBtn" :class="{ 'is-active': !serviceTypeEditorDraft.has_subtraction }" @click="serviceTypeEditorDraft.has_subtraction = false">ندارد</button>
-              <button type="button" class="serviceTypeEditor__segBtn" :class="{ 'is-active': serviceTypeEditorDraft.has_subtraction }" @click="serviceTypeEditorDraft.has_subtraction = true">دارد</button>
+              <button
+                type="button"
+                class="serviceTypeEditor__segBtn"
+                :class="{ 'is-active': serviceTypeEditorDraft.has_subtraction }"
+                @click="serviceTypeEditorDraft.has_subtraction = true; applyServiceTypeEditorRuleConstraints(serviceTypeEditorDraft)"
+              >دارد</button>
             </div>
           </div>
 
           <div v-if="serviceTypeEditorDraft.has_subtraction" class="serviceTypeEditor__drillGrid">
             <div class="serviceTypeEditor__fields">
               <div class="serviceTypeEditor__fieldBlock">
+                <span class="serviceTypeEditor__label">نوع سوراخکاری</span>
+                <div class="serviceTypeEditor__fieldHint">اول نوع سوراخکاری را انتخاب کنید. گازور لولا و پین طبقه نقطه‌ای هستند؛ شیار و فارسی‌کاری خطی هستند.</div>
+                <div class="serviceTypeEditor__segmented serviceTypeEditor__segmented--rich">
+                  <button
+                    v-for="option in DRILL_PATTERN_OPTIONS"
+                    :key="option.value"
+                    type="button"
+                    class="serviceTypeEditor__segBtn serviceTypeEditor__segBtn--rich"
+                    :class="{ 'is-active': serviceTypeEditorDraft.drill_pattern === option.value }"
+                    @click="onServiceTypeDrillPatternChange(option.value)"
+                  >
+                    <span class="serviceTypeEditor__segIcon" :class="`is-${option.icon}`"></span>
+                    <span>{{ option.label }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="serviceTypeEditor__fieldBlock">
                 <span class="serviceTypeEditor__label">محل خدمت</span>
+                <div class="serviceTypeEditor__fieldHint">برای نقطه‌ای فقط روی قطعه یا پشت قطعه مجاز است. برای خطی فقط ضخامت قطعه مجاز است.</div>
                 <div class="serviceTypeEditor__locationGrid">
                   <button
                     v-for="option in SERVICE_LOCATION_OPTIONS"
                     :key="option.value"
                     type="button"
                     class="serviceTypeEditor__locationCard"
-                    :class="{ 'is-active': serviceTypeEditorDraft.service_location === option.value }"
-                    @click="serviceTypeEditorDraft.service_location = option.value"
+                    :class="{
+                      'is-active': serviceTypeEditorDraft.service_location === option.value,
+                      'is-disabled': !isServiceTypeLocationAllowedForDrillPattern(serviceTypeEditorDraft.drill_pattern, option.value),
+                    }"
+                    :disabled="!isServiceTypeLocationAllowedForDrillPattern(serviceTypeEditorDraft.drill_pattern, option.value)"
+                    @click="onServiceTypeLocationChange(option.value)"
                   >
                     <span class="serviceTypeEditor__locationCardIconWrap" aria-hidden="true">
                       <span class="serviceTypeEditor__segIcon" :class="`is-${option.icon}`"></span>
@@ -29155,31 +29266,18 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="serviceTypeEditor__fieldBlock">
-                <span class="serviceTypeEditor__label">نوع سوراخکاری</span>
-                <div class="serviceTypeEditor__segmented serviceTypeEditor__segmented--rich">
-                  <button
-                    v-for="option in DRILL_PATTERN_OPTIONS"
-                    :key="option.value"
-                    type="button"
-                    class="serviceTypeEditor__segBtn serviceTypeEditor__segBtn--rich"
-                    :class="{ 'is-active': serviceTypeEditorDraft.drill_pattern === option.value }"
-                    @click="serviceTypeEditorDraft.drill_pattern = option.value"
-                  >
-                    <span class="serviceTypeEditor__segIcon" :class="`is-${option.icon}`"></span>
-                    <span>{{ option.label }}</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="serviceTypeEditor__fieldBlock">
                 <span class="serviceTypeEditor__label">شکل سابترکشن</span>
+                <div class="serviceTypeEditor__fieldHint">روی قطعه و پشت قطعه همیشه دایره‌ای هستند. در ضخامت قطعه هر سه شکل در دسترس‌اند.</div>
                 <div class="serviceTypeEditor__segmented">
                   <button
                     v-for="option in SUBTRACTION_SHAPE_OPTIONS"
                     :key="option.value"
                     type="button"
                     class="serviceTypeEditor__segBtn"
-                    :class="{ 'is-active': serviceTypeEditorDraft.subtraction_shape === option.value }"
+                    :class="{
+                      'is-active': serviceTypeEditorDraft.subtraction_shape === option.value,
+                    }"
+                    :disabled="!isServiceTypeShapeAllowedForRule(serviceTypeEditorDraft.drill_pattern, serviceTypeEditorDraft.service_location, option.value)"
                     @click="onServiceTypeSubtractionShapeChange(option.value)"
                   >
                     {{ option.label }}
@@ -34142,6 +34240,12 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+.serviceTypeEditor__fieldHint {
+  font-size: 11px;
+  line-height: 1.75;
+  color: #64748b;
+}
+
 .serviceTypeEditor__sectionTitle {
   font-size: 14px;
   font-weight: 700;
@@ -34208,6 +34312,13 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
 }
 
+.serviceTypeEditor__segBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  color: #94a3b8;
+  box-shadow: none;
+}
+
 .serviceTypeEditor__locationCard {
   display: grid;
   gap: 10px;
@@ -34223,6 +34334,13 @@ onBeforeUnmount(() => {
   border-color: #0f766e;
   background: #ecfeff;
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+.serviceTypeEditor__locationCard:disabled,
+.serviceTypeEditor__locationCard.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  box-shadow: none;
 }
 
 .serviceTypeEditor__locationCardIconWrap {
