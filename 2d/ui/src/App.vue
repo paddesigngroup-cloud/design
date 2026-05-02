@@ -10020,6 +10020,14 @@ const serviceTypeEditorPreviewState = computed(() => {
 
   function buildShapeAtAnchor(anchor, boundRect, sizePx, linearAxis = "vertical", renderMode = "default") {
     if (!hasVisibleSubtraction) return null;
+    if (safeShape === "circle" && renderMode === "allowOverflow") {
+      return {
+        type: "circle",
+        cx: anchor.x,
+        cy: anchor.y,
+        r: Math.max(2, sizePx / 2),
+      };
+    }
     const safeSize = Math.max(4, Math.min(sizePx, Math.min(boundRect.width, boundRect.height) - 4));
     if (safeShape === "circle" && renderMode === "line") {
       const lineStrokeWidth = Math.max(2, Math.min(4, (Math.min(boundRect.width, boundRect.height) * 0.22)));
@@ -10151,6 +10159,31 @@ const serviceTypeEditorPreviewState = computed(() => {
     };
   }
 
+  function buildBottomCornerExtrudeProjection(anchorX, anchorBottomY, rect, depthPx, thicknessPx = 10) {
+    const projectedWidth = Math.max(2, Math.min(thicknessPx, rect.width - 2));
+    if (depthPx <= 0) {
+      return {
+        type: "line",
+        x1: anchorX - (projectedWidth * 0.5),
+        y1: rect.y + rect.height,
+        x2: anchorX + (projectedWidth * 0.5),
+        y2: rect.y + rect.height,
+        strokeWidth: 2,
+        roundCaps: true,
+      };
+    }
+    const projectedDepth = Math.max(8, Math.min(depthPx, rect.height - 2));
+    const bottomY = Math.max(rect.y + projectedDepth + 2, Math.min(rect.y + rect.height, anchorBottomY));
+    return {
+      type: "rect",
+      x: anchorX - (projectedWidth * 0.5),
+      y: bottomY - projectedDepth,
+      width: projectedWidth,
+      height: projectedDepth,
+      rx: 2,
+    };
+  }
+
   const topRect = buildPreviewRect(partWidthMm, partLengthMm);
   const bottomRect = buildPreviewRect(partWidthMm, partLengthMm);
   const sideRect = buildPreviewRect(partWidthMm, partThicknessMm);
@@ -10169,15 +10202,23 @@ const serviceTypeEditorPreviewState = computed(() => {
   const sideThicknessAnchorY = sideRect.y + sideRect.height - (thicknessRatio * sideRect.height);
   const shapeTopSize = Math.min(topRect.width - 4, topRect.height - 4, workingDiameter * topRect.scale);
   const shapeBottomSize = Math.min(bottomRect.width - 4, bottomRect.height - 4, workingDiameter * bottomRect.scale);
-  const shapeSideSize = Math.min(sideRect.width - 4, sideRect.height - 4, workingDiameter * sideRect.scale);
-  const bottomTraceDepth = Math.min(bottomRect.width - 2, workingDepth * bottomRect.scale);
+  const shapeSideSize = safeShape === "circle"
+    ? Math.max(4, workingDiameter * sideRect.scale)
+    : Math.min(sideRect.width - 4, sideRect.height - 4, workingDiameter * sideRect.scale);
+  const bottomTraceDepth = Math.min(bottomRect.height - 2, workingDepth * bottomRect.scale);
   const sideTraceWidth = Math.min(sideRect.width - 2, Math.max(2, workingDiameter * sideRect.scale));
   const sideTraceDepth = Math.min(sideRect.height - 2, workingDepth * sideRect.scale);
-  const topTraceDepth = Math.min(topRect.width - 2, workingDepth * topRect.scale);
+  const topTraceDepth = Math.min(topRect.height - 2, workingDepth * topRect.scale);
+  const topThicknessProjectionWidth = Math.min(topRect.width - 2, Math.max(2, workingDiameter * topRect.scale));
+  const bottomThicknessProjectionWidth = Math.min(bottomRect.width - 2, Math.max(2, workingDiameter * bottomRect.scale));
   const sideFrontBackAnchorY = safeLocation === "back"
     ? sideRect.y + sideRect.height
     : sideRect.y;
   const sideFrontBackAnchorX = sideAnchorX;
+  const topThicknessAnchorX = topRect.x + (widthRatio * topRect.width);
+  const bottomThicknessAnchorX = bottomRect.x + (widthRatio * bottomRect.width);
+  const topThicknessAnchorBottomY = topRect.y + topRect.height;
+  const bottomThicknessAnchorBottomY = bottomRect.y + bottomRect.height;
 
   const topPrimary = safeLocation === "thickness"
     ? null
@@ -10187,14 +10228,20 @@ const serviceTypeEditorPreviewState = computed(() => {
     : buildShapeAtAnchor(bottomAnchor, bottomRect, shapeBottomSize, "vertical");
   const bottomTrace = !hasVisibleSubtraction || safeLocation !== "thickness"
     ? null
-    : buildHorizontalTrace(bottomAnchor.y, bottomRect, bottomTraceDepth, shapeBottomSize, true);
+    : buildBottomCornerExtrudeProjection(
+      bottomThicknessAnchorX,
+      bottomThicknessAnchorBottomY,
+      bottomRect,
+      bottomTraceDepth,
+      bottomThicknessProjectionWidth
+    );
   const sidePrimary = safeLocation === "thickness"
     ? buildShapeAtAnchor(
       { x: sideAnchorX, y: sideThicknessAnchorY },
       sideRect,
       shapeSideSize,
       "horizontal",
-      safeShape === "circle" ? "line" : "default"
+      safeShape === "circle" ? "allowOverflow" : "default"
     )
     : null;
   const sideTrace = !hasVisibleSubtraction || safeLocation === "thickness"
@@ -10209,7 +10256,13 @@ const serviceTypeEditorPreviewState = computed(() => {
     );
   const topTrace = !hasVisibleSubtraction || safeLocation !== "thickness"
     ? null
-    : buildHorizontalTrace(topAnchor.y, topRect, topTraceDepth, shapeTopSize, true);
+    : buildBottomCornerExtrudeProjection(
+      topThicknessAnchorX,
+      topThicknessAnchorBottomY,
+      topRect,
+      topTraceDepth,
+      topThicknessProjectionWidth
+    );
   return {
     viewBox,
     hasVisibleSubtraction,
