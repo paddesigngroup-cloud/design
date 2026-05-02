@@ -10012,6 +10012,7 @@ const serviceTypeEditorPreviewState = computed(() => {
       y: frame.y + ((frame.height - drawHeight) / 2),
       width: drawWidth,
       height: drawHeight,
+      scale,
     };
   }
 
@@ -10021,35 +10022,38 @@ const serviceTypeEditorPreviewState = computed(() => {
     return vertices.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
   }
 
-  function buildShapeAtAnchor(anchor, boundRect, sizePx, linearAxis = "vertical") {
+  function buildShapeAtAnchor(anchor, boundRect, sizePx, linearAxis = "vertical", renderMode = "default") {
     if (!hasVisibleSubtraction) return null;
-    const safeSize = Math.max(10, sizePx);
-    if (safeShape === "circle" && safePattern === "point") {
+    const safeSize = Math.max(4, Math.min(sizePx, Math.min(boundRect.width, boundRect.height) - 4));
+    if (safeShape === "circle" && renderMode === "line") {
+      const lineStrokeWidth = Math.max(2, Math.min(4, (Math.min(boundRect.width, boundRect.height) * 0.22)));
+      if (linearAxis === "horizontal") {
+        return {
+          type: "line",
+          x1: Math.max(boundRect.x + 2, anchor.x - (safeSize / 2)),
+          y1: anchor.y,
+          x2: Math.min(boundRect.x + boundRect.width - 2, anchor.x + (safeSize / 2)),
+          y2: anchor.y,
+          strokeWidth: lineStrokeWidth,
+          roundCaps: true,
+        };
+      }
+      return {
+        type: "line",
+        x1: anchor.x,
+        y1: Math.max(boundRect.y + 2, anchor.y - (safeSize / 2)),
+        x2: anchor.x,
+        y2: Math.min(boundRect.y + boundRect.height - 2, anchor.y + (safeSize / 2)),
+        strokeWidth: lineStrokeWidth,
+        roundCaps: true,
+      };
+    }
+    if (safeShape === "circle") {
       return {
         type: "circle",
         cx: anchor.x,
         cy: anchor.y,
-        r: Math.max(5, safeSize / 2),
-      };
-    }
-    if (safeShape === "circle" && safePattern === "linear") {
-      if (linearAxis === "horizontal") {
-        return {
-          type: "rect",
-          x: Math.max(boundRect.x + 2, Math.min(boundRect.x + boundRect.width - Math.max(18, safeSize), anchor.x - (Math.max(18, safeSize) / 2))),
-          y: Math.max(boundRect.y + 2, Math.min(boundRect.y + boundRect.height - 12, anchor.y - 6)),
-          width: Math.max(18, safeSize),
-          height: 12,
-          rx: 6,
-        };
-      }
-      return {
-        type: "rect",
-        x: Math.max(boundRect.x + 2, Math.min(boundRect.x + boundRect.width - 12, anchor.x - 6)),
-        y: Math.max(boundRect.y + 2, Math.min(boundRect.y + boundRect.height - Math.max(18, safeSize), anchor.y - (Math.max(18, safeSize) / 2))),
-        width: 12,
-        height: Math.max(18, safeSize),
-        rx: 6,
+        r: Math.max(2, safeSize / 2),
       };
     }
     const frameSize = Math.max(16, Math.min(safeSize, Math.min(boundRect.width, boundRect.height) - 4));
@@ -10065,7 +10069,8 @@ const serviceTypeEditorPreviewState = computed(() => {
     };
   }
 
-  function buildVerticalTrace(anchorX, rect, sizePx, depthPx, fromBottom = false) {
+  function buildVerticalTrace(anchorX, rect, diameterPx, depthPx, fromBottom = false) {
+    const strokeWidth = Math.max(2, Math.min(diameterPx, rect.width - 2));
     if (depthPx <= 0) {
       return {
         type: "line",
@@ -10075,37 +10080,52 @@ const serviceTypeEditorPreviewState = computed(() => {
         y2: fromBottom
           ? rect.y + rect.height - Math.max(6, Math.min(12, rect.height * 0.4))
           : rect.y + Math.max(6, Math.min(12, rect.height * 0.4)),
+        strokeWidth,
+        roundCaps: true,
       };
     }
+    const startY = fromBottom ? rect.y + rect.height : rect.y;
+    const endY = fromBottom
+      ? Math.max(rect.y + 2, rect.y + rect.height - depthPx)
+      : Math.min(rect.y + rect.height - 2, rect.y + depthPx);
     return {
-      type: "rect",
-      x: Math.max(rect.x + 2, Math.min(rect.x + rect.width - Math.max(10, sizePx), anchorX - (Math.max(10, sizePx) / 2))),
-      y: fromBottom
-        ? Math.max(rect.y + 2, rect.y + rect.height - Math.max(8, Math.min(rect.height - 2, depthPx)))
-        : rect.y,
-      width: Math.max(10, sizePx),
-      height: Math.max(8, Math.min(rect.height - 2, depthPx)),
-      rx: 4,
+      type: "line",
+      x1: anchorX,
+      y1: startY,
+      x2: anchorX,
+      y2: endY,
+      strokeWidth,
+      roundCaps: true,
     };
   }
 
-  function buildHorizontalTrace(anchorY, rect, depthPx, thicknessPx = 10) {
+  function buildHorizontalTrace(anchorY, rect, depthPx, thicknessPx = 10, fromLeft = false) {
+    const strokeWidth = Math.max(2, Math.min(thicknessPx, rect.height - 2));
     if (depthPx <= 0) {
       return {
         type: "line",
-        x1: rect.x + rect.width,
+        x1: fromLeft ? rect.x : rect.x + rect.width,
         y1: anchorY,
-        x2: rect.x + rect.width - Math.max(8, Math.min(16, rect.width * 0.2)),
+        x2: fromLeft
+          ? rect.x + Math.max(8, Math.min(16, rect.width * 0.2))
+          : rect.x + rect.width - Math.max(8, Math.min(16, rect.width * 0.2)),
         y2: anchorY,
+        strokeWidth,
+        roundCaps: true,
       };
     }
+    const startX = fromLeft ? rect.x : rect.x + rect.width;
+    const endX = fromLeft
+      ? Math.min(rect.x + rect.width - 2, rect.x + depthPx)
+      : Math.max(rect.x + 2, rect.x + rect.width - depthPx);
     return {
-      type: "rect",
-      x: Math.max(rect.x + 2, rect.x + rect.width - Math.max(10, depthPx)),
-      y: Math.max(rect.y + 2, Math.min(rect.y + rect.height - thicknessPx - 2, anchorY - (thicknessPx / 2))),
-      width: Math.max(10, Math.min(rect.width - 2, depthPx)),
-      height: thicknessPx,
-      rx: 4,
+      type: "line",
+      x1: startX,
+      y1: anchorY,
+      x2: endX,
+      y2: anchorY,
+      strokeWidth,
+      roundCaps: true,
     };
   }
 
@@ -10116,22 +10136,25 @@ const serviceTypeEditorPreviewState = computed(() => {
   const lengthRatio = clampPreviewRatio(axisOpposite, partLengthMm);
   const thicknessRatio = clampPreviewRatio(axisOpposite, partThicknessMm);
   const topAnchor = {
-    x: topRect.x + topRect.width - (widthRatio * topRect.width),
-    y: topRect.y + (lengthRatio * topRect.height),
+    x: topRect.x + (widthRatio * topRect.width),
+    y: topRect.y + topRect.height - (lengthRatio * topRect.height),
   };
   const bottomAnchor = {
-    x: bottomRect.x + (widthRatio * bottomRect.width),
-    y: bottomRect.y + bottomRect.height - (lengthRatio * bottomRect.height),
+    x: bottomRect.x + topAnchor.x - topRect.x,
+    y: bottomRect.y + topAnchor.y - topRect.y,
   };
-  const sideAnchorX = sideRect.x + sideRect.width - (widthRatio * sideRect.width);
-  const sideThicknessAnchorY = sideRect.y + (thicknessRatio * sideRect.height);
-  const shapeTopSize = Math.min(topRect.width, topRect.height) * Math.min(0.56, workingDiameter / Math.max(partWidthMm, partLengthMm, 1));
-  const shapeBottomSize = Math.min(bottomRect.width, bottomRect.height) * Math.min(0.56, workingDiameter / Math.max(partWidthMm, partLengthMm, 1));
-  const shapeSideSize = Math.min(sideRect.width, sideRect.height) * Math.min(0.72, workingDiameter / Math.max(partWidthMm, partThicknessMm, 1));
-  const bottomTraceDepth = Math.min(bottomRect.width - 2, (workingDepth / Math.max(partWidthMm, 1)) * bottomRect.width);
-  const sideTraceWidth = Math.max(8, (workingDiameter / Math.max(partWidthMm, 1)) * sideRect.width);
-  const sideTraceDepth = Math.min(sideRect.height - 2, (workingDepth / Math.max(partThicknessMm, 1)) * sideRect.height);
-  const topTraceDepth = Math.min(topRect.width - 2, (workingDepth / Math.max(partWidthMm, 1)) * topRect.width);
+  const sideAnchorX = sideRect.x + (widthRatio * sideRect.width);
+  const sideThicknessAnchorY = sideRect.y + sideRect.height - (thicknessRatio * sideRect.height);
+  const shapeTopSize = Math.min(topRect.width - 4, topRect.height - 4, workingDiameter * topRect.scale);
+  const shapeBottomSize = Math.min(bottomRect.width - 4, bottomRect.height - 4, workingDiameter * bottomRect.scale);
+  const shapeSideSize = Math.min(sideRect.width - 4, sideRect.height - 4, workingDiameter * sideRect.scale);
+  const bottomTraceDepth = Math.min(bottomRect.width - 2, workingDepth * bottomRect.scale);
+  const sideTraceWidth = Math.min(sideRect.width - 2, Math.max(2, workingDiameter * sideRect.scale));
+  const sideTraceDepth = Math.min(sideRect.height - 2, workingDepth * sideRect.scale);
+  const topTraceDepth = Math.min(topRect.width - 2, workingDepth * topRect.scale);
+  const sideFrontBackAnchorY = safeLocation === "back"
+    ? sideRect.y + Math.max(2, sideTraceWidth * 0.5)
+    : sideRect.y + sideRect.height - Math.max(2, sideTraceWidth * 0.5);
 
   const topPrimary = safeLocation === "thickness"
     ? null
@@ -10141,21 +10164,22 @@ const serviceTypeEditorPreviewState = computed(() => {
     : buildShapeAtAnchor(bottomAnchor, bottomRect, shapeBottomSize, safePattern === "linear" ? "horizontal" : "vertical");
   const bottomTrace = !hasVisibleSubtraction || safeLocation !== "thickness"
     ? null
-    : buildHorizontalTrace(bottomAnchor.y, bottomRect, bottomTraceDepth, Math.max(10, Math.min(14, bottomRect.height * 0.12)));
+    : buildHorizontalTrace(bottomAnchor.y, bottomRect, bottomTraceDepth, shapeBottomSize, true);
   const sidePrimary = safeLocation === "thickness"
     ? buildShapeAtAnchor(
       { x: sideAnchorX, y: sideThicknessAnchorY },
       sideRect,
       shapeSideSize,
-      safePattern === "linear" ? "horizontal" : "vertical"
+      safePattern === "linear" ? "horizontal" : "vertical",
+      safeShape === "circle" ? "line" : "default"
     )
     : null;
   const sideTrace = !hasVisibleSubtraction || safeLocation === "thickness"
     ? null
-    : buildVerticalTrace(sideAnchorX, sideRect, sideTraceWidth, sideTraceDepth);
+    : buildHorizontalTrace(sideFrontBackAnchorY, sideRect, sideTraceDepth, sideTraceWidth, true);
   const topTrace = !hasVisibleSubtraction || safeLocation !== "thickness"
     ? null
-    : buildHorizontalTrace(topAnchor.y, topRect, topTraceDepth, Math.max(10, Math.min(14, topRect.height * 0.12)));
+    : buildHorizontalTrace(topAnchor.y, topRect, topTraceDepth, shapeTopSize, true);
   return {
     viewBox,
     hasVisibleSubtraction,
@@ -29441,6 +29465,16 @@ onBeforeUnmount(() => {
                           :r="view.primaryShape.r"
                           class="serviceTypeEditor__previewShape"
                         />
+                        <line
+                          v-else-if="view.primaryShape.type === 'line'"
+                          :x1="view.primaryShape.x1"
+                          :y1="view.primaryShape.y1"
+                          :x2="view.primaryShape.x2"
+                          :y2="view.primaryShape.y2"
+                          :stroke-width="view.primaryShape.strokeWidth || null"
+                          :stroke-linecap="view.primaryShape.roundCaps ? 'round' : 'square'"
+                          class="serviceTypeEditor__previewShapeLine"
+                        />
                         <rect
                           v-else-if="view.primaryShape.type === 'rect'"
                           :x="view.primaryShape.x"
@@ -29463,6 +29497,8 @@ onBeforeUnmount(() => {
                           :y1="view.traceShape.y1"
                           :x2="view.traceShape.x2"
                           :y2="view.traceShape.y2"
+                          :stroke-width="view.traceShape.strokeWidth || null"
+                          :stroke-linecap="view.traceShape.roundCaps ? 'round' : 'square'"
                           class="serviceTypeEditor__previewTraceLine"
                         />
                         <rect
@@ -34558,6 +34594,12 @@ onBeforeUnmount(() => {
   stroke: #0f172a;
   stroke-width: 2.2;
   stroke-linejoin: round;
+}
+
+.serviceTypeEditor__previewShapeLine {
+  fill: none;
+  stroke: #0f172a;
+  stroke-width: 2.2;
 }
 
 .serviceTypeEditor__previewTraceLine {
