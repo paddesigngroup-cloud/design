@@ -912,6 +912,7 @@ const partServiceEditorOpen = ref(false);
 const partServiceEditorDraft = ref(null);
 const serviceTypeEditorOpen = ref(false);
 const serviceTypeEditorDraft = ref(null);
+const serviceTypeEditorPreviewPartDraft = ref(null);
 const doorPartGroupParamGroupsOpen = ref(false);
 const doorPartGroupDefaultsEditorOpen = ref(false);
 const doorPartGroupDefaultsEditorRowId = ref(null);
@@ -8887,6 +8888,12 @@ const SERVICE_TYPE_MEASUREMENT_FIELDS = [
   "working_diameter",
   "working_depth",
 ];
+const SERVICE_TYPE_PREVIEW_DIMENSION_FIELDS = ["length", "width", "thickness"];
+const DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM = Object.freeze({
+  length: 100,
+  width: 100,
+  thickness: 16,
+});
 
 function normalizeServiceTypeMeasurement(value) {
   if (value === "" || value == null) return 0;
@@ -8929,6 +8936,28 @@ function syncServiceTypeMeasurementDraftTexts(draft, force = false) {
 function getServiceTypeMeasurementDisplayText(valueMm) {
   const text = formatServiceTypeMeasurementForDisplay(valueMm);
   return text || "0";
+}
+
+function buildServiceTypePreviewPartDraft() {
+  return syncServiceTypePreviewPartDraftTexts({
+    length: DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM.length,
+    width: DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM.width,
+    thickness: DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM.thickness,
+  }, true);
+}
+
+function getServiceTypePreviewPartDraftTextKey(fieldName) {
+  return `_preview_part_${String(fieldName)}_display_text`;
+}
+
+function syncServiceTypePreviewPartDraftTexts(draft, force = false) {
+  if (!draft || typeof draft !== "object") return draft;
+  for (const fieldName of SERVICE_TYPE_PREVIEW_DIMENSION_FIELDS) {
+    const textKey = getServiceTypePreviewPartDraftTextKey(fieldName);
+    if (!force && String(draft[textKey] ?? "").trim()) continue;
+    draft[textKey] = formatServiceTypeMeasurementForDisplay(draft[fieldName]);
+  }
+  return draft;
 }
 
 function normalizePartModelPayload(item) {
@@ -9942,158 +9971,225 @@ const partFormulaModelEditorPreviewState = computed(() => {
 
 const serviceTypeEditorPreviewState = computed(() => {
   const draft = serviceTypeEditorDraft.value;
-  const viewBox = "0 0 360 240";
-  const frameRect = { x: 34, y: 22, width: 292, height: 182 };
-  const previewPartWidthMm = 100;
-  const previewPartHeightMm = 100;
-  const previewPartThicknessMm = 16;
-  const previewFaceAspect = previewPartWidthMm / previewPartHeightMm;
-  const faceWidth = Math.min(frameRect.width - 24, (frameRect.height - 24) * previewFaceAspect);
-  const faceHeight = faceWidth / previewFaceAspect;
-  const faceRect = {
-    x: frameRect.x + ((frameRect.width - faceWidth) / 2),
-    y: frameRect.y + ((frameRect.height - faceHeight) / 2),
-    width: faceWidth,
-    height: faceHeight,
-  };
+  const previewPartDraft = serviceTypeEditorPreviewPartDraft.value || buildServiceTypePreviewPartDraft();
+  const viewBox = "0 0 220 168";
   const safeLocation = draft ? normalizeServiceLocation(draft.service_location) : "front";
   const safePattern = draft ? normalizeDrillPattern(draft.drill_pattern) : "point";
   const safeShape = draft ? normalizeSubtractionShape(draft.subtraction_shape) : "circle";
-  const selectedProjection = safeLocation === "thickness" ? "thickness" : "face";
   const workingDepth = Math.max(0, Number(draft?.working_depth) || 0);
   const workingDiameter = Math.max(0, Number(draft?.working_diameter) || 0);
   const hasVisibleSubtraction = workingDiameter > 0;
   const axisAligned = Math.max(0, Number(draft?.axis_to_aligned_edge_distance) || 0);
   const axisOpposite = Math.max(0, Number(draft?.axis_to_opposite_edge_distance) || 0);
-  const scaleAxisX = Math.min(faceRect.width, (axisAligned / previewPartWidthMm) * faceRect.width);
-  const scaleAxisY = Math.min(faceRect.height, (axisOpposite / previewPartHeightMm) * faceRect.height);
-  const scaleDiameterFace = Math.min(faceRect.height, (workingDiameter / previewPartHeightMm) * faceRect.height);
-  const scaleDiameterThickness = Math.min(thicknessRectHeightSafe(), (workingDiameter / previewPartHeightMm) * faceRect.height);
-  const scaleDepth = Math.min(1, workingDepth / previewPartThicknessMm);
+  const partLengthMm = Math.max(1, Number(previewPartDraft?.length) || DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM.length);
+  const partWidthMm = Math.max(1, Number(previewPartDraft?.width) || DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM.width);
+  const partThicknessMm = Math.max(1, Number(previewPartDraft?.thickness) || DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM.thickness);
   const geometry = normalizePartModelPreviewGeometry(
     Math.max(3, getServiceTypeShapeSideCount(safeShape) || 4),
     safeShape === "circle" ? null : normalizeServiceTypeShapeAngles(safeShape, draft?.shape_angles)
   );
-  function thicknessRectHeightSafe() {
-    return Math.max(12, (previewPartThicknessMm / previewPartHeightMm) * faceRect.height);
+  const previewSizeLabel = [
+    formatServiceTypeMeasurementForDisplay(partLengthMm),
+    formatServiceTypeMeasurementForDisplay(partWidthMm),
+    formatServiceTypeMeasurementForDisplay(partThicknessMm),
+  ].join(" × ");
+  const previewSizeUnitLabel = getCurrentParamLengthUnitLabel();
+
+  function clampPreviewRatio(valueMm, totalMm) {
+    if (totalMm <= 0) return 0;
+    return Math.max(0, Math.min(1, valueMm / totalMm));
   }
-  const anchorX = Math.max(
-    faceRect.x,
-    faceRect.x + faceRect.width - scaleAxisX
-  );
-  const anchorY = Math.min(
-    faceRect.y + faceRect.height,
-    faceRect.y + scaleAxisY
-  );
-  const frontBackAnchor = { x: anchorX, y: anchorY };
-  const thicknessRectHeight = thicknessRectHeightSafe();
-  const thicknessRectWidth = faceRect.width;
-  const thicknessRectX = faceRect.x;
-  const thicknessRectY = frameRect.y + ((frameRect.height - thicknessRectHeight) / 2);
-  const thicknessAnchor = {
-    x: thicknessRectX + thicknessRectWidth,
-    y: thicknessRectY,
-  };
-  const thicknessRect = {
-    x: thicknessRectX,
-    y: thicknessRectY,
-    width: thicknessRectWidth,
-    height: thicknessRectHeight,
-  };
-  const faceShapeFrame = {
-    x: Math.max(faceRect.x + 4, Math.min(faceRect.x + faceRect.width - 64, frontBackAnchor.x - 28)),
-    y: Math.max(faceRect.y + 4, Math.min(faceRect.y + faceRect.height - 64, frontBackAnchor.y - 28)),
-    width: 68,
-    height: 68,
-  };
-  const thicknessShapeFrame = {
-    x: Math.max(thicknessRect.x + thicknessRect.width - 44, Math.min(thicknessRect.x + thicknessRect.width - 44, thicknessAnchor.x - 22)),
-    y: Math.max(thicknessRect.y - 22, Math.min(thicknessRect.y + thicknessRect.height - 22, thicknessAnchor.y - 22)),
-    width: 44,
-    height: 44,
-  };
-  const facePolygonVertices = safeShape === "circle" ? [] : scalePartModelVerticesIntoFrame(geometry.vertices, faceShapeFrame, 6);
-  const thicknessPolygonVertices = safeShape === "circle" ? [] : scalePartModelVerticesIntoFrame(geometry.vertices, thicknessShapeFrame, 4);
-  const facePolygonPoints = facePolygonVertices.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
-  const thicknessPolygonPoints = thicknessPolygonVertices.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
-  const faceTraceLine = {
-    x1: Math.max(faceRect.x + 4, frontBackAnchor.x - 18),
-    y1: frontBackAnchor.y,
-    x2: Math.min(faceRect.x + faceRect.width - 4, frontBackAnchor.x + 18),
-    y2: frontBackAnchor.y,
-  };
-  const thicknessTraceLine = {
-    x1: Math.max(thicknessRect.x, thicknessAnchor.x - 30),
-    y1: thicknessAnchor.y,
-    x2: Math.min(thicknessRect.x + thicknessRect.width, thicknessAnchor.x),
-    y2: thicknessAnchor.y,
-  };
-  const faceTraceRectHeight = 18 + (scaleDepth * 56);
-  const faceTraceRect = {
-    x: Math.max(faceRect.x + 4, Math.min(faceRect.x + faceRect.width - 16, frontBackAnchor.x - 7)),
-    y: Math.max(faceRect.y + 4, Math.min(faceRect.y + faceRect.height - faceTraceRectHeight - 4, frontBackAnchor.y - (faceTraceRectHeight / 2))),
-    width: 14,
-    height: faceTraceRectHeight,
-  };
-  const faceCircleCenter = {
-    x: frontBackAnchor.x,
-    y: frontBackAnchor.y,
-  };
-  const thicknessCircleCenter = {
-    x: thicknessAnchor.x,
-    y: thicknessAnchor.y,
-  };
-  const faceLinearRect = {
-    x: Math.max(faceRect.x + 4, Math.min(faceRect.x + faceRect.width - 24, frontBackAnchor.x - 8)),
-    y: Math.max(faceRect.y + 4, Math.min(faceRect.y + faceRect.height - 48, frontBackAnchor.y - 22)),
-    width: 16,
-    height: Math.max(12, scaleDiameterFace),
-  };
-  const thicknessLinearRect = {
-    x: Math.max(thicknessRect.x + thicknessRect.width - 18, Math.min(thicknessRect.x + thicknessRect.width - 10, thicknessAnchor.x - 5)),
-    y: Math.max(frameRect.y + 10, Math.min(frameRect.y + frameRect.height - 54, thicknessAnchor.y - 22)),
-    width: 10,
-    height: Math.max(12, Math.min(thicknessRect.height + 14, scaleDiameterThickness + 8)),
-  };
-  const projectionModes = hasVisibleSubtraction
-    ? {
-        front: selectedProjection === "face"
-          ? "face-shape"
-          : (workingDepth > 0 ? "face-trace-rect" : "face-trace-line"),
-        back: selectedProjection === "face"
-          ? "face-shape"
-          : (workingDepth > 0 ? "face-trace-rect" : "face-trace-line"),
-        thickness: selectedProjection === "thickness" ? "thickness-shape" : "thickness-trace-line",
-      }
-    : {
-        front: null,
-        back: null,
-        thickness: null,
+
+  function buildPreviewRect(widthMm, heightMm) {
+    const frame = { x: 18, y: 18, width: 184, height: 116 };
+    const safeWidth = Math.max(1, widthMm);
+    const safeHeight = Math.max(1, heightMm);
+    const scale = Math.min((frame.width - 20) / safeWidth, (frame.height - 20) / safeHeight);
+    const drawWidth = safeWidth * scale;
+    const drawHeight = safeHeight * scale;
+    return {
+      x: frame.x + ((frame.width - drawWidth) / 2),
+      y: frame.y + ((frame.height - drawHeight) / 2),
+      width: drawWidth,
+      height: drawHeight,
+    };
+  }
+
+  function buildPolygonPoints(frame, padding = 6) {
+    if (safeShape === "circle") return "";
+    const vertices = scalePartModelVerticesIntoFrame(geometry.vertices, frame, padding);
+    return vertices.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
+  }
+
+  function buildShapeAtAnchor(anchor, boundRect, sizePx, linearAxis = "vertical") {
+    if (!hasVisibleSubtraction) return null;
+    const safeSize = Math.max(10, sizePx);
+    if (safeShape === "circle" && safePattern === "point") {
+      return {
+        type: "circle",
+        cx: anchor.x,
+        cy: anchor.y,
+        r: Math.max(5, safeSize / 2),
       };
+    }
+    if (safeShape === "circle" && safePattern === "linear") {
+      if (linearAxis === "horizontal") {
+        return {
+          type: "rect",
+          x: Math.max(boundRect.x + 2, Math.min(boundRect.x + boundRect.width - Math.max(18, safeSize), anchor.x - (Math.max(18, safeSize) / 2))),
+          y: Math.max(boundRect.y + 2, Math.min(boundRect.y + boundRect.height - 12, anchor.y - 6)),
+          width: Math.max(18, safeSize),
+          height: 12,
+          rx: 6,
+        };
+      }
+      return {
+        type: "rect",
+        x: Math.max(boundRect.x + 2, Math.min(boundRect.x + boundRect.width - 12, anchor.x - 6)),
+        y: Math.max(boundRect.y + 2, Math.min(boundRect.y + boundRect.height - Math.max(18, safeSize), anchor.y - (Math.max(18, safeSize) / 2))),
+        width: 12,
+        height: Math.max(18, safeSize),
+        rx: 6,
+      };
+    }
+    const frameSize = Math.max(16, Math.min(safeSize, Math.min(boundRect.width, boundRect.height) - 4));
+    const frame = {
+      x: Math.max(boundRect.x + 2, Math.min(boundRect.x + boundRect.width - frameSize - 2, anchor.x - (frameSize / 2))),
+      y: Math.max(boundRect.y + 2, Math.min(boundRect.y + boundRect.height - frameSize - 2, anchor.y - (frameSize / 2))),
+      width: frameSize,
+      height: frameSize,
+    };
+    return {
+      type: "polygon",
+      points: buildPolygonPoints(frame, 4),
+    };
+  }
+
+  function buildVerticalTrace(anchorX, rect, sizePx, depthPx, fromBottom = false) {
+    if (depthPx <= 0) {
+      return {
+        type: "line",
+        x1: anchorX,
+        y1: fromBottom ? rect.y + rect.height : rect.y,
+        x2: anchorX,
+        y2: fromBottom
+          ? rect.y + rect.height - Math.max(6, Math.min(12, rect.height * 0.4))
+          : rect.y + Math.max(6, Math.min(12, rect.height * 0.4)),
+      };
+    }
+    return {
+      type: "rect",
+      x: Math.max(rect.x + 2, Math.min(rect.x + rect.width - Math.max(10, sizePx), anchorX - (Math.max(10, sizePx) / 2))),
+      y: fromBottom
+        ? Math.max(rect.y + 2, rect.y + rect.height - Math.max(8, Math.min(rect.height - 2, depthPx)))
+        : rect.y,
+      width: Math.max(10, sizePx),
+      height: Math.max(8, Math.min(rect.height - 2, depthPx)),
+      rx: 4,
+    };
+  }
+
+  function buildHorizontalTrace(anchorY, rect, depthPx, thicknessPx = 10) {
+    if (depthPx <= 0) {
+      return {
+        type: "line",
+        x1: rect.x + rect.width,
+        y1: anchorY,
+        x2: rect.x + rect.width - Math.max(8, Math.min(16, rect.width * 0.2)),
+        y2: anchorY,
+      };
+    }
+    return {
+      type: "rect",
+      x: Math.max(rect.x + 2, rect.x + rect.width - Math.max(10, depthPx)),
+      y: Math.max(rect.y + 2, Math.min(rect.y + rect.height - thicknessPx - 2, anchorY - (thicknessPx / 2))),
+      width: Math.max(10, Math.min(rect.width - 2, depthPx)),
+      height: thicknessPx,
+      rx: 4,
+    };
+  }
+
+  const topRect = buildPreviewRect(partWidthMm, partLengthMm);
+  const bottomRect = buildPreviewRect(partWidthMm, partLengthMm);
+  const sideRect = buildPreviewRect(partWidthMm, partThicknessMm);
+  const widthRatio = clampPreviewRatio(axisAligned, partWidthMm);
+  const lengthRatio = clampPreviewRatio(axisOpposite, partLengthMm);
+  const thicknessRatio = clampPreviewRatio(axisOpposite, partThicknessMm);
+  const topAnchor = {
+    x: topRect.x + topRect.width - (widthRatio * topRect.width),
+    y: topRect.y + (lengthRatio * topRect.height),
+  };
+  const bottomAnchor = {
+    x: bottomRect.x + (widthRatio * bottomRect.width),
+    y: bottomRect.y + bottomRect.height - (lengthRatio * bottomRect.height),
+  };
+  const sideAnchorX = sideRect.x + sideRect.width - (widthRatio * sideRect.width);
+  const sideThicknessAnchorY = sideRect.y + (thicknessRatio * sideRect.height);
+  const shapeTopSize = Math.min(topRect.width, topRect.height) * Math.min(0.56, workingDiameter / Math.max(partWidthMm, partLengthMm, 1));
+  const shapeBottomSize = Math.min(bottomRect.width, bottomRect.height) * Math.min(0.56, workingDiameter / Math.max(partWidthMm, partLengthMm, 1));
+  const shapeSideSize = Math.min(sideRect.width, sideRect.height) * Math.min(0.72, workingDiameter / Math.max(partWidthMm, partThicknessMm, 1));
+  const bottomTraceDepth = Math.min(bottomRect.width - 2, (workingDepth / Math.max(partWidthMm, 1)) * bottomRect.width);
+  const sideTraceWidth = Math.max(8, (workingDiameter / Math.max(partWidthMm, 1)) * sideRect.width);
+  const sideTraceDepth = Math.min(sideRect.height - 2, (workingDepth / Math.max(partThicknessMm, 1)) * sideRect.height);
+  const topTraceDepth = Math.min(topRect.width - 2, (workingDepth / Math.max(partWidthMm, 1)) * topRect.width);
+
+  const topPrimary = safeLocation === "thickness"
+    ? null
+    : buildShapeAtAnchor(topAnchor, topRect, shapeTopSize, safePattern === "linear" ? "horizontal" : "vertical");
+  const bottomPrimary = safeLocation === "thickness"
+    ? null
+    : buildShapeAtAnchor(bottomAnchor, bottomRect, shapeBottomSize, safePattern === "linear" ? "horizontal" : "vertical");
+  const bottomTrace = !hasVisibleSubtraction || safeLocation !== "thickness"
+    ? null
+    : buildHorizontalTrace(bottomAnchor.y, bottomRect, bottomTraceDepth, Math.max(10, Math.min(14, bottomRect.height * 0.12)));
+  const sidePrimary = safeLocation === "thickness"
+    ? buildShapeAtAnchor(
+      { x: sideAnchorX, y: sideThicknessAnchorY },
+      sideRect,
+      shapeSideSize,
+      safePattern === "linear" ? "horizontal" : "vertical"
+    )
+    : null;
+  const sideTrace = !hasVisibleSubtraction || safeLocation === "thickness"
+    ? null
+    : buildVerticalTrace(sideAnchorX, sideRect, sideTraceWidth, sideTraceDepth);
+  const topTrace = !hasVisibleSubtraction || safeLocation !== "thickness"
+    ? null
+    : buildHorizontalTrace(topAnchor.y, topRect, topTraceDepth, Math.max(10, Math.min(14, topRect.height * 0.12)));
   return {
     viewBox,
-    frameRect,
-    faceRect,
-    selectedLocation: safeLocation,
-    pattern: safePattern,
-    shape: safeShape,
-    sharedAnchor: { x: frontBackAnchor.x, y: frontBackAnchor.y },
-    frontBackAnchor,
-    thicknessAnchor,
-    thicknessRect,
-    facePolygonPoints,
-    thicknessPolygonPoints,
-    faceCircleCenter,
-    thicknessCircleCenter,
-    faceLinearRect,
-    thicknessLinearRect,
-    faceTraceLine,
-    thicknessTraceLine,
-    faceTraceRect,
-    projectionModes,
     hasVisibleSubtraction,
-    circleRadius: Math.max(5, scaleDiameterFace / 2),
-    thicknessCircleRadius: Math.max(4, Math.min((thicknessRect.height / 2) - 2, scaleDiameterThickness / 2)),
+    sizeLabel: previewSizeLabel,
+    sizeUnitLabel: previewSizeUnitLabel,
+    views: [
+      {
+        key: "top",
+        title: "نمای بالا",
+        axisLabel: "W × L",
+        rect: topRect,
+        tone: safeLocation === "back" ? "back" : "front",
+        primaryShape: topPrimary,
+        traceShape: topTrace,
+      },
+      {
+        key: "bottom",
+        title: "نمای پایین",
+        axisLabel: "W × L",
+        rect: bottomRect,
+        tone: safeLocation === "back" ? "back" : "front",
+        primaryShape: bottomPrimary,
+        traceShape: bottomTrace,
+      },
+      {
+        key: "side",
+        title: "نمای بغل",
+        axisLabel: "W × T",
+        rect: sideRect,
+        tone: safeLocation === "thickness" ? "thickness" : "side",
+        primaryShape: sidePrimary,
+        traceShape: sideTrace,
+      },
+    ],
   };
 });
 
@@ -11310,6 +11406,7 @@ function closeServiceTypeEditor() {
   constructionUploadingServiceTypeIconRowId.value = null;
   serviceTypeEditorOpen.value = false;
   serviceTypeEditorDraft.value = null;
+  serviceTypeEditorPreviewPartDraft.value = null;
 }
 
 function hasSubtractorPartGroupDefaultsChanges() {
@@ -14039,6 +14136,7 @@ function openServiceTypeEditor(item = null) {
         is_system: !!item.is_system,
       }
     : buildNewServiceTypeDraft(), true);
+  serviceTypeEditorPreviewPartDraft.value = buildServiceTypePreviewPartDraft();
   serviceTypeEditorOpen.value = true;
 }
 
@@ -14066,6 +14164,33 @@ function onServiceTypeMeasurementChange(fieldName, value) {
   const draft = serviceTypeEditorDraft.value;
   if (!draft) return;
   const textKey = getServiceTypeMeasurementDraftTextKey(fieldName);
+  const text = String(value ?? "").trim();
+  if (!text) {
+    draft[fieldName] = 0;
+    draft[textKey] = formatServiceTypeMeasurementForDisplay(0);
+    return;
+  }
+  const parsed = parseServiceTypeMeasurementDisplayToMm(text);
+  draft[fieldName] = parsed;
+  draft[textKey] = formatServiceTypeMeasurementForDisplay(parsed);
+}
+
+function onServiceTypePreviewDimensionInput(fieldName, value) {
+  const draft = serviceTypeEditorPreviewPartDraft.value;
+  if (!draft) return;
+  const textKey = getServiceTypePreviewPartDraftTextKey(fieldName);
+  draft[textKey] = value;
+  if (!String(value ?? "").trim()) {
+    draft[fieldName] = 0;
+    return;
+  }
+  draft[fieldName] = parseServiceTypeMeasurementDisplayToMm(value);
+}
+
+function onServiceTypePreviewDimensionChange(fieldName, value) {
+  const draft = serviceTypeEditorPreviewPartDraft.value;
+  if (!draft) return;
+  const textKey = getServiceTypePreviewPartDraftTextKey(fieldName);
   const text = String(value ?? "").trim();
   if (!text) {
     draft[fieldName] = 0;
@@ -24055,6 +24180,9 @@ const currentEditorDisplayUnit = computed(() => {
 watch(currentEditorDisplayUnit, () => {
   if (!serviceTypeEditorDraft.value) return;
   syncServiceTypeMeasurementDraftTexts(serviceTypeEditorDraft.value, true);
+  if (serviceTypeEditorPreviewPartDraft.value) {
+    syncServiceTypePreviewPartDraftTexts(serviceTypeEditorPreviewPartDraft.value, true);
+  }
 });
 const widgetPreviewWalls2d = computed(() => ({
   nodes: [],
@@ -29018,103 +29146,9 @@ onBeforeUnmount(() => {
                     :class="{ 'is-active': serviceTypeEditorDraft.service_location === option.value }"
                     @click="serviceTypeEditorDraft.service_location = option.value"
                   >
-                    <svg :viewBox="serviceTypeEditorPreviewState.viewBox" class="serviceTypeEditor__locationSvg" aria-hidden="true">
-                      <template v-if="option.value !== 'thickness'">
-                        <rect
-                          :x="serviceTypeEditorPreviewState.faceRect.x"
-                          :y="serviceTypeEditorPreviewState.faceRect.y"
-                          :width="serviceTypeEditorPreviewState.faceRect.width"
-                          :height="serviceTypeEditorPreviewState.faceRect.height"
-                          class="serviceTypeEditor__previewFrame"
-                        />
-                        <rect
-                          :x="serviceTypeEditorPreviewState.faceRect.x"
-                          :y="serviceTypeEditorPreviewState.faceRect.y"
-                          :width="serviceTypeEditorPreviewState.faceRect.width"
-                          :height="serviceTypeEditorPreviewState.faceRect.height"
-                          :class="['serviceTypeEditor__previewFace', option.value === 'back' ? 'is-back' : 'is-front']"
-                        />
-                      </template>
-                      <rect
-                        v-if="option.value === 'thickness'"
-                        :x="serviceTypeEditorPreviewState.thicknessRect.x"
-                        :y="serviceTypeEditorPreviewState.thicknessRect.y"
-                        :width="serviceTypeEditorPreviewState.thicknessRect.width"
-                        :height="serviceTypeEditorPreviewState.thicknessRect.height"
-                        class="serviceTypeEditor__previewThickness"
-                      />
-                      <template v-if="serviceTypeEditorPreviewState.projectionModes[option.value] === 'face-shape'">
-                        <circle
-                          v-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'point'"
-                          :cx="serviceTypeEditorPreviewState.faceCircleCenter.x"
-                          :cy="serviceTypeEditorPreviewState.faceCircleCenter.y"
-                          :r="serviceTypeEditorPreviewState.circleRadius"
-                          class="serviceTypeEditor__previewShape"
-                        />
-                        <rect
-                          v-else-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'linear'"
-                          :x="serviceTypeEditorPreviewState.faceLinearRect.x"
-                          :y="serviceTypeEditorPreviewState.faceLinearRect.y"
-                          :width="serviceTypeEditorPreviewState.faceLinearRect.width"
-                          :height="serviceTypeEditorPreviewState.faceLinearRect.height"
-                          rx="8"
-                          class="serviceTypeEditor__previewShape"
-                        />
-                        <polygon
-                          v-else
-                          :points="serviceTypeEditorPreviewState.facePolygonPoints"
-                          class="serviceTypeEditor__previewShape"
-                        />
-                      </template>
-                      <template v-else-if="serviceTypeEditorPreviewState.projectionModes[option.value] === 'thickness-shape'">
-                        <circle
-                          v-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'point'"
-                          :cx="serviceTypeEditorPreviewState.thicknessCircleCenter.x"
-                          :cy="serviceTypeEditorPreviewState.thicknessCircleCenter.y"
-                          :r="serviceTypeEditorPreviewState.thicknessCircleRadius"
-                          class="serviceTypeEditor__previewShape"
-                        />
-                        <rect
-                          v-else-if="serviceTypeEditorPreviewState.shape === 'circle' && serviceTypeEditorPreviewState.pattern === 'linear'"
-                          :x="serviceTypeEditorPreviewState.thicknessLinearRect.x"
-                          :y="serviceTypeEditorPreviewState.thicknessLinearRect.y"
-                          :width="serviceTypeEditorPreviewState.thicknessLinearRect.width"
-                          :height="serviceTypeEditorPreviewState.thicknessLinearRect.height"
-                          rx="6"
-                          class="serviceTypeEditor__previewShape"
-                        />
-                        <polygon
-                          v-else
-                          :points="serviceTypeEditorPreviewState.thicknessPolygonPoints"
-                          class="serviceTypeEditor__previewShape"
-                        />
-                      </template>
-                      <line
-                        v-else-if="serviceTypeEditorPreviewState.projectionModes[option.value] === 'face-trace-line'"
-                        :x1="serviceTypeEditorPreviewState.faceTraceLine.x1"
-                        :y1="serviceTypeEditorPreviewState.faceTraceLine.y1"
-                        :x2="serviceTypeEditorPreviewState.faceTraceLine.x2"
-                        :y2="serviceTypeEditorPreviewState.faceTraceLine.y2"
-                        class="serviceTypeEditor__previewTraceLine"
-                      />
-                      <rect
-                        v-else-if="serviceTypeEditorPreviewState.projectionModes[option.value] === 'face-trace-rect'"
-                        :x="serviceTypeEditorPreviewState.faceTraceRect.x"
-                        :y="serviceTypeEditorPreviewState.faceTraceRect.y"
-                        :width="serviceTypeEditorPreviewState.faceTraceRect.width"
-                        :height="serviceTypeEditorPreviewState.faceTraceRect.height"
-                        rx="4"
-                        class="serviceTypeEditor__previewTraceRect"
-                      />
-                      <line
-                        v-else-if="serviceTypeEditorPreviewState.projectionModes[option.value] === 'thickness-trace-line'"
-                        :x1="serviceTypeEditorPreviewState.thicknessTraceLine.x1"
-                        :y1="serviceTypeEditorPreviewState.thicknessTraceLine.y1"
-                        :x2="serviceTypeEditorPreviewState.thicknessTraceLine.x2"
-                        :y2="serviceTypeEditorPreviewState.thicknessTraceLine.y2"
-                        class="serviceTypeEditor__previewTraceLine"
-                      />
-                    </svg>
+                    <span class="serviceTypeEditor__locationCardIconWrap" aria-hidden="true">
+                      <span class="serviceTypeEditor__segIcon" :class="`is-${option.icon}`"></span>
+                    </span>
                     <span class="serviceTypeEditor__locationLabel">{{ option.label }}</span>
                   </button>
                 </div>
@@ -29204,6 +29238,51 @@ onBeforeUnmount(() => {
                 </label>
               </div>
 
+              <div class="serviceTypeEditor__fieldBlock">
+                <div class="serviceTypeEditor__sectionHead">
+                  <div class="serviceTypeEditor__sectionTitle">ابعاد قطعه preview</div>
+                  <div class="serviceTypeEditor__sectionHint">این مقادیر فقط برای همین پیش‌نمایش هستند و در داده‌ی خدمت ذخیره نمی‌شوند.</div>
+                </div>
+                <div v-if="serviceTypeEditorPreviewPartDraft" class="serviceTypeEditor__measureGrid">
+                  <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+                    <span>{{ `طول (${getCurrentParamLengthUnitLabel()})` }}</span>
+                    <input
+                      :value="serviceTypeEditorPreviewPartDraft._preview_part_length_display_text ?? ''"
+                      class="constructionDialog__input constructionDialog__input--mono"
+                      type="text"
+                      inputmode="decimal"
+                      @input="onServiceTypePreviewDimensionInput('length', $event.target.value)"
+                      @change="onServiceTypePreviewDimensionChange('length', $event.target.value)"
+                      @blur="onServiceTypePreviewDimensionChange('length', $event.target.value)"
+                    />
+                  </label>
+                  <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+                    <span>{{ `عرض (${getCurrentParamLengthUnitLabel()})` }}</span>
+                    <input
+                      :value="serviceTypeEditorPreviewPartDraft._preview_part_width_display_text ?? ''"
+                      class="constructionDialog__input constructionDialog__input--mono"
+                      type="text"
+                      inputmode="decimal"
+                      @input="onServiceTypePreviewDimensionInput('width', $event.target.value)"
+                      @change="onServiceTypePreviewDimensionChange('width', $event.target.value)"
+                      @blur="onServiceTypePreviewDimensionChange('width', $event.target.value)"
+                    />
+                  </label>
+                  <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+                    <span>{{ `ضخامت (${getCurrentParamLengthUnitLabel()})` }}</span>
+                    <input
+                      :value="serviceTypeEditorPreviewPartDraft._preview_part_thickness_display_text ?? ''"
+                      class="constructionDialog__input constructionDialog__input--mono"
+                      type="text"
+                      inputmode="decimal"
+                      @input="onServiceTypePreviewDimensionInput('thickness', $event.target.value)"
+                      @change="onServiceTypePreviewDimensionChange('thickness', $event.target.value)"
+                      @blur="onServiceTypePreviewDimensionChange('thickness', $event.target.value)"
+                    />
+                  </label>
+                </div>
+              </div>
+
               <div v-if="['triangle', 'rectangle'].includes(serviceTypeEditorDraft.subtraction_shape)" class="serviceTypeEditor__angleEditor">
                 <div class="serviceTypeEditor__label">زاویه‌های شکل</div>
                 <div class="serviceTypeEditor__angleFields">
@@ -29223,6 +29302,83 @@ onBeforeUnmount(() => {
                       @blur="onServiceTypeShapeAngleChange(angle.index, $event.target.value)"
                     />
                   </label>
+                </div>
+              </div>
+
+              <div class="serviceTypeEditor__previewPanel">
+                <div class="serviceTypeEditor__previewPanelHead">
+                  <div class="serviceTypeEditor__sectionTitle">پیش‌نمایش استاندارد قطعه</div>
+                  <div class="serviceTypeEditor__previewSize">{{ `${serviceTypeEditorPreviewState.sizeLabel} ${serviceTypeEditorPreviewState.sizeUnitLabel}` }}</div>
+                </div>
+                <div class="serviceTypeEditor__previewGrid">
+                  <article
+                    v-for="view in serviceTypeEditorPreviewState.views"
+                    :key="view.key"
+                    class="serviceTypeEditor__previewCard"
+                  >
+                    <div class="serviceTypeEditor__previewCardHead">
+                      <span class="serviceTypeEditor__previewCardTitle">{{ view.title }}</span>
+                      <span class="serviceTypeEditor__previewAxis">{{ view.axisLabel }}</span>
+                    </div>
+                    <svg :viewBox="serviceTypeEditorPreviewState.viewBox" class="serviceTypeEditor__previewSvg" aria-hidden="true">
+                      <rect
+                        :x="view.rect.x"
+                        :y="view.rect.y"
+                        :width="view.rect.width"
+                        :height="view.rect.height"
+                        class="serviceTypeEditor__previewFrame"
+                      />
+                      <rect
+                        :x="view.rect.x"
+                        :y="view.rect.y"
+                        :width="view.rect.width"
+                        :height="view.rect.height"
+                        :class="['serviceTypeEditor__previewFace', `is-${view.tone}`]"
+                      />
+                      <template v-if="view.primaryShape">
+                        <circle
+                          v-if="view.primaryShape.type === 'circle'"
+                          :cx="view.primaryShape.cx"
+                          :cy="view.primaryShape.cy"
+                          :r="view.primaryShape.r"
+                          class="serviceTypeEditor__previewShape"
+                        />
+                        <rect
+                          v-else-if="view.primaryShape.type === 'rect'"
+                          :x="view.primaryShape.x"
+                          :y="view.primaryShape.y"
+                          :width="view.primaryShape.width"
+                          :height="view.primaryShape.height"
+                          :rx="view.primaryShape.rx || 0"
+                          class="serviceTypeEditor__previewShape"
+                        />
+                        <polygon
+                          v-else-if="view.primaryShape.type === 'polygon'"
+                          :points="view.primaryShape.points"
+                          class="serviceTypeEditor__previewShape"
+                        />
+                      </template>
+                      <template v-if="view.traceShape">
+                        <line
+                          v-if="view.traceShape.type === 'line'"
+                          :x1="view.traceShape.x1"
+                          :y1="view.traceShape.y1"
+                          :x2="view.traceShape.x2"
+                          :y2="view.traceShape.y2"
+                          class="serviceTypeEditor__previewTraceLine"
+                        />
+                        <rect
+                          v-else-if="view.traceShape.type === 'rect'"
+                          :x="view.traceShape.x"
+                          :y="view.traceShape.y"
+                          :width="view.traceShape.width"
+                          :height="view.traceShape.height"
+                          :rx="view.traceShape.rx || 0"
+                          class="serviceTypeEditor__previewTraceRect"
+                        />
+                      </template>
+                    </svg>
+                  </article>
                 </div>
               </div>
             </div>
@@ -34055,7 +34211,7 @@ onBeforeUnmount(() => {
 .serviceTypeEditor__locationCard {
   display: grid;
   gap: 10px;
-  padding: 0px;
+  padding: 14px 12px 12px;
   border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.9);
@@ -34069,13 +34225,15 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
 }
 
-.serviceTypeEditor__locationSvg {
-  width: 100%;
-  height: auto;
+.serviceTypeEditor__locationCardIconWrap {
+  width: 42px;
+  height: 42px;
+  margin: 0 auto;
   border-radius: 14px;
-  margin-top: 0px;
-  margin-bottom: -24px;
-  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(241, 245, 249, 0.94));
+  border: 1px solid rgba(148, 163, 184, 0.28);
 }
 
 .serviceTypeEditor__locationLabel {
@@ -34161,7 +34319,8 @@ onBeforeUnmount(() => {
 
 .serviceTypeEditor__fields,
 .serviceTypeEditor__measureGrid,
-.serviceTypeEditor__angleFields {
+.serviceTypeEditor__angleFields,
+.serviceTypeEditor__previewGrid {
   display: grid;
   gap: 12px;
 }
@@ -34181,10 +34340,69 @@ onBeforeUnmount(() => {
   color: #334155;
 }
 
+.serviceTypeEditor__previewPanel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background:
+    radial-gradient(circle at top right, rgba(20, 184, 166, 0.07), transparent 34%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.94));
+}
+
+.serviceTypeEditor__previewPanelHead,
+.serviceTypeEditor__previewCardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.serviceTypeEditor__previewSize,
+.serviceTypeEditor__previewAxis {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+
+.serviceTypeEditor__previewGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.serviceTypeEditor__previewCard {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.serviceTypeEditor__previewCardTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.serviceTypeEditor__previewSvg {
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.94));
+}
+
 .serviceTypeEditor__previewFrame {
   fill: rgba(248, 250, 252, 0.92);
   stroke: rgba(15, 23, 42, 0.16);
   stroke-width: 2;
+  stroke-dasharray: 7 5;
 }
 
 .serviceTypeEditor__previewFace {
@@ -34199,10 +34417,22 @@ onBeforeUnmount(() => {
   fill: rgba(59, 130, 246, 0.14);
 }
 
+.serviceTypeEditor__previewFace.is-front-elevation {
+  fill: rgba(226, 232, 240, 0.72);
+}
+
+.serviceTypeEditor__previewFace.is-side {
+  fill: rgba(226, 232, 240, 0.72);
+}
+
 .serviceTypeEditor__previewThickness {
   fill: rgba(249, 115, 22, 0.18);
   stroke: rgba(194, 65, 12, 0.38);
   stroke-width: 1.6;
+}
+
+.serviceTypeEditor__previewFace.is-thickness {
+  fill: rgba(249, 115, 22, 0.18);
 }
 
 .serviceTypeEditor__previewShape {
@@ -34241,7 +34471,8 @@ onBeforeUnmount(() => {
 
   .serviceTypeEditor__drillGrid,
   .serviceTypeEditor__measureGrid,
-  .serviceTypeEditor__angleFields {
+  .serviceTypeEditor__angleFields,
+  .serviceTypeEditor__previewGrid {
     grid-template-columns: 1fr;
   }
 }
