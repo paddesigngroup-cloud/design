@@ -188,7 +188,6 @@ class PartServiceType(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Vers
     icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     has_subtraction: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     service_location: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    drill_pattern: Mapped[str | None] = mapped_column(String(16), nullable=True)
     subtraction_shape: Mapped[str | None] = mapped_column(String(16), nullable=True)
     shape_angles: Mapped[list[dict[str, object]] | None] = mapped_column(JSONB, nullable=True)
     axis_to_opposite_edge_distance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")

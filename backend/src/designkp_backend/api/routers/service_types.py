@@ -33,7 +33,6 @@ class ServiceTypeItem(BaseModel):
     icon_path: str | None
     has_subtraction: bool
     service_location: str | None
-    drill_pattern: str | None
     subtraction_shape: str | None
     shape_angles: list[ServiceTypeAngleItem] | None
     axis_to_opposite_edge_distance: float
@@ -54,7 +53,6 @@ class ServiceTypeCreate(BaseModel):
     icon_path: str | None = Field(default=None, max_length=255)
     has_subtraction: bool = False
     service_location: str | None = Field(default=None, min_length=1, max_length=16)
-    drill_pattern: str | None = Field(default=None, min_length=1, max_length=16)
     subtraction_shape: str | None = Field(default=None, min_length=1, max_length=16)
     shape_angles: list[ServiceTypeAngleItem] | None = None
     axis_to_opposite_edge_distance: float = Field(default=0, ge=0)
@@ -73,7 +71,6 @@ class ServiceTypeUpdate(BaseModel):
     icon_path: str | None = Field(default=None, max_length=255)
     has_subtraction: bool = False
     service_location: str | None = Field(default=None, min_length=1, max_length=16)
-    drill_pattern: str | None = Field(default=None, min_length=1, max_length=16)
     subtraction_shape: str | None = Field(default=None, min_length=1, max_length=16)
     shape_angles: list[ServiceTypeAngleItem] | None = None
     axis_to_opposite_edge_distance: float = Field(default=0, ge=0)
@@ -107,20 +104,6 @@ def _normalize_service_location(value: str | None) -> str | None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Service location must be front, back, or thickness.",
-        )
-    return normalized
-
-
-def _normalize_drill_pattern(value: str | None) -> str | None:
-    if value is None:
-        return None
-    normalized = str(value or "").strip().lower()
-    if not normalized:
-        return None
-    if normalized not in {"point", "linear"}:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Drill pattern must be point or linear.",
         )
     return normalized
 
@@ -205,7 +188,6 @@ def _normalize_subtraction_payload(payload: ServiceTypeCreate | ServiceTypeUpdat
         return {
             "has_subtraction": False,
             "service_location": None,
-            "drill_pattern": None,
             "subtraction_shape": None,
             "shape_angles": None,
             "axis_to_opposite_edge_distance": axis_to_opposite_edge_distance,
@@ -214,19 +196,15 @@ def _normalize_subtraction_payload(payload: ServiceTypeCreate | ServiceTypeUpdat
             "working_depth": working_depth,
         }
     service_location = _normalize_service_location(payload.service_location)
-    drill_pattern = _normalize_drill_pattern(payload.drill_pattern)
     subtraction_shape = _normalize_subtraction_shape(payload.subtraction_shape)
     if service_location is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service location is required when subtraction is enabled.")
-    if drill_pattern is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Drill pattern is required when subtraction is enabled.")
     if subtraction_shape is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Subtraction shape is required when subtraction is enabled.")
     shape_angles = _normalize_shape_angles(subtraction_shape, payload.shape_angles)
     return {
         "has_subtraction": True,
         "service_location": service_location,
-        "drill_pattern": drill_pattern,
         "subtraction_shape": subtraction_shape,
         "shape_angles": shape_angles,
         "axis_to_opposite_edge_distance": axis_to_opposite_edge_distance,
@@ -313,7 +291,6 @@ async def create_service_type(payload: ServiceTypeCreate, session: AsyncSession 
         icon_path=final_icon_file_name,
         has_subtraction=bool(subtraction_payload["has_subtraction"]),
         service_location=subtraction_payload["service_location"],
-        drill_pattern=subtraction_payload["drill_pattern"],
         subtraction_shape=subtraction_payload["subtraction_shape"],
         shape_angles=subtraction_payload["shape_angles"],
         axis_to_opposite_edge_distance=subtraction_payload["axis_to_opposite_edge_distance"],
@@ -378,7 +355,6 @@ async def update_service_type(
     item.icon_path = next_icon_file_name
     item.has_subtraction = bool(subtraction_payload["has_subtraction"])
     item.service_location = subtraction_payload["service_location"]
-    item.drill_pattern = subtraction_payload["drill_pattern"]
     item.subtraction_shape = subtraction_payload["subtraction_shape"]
     item.shape_angles = subtraction_payload["shape_angles"]
     item.axis_to_opposite_edge_distance = subtraction_payload["axis_to_opposite_edge_distance"]

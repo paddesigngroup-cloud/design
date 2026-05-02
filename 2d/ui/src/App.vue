@@ -8400,7 +8400,6 @@ const constructionServiceTypeColumnWidths = computed(() => {
     short_code: getMaxColumnLength(rows.map((item) => item.short_code), 3),
     has_subtraction: getMaxColumnLength(rows.map((item) => getSubtractionToggleLabel(item.has_subtraction)), 4),
     service_location: getMaxColumnLength(rows.map((item) => getServiceLocationLabel(item.service_location)), 6),
-    drill_pattern: getMaxColumnLength(rows.map((item) => getDrillPatternLabel(item.drill_pattern)), 4),
     subtraction_shape: getMaxColumnLength(rows.map((item) => getSubtractionShapeLabel(item.subtraction_shape)), 4),
     axis_to_opposite_edge_distance: getMaxColumnLength(rows.map((item) => getServiceTypeMeasurementDisplayText(item.axis_to_opposite_edge_distance)), 3),
     axis_to_aligned_edge_distance: getMaxColumnLength(rows.map((item) => getServiceTypeMeasurementDisplayText(item.axis_to_aligned_edge_distance)), 3),
@@ -8983,7 +8982,6 @@ function normalizeServiceTypePayload(item) {
     icon_path: normalizeIconFileName(item.icon_path),
     has_subtraction: normalizeBooleanFlag(item.has_subtraction, false),
     service_location: normalizeBooleanFlag(item.has_subtraction, false) ? normalizeServiceLocation(item.service_location) : null,
-    drill_pattern: normalizeBooleanFlag(item.has_subtraction, false) ? normalizeDrillPattern(item.drill_pattern) : null,
     subtraction_shape: normalizeBooleanFlag(item.has_subtraction, false) ? normalizeSubtractionShape(item.subtraction_shape) : null,
     shape_angles: normalizeBooleanFlag(item.has_subtraction, false)
       ? normalizeServiceTypeShapeAngles(item.subtraction_shape, item.shape_angles)
@@ -9108,7 +9106,6 @@ function normalizeEditableServiceTypeRecord(item) {
     icon_path: normalizeIconFileName(item.icon_path) || "",
     has_subtraction: normalizeBooleanFlag(item.has_subtraction, false),
     service_location: normalizeServiceLocation(item.service_location),
-    drill_pattern: normalizeDrillPattern(item.drill_pattern),
     subtraction_shape: shape,
     shape_angles: normalizeServiceTypeShapeAngleDrafts(shape, item.shape_angles),
     axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance),
@@ -9974,7 +9971,6 @@ const serviceTypeEditorPreviewState = computed(() => {
   const previewPartDraft = serviceTypeEditorPreviewPartDraft.value || buildServiceTypePreviewPartDraft();
   const viewBox = "0 0 220 168";
   const safeLocation = draft ? normalizeServiceLocation(draft.service_location) : "front";
-  const safePattern = draft ? normalizeDrillPattern(draft.drill_pattern) : "point";
   const safeShape = draft ? normalizeSubtractionShape(draft.subtraction_shape) : "circle";
   const workingDepth = Math.max(0, Number(draft?.working_depth) || 0);
   const workingDiameter = Math.max(0, Number(draft?.working_diameter) || 0);
@@ -10185,10 +10181,10 @@ const serviceTypeEditorPreviewState = computed(() => {
 
   const topPrimary = safeLocation === "thickness"
     ? null
-    : buildShapeAtAnchor(topAnchor, topRect, shapeTopSize, safePattern === "linear" ? "horizontal" : "vertical");
+    : buildShapeAtAnchor(topAnchor, topRect, shapeTopSize, "vertical");
   const bottomPrimary = safeLocation === "thickness"
     ? null
-    : buildShapeAtAnchor(bottomAnchor, bottomRect, shapeBottomSize, safePattern === "linear" ? "horizontal" : "vertical");
+    : buildShapeAtAnchor(bottomAnchor, bottomRect, shapeBottomSize, "vertical");
   const bottomTrace = !hasVisibleSubtraction || safeLocation !== "thickness"
     ? null
     : buildHorizontalTrace(bottomAnchor.y, bottomRect, bottomTraceDepth, shapeBottomSize, true);
@@ -10197,7 +10193,7 @@ const serviceTypeEditorPreviewState = computed(() => {
       { x: sideAnchorX, y: sideThicknessAnchorY },
       sideRect,
       shapeSideSize,
-      safePattern === "linear" ? "horizontal" : "vertical",
+      "horizontal",
       safeShape === "circle" ? "line" : "default"
     )
     : null;
@@ -10266,56 +10262,29 @@ const SERVICE_LOCATION_OPTIONS = [
   { value: "back", label: "پشت قطعه", icon: "face-back" },
   { value: "thickness", label: "ضخامت قطعه", icon: "face-thickness" },
 ];
-const DRILL_PATTERN_OPTIONS = [
-  { value: "point", label: "نقطه‌ای", icon: "drill-point" },
-  { value: "linear", label: "خطی", icon: "drill-linear" },
-];
 const SUBTRACTION_SHAPE_OPTIONS = [
   { value: "circle", label: "دایره" },
   { value: "triangle", label: "مثلث" },
   { value: "rectangle", label: "مستطیل" },
 ];
 
-function getAllowedServiceLocationsForDrillPattern(pattern) {
-  return normalizeDrillPattern(pattern) === "linear"
-    ? ["thickness"]
-    : ["front", "back"];
-}
-
-function getAllowedSubtractionShapesForServiceRule(pattern, location) {
-  return normalizeDrillPattern(pattern) === "linear" && normalizeServiceLocation(location) === "thickness"
+function getAllowedSubtractionShapesForServiceLocation(location) {
+  return normalizeServiceLocation(location) === "thickness"
     ? ["circle", "triangle", "rectangle"]
     : ["circle"];
 }
 
-function isServiceTypeLocationAllowedForDrillPattern(pattern, location) {
-  return getAllowedServiceLocationsForDrillPattern(pattern).includes(normalizeServiceLocation(location));
-}
-
-function isServiceTypeShapeAllowedForRule(pattern, location, shape) {
-  return getAllowedSubtractionShapesForServiceRule(pattern, location).includes(normalizeSubtractionShape(shape));
+function isServiceTypeShapeAllowedForLocation(location, shape) {
+  return getAllowedSubtractionShapesForServiceLocation(location).includes(normalizeSubtractionShape(shape));
 }
 
 function canonicalizeServiceTypeRuleState(input) {
-  let drillPattern = normalizeDrillPattern(input?.drill_pattern);
   let serviceLocation = normalizeServiceLocation(input?.service_location);
-  if (!isServiceTypeLocationAllowedForDrillPattern(drillPattern, serviceLocation)) {
-    serviceLocation = getAllowedServiceLocationsForDrillPattern(drillPattern)[0];
-  }
-
-  if (drillPattern === "point" && serviceLocation !== "front" && serviceLocation !== "back") {
-    serviceLocation = "front";
-  }
-  if (drillPattern === "linear") {
-    serviceLocation = "thickness";
-  }
-
-  const allowedShapes = getAllowedSubtractionShapesForServiceRule(drillPattern, serviceLocation);
+  const allowedShapes = getAllowedSubtractionShapesForServiceLocation(serviceLocation);
   const subtractionShape = allowedShapes.includes(normalizeSubtractionShape(input?.subtraction_shape))
     ? normalizeSubtractionShape(input?.subtraction_shape)
     : allowedShapes[0];
   return {
-    drill_pattern: drillPattern,
     service_location: serviceLocation,
     subtraction_shape: subtractionShape,
   };
@@ -10324,7 +10293,6 @@ function canonicalizeServiceTypeRuleState(input) {
 function applyServiceTypeEditorRuleConstraints(draft) {
   if (!draft || normalizeBooleanFlag(draft.has_subtraction, false) === false) return draft;
   const normalized = canonicalizeServiceTypeRuleState(draft);
-  draft.drill_pattern = normalized.drill_pattern;
   draft.service_location = normalized.service_location;
   if (draft.subtraction_shape !== normalized.subtraction_shape) {
     draft.subtraction_shape = normalized.subtraction_shape;
@@ -10353,19 +10321,6 @@ function getServiceLocationLabel(value) {
   if (normalized === "back") return "پشت قطعه";
   if (normalized === "thickness") return "ضخامت قطعه";
   return "روی قطعه";
-}
-
-function normalizeDrillPattern(value) {
-  return String(value || "").trim().toLowerCase() === "linear" ? "linear" : "point";
-}
-
-function isValidDrillPattern(value) {
-  const text = String(value || "").trim().toLowerCase();
-  return text === "point" || text === "linear";
-}
-
-function getDrillPatternLabel(value) {
-  return normalizeDrillPattern(value) === "linear" ? "خطی" : "نقطه‌ای";
 }
 
 function normalizeSubtractionShape(value) {
@@ -11447,7 +11402,6 @@ function buildNewServiceTypeDraft() {
     icon_path: "",
     has_subtraction: false,
     service_location: "front",
-    drill_pattern: "point",
     subtraction_shape: "circle",
     shape_angles: [],
     axis_to_opposite_edge_distance: 0,
@@ -14243,7 +14197,6 @@ function openServiceTypeEditor(item = null) {
         icon_path: normalizeIconFileName(item.icon_path) || "",
         has_subtraction: normalizeBooleanFlag(item.has_subtraction, false),
         service_location: normalizeServiceLocation(item.service_location),
-        drill_pattern: normalizeDrillPattern(item.drill_pattern),
         subtraction_shape: normalizeSubtractionShape(item.subtraction_shape),
         shape_angles: normalizeServiceTypeShapeAngleDrafts(item.subtraction_shape, item.shape_angles),
         axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance),
@@ -14261,28 +14214,15 @@ function openServiceTypeEditor(item = null) {
 
 function onServiceTypeSubtractionShapeChange(value) {
   if (!serviceTypeEditorDraft.value) return;
-  if (!isServiceTypeShapeAllowedForRule(
-    serviceTypeEditorDraft.value.drill_pattern,
-    serviceTypeEditorDraft.value.service_location,
-    value
-  )) return;
+  if (!isServiceTypeShapeAllowedForLocation(serviceTypeEditorDraft.value.service_location, value)) return;
   const shape = normalizeSubtractionShape(value);
   serviceTypeEditorDraft.value.subtraction_shape = shape;
   serviceTypeEditorDraft.value.shape_angles = normalizeServiceTypeShapeAngleDrafts(shape, serviceTypeEditorDraft.value.shape_angles);
 }
 
-function onServiceTypeDrillPatternChange(value) {
-  if (!serviceTypeEditorDraft.value) return;
-  serviceTypeEditorDraft.value.drill_pattern = normalizeDrillPattern(value);
-  applyServiceTypeEditorRuleConstraints(serviceTypeEditorDraft.value);
-}
-
 function onServiceTypeLocationChange(value) {
   if (!serviceTypeEditorDraft.value) return;
   serviceTypeEditorDraft.value.service_location = normalizeServiceLocation(value);
-  serviceTypeEditorDraft.value.drill_pattern = serviceTypeEditorDraft.value.service_location === "thickness"
-    ? "linear"
-    : "point";
   applyServiceTypeEditorRuleConstraints(serviceTypeEditorDraft.value);
 }
 
@@ -17129,7 +17069,6 @@ function validateConstructionServiceTypes() {
     const shortCode = String(item.short_code || "").trim();
     const hasSubtraction = normalizeBooleanFlag(item.has_subtraction, false);
     const serviceLocation = normalizeServiceLocation(item.service_location);
-    const drillPattern = normalizeDrillPattern(item.drill_pattern);
     const subtractionShape = normalizeSubtractionShape(item.subtraction_shape);
     const axisToOppositeEdgeDistance = normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance);
     const axisToAlignedEdgeDistance = normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance);
@@ -17159,10 +17098,6 @@ function validateConstructionServiceTypes() {
     if (!hasSubtraction) continue;
     if (!isValidServiceLocation(serviceLocation)) {
       showAlert("محل خدمت باید روی قطعه، پشت قطعه یا ضخامت قطعه باشد.", { title: "اعتبارسنجی" });
-      return false;
-    }
-    if (!isValidDrillPattern(drillPattern)) {
-      showAlert("نوع سوراخکاری باید نقطه‌ای یا خطی باشد.", { title: "اعتبارسنجی" });
       return false;
     }
     if (!isValidSubtractionShape(subtractionShape)) {
@@ -17254,7 +17189,6 @@ async function saveServiceTypeEditor() {
   const shortCode = String(draft.short_code || "").trim();
   const hasSubtraction = normalizeBooleanFlag(draft.has_subtraction, false);
   const serviceLocation = normalizeServiceLocation(draft.service_location);
-  const drillPattern = normalizeDrillPattern(draft.drill_pattern);
   const subtractionShape = normalizeSubtractionShape(draft.subtraction_shape);
   const axisToOppositeEdgeDistance = normalizeServiceTypeMeasurement(draft.axis_to_opposite_edge_distance);
   const axisToAlignedEdgeDistance = normalizeServiceTypeMeasurement(draft.axis_to_aligned_edge_distance);
@@ -17287,10 +17221,6 @@ async function saveServiceTypeEditor() {
       showAlert("محل خدمت معتبر نیست.", { title: "اعتبارسنجی" });
       return;
     }
-    if (!isValidDrillPattern(drillPattern)) {
-      showAlert("نوع سوراخکاری معتبر نیست.", { title: "اعتبارسنجی" });
-      return;
-    }
     if (!isValidSubtractionShape(subtractionShape)) {
       showAlert("شکل سابترکشن معتبر نیست.", { title: "اعتبارسنجی" });
       return;
@@ -17313,7 +17243,6 @@ async function saveServiceTypeEditor() {
   }
   draft.has_subtraction = hasSubtraction;
   draft.service_location = hasSubtraction ? serviceLocation : null;
-  draft.drill_pattern = hasSubtraction ? drillPattern : null;
   draft.subtraction_shape = hasSubtraction ? subtractionShape : null;
   draft.shape_angles = hasSubtraction ? draft.shape_angles : [];
   draft.axis_to_opposite_edge_distance = axisToOppositeEdgeDistance;
@@ -19251,7 +19180,6 @@ function getConstructionCsvHeaders() {
       "short_code",
       "has_subtraction",
       "service_location",
-      "drill_pattern",
       "subtraction_shape",
       "shape_angles",
       "axis_to_opposite_edge_distance",
@@ -19330,7 +19258,6 @@ function getConstructionCsvRows(items = null) {
       String(item.short_code || "").trim(),
       normalizeBooleanFlag(item.has_subtraction, false) ? 1 : 0,
       normalizeBooleanFlag(item.has_subtraction, false) ? normalizeServiceLocation(item.service_location) : "",
-      normalizeBooleanFlag(item.has_subtraction, false) ? normalizeDrillPattern(item.drill_pattern) : "",
       normalizeBooleanFlag(item.has_subtraction, false) ? normalizeSubtractionShape(item.subtraction_shape) : "",
       normalizeBooleanFlag(item.has_subtraction, false)
         ? normalizeServiceTypeShapeAngles(item.subtraction_shape, item.shape_angles).map((entry) => formatPartModelAngleNumber(entry.angle_deg)).join(",")
@@ -19653,9 +19580,9 @@ async function onConstructionImportFileChange(event) {
       });
     } else if (constructionStep.value === "service_types") {
       previewRows = rows.slice(1).map((row, index) => {
-        const adminMode = String(row[12] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const adminMode = String(row[11] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         const hasSubtraction = normalizeBooleanFlag(row[3], false);
-        const subtractionShape = normalizeSubtractionShape(row[6]);
+        const subtractionShape = normalizeSubtractionShape(row[5]);
         return {
           lineNo: index + 2,
           service_type: String(row[0] || "").trim(),
@@ -19663,13 +19590,12 @@ async function onConstructionImportFileChange(event) {
           short_code: String(row[2] || "").trim(),
           has_subtraction: hasSubtraction,
           service_location: hasSubtraction ? normalizeServiceLocation(row[4]) : null,
-          drill_pattern: hasSubtraction ? normalizeDrillPattern(row[5]) : null,
           subtraction_shape: hasSubtraction ? subtractionShape : null,
-          shape_angles: hasSubtraction ? normalizeServiceTypeShapeAngleDrafts(subtractionShape, parsePartModelAnglesCsv(row[7], getServiceTypeShapeSideCount(subtractionShape), getServiceTypeShapeAngleSum(subtractionShape))) : [],
-          axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(row[8]),
-          axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(row[9]),
-          working_diameter: normalizeServiceTypeMeasurement(row[10]),
-          working_depth: normalizeServiceTypeMeasurement(row[11]),
+          shape_angles: hasSubtraction ? normalizeServiceTypeShapeAngleDrafts(subtractionShape, parsePartModelAnglesCsv(row[6], getServiceTypeShapeSideCount(subtractionShape), getServiceTypeShapeAngleSum(subtractionShape))) : [],
+          axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(row[7]),
+          axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(row[8]),
+          working_diameter: normalizeServiceTypeMeasurement(row[9]),
+          working_depth: normalizeServiceTypeMeasurement(row[10]),
           admin_mode: adminMode,
         };
       });
@@ -19877,7 +19803,6 @@ async function onConstructionImportFileChange(event) {
             !row.service_title ||
             !row.short_code ||
             (normalizeBooleanFlag(row.has_subtraction, false) && !isValidServiceLocation(row.service_location)) ||
-            (normalizeBooleanFlag(row.has_subtraction, false) && !isValidDrillPattern(row.drill_pattern)) ||
             (normalizeBooleanFlag(row.has_subtraction, false) && !isValidSubtractionShape(row.subtraction_shape)) ||
             (normalizeBooleanFlag(row.has_subtraction, false) && !validateServiceTypeShapeAngles(row.subtraction_shape, row.shape_angles).ok) ||
             (row.axis_to_opposite_edge_distance != null && row.axis_to_opposite_edge_distance < 0) ||
@@ -22995,7 +22920,6 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       short_code: String(row.short_code || "").trim(),
       has_subtraction: normalizeBooleanFlag(row.has_subtraction, false),
       service_location: normalizeBooleanFlag(row.has_subtraction, false) ? normalizeServiceLocation(row.service_location) : null,
-      drill_pattern: normalizeBooleanFlag(row.has_subtraction, false) ? normalizeDrillPattern(row.drill_pattern) : null,
       subtraction_shape: normalizeBooleanFlag(row.has_subtraction, false) ? normalizeSubtractionShape(row.subtraction_shape) : null,
       shape_angles: normalizeBooleanFlag(row.has_subtraction, false)
         ? normalizeServiceTypeShapeAngleDrafts(row.subtraction_shape, row.shape_angles)
@@ -23021,7 +22945,6 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       String(existing.short_code || "").trim() !== nextPayload.short_code ||
       normalizeBooleanFlag(existing.has_subtraction, false) !== nextPayload.has_subtraction ||
       normalizeServiceLocation(existing.service_location) !== normalizeServiceLocation(nextPayload.service_location) ||
-      normalizeDrillPattern(existing.drill_pattern) !== normalizeDrillPattern(nextPayload.drill_pattern) ||
       normalizeSubtractionShape(existing.subtraction_shape) !== normalizeSubtractionShape(nextPayload.subtraction_shape) ||
       JSON.stringify(normalizeServiceTypeShapeAngles(existing.subtraction_shape, existing.shape_angles))
         !== JSON.stringify(normalizeServiceTypeShapeAngles(nextPayload.subtraction_shape, nextPayload.shape_angles)) ||
@@ -27837,7 +27760,6 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">کد اختصاری</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">سابترکشن</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">محل خدمت</th>
-                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('drill_pattern')">نوع سوراخکاری</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">شکل</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه ظلع مقابل</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">فاصله آکس تا لبه ضلع موافق</th>
@@ -27853,7 +27775,6 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">{{ row.short_code }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">{{ getSubtractionToggleLabel(row.has_subtraction) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">{{ row.has_subtraction ? getServiceLocationLabel(row.service_location) : "-" }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('drill_pattern')">{{ row.has_subtraction ? getDrillPatternLabel(row.drill_pattern) : "-" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">{{ row.has_subtraction ? getSubtractionShapeLabel(row.subtraction_shape) : "-" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">{{ getServiceTypeMeasurementDisplayText(row.axis_to_opposite_edge_distance) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">{{ getServiceTypeMeasurementDisplayText(row.axis_to_aligned_edge_distance) }}</td>
@@ -27883,7 +27804,6 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">کد اختصاری</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">سابترکشن</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">محل خدمت</th>
-                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('drill_pattern')">نوع سوراخکاری</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">شکل</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه ظلع مقابل</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">فاصله آکس تا لبه ضلع موافق</th>
@@ -27918,9 +27838,6 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">
                       <span class="constructionDialog__pill">{{ item.has_subtraction ? getServiceLocationLabel(item.service_location) : "-" }}</span>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('drill_pattern')">
-                      <span class="constructionDialog__pill">{{ item.has_subtraction ? getDrillPatternLabel(item.drill_pattern) : "-" }}</span>
-                    </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">
                       <span class="constructionDialog__pill">{{ item.has_subtraction ? getSubtractionShapeLabel(item.subtraction_shape) : "-" }}</span>
                     </td>
@@ -27944,7 +27861,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionServiceTypes.length">
-                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="13">هنوز خدمتی برای قطعات ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="12">هنوز خدمتی برای قطعات ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -29282,37 +29199,15 @@ onBeforeUnmount(() => {
           <div v-if="serviceTypeEditorDraft.has_subtraction" class="serviceTypeEditor__drillGrid">
             <div class="serviceTypeEditor__fields">
               <div class="serviceTypeEditor__fieldBlock">
-                <span class="serviceTypeEditor__label">نوع سوراخکاری</span>
-                <div class="serviceTypeEditor__fieldHint">اول نوع سوراخکاری را انتخاب کنید. گازور لولا و پین طبقه نقطه‌ای هستند؛ شیار و فارسی‌کاری خطی هستند.</div>
-                <div class="serviceTypeEditor__segmented serviceTypeEditor__segmented--rich">
-                  <button
-                    v-for="option in DRILL_PATTERN_OPTIONS"
-                    :key="option.value"
-                    type="button"
-                    class="serviceTypeEditor__segBtn serviceTypeEditor__segBtn--rich"
-                    :class="{ 'is-active': serviceTypeEditorDraft.drill_pattern === option.value }"
-                    @click="onServiceTypeDrillPatternChange(option.value)"
-                  >
-                    <span class="serviceTypeEditor__segIcon" :class="`is-${option.icon}`"></span>
-                    <span>{{ option.label }}</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="serviceTypeEditor__fieldBlock">
                 <span class="serviceTypeEditor__label">محل خدمت</span>
-                <div class="serviceTypeEditor__fieldHint">برای نقطه‌ای فقط روی قطعه یا پشت قطعه مجاز است. برای خطی فقط ضخامت قطعه مجاز است.</div>
+                <div class="serviceTypeEditor__fieldHint">با وجود عمق کارگیر، هر محل خدمت قابل انتخاب است و preview بر همان اساس سه‌نما را می‌سازد.</div>
                 <div class="serviceTypeEditor__locationGrid">
                   <button
                     v-for="option in SERVICE_LOCATION_OPTIONS"
                     :key="option.value"
                     type="button"
                     class="serviceTypeEditor__locationCard"
-                    :class="{
-                      'is-active': serviceTypeEditorDraft.service_location === option.value,
-                      'is-disabled': !isServiceTypeLocationAllowedForDrillPattern(serviceTypeEditorDraft.drill_pattern, option.value),
-                    }"
-                    :disabled="!isServiceTypeLocationAllowedForDrillPattern(serviceTypeEditorDraft.drill_pattern, option.value)"
+                    :class="{ 'is-active': serviceTypeEditorDraft.service_location === option.value }"
                     @click="onServiceTypeLocationChange(option.value)"
                   >
                     <span class="serviceTypeEditor__locationCardIconWrap" aria-hidden="true">
@@ -29325,7 +29220,7 @@ onBeforeUnmount(() => {
 
               <div class="serviceTypeEditor__fieldBlock">
                 <span class="serviceTypeEditor__label">شکل سابترکشن</span>
-                <div class="serviceTypeEditor__fieldHint">روی قطعه و پشت قطعه همیشه دایره‌ای هستند. در ضخامت قطعه هر سه شکل در دسترس‌اند.</div>
+                <div class="serviceTypeEditor__fieldHint">دایره در همه‌ی محل‌های خدمت مجاز است. مثلث و مستطیل فقط برای ضخامت قطعه در دسترس‌اند.</div>
                 <div class="serviceTypeEditor__segmented">
                   <button
                     v-for="option in SUBTRACTION_SHAPE_OPTIONS"
@@ -29335,7 +29230,7 @@ onBeforeUnmount(() => {
                     :class="{
                       'is-active': serviceTypeEditorDraft.subtraction_shape === option.value,
                     }"
-                    :disabled="!isServiceTypeShapeAllowedForRule(serviceTypeEditorDraft.drill_pattern, serviceTypeEditorDraft.service_location, option.value)"
+                    :disabled="!isServiceTypeShapeAllowedForLocation(serviceTypeEditorDraft.service_location, option.value)"
                     @click="onServiceTypeSubtractionShapeChange(option.value)"
                   >
                     {{ option.label }}
@@ -29553,7 +29448,6 @@ onBeforeUnmount(() => {
 
             <div class="serviceTypeEditor__previewMeta">
               <span>{{ getServiceLocationLabel(serviceTypeEditorDraft.service_location) }}</span>
-              <span>{{ getDrillPatternLabel(serviceTypeEditorDraft.drill_pattern) }}</span>
               <span>{{ getSubtractionShapeLabel(serviceTypeEditorDraft.subtraction_shape) }}</span>
             </div>
           </div>
@@ -34466,36 +34360,6 @@ onBeforeUnmount(() => {
 .serviceTypeEditor__segIcon.is-face-thickness::after {
   inset: 3px 3px 3px 11px;
   background: rgba(15, 118, 110, 0.26);
-}
-
-.serviceTypeEditor__segIcon.is-drill-point::before {
-  inset: 4px;
-  border: 2px solid #2563eb;
-}
-
-.serviceTypeEditor__segIcon.is-drill-point::after {
-  width: 5px;
-  height: 5px;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  background: #2563eb;
-}
-
-.serviceTypeEditor__segIcon.is-drill-linear::before {
-  left: 2px;
-  right: 2px;
-  top: 8px;
-  height: 4px;
-  background: #2563eb;
-}
-
-.serviceTypeEditor__segIcon.is-drill-linear::after {
-  width: 18px;
-  height: 18px;
-  left: 1px;
-  top: 1px;
-  border: 1.6px dashed rgba(37, 99, 235, 0.45);
 }
 
 .serviceTypeEditor__drillGrid {

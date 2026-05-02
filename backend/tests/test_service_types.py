@@ -72,7 +72,6 @@ def test_create_service_type_success_without_subtraction(monkeypatch: pytest.Mon
         icon_path=" icon.webp ",
         has_subtraction=False,
         service_location="back",
-        drill_pattern="point",
         subtraction_shape="circle",
         shape_angles=[],
         axis_to_opposite_edge_distance=12.5,
@@ -91,7 +90,6 @@ def test_create_service_type_success_without_subtraction(monkeypatch: pytest.Mon
     assert result.icon_path == "icon.webp"
     assert result.has_subtraction is False
     assert result.service_location is None
-    assert result.drill_pattern is None
     assert result.subtraction_shape is None
     assert result.shape_angles is None
     assert result.axis_to_opposite_edge_distance == 12.5
@@ -117,7 +115,6 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
         icon_path=None,
         has_subtraction=False,
         service_location=None,
-        drill_pattern=None,
         subtraction_shape=None,
         shape_angles=None,
         axis_to_opposite_edge_distance=0,
@@ -136,7 +133,6 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
         icon_path="assembly.webp",
         has_subtraction=True,
         service_location="thickness",
-        drill_pattern="linear",
         subtraction_shape="circle",
         shape_angles=[],
         axis_to_opposite_edge_distance=4,
@@ -155,7 +151,6 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
     assert existing.icon_path == "assembly.webp"
     assert existing.has_subtraction is True
     assert existing.service_location == "thickness"
-    assert existing.drill_pattern == "linear"
     assert existing.subtraction_shape == "circle"
     assert existing.shape_angles == []
     assert existing.axis_to_opposite_edge_distance == 4
@@ -246,7 +241,6 @@ def test_delete_service_type_checks_access_scope(monkeypatch: pytest.MonkeyPatch
         icon_path="icon.webp",
         has_subtraction=False,
         service_location=None,
-        drill_pattern=None,
         subtraction_shape=None,
         shape_angles=None,
         axis_to_opposite_edge_distance=0,
@@ -276,7 +270,6 @@ def test_create_service_type_rejects_invalid_service_location(monkeypatch: pytes
         icon_path=None,
         has_subtraction=True,
         service_location="left",
-        drill_pattern="point",
         subtraction_shape="circle",
         shape_angles=[],
         sort_order=1,
@@ -288,33 +281,6 @@ def test_create_service_type_rejects_invalid_service_location(monkeypatch: pytes
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "Service location must be front, back, or thickness."
-
-
-def test_create_service_type_rejects_invalid_drill_pattern(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_require_admin_if_present(session, admin_id):
-        return None
-
-    monkeypatch.setattr(router, "require_admin_if_present", fake_require_admin_if_present)
-    payload = ServiceTypeCreate(
-        admin_id=None,
-        service_type="خدمات",
-        service_title="توضیح",
-        short_code="code",
-        icon_path=None,
-        has_subtraction=True,
-        service_location="front",
-        drill_pattern="curve",
-        subtraction_shape="circle",
-        shape_angles=[],
-        sort_order=1,
-        is_system=True,
-    )
-
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(create_service_type(payload, FakeSession()))
-
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "Drill pattern must be point or linear."
 
 
 def test_create_service_type_rejects_invalid_triangle_angles(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -330,7 +296,6 @@ def test_create_service_type_rejects_invalid_triangle_angles(monkeypatch: pytest
         icon_path=None,
         has_subtraction=True,
         service_location="front",
-        drill_pattern="point",
         subtraction_shape="triangle",
         shape_angles=[
             {"index": 0, "angle_deg": 50},
@@ -361,7 +326,6 @@ def test_create_service_type_rejects_invalid_rectangle_angle_count(monkeypatch: 
         icon_path=None,
         has_subtraction=True,
         service_location="back",
-        drill_pattern="linear",
         subtraction_shape="rectangle",
         shape_angles=[
             {"index": 0, "angle_deg": 90},
@@ -401,7 +365,6 @@ def test_delete_service_type_removes_owned_icon(monkeypatch: pytest.MonkeyPatch)
         icon_path="icon.webp",
         has_subtraction=False,
         service_location=None,
-        drill_pattern=None,
         subtraction_shape=None,
         shape_angles=None,
         axis_to_opposite_edge_distance=0,
