@@ -37,6 +37,7 @@ import { getJson, invalidateApiCache, sendJson } from "./services/api_client.js"
 
 const GlbViewerWidget = defineAsyncComponent(() => import("./components/GlbViewerWidget.vue"));
 const FrontViewCanvas = defineAsyncComponent(() => import("./components/FrontViewCanvas.vue"));
+const ServiceType3dPreview = defineAsyncComponent(() => import("./components/ServiceType3dPreview.vue"));
 
 const activeTool = ref("select");
 const snapOn = ref(true);
@@ -10018,6 +10019,27 @@ const serviceTypeEditorPreviewState = computed(() => {
     return vertices.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
   }
 
+  function buildShapeProfilePoints(targetSizeMm) {
+    if (safeShape === "circle") return [];
+    const sourceVertices = Array.isArray(geometry.vertices) ? geometry.vertices : [];
+    if (!sourceVertices.length) return [];
+    const centerX = Number(geometry.center?.x) || 0;
+    const centerY = Number(geometry.center?.y) || 0;
+    const localVertices = sourceVertices.map((point) => ({
+      x: (Number(point.x) || 0) - centerX,
+      y: centerY - (Number(point.y) || 0),
+    }));
+    const xs = localVertices.map((point) => point.x);
+    const ys = localVertices.map((point) => point.y);
+    const width = Math.max(1, Math.max(...xs) - Math.min(...xs));
+    const height = Math.max(1, Math.max(...ys) - Math.min(...ys));
+    const scale = Math.max(0.01, targetSizeMm / Math.max(width, height));
+    return localVertices.map((point) => ({
+      x: point.x * scale,
+      y: point.y * scale,
+    }));
+  }
+
   function buildShapeAtAnchor(anchor, boundRect, sizePx, linearAxis = "vertical", renderMode = "default") {
     if (!hasVisibleSubtraction) return null;
     if (safeShape === "circle" && renderMode === "allowOverflow") {
@@ -10219,6 +10241,7 @@ const serviceTypeEditorPreviewState = computed(() => {
   const bottomThicknessAnchorX = bottomRect.x + (widthRatio * bottomRect.width);
   const topThicknessAnchorBottomY = topRect.y + topRect.height;
   const bottomThicknessAnchorBottomY = bottomRect.y + bottomRect.height;
+  const shapeProfilePoints = buildShapeProfilePoints(Math.max(workingDiameter, 1));
 
   const topPrimary = safeLocation === "thickness"
     ? null
@@ -10268,6 +10291,23 @@ const serviceTypeEditorPreviewState = computed(() => {
     hasVisibleSubtraction,
     sizeLabel: previewSizeLabel,
     sizeUnitLabel: previewSizeUnitLabel,
+    scene3d: {
+      part: {
+        width: partWidthMm,
+        length: partLengthMm,
+        thickness: partThicknessMm,
+      },
+      cutter: {
+        hasVisibleSubtraction,
+        serviceLocation: safeLocation,
+        shape: safeShape,
+        workingDiameter,
+        workingDepth,
+        axisAligned,
+        axisOpposite,
+        profilePoints: shapeProfilePoints,
+      },
+    },
     views: [
       {
         key: "top",
@@ -29495,6 +29535,13 @@ onBeforeUnmount(() => {
                       </template>
                     </svg>
                   </article>
+                  <article class="serviceTypeEditor__previewCard serviceTypeEditor__previewCard--3d">
+                    <div class="serviceTypeEditor__previewCardHead">
+                      <span class="serviceTypeEditor__previewCardTitle">نمای سه‌بعدی</span>
+                      <span class="serviceTypeEditor__previewAxis">3D</span>
+                    </div>
+                    <ServiceType3dPreview :scene="serviceTypeEditorPreviewState.scene3d" />
+                  </article>
                 </div>
               </div>
             </div>
@@ -34477,7 +34524,7 @@ onBeforeUnmount(() => {
 }
 
 .serviceTypeEditor__previewGrid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .serviceTypeEditor__previewCard {
@@ -34487,6 +34534,10 @@ onBeforeUnmount(() => {
   border-radius: 16px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(255, 255, 255, 0.78);
+}
+
+.serviceTypeEditor__previewCard--3d {
+  align-content: start;
 }
 
 .serviceTypeEditor__previewCardTitle {
