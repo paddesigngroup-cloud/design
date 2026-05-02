@@ -34590,7 +34590,6 @@ onBeforeUnmount(() => {
   fill: rgba(248, 250, 252, 0.92);
   stroke: rgba(15, 23, 42, 0.16);
   stroke-width: 2;
-  stroke-dasharray: 7 5;
 }
 
 .serviceTypeEditor__previewFace {
@@ -34624,28 +34623,32 @@ onBeforeUnmount(() => {
 }
 
 .serviceTypeEditor__previewShape {
-  fill: rgba(15, 23, 42, 0.12);
-  stroke: #0f172a;
-  stroke-width: 2.2;
+  fill: rgba(249, 115, 22, 0.12);
+  stroke: rgba(234, 88, 12, 0.95);
+  stroke-width: 2;
   stroke-linejoin: round;
+  stroke-dasharray: 6 5;
 }
 
 .serviceTypeEditor__previewShapeLine {
   fill: none;
-  stroke: #0f172a;
-  stroke-width: 2.2;
+  stroke: rgba(234, 88, 12, 0.95);
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
 }
 
 .serviceTypeEditor__previewTraceLine {
   stroke: rgba(249, 115, 22, 0.95);
   stroke-width: 3;
   stroke-linecap: round;
+  stroke-dasharray: 6 5;
 }
 
 .serviceTypeEditor__previewTraceRect {
   fill: rgba(249, 115, 22, 0.24);
   stroke: rgba(249, 115, 22, 0.95);
   stroke-width: 1.8;
+  stroke-dasharray: 6 5;
 }
 
 .serviceTypeEditor__previewMeta {
