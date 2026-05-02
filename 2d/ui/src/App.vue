@@ -33,6 +33,7 @@ import {
   snapInteriorPointToGeometry,
 } from "./features/interior_library_annotations.js";
 import { CURRENT_ADMIN_ID, CURRENT_BOOTSTRAP_USER_ID, CURRENT_BOOTSTRAP_USER_NAME, PART_KINDS_CATALOG } from "./features/part_kinds_catalog.js";
+import { buildServiceTypeProjectionViews, normalizeServiceTypePreviewSceneInput } from "./features/service_type_preview_geometry.js";
 import { getJson, invalidateApiCache, sendJson } from "./services/api_client.js";
 
 const GlbViewerWidget = defineAsyncComponent(() => import("./components/GlbViewerWidget.vue"));
@@ -9992,11 +9993,6 @@ const serviceTypeEditorPreviewState = computed(() => {
   ].join(" × ");
   const previewSizeUnitLabel = getCurrentParamLengthUnitLabel();
 
-  function clampPreviewRatio(valueMm, totalMm) {
-    if (totalMm <= 0) return 0;
-    return Math.max(0, Math.min(1, valueMm / totalMm));
-  }
-
   function buildPreviewRect(widthMm, heightMm) {
     const frame = { x: 18, y: 18, width: 184, height: 116 };
     const safeWidth = Math.max(1, widthMm);
@@ -10011,12 +10007,6 @@ const serviceTypeEditorPreviewState = computed(() => {
       height: drawHeight,
       scale,
     };
-  }
-
-  function buildPolygonPoints(frame, padding = 6) {
-    if (safeShape === "circle") return "";
-    const vertices = scalePartModelVerticesIntoFrame(geometry.vertices, frame, padding);
-    return vertices.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
   }
 
   function buildShapeProfilePoints(targetSizeMm) {
@@ -10040,274 +10030,38 @@ const serviceTypeEditorPreviewState = computed(() => {
     }));
   }
 
-  function buildShapeAtAnchor(anchor, boundRect, sizePx, linearAxis = "vertical", renderMode = "default") {
-    if (!hasVisibleSubtraction) return null;
-    if (safeShape === "circle" && renderMode === "allowOverflow") {
-      return {
-        type: "circle",
-        cx: anchor.x,
-        cy: anchor.y,
-        r: Math.max(2, sizePx / 2),
-      };
-    }
-    const safeSize = Math.max(4, Math.min(sizePx, Math.min(boundRect.width, boundRect.height) - 4));
-    if (safeShape === "circle" && renderMode === "line") {
-      const lineStrokeWidth = Math.max(2, Math.min(4, (Math.min(boundRect.width, boundRect.height) * 0.22)));
-      if (linearAxis === "horizontal") {
-        return {
-          type: "line",
-          x1: Math.max(boundRect.x + 2, anchor.x - (safeSize / 2)),
-          y1: anchor.y,
-          x2: Math.min(boundRect.x + boundRect.width - 2, anchor.x + (safeSize / 2)),
-          y2: anchor.y,
-          strokeWidth: lineStrokeWidth,
-          roundCaps: true,
-        };
-      }
-      return {
-        type: "line",
-        x1: anchor.x,
-        y1: Math.max(boundRect.y + 2, anchor.y - (safeSize / 2)),
-        x2: anchor.x,
-        y2: Math.min(boundRect.y + boundRect.height - 2, anchor.y + (safeSize / 2)),
-        strokeWidth: lineStrokeWidth,
-        roundCaps: true,
-      };
-    }
-    if (safeShape === "circle") {
-      return {
-        type: "circle",
-        cx: anchor.x,
-        cy: anchor.y,
-        r: Math.max(2, safeSize / 2),
-      };
-    }
-    const frameSize = Math.max(16, Math.min(safeSize, Math.min(boundRect.width, boundRect.height) - 4));
-    const frame = {
-      x: Math.max(boundRect.x + 2, Math.min(boundRect.x + boundRect.width - frameSize - 2, anchor.x - (frameSize / 2))),
-      y: Math.max(boundRect.y + 2, Math.min(boundRect.y + boundRect.height - frameSize - 2, anchor.y - (frameSize / 2))),
-      width: frameSize,
-      height: frameSize,
-    };
-    return {
-      type: "polygon",
-      points: buildPolygonPoints(frame, 4),
-    };
-  }
-
-  function buildVerticalTrace(anchorX, rect, diameterPx, depthPx, fromBottom = false) {
-    const strokeWidth = Math.max(2, Math.min(diameterPx, rect.width - 2));
-    if (depthPx <= 0) {
-      return {
-        type: "line",
-        x1: anchorX,
-        y1: fromBottom ? rect.y + rect.height : rect.y,
-        x2: anchorX,
-        y2: fromBottom
-          ? rect.y + rect.height - Math.max(6, Math.min(12, rect.height * 0.4))
-          : rect.y + Math.max(6, Math.min(12, rect.height * 0.4)),
-        strokeWidth,
-        roundCaps: true,
-      };
-    }
-    const startY = fromBottom ? rect.y + rect.height : rect.y;
-    const endY = fromBottom
-      ? Math.max(rect.y + 2, rect.y + rect.height - depthPx)
-      : Math.min(rect.y + rect.height - 2, rect.y + depthPx);
-    return {
-      type: "line",
-      x1: anchorX,
-      y1: startY,
-      x2: anchorX,
-      y2: endY,
-      strokeWidth,
-      roundCaps: true,
-    };
-  }
-
-  function buildHorizontalTrace(anchorY, rect, depthPx, thicknessPx = 10, fromLeft = false) {
-    const strokeWidth = Math.max(2, Math.min(thicknessPx, rect.height - 2));
-    if (depthPx <= 0) {
-      return {
-        type: "line",
-        x1: fromLeft ? rect.x : rect.x + rect.width,
-        y1: anchorY,
-        x2: fromLeft
-          ? rect.x + Math.max(8, Math.min(16, rect.width * 0.2))
-          : rect.x + rect.width - Math.max(8, Math.min(16, rect.width * 0.2)),
-        y2: anchorY,
-        strokeWidth,
-        roundCaps: true,
-      };
-    }
-    const startX = fromLeft ? rect.x : rect.x + rect.width;
-    const endX = fromLeft
-      ? Math.min(rect.x + rect.width - 2, rect.x + depthPx)
-      : Math.max(rect.x + 2, rect.x + rect.width - depthPx);
-    return {
-      type: "line",
-      x1: startX,
-      y1: anchorY,
-      x2: endX,
-      y2: anchorY,
-      strokeWidth,
-      roundCaps: true,
-    };
-  }
-
-  function buildCornerCenteredHorizontalTrace(anchorX, anchorY, rect, depthPx, thicknessPx = 10, fromBottom = false) {
-    const strokeWidth = Math.max(2, Math.min(thicknessPx, rect.height - 2));
-    const length = depthPx > 0
-      ? Math.max(8, depthPx)
-      : Math.max(10, Math.min(16, rect.width * 0.24));
-    if (depthPx > 0) {
-      return {
-        type: "rect",
-        x: anchorX - (strokeWidth * 0.5),
-        y: fromBottom ? anchorY - length : anchorY,
-        width: strokeWidth,
-        height: length,
-        rx: 2,
-      };
-    }
-    return {
-      type: "line",
-      x1: anchorX - (length * 0.5),
-      y1: anchorY,
-      x2: anchorX + (length * 0.5),
-      y2: anchorY,
-      strokeWidth,
-      roundCaps: true,
-    };
-  }
-
-  function buildBottomCornerExtrudeProjection(anchorX, anchorBottomY, rect, depthPx, thicknessPx = 10) {
-    const projectedWidth = Math.max(2, Math.min(thicknessPx, rect.width - 2));
-    if (depthPx <= 0) {
-      return {
-        type: "line",
-        x1: anchorX - (projectedWidth * 0.5),
-        y1: rect.y + rect.height,
-        x2: anchorX + (projectedWidth * 0.5),
-        y2: rect.y + rect.height,
-        strokeWidth: 2,
-        roundCaps: true,
-      };
-    }
-    const projectedDepth = Math.max(8, Math.min(depthPx, rect.height - 2));
-    const bottomY = Math.max(rect.y + projectedDepth + 2, Math.min(rect.y + rect.height, anchorBottomY));
-    return {
-      type: "rect",
-      x: anchorX - (projectedWidth * 0.5),
-      y: bottomY - projectedDepth,
-      width: projectedWidth,
-      height: projectedDepth,
-      rx: 2,
-    };
-  }
-
   const topRect = buildPreviewRect(partWidthMm, partLengthMm);
   const bottomRect = buildPreviewRect(partWidthMm, partLengthMm);
   const sideRect = buildPreviewRect(partWidthMm, partThicknessMm);
-  const widthRatio = clampPreviewRatio(axisAligned, partWidthMm);
-  const lengthRatio = clampPreviewRatio(axisOpposite, partLengthMm);
-  const thicknessRatio = clampPreviewRatio(axisOpposite, partThicknessMm);
-  const topAnchor = {
-    x: topRect.x + (widthRatio * topRect.width),
-    y: topRect.y + topRect.height - (lengthRatio * topRect.height),
-  };
-  const bottomAnchor = {
-    x: bottomRect.x + topAnchor.x - topRect.x,
-    y: bottomRect.y + topAnchor.y - topRect.y,
-  };
-  const sideAnchorX = sideRect.x + (widthRatio * sideRect.width);
-  const sideThicknessAnchorY = sideRect.y + sideRect.height - (thicknessRatio * sideRect.height);
-  const shapeTopSize = Math.min(topRect.width - 4, topRect.height - 4, workingDiameter * topRect.scale);
-  const shapeBottomSize = Math.min(bottomRect.width - 4, bottomRect.height - 4, workingDiameter * bottomRect.scale);
-  const shapeSideSize = safeShape === "circle"
-    ? Math.max(4, workingDiameter * sideRect.scale)
-    : Math.min(sideRect.width - 4, sideRect.height - 4, workingDiameter * sideRect.scale);
-  const bottomTraceDepth = Math.min(bottomRect.height - 2, workingDepth * bottomRect.scale);
-  const sideTraceWidth = Math.min(sideRect.width - 2, Math.max(2, workingDiameter * sideRect.scale));
-  const sideTraceDepth = Math.min(sideRect.height - 2, workingDepth * sideRect.scale);
-  const topTraceDepth = Math.min(topRect.height - 2, workingDepth * topRect.scale);
-  const topThicknessProjectionWidth = Math.min(topRect.width - 2, Math.max(2, workingDiameter * topRect.scale));
-  const bottomThicknessProjectionWidth = Math.min(bottomRect.width - 2, Math.max(2, workingDiameter * bottomRect.scale));
-  const sideFrontBackAnchorY = safeLocation === "back"
-    ? sideRect.y + sideRect.height
-    : sideRect.y;
-  const sideFrontBackAnchorX = sideAnchorX;
-  const topThicknessAnchorX = topRect.x + (widthRatio * topRect.width);
-  const bottomThicknessAnchorX = bottomRect.x + (widthRatio * bottomRect.width);
-  const topThicknessAnchorBottomY = topRect.y + topRect.height;
-  const bottomThicknessAnchorBottomY = bottomRect.y + bottomRect.height;
   const shapeProfilePoints = buildShapeProfilePoints(Math.max(workingDiameter, 1));
-
-  const topPrimary = safeLocation === "thickness"
-    ? null
-    : buildShapeAtAnchor(topAnchor, topRect, shapeTopSize, "vertical");
-  const bottomPrimary = safeLocation === "thickness"
-    ? null
-    : buildShapeAtAnchor(bottomAnchor, bottomRect, shapeBottomSize, "vertical");
-  const bottomTrace = !hasVisibleSubtraction || safeLocation !== "thickness"
-    ? null
-    : buildBottomCornerExtrudeProjection(
-      bottomThicknessAnchorX,
-      bottomThicknessAnchorBottomY,
-      bottomRect,
-      bottomTraceDepth,
-      bottomThicknessProjectionWidth
-    );
-  const sidePrimary = safeLocation === "thickness"
-    ? buildShapeAtAnchor(
-      { x: sideAnchorX, y: sideThicknessAnchorY },
-      sideRect,
-      shapeSideSize,
-      "horizontal",
-      safeShape === "circle" ? "allowOverflow" : "default"
-    )
-    : null;
-  const sideTrace = !hasVisibleSubtraction || safeLocation === "thickness"
-    ? null
-    : buildCornerCenteredHorizontalTrace(
-      sideFrontBackAnchorX,
-      sideFrontBackAnchorY,
-      sideRect,
-      sideTraceDepth,
-      sideTraceWidth,
-      safeLocation === "back"
-    );
-  const topTrace = !hasVisibleSubtraction || safeLocation !== "thickness"
-    ? null
-    : buildBottomCornerExtrudeProjection(
-      topThicknessAnchorX,
-      topThicknessAnchorBottomY,
-      topRect,
-      topTraceDepth,
-      topThicknessProjectionWidth
-    );
+  const previewSceneSpec = normalizeServiceTypePreviewSceneInput({
+    part: {
+      width: partWidthMm,
+      length: partLengthMm,
+      thickness: partThicknessMm,
+    },
+    cutter: {
+      hasVisibleSubtraction,
+      serviceLocation: safeLocation,
+      shape: safeShape,
+      workingDiameter,
+      workingDepth,
+      axisAligned,
+      axisOpposite,
+      profilePoints: shapeProfilePoints,
+    },
+  });
+  const projectedViews = buildServiceTypeProjectionViews(previewSceneSpec, {
+    topRect,
+    bottomRect,
+    sideRect,
+  });
   return {
     viewBox,
     hasVisibleSubtraction,
     sizeLabel: previewSizeLabel,
     sizeUnitLabel: previewSizeUnitLabel,
-    scene3d: {
-      part: {
-        width: partWidthMm,
-        length: partLengthMm,
-        thickness: partThicknessMm,
-      },
-      cutter: {
-        hasVisibleSubtraction,
-        serviceLocation: safeLocation,
-        shape: safeShape,
-        workingDiameter,
-        workingDepth,
-        axisAligned,
-        axisOpposite,
-        profilePoints: shapeProfilePoints,
-      },
-    },
+    scene3d: previewSceneSpec,
     views: [
       {
         key: "top",
@@ -10315,8 +10069,8 @@ const serviceTypeEditorPreviewState = computed(() => {
         axisLabel: "W × L",
         rect: topRect,
         tone: safeLocation === "back" ? "back" : "front",
-        primaryShape: topPrimary,
-        traceShape: topTrace,
+        primaryShape: projectedViews.top.primaryShape,
+        traceShape: projectedViews.top.traceShape,
       },
       {
         key: "bottom",
@@ -10324,8 +10078,8 @@ const serviceTypeEditorPreviewState = computed(() => {
         axisLabel: "W × L",
         rect: bottomRect,
         tone: safeLocation === "back" ? "back" : "front",
-        primaryShape: bottomPrimary,
-        traceShape: bottomTrace,
+        primaryShape: projectedViews.bottom.primaryShape,
+        traceShape: projectedViews.bottom.traceShape,
       },
       {
         key: "side",
@@ -10333,8 +10087,8 @@ const serviceTypeEditorPreviewState = computed(() => {
         axisLabel: "W × T",
         rect: sideRect,
         tone: safeLocation === "thickness" ? "thickness" : "side",
-        primaryShape: sidePrimary,
-        traceShape: sideTrace,
+        primaryShape: projectedViews.side.primaryShape,
+        traceShape: projectedViews.side.traceShape,
       },
     ],
   };
