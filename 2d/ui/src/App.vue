@@ -10129,11 +10129,21 @@ const serviceTypeEditorPreviewState = computed(() => {
     };
   }
 
-  function buildCornerCenteredHorizontalTrace(anchorX, anchorY, rect, depthPx, thicknessPx = 10) {
+  function buildCornerCenteredHorizontalTrace(anchorX, anchorY, rect, depthPx, thicknessPx = 10, fromBottom = false) {
     const strokeWidth = Math.max(2, Math.min(thicknessPx, rect.height - 2));
     const length = depthPx > 0
       ? Math.max(8, depthPx)
       : Math.max(10, Math.min(16, rect.width * 0.24));
+    if (depthPx > 0) {
+      return {
+        type: "rect",
+        x: anchorX - (strokeWidth * 0.5),
+        y: fromBottom ? anchorY - length : anchorY,
+        width: strokeWidth,
+        height: length,
+        rx: 2,
+      };
+    }
     return {
       type: "line",
       x1: anchorX - (length * 0.5),
@@ -10171,7 +10181,7 @@ const serviceTypeEditorPreviewState = computed(() => {
   const sideFrontBackAnchorY = safeLocation === "back"
     ? sideRect.y + sideRect.height
     : sideRect.y;
-  const sideFrontBackAnchorX = sideRect.x;
+  const sideFrontBackAnchorX = sideAnchorX;
 
   const topPrimary = safeLocation === "thickness"
     ? null
@@ -10193,7 +10203,14 @@ const serviceTypeEditorPreviewState = computed(() => {
     : null;
   const sideTrace = !hasVisibleSubtraction || safeLocation === "thickness"
     ? null
-    : buildCornerCenteredHorizontalTrace(sideFrontBackAnchorX, sideFrontBackAnchorY, sideRect, sideTraceDepth, sideTraceWidth);
+    : buildCornerCenteredHorizontalTrace(
+      sideFrontBackAnchorX,
+      sideFrontBackAnchorY,
+      sideRect,
+      sideTraceDepth,
+      sideTraceWidth,
+      safeLocation === "back"
+    );
   const topTrace = !hasVisibleSubtraction || safeLocation !== "thickness"
     ? null
     : buildHorizontalTrace(topAnchor.y, topRect, topTraceDepth, shapeTopSize, true);
