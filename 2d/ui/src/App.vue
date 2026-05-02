@@ -10153,8 +10153,8 @@ const serviceTypeEditorPreviewState = computed(() => {
   const sideTraceDepth = Math.min(sideRect.height - 2, workingDepth * sideRect.scale);
   const topTraceDepth = Math.min(topRect.width - 2, workingDepth * topRect.scale);
   const sideFrontBackAnchorY = safeLocation === "back"
-    ? sideRect.y + Math.max(2, sideTraceWidth * 0.5)
-    : sideRect.y + sideRect.height - Math.max(2, sideTraceWidth * 0.5);
+    ? sideRect.y + sideRect.height
+    : sideRect.y;
 
   const topPrimary = safeLocation === "thickness"
     ? null
