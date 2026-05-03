@@ -43,6 +43,7 @@ def test_export_service_types_returns_csv_and_snapshot(monkeypatch: pytest.Monke
                 service_type="برش CNC",
                 service_title="دورو",
                 short_code="dr",
+                is_common=True,
                 has_subtraction=True,
                 service_location="front",
                 subtraction_shape="triangle",
@@ -71,13 +72,14 @@ def test_export_service_types_returns_csv_and_snapshot(monkeypatch: pytest.Monke
     body = response.body.decode("utf-8-sig")
 
     assert response.headers["Content-Disposition"] == 'attachment; filename="part_services_excel_template.csv"'
-    assert "service_type,service_title,short_code,has_subtraction,service_location,subtraction_shape,shape_angles" in body
-    assert "برش CNC,دورو,dr,1,front,triangle,\"60,60,60\",12,8,35,24,18,14,to_end,2,1,0,system" in body
+    assert "service_type,service_title,short_code,is_common,has_subtraction,service_location,subtraction_shape,shape_angles" in body
+    assert "برش CNC,دورو,dr,1,1,front,triangle,\"60,60,60\",12,8,35,24,18,14,to_end,2,1,0,system" in body
     assert called["table_name"] == "service_types"
     assert called["headers"] == [
         "service_type",
         "service_title",
         "short_code",
+        "is_common",
         "has_subtraction",
         "service_location",
         "subtraction_shape",
@@ -98,6 +100,7 @@ def test_export_service_types_returns_csv_and_snapshot(monkeypatch: pytest.Monke
         "برش CNC",
         "دورو",
         "dr",
+        1,
         1,
         "front",
         "triangle",

@@ -8400,6 +8400,7 @@ const constructionServiceTypeColumnWidths = computed(() => {
     service_type: getMaxColumnLength(rows.map((item) => item.service_type), 6),
     service_title: getMaxColumnLength(rows.map((item) => item.service_title), 6),
     short_code: getMaxColumnLength(rows.map((item) => item.short_code), 3),
+    is_common: getMaxColumnLength(rows.map((item) => normalizeBooleanFlag(item.is_common, false) ? "بله" : "خیر"), 4),
     has_subtraction: getMaxColumnLength(rows.map((item) => getSubtractionToggleLabel(item.has_subtraction)), 4),
     service_location: getMaxColumnLength(rows.map((item) => getServiceLocationLabel(item.service_location)), 6),
     subtraction_shape: getMaxColumnLength(rows.map((item) => getSubtractionShapeLabel(item.subtraction_shape)), 4),
@@ -9023,6 +9024,7 @@ function normalizeServiceTypePayload(item) {
     service_title: String(item.service_title || "").trim(),
     short_code: String(item.short_code || "").trim(),
     icon_path: normalizeIconFileName(item.icon_path),
+    is_common: normalizeBooleanFlag(item.is_common, false),
     has_subtraction: normalizeBooleanFlag(item.has_subtraction, false),
     service_location: normalizeBooleanFlag(item.has_subtraction, false) ? normalizeServiceLocation(item.service_location) : null,
     subtraction_shape: normalizeBooleanFlag(item.has_subtraction, false) ? normalizeSubtractionShape(item.subtraction_shape) : null,
@@ -9169,6 +9171,7 @@ function normalizeEditableServiceTypeRecord(item) {
     service_title: String(item.service_title || "").trim(),
     short_code: String(item.short_code || "").trim(),
     icon_path: normalizeIconFileName(item.icon_path) || "",
+    is_common: normalizeBooleanFlag(item.is_common, false),
     has_subtraction: normalizeBooleanFlag(item.has_subtraction, false),
     service_location: normalizeServiceLocation(item.service_location),
     subtraction_shape: shape,
@@ -11487,6 +11490,7 @@ function buildNewServiceTypeDraft() {
     service_title: "",
     short_code: `service_type_${nextSort}`,
     icon_path: "",
+    is_common: false,
     has_subtraction: false,
     service_location: "front",
     subtraction_shape: "circle",
@@ -14322,6 +14326,7 @@ function openServiceTypeEditor(item = null) {
         service_title: String(item.service_title || "").trim(),
         short_code: String(item.short_code || "").trim(),
         icon_path: normalizeIconFileName(item.icon_path) || "",
+        is_common: normalizeBooleanFlag(item.is_common, false),
         has_subtraction: normalizeBooleanFlag(item.has_subtraction, false),
         service_location: normalizeServiceLocation(item.service_location),
         subtraction_shape: normalizeSubtractionShape(item.subtraction_shape),
@@ -19355,6 +19360,7 @@ function getConstructionCsvHeaders() {
       "service_type",
       "service_title",
       "short_code",
+      "is_common",
       "has_subtraction",
       "service_location",
       "subtraction_shape",
@@ -19441,6 +19447,7 @@ function getConstructionCsvRows(items = null) {
       String(item.service_type || "").trim(),
       String(item.service_title || "").trim(),
       String(item.short_code || "").trim(),
+      normalizeBooleanFlag(item.is_common, false) ? 1 : 0,
       normalizeBooleanFlag(item.has_subtraction, false) ? 1 : 0,
       normalizeBooleanFlag(item.has_subtraction, false) ? normalizeServiceLocation(item.service_location) : "",
       normalizeBooleanFlag(item.has_subtraction, false) ? normalizeSubtractionShape(item.subtraction_shape) : "",
@@ -19775,28 +19782,29 @@ async function onConstructionImportFileChange(event) {
       });
     } else if (constructionStep.value === "service_types") {
       previewRows = rows.slice(1).map((row, index) => {
-        const adminMode = String(row[17] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
-        const hasSubtraction = normalizeBooleanFlag(row[3], false);
-        const subtractionShape = normalizeSubtractionShape(row[5]);
+        const adminMode = String(row[18] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const hasSubtraction = normalizeBooleanFlag(row[4], false);
+        const subtractionShape = normalizeSubtractionShape(row[6]);
         return {
           lineNo: index + 2,
           service_type: String(row[0] || "").trim(),
           service_title: String(row[1] || "").trim(),
           short_code: String(row[2] || "").trim(),
+          is_common: normalizeBooleanFlag(row[3], false),
           has_subtraction: hasSubtraction,
-          service_location: hasSubtraction ? normalizeServiceLocation(row[4]) : null,
+          service_location: hasSubtraction ? normalizeServiceLocation(row[5]) : null,
           subtraction_shape: hasSubtraction ? subtractionShape : null,
-          shape_angles: hasSubtraction ? normalizeServiceTypeShapeAngleDrafts(subtractionShape, parsePartModelAnglesCsv(row[6], getServiceTypeShapeSideCount(subtractionShape), getServiceTypeShapeAngleSum(subtractionShape))) : [],
-          axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(row[7]),
-          axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(row[8]),
-          working_diameter: normalizeServiceTypeMeasurement(row[9]),
-          working_width: normalizeServiceTypeMeasurement(row[10]),
-          working_height: normalizeServiceTypeMeasurement(row[11]),
-          working_depth: normalizeServiceTypeMeasurement(row[12]),
-          working_depth_mode: normalizeServiceTypeWorkingDepthMode(row[13]),
-          working_depth_end_offset: normalizeServiceTypeMeasurement(row[14]),
-          preview_mirror_x: normalizeBooleanFlag(row[15], false),
-          preview_mirror_y: normalizeBooleanFlag(row[16], false),
+          shape_angles: hasSubtraction ? normalizeServiceTypeShapeAngleDrafts(subtractionShape, parsePartModelAnglesCsv(row[7], getServiceTypeShapeSideCount(subtractionShape), getServiceTypeShapeAngleSum(subtractionShape))) : [],
+          axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(row[8]),
+          axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(row[9]),
+          working_diameter: normalizeServiceTypeMeasurement(row[10]),
+          working_width: normalizeServiceTypeMeasurement(row[11]),
+          working_height: normalizeServiceTypeMeasurement(row[12]),
+          working_depth: normalizeServiceTypeMeasurement(row[13]),
+          working_depth_mode: normalizeServiceTypeWorkingDepthMode(row[14]),
+          working_depth_end_offset: normalizeServiceTypeMeasurement(row[15]),
+          preview_mirror_x: normalizeBooleanFlag(row[16], false),
+          preview_mirror_y: normalizeBooleanFlag(row[17], false),
           admin_mode: adminMode,
         };
       });
@@ -20003,6 +20011,7 @@ async function onConstructionImportFileChange(event) {
             !row.service_type ||
             !row.service_title ||
             !row.short_code ||
+            typeof row.is_common !== "boolean" ||
             (normalizeBooleanFlag(row.has_subtraction, false) && !isValidServiceLocation(row.service_location)) ||
             (normalizeBooleanFlag(row.has_subtraction, false) && !isValidSubtractionShape(row.subtraction_shape)) ||
             (normalizeBooleanFlag(row.has_subtraction, false) && !validateServiceTypeShapeAngles(row.subtraction_shape, row.shape_angles).ok) ||
@@ -23121,6 +23130,7 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       service_type: String(row.service_type || "").trim(),
       service_title: String(row.service_title || "").trim(),
       short_code: String(row.short_code || "").trim(),
+      is_common: normalizeBooleanFlag(row.is_common, false),
       has_subtraction: normalizeBooleanFlag(row.has_subtraction, false),
       service_location: normalizeBooleanFlag(row.has_subtraction, false) ? normalizeServiceLocation(row.service_location) : null,
       subtraction_shape: normalizeBooleanFlag(row.has_subtraction, false) ? normalizeSubtractionShape(row.subtraction_shape) : null,
@@ -23152,6 +23162,7 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       String(existing.service_type || "").trim() !== nextPayload.service_type ||
       String(existing.service_title || "").trim() !== nextPayload.service_title ||
       String(existing.short_code || "").trim() !== nextPayload.short_code ||
+      normalizeBooleanFlag(existing.is_common, false) !== nextPayload.is_common ||
       normalizeBooleanFlag(existing.has_subtraction, false) !== nextPayload.has_subtraction ||
       normalizeServiceLocation(existing.service_location) !== normalizeServiceLocation(nextPayload.service_location) ||
       normalizeSubtractionShape(existing.subtraction_shape) !== normalizeSubtractionShape(nextPayload.subtraction_shape) ||
@@ -27977,6 +27988,7 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--partServiceType" :style="getConstructionServiceTypeColumnStyle('service_type')">نوع خدمت</th>
                       <th class="constructionDialog__col constructionDialog__col--title" :style="getConstructionServiceTypeColumnStyle('service_title')">عنوان خدمات</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">کد اختصاری</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('is_common')">پرکاربرد</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">سابترکشن</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">محل خدمت</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">شکل</th>
@@ -27992,6 +28004,7 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--partServiceType" :style="getConstructionServiceTypeColumnStyle('service_type')">{{ row.service_type }}</td>
                       <td class="constructionDialog__col constructionDialog__col--title" :style="getConstructionServiceTypeColumnStyle('service_title')">{{ row.service_title }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">{{ row.short_code }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('is_common')">{{ row.is_common ? "بله" : "خیر" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">{{ getSubtractionToggleLabel(row.has_subtraction) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">{{ row.has_subtraction ? getServiceLocationLabel(row.service_location) : "-" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">{{ row.has_subtraction ? getSubtractionShapeLabel(row.subtraction_shape) : "-" }}</td>
@@ -28021,6 +28034,7 @@ onBeforeUnmount(() => {
                     <th class="constructionDialog__col constructionDialog__col--partServiceType" :style="getConstructionServiceTypeColumnStyle('service_type')">نوع خدمت</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceDescription" :style="getConstructionServiceTypeColumnStyle('service_title')">عنوان خدمات</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">کد اختصاری</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('is_common')">پرکاربرد</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">سابترکشن</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">محل خدمت</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">شکل</th>
@@ -28051,6 +28065,9 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('short_code')">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ item.short_code }}</span>
                     </td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('is_common')">
+                      <span class="constructionDialog__pill">{{ item.is_common ? "بله" : "خیر" }}</span>
+                    </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">
                       <span class="constructionDialog__pill">{{ getSubtractionToggleLabel(item.has_subtraction) }}</span>
                     </td>
@@ -28080,7 +28097,7 @@ onBeforeUnmount(() => {
                     </td>
                   </tr>
                   <tr v-if="!constructionServiceTypes.length">
-                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="12">هنوز خدمتی برای قطعات ثبت نشده است.</td>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceDescription" colspan="13">هنوز خدمتی برای قطعات ثبت نشده است.</td>
                   </tr>
                 </tbody>
               </table>
@@ -29403,6 +29420,13 @@ onBeforeUnmount(() => {
             <span>کد اختصاری</span>
             <input v-model="serviceTypeEditorDraft.short_code" class="constructionDialog__input constructionDialog__input--mono" type="text" />
           </label>
+          <div class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+            <span>پرکاربرد</span>
+            <div class="serviceTypeEditor__segmented">
+              <button type="button" class="serviceTypeEditor__segBtn" :class="{ 'is-active': !serviceTypeEditorDraft.is_common }" @click="serviceTypeEditorDraft.is_common = false">خیر</button>
+              <button type="button" class="serviceTypeEditor__segBtn" :class="{ 'is-active': serviceTypeEditorDraft.is_common }" @click="serviceTypeEditorDraft.is_common = true">بله</button>
+            </div>
+          </div>
           <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
             <span>ترتیب</span>
             <input v-model.number="serviceTypeEditorDraft.sort_order" class="constructionDialog__input" type="number" min="0" step="1" />

@@ -31,6 +31,7 @@ class ServiceTypeItem(BaseModel):
     service_title: str
     short_code: str
     icon_path: str | None
+    is_common: bool
     has_subtraction: bool
     service_location: str | None
     subtraction_shape: str | None
@@ -57,6 +58,7 @@ class ServiceTypeCreate(BaseModel):
     service_title: str = Field(min_length=1, max_length=255)
     short_code: str = Field(min_length=1, max_length=64)
     icon_path: str | None = Field(default=None, max_length=255)
+    is_common: bool = False
     has_subtraction: bool = False
     service_location: str | None = Field(default=None, min_length=1, max_length=16)
     subtraction_shape: str | None = Field(default=None, min_length=1, max_length=16)
@@ -81,6 +83,7 @@ class ServiceTypeUpdate(BaseModel):
     service_title: str = Field(min_length=1, max_length=255)
     short_code: str = Field(min_length=1, max_length=64)
     icon_path: str | None = Field(default=None, max_length=255)
+    is_common: bool = False
     has_subtraction: bool = False
     service_location: str | None = Field(default=None, min_length=1, max_length=16)
     subtraction_shape: str | None = Field(default=None, min_length=1, max_length=16)
@@ -333,6 +336,7 @@ async def create_service_type(payload: ServiceTypeCreate, session: AsyncSession 
         service_title=service_title,
         short_code=short_code,
         icon_path=final_icon_file_name,
+        is_common=bool(payload.is_common),
         has_subtraction=bool(subtraction_payload["has_subtraction"]),
         service_location=subtraction_payload["service_location"],
         subtraction_shape=subtraction_payload["subtraction_shape"],
@@ -403,6 +407,7 @@ async def update_service_type(
     item.service_title = service_title
     item.short_code = short_code
     item.icon_path = next_icon_file_name
+    item.is_common = bool(payload.is_common)
     item.has_subtraction = bool(subtraction_payload["has_subtraction"])
     item.service_location = subtraction_payload["service_location"]
     item.subtraction_shape = subtraction_payload["subtraction_shape"]

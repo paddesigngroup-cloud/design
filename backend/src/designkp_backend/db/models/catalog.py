@@ -186,6 +186,7 @@ class PartServiceType(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Vers
     service_title: Mapped[str] = mapped_column(String(255), nullable=False)
     short_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     icon_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_common: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     has_subtraction: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     service_location: Mapped[str | None] = mapped_column(String(16), nullable=True)
     subtraction_shape: Mapped[str | None] = mapped_column(String(16), nullable=True)

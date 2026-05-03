@@ -70,6 +70,7 @@ def test_create_service_type_success_without_subtraction(monkeypatch: pytest.Mon
         service_title="  دورو  ",
         short_code="  dr  ",
         icon_path=" icon.webp ",
+        is_common=True,
         has_subtraction=False,
         service_location="back",
         subtraction_shape="circle",
@@ -94,6 +95,7 @@ def test_create_service_type_success_without_subtraction(monkeypatch: pytest.Mon
     assert result.service_title == "دورو"
     assert result.short_code == "dr"
     assert result.icon_path == "icon.webp"
+    assert result.is_common is True
     assert result.has_subtraction is False
     assert result.service_location is None
     assert result.subtraction_shape is None
@@ -125,6 +127,7 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
         service_title="قدیمی",
         short_code="old_code",
         icon_path=None,
+        is_common=False,
         has_subtraction=False,
         service_location=None,
         subtraction_shape=None,
@@ -149,6 +152,7 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
         service_title="مونتاژ بدنه",
         short_code="asm",
         icon_path="assembly.webp",
+        is_common=True,
         has_subtraction=True,
         service_location="thickness",
         subtraction_shape="circle",
@@ -173,6 +177,7 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
     assert existing.service_title == "مونتاژ بدنه"
     assert existing.short_code == "asm"
     assert existing.icon_path == "assembly.webp"
+    assert existing.is_common is True
     assert existing.has_subtraction is True
     assert existing.service_location == "thickness"
     assert existing.subtraction_shape == "circle"
@@ -202,6 +207,7 @@ def test_create_service_type_rejects_blank_trimmed_fields(monkeypatch: pytest.Mo
         service_title="عنوان",
         short_code="code",
         icon_path=None,
+        is_common=False,
         has_subtraction=False,
         sort_order=0,
         is_system=True,
@@ -227,6 +233,7 @@ def test_create_service_type_rejects_duplicate_short_code_in_scope(monkeypatch: 
         service_title="توضیح",
         short_code="dup",
         icon_path=None,
+        is_common=False,
         has_subtraction=False,
         sort_order=1,
         is_system=True,
