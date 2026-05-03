@@ -9758,6 +9758,38 @@ function normalizePartModelPreviewGeometry(sideCount, defaultAngles) {
   };
 }
 
+function reflectPartModelPreviewVertices(vertices, axis, center = null) {
+  const points = Array.isArray(vertices) ? vertices : [];
+  if (!points.length) return [];
+  const fallbackCenter = points.reduce(
+    (acc, point) => ({ x: acc.x + (Number(point?.x) || 0), y: acc.y + (Number(point?.y) || 0) }),
+    { x: 0, y: 0 }
+  );
+  fallbackCenter.x /= points.length || 1;
+  fallbackCenter.y /= points.length || 1;
+  const resolvedCenter = center && Number.isFinite(Number(center.x)) && Number.isFinite(Number(center.y))
+    ? { x: Number(center.x), y: Number(center.y) }
+    : fallbackCenter;
+  return points.map((point) => {
+    const x = Number(point?.x) || 0;
+    const y = Number(point?.y) || 0;
+    return axis === "horizontal"
+      ? { x, y: (resolvedCenter.y * 2) - y }
+      : { x: (resolvedCenter.x * 2) - x, y };
+  });
+}
+
+function applyPartModelPreviewMirrorState(vertices, center, mirrorX = false, mirrorY = false) {
+  let nextVertices = Array.isArray(vertices) ? vertices.map((point) => ({ x: Number(point?.x) || 0, y: Number(point?.y) || 0 })) : [];
+  if (mirrorX) nextVertices = reflectPartModelPreviewVertices(nextVertices, "vertical", center);
+  if (mirrorY) nextVertices = reflectPartModelPreviewVertices(nextVertices, "horizontal", center);
+  return nextVertices;
+}
+
+function serializePartModelPreviewPoints(vertices) {
+  return (Array.isArray(vertices) ? vertices : []).map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
+}
+
 function getPartModelPreviewSignedArea(vertices) {
   const points = Array.isArray(vertices) ? vertices : [];
   if (points.length < 3) return 0;
@@ -9791,9 +9823,9 @@ function normalizePositiveAngleRad(value) {
   return result;
 }
 
-function buildPartModelAnglePreviewRecords(sideCount, defaultAngles) {
+function buildPartModelAnglePreviewRecords(sideCount, defaultAngles, previewVertices = null) {
   const geometry = normalizePartModelPreviewGeometry(sideCount, defaultAngles);
-  const vertices = geometry.vertices || [];
+  const vertices = Array.isArray(previewVertices) && previewVertices.length ? previewVertices : (geometry.vertices || []);
   return vertices.map((vertex, index) => {
     const prev = vertices[(index - 1 + vertices.length) % vertices.length] || vertex;
     const next = vertices[(index + 1) % vertices.length] || vertex;
@@ -9895,14 +9927,27 @@ const partModelPreviewState = computed(() => {
     ? draft.default_angles
     : buildEqualPartModelAngleDrafts(draft.side_count, null, draft.interior_angle_sum);
   const geometry = normalizePartModelPreviewGeometry(draft.side_count, normalizedAngles);
-  const angles = buildPartModelAnglePreviewRecords(draft.side_count, normalizedAngles).map((item) => ({
+  const mirroredVertices = applyPartModelPreviewMirrorState(
+    geometry.vertices,
+    geometry.center,
+    !!draft._previewMirrorX,
+    !!draft._previewMirrorY,
+  );
+  const center = mirroredVertices.reduce(
+    (acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }),
+    { x: 0, y: 0 }
+  );
+  center.x /= mirroredVertices.length || 1;
+  center.y /= mirroredVertices.length || 1;
+  const angles = buildPartModelAnglePreviewRecords(draft.side_count, normalizedAngles, mirroredVertices).map((item) => ({
     ...item,
     value: normalizedAngles.find((entry) => Number(entry?.index) === item.index)?.angle_deg,
   }));
   return {
     viewBox: geometry.viewBox,
-    points: geometry.points,
-    vertices: geometry.vertices,
+    points: serializePartModelPreviewPoints(mirroredVertices),
+    vertices: mirroredVertices,
+    center,
     angles,
   };
 });
@@ -11232,6 +11277,8 @@ function buildNewPartModelDraft() {
     side_count: sideCount,
     interior_angle_sum: interiorAngleSum,
     default_angles: buildEqualPartModelAngleDrafts(sideCount, null, interiorAngleSum),
+    _previewMirrorX: false,
+    _previewMirrorY: false,
     sort_order: nextSort,
     is_system: true,
   };
@@ -13926,13 +13973,15 @@ function openPartModelEditor(item = null) {
   const sideCount = Number(item?.side_count) || 4;
   const interiorAngleSum = Number(item?.interior_angle_sum) || getPartModelInteriorAngleSum(sideCount);
   partModelEditorDraft.value = item
-    ? {
+      ? {
         id: item.id,
         admin_id: item.admin_id,
         title: String(item.title || "").trim(),
         side_count: sideCount,
         interior_angle_sum: interiorAngleSum,
         default_angles: buildPartModelAngleDrafts(sideCount, item.default_angles, interiorAngleSum),
+        _previewMirrorX: false,
+        _previewMirrorY: false,
         sort_order: Number(item.sort_order) || 0,
         is_system: !!item.is_system,
       }
@@ -13950,6 +13999,8 @@ function resetPartModelAnglesToDefault(sideCount) {
   draft.side_count = normalizedSideCount;
   draft.interior_angle_sum = interiorAngleSum;
   draft.default_angles = buildEqualPartModelAngleDrafts(normalizedSideCount, null, interiorAngleSum);
+  draft._previewMirrorX = false;
+  draft._previewMirrorY = false;
   selectedPartModelAngleIndex.value = 0;
 }
 
@@ -13990,6 +14041,16 @@ function syncPartModelAngleDraftTexts(defaultAngles) {
     ...item,
     _draft_text: formatPartModelAngleNumber(item.angle_deg),
   }));
+}
+
+function applyPartModelMirror(axis) {
+  const draft = partModelEditorDraft.value;
+  if (!draft) return;
+  if (axis === "horizontal") {
+    draft._previewMirrorY = !draft._previewMirrorY;
+  } else {
+    draft._previewMirrorX = !draft._previewMirrorX;
+  }
 }
 
 function onPartModelAngleInput(angleIndex, value) {
@@ -28787,8 +28848,32 @@ onBeforeUnmount(() => {
       <div class="subCategoryDesignEditor">
         <div class="partModelPreview">
           <div class="partModelPreview__head">
-            <div class="partModelPreview__title">نمای ساده قطعه</div>
-            <div class="partModelPreview__hint">برای انتخاب سریع، روی زاویه‌ها کلیک کنید.</div>
+            <div class="partModelPreview__titleWrap">
+              <div class="partModelPreview__title">نمای ساده قطعه</div>
+              <div class="partModelPreview__hint">برای انتخاب سریع، روی زاویه‌ها کلیک کنید.</div>
+            </div>
+            <div class="partModelPreview__actions">
+              <button type="button" class="partModelPreview__mirrorBtn" title="قرینه عمودی" @click="applyPartModelMirror('horizontal')">
+                <svg viewBox="0 0 24 24" class="partModelPreview__mirrorSvg" aria-hidden="true">
+                  <line x1="3" y1="12" x2="21" y2="12" class="partModelPreview__mirrorAxis" />
+                  <circle cx="12" cy="7" r="2.4" class="partModelPreview__mirrorDot" />
+                  <circle cx="12" cy="17" r="2.4" class="partModelPreview__mirrorDot" />
+                  <path d="M 9.5 9.5 L 11.5 11.5 L 13.5 9.5" class="partModelPreview__mirrorArrow" />
+                  <path d="M 9.5 14.5 L 11.5 12.5 L 13.5 14.5" class="partModelPreview__mirrorArrow" />
+                </svg>
+                <span>قرینه عمودی</span>
+              </button>
+              <button type="button" class="partModelPreview__mirrorBtn" title="قرینه افقی" @click="applyPartModelMirror('vertical')">
+                <svg viewBox="0 0 24 24" class="partModelPreview__mirrorSvg" aria-hidden="true">
+                  <line x1="12" y1="3" x2="12" y2="21" class="partModelPreview__mirrorAxis" />
+                  <circle cx="7" cy="12" r="2.4" class="partModelPreview__mirrorDot" />
+                  <circle cx="17" cy="12" r="2.4" class="partModelPreview__mirrorDot" />
+                  <path d="M 9.5 9.5 L 11.5 11.5 L 9.5 13.5" class="partModelPreview__mirrorArrow" />
+                  <path d="M 14.5 9.5 L 12.5 11.5 L 14.5 13.5" class="partModelPreview__mirrorArrow" />
+                </svg>
+                <span>قرینه افقی</span>
+              </button>
+            </div>
           </div>
           <div class="partModelPreview__canvas">
             <svg :viewBox="partModelPreviewState.viewBox" class="partModelPreview__svg" aria-hidden="true">
@@ -33774,10 +33859,15 @@ onBeforeUnmount(() => {
 
 .partModelPreview__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.partModelPreview__titleWrap {
+  display: grid;
+  gap: 4px;
 }
 
 .partModelPreview__title {
@@ -33789,6 +33879,59 @@ onBeforeUnmount(() => {
 .partModelPreview__hint {
   font-size: 12px;
   color: #475569;
+}
+
+.partModelPreview__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.partModelPreview__mirrorBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #0f172a;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.partModelPreview__mirrorBtn:hover {
+  border-color: rgba(249, 115, 22, 0.65);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.partModelPreview__mirrorBtn:focus-visible {
+  outline: none;
+  border-color: #f97316;
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18);
+}
+
+.partModelPreview__mirrorSvg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.partModelPreview__mirrorAxis,
+.partModelPreview__mirrorArrow {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.partModelPreview__mirrorDot {
+  fill: currentColor;
+  opacity: 0.82;
 }
 
 .partModelPreview__canvas {
