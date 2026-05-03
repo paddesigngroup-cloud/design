@@ -39,6 +39,8 @@ class ServiceTypeItem(BaseModel):
     axis_to_aligned_edge_distance: float
     working_diameter: float
     working_depth: float
+    working_depth_mode: str
+    working_depth_end_offset: float
     sort_order: int
     is_system: bool
 
@@ -59,6 +61,8 @@ class ServiceTypeCreate(BaseModel):
     axis_to_aligned_edge_distance: float = Field(default=0, ge=0)
     working_diameter: float = Field(default=0, ge=0)
     working_depth: float = Field(default=0, ge=0)
+    working_depth_mode: str = Field(default="fixed", min_length=1, max_length=16)
+    working_depth_end_offset: float = Field(default=0, ge=0)
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
 
@@ -77,6 +81,8 @@ class ServiceTypeUpdate(BaseModel):
     axis_to_aligned_edge_distance: float = Field(default=0, ge=0)
     working_diameter: float = Field(default=0, ge=0)
     working_depth: float = Field(default=0, ge=0)
+    working_depth_mode: str = Field(default="fixed", min_length=1, max_length=16)
+    working_depth_end_offset: float = Field(default=0, ge=0)
     sort_order: int = Field(ge=0)
     is_system: bool
 
@@ -129,6 +135,16 @@ def _normalize_optional_measurement(value: float | None) -> float:
     if normalized < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Measurements must be zero or greater.")
     return round(normalized, 1)
+
+
+def _normalize_working_depth_mode(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized not in {"", "fixed", "to_end"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Working depth mode must be fixed or to_end.",
+        )
+    return "to_end" if normalized == "to_end" else "fixed"
 
 
 def _normalize_shape_angles(
@@ -184,6 +200,8 @@ def _normalize_subtraction_payload(payload: ServiceTypeCreate | ServiceTypeUpdat
     axis_to_aligned_edge_distance = _normalize_optional_measurement(payload.axis_to_aligned_edge_distance)
     working_diameter = _normalize_optional_measurement(payload.working_diameter)
     working_depth = _normalize_optional_measurement(payload.working_depth)
+    working_depth_mode = _normalize_working_depth_mode(payload.working_depth_mode)
+    working_depth_end_offset = _normalize_optional_measurement(payload.working_depth_end_offset)
     if not has_subtraction:
         return {
             "has_subtraction": False,
@@ -194,6 +212,8 @@ def _normalize_subtraction_payload(payload: ServiceTypeCreate | ServiceTypeUpdat
             "axis_to_aligned_edge_distance": axis_to_aligned_edge_distance,
             "working_diameter": working_diameter,
             "working_depth": working_depth,
+            "working_depth_mode": working_depth_mode,
+            "working_depth_end_offset": 0.0 if working_depth_mode != "to_end" else working_depth_end_offset,
         }
     service_location = _normalize_service_location(payload.service_location)
     subtraction_shape = _normalize_subtraction_shape(payload.subtraction_shape)
@@ -211,6 +231,8 @@ def _normalize_subtraction_payload(payload: ServiceTypeCreate | ServiceTypeUpdat
         "axis_to_aligned_edge_distance": axis_to_aligned_edge_distance,
         "working_diameter": working_diameter,
         "working_depth": working_depth,
+        "working_depth_mode": working_depth_mode,
+        "working_depth_end_offset": 0.0 if working_depth_mode != "to_end" else working_depth_end_offset,
     }
 
 
@@ -297,6 +319,8 @@ async def create_service_type(payload: ServiceTypeCreate, session: AsyncSession 
         axis_to_aligned_edge_distance=subtraction_payload["axis_to_aligned_edge_distance"],
         working_diameter=subtraction_payload["working_diameter"],
         working_depth=subtraction_payload["working_depth"],
+        working_depth_mode=subtraction_payload["working_depth_mode"],
+        working_depth_end_offset=subtraction_payload["working_depth_end_offset"],
         sort_order=payload.sort_order if payload.sort_order is not None else await _next_sort_order(session),
         is_system=payload.is_system,
     )
@@ -361,6 +385,8 @@ async def update_service_type(
     item.axis_to_aligned_edge_distance = subtraction_payload["axis_to_aligned_edge_distance"]
     item.working_diameter = subtraction_payload["working_diameter"]
     item.working_depth = subtraction_payload["working_depth"]
+    item.working_depth_mode = subtraction_payload["working_depth_mode"]
+    item.working_depth_end_offset = subtraction_payload["working_depth_end_offset"]
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     try:

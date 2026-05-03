@@ -126,7 +126,8 @@ function createPartEdgeLines(part) {
 
 function createOpeningOutline(sceneInput) {
   const cutter = sceneInput?.cutter || {};
-  if (!cutter.hasVisibleSubtraction || cutter.workingDiameter <= 0 || cutter.workingDepth <= 0) return null;
+  const effectiveDepth = Math.max(0, Number(cutter.effectiveWorkingDepth ?? cutter.workingDepth) || 0);
+  if (!cutter.hasVisibleSubtraction || cutter.workingDiameter <= 0 || effectiveDepth <= 0) return null;
   const part = sceneInput?.part || {};
   const widthM = mmToM(part.width);
   const thicknessM = mmToM(part.thickness);
@@ -180,7 +181,7 @@ function createOpeningOutline(sceneInput) {
 function createCircleCutter(sceneInput) {
   const cutter = sceneInput?.cutter || {};
   const radius = Math.max(0.0005, mmToM(cutter.workingDiameter) * 0.5);
-  const depth = Math.max(0.0005, mmToM(cutter.workingDepth));
+  const depth = Math.max(0.0005, mmToM(cutter.effectiveWorkingDepth ?? cutter.workingDepth));
   const part = sceneInput?.part || {};
   const widthM = mmToM(part.width);
   const thicknessM = mmToM(part.thickness);
@@ -207,7 +208,7 @@ function createCircleCutter(sceneInput) {
 
 function createProfileCutter(sceneInput) {
   const cutter = sceneInput?.cutter || {};
-  const depth = Math.max(0.0005, mmToM(cutter.workingDepth));
+  const depth = Math.max(0.0005, mmToM(cutter.effectiveWorkingDepth ?? cutter.workingDepth));
   const part = sceneInput?.part || {};
   const widthM = mmToM(part.width);
   const thicknessM = mmToM(part.thickness);
@@ -244,7 +245,7 @@ function createProfileCutter(sceneInput) {
 
 function createCutterMesh(sceneInput) {
   const cutter = sceneInput?.cutter || {};
-  if (!cutter.hasVisibleSubtraction || cutter.workingDiameter <= 0 || cutter.workingDepth <= 0) return null;
+  if (!cutter.hasVisibleSubtraction || cutter.workingDiameter <= 0 || Number(cutter.effectiveWorkingDepth ?? cutter.workingDepth) <= 0) return null;
   if (cutter.shape === "circle") return createCircleCutter(sceneInput);
   return createProfileCutter(sceneInput);
 }

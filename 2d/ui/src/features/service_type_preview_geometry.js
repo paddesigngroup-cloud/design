@@ -20,6 +20,15 @@ export function normalizeServiceTypePreviewSceneInput(source) {
     : [];
   const workingDiameter = Math.max(0, Number(cutter.workingDiameter) || 0);
   const workingDepth = Math.max(0, Number(cutter.workingDepth) || 0);
+  const workingDepthMode = normalizeWorkingDepthMode(cutter.workingDepthMode);
+  const workingDepthEndOffset = Math.max(0, Number(cutter.workingDepthEndOffset) || 0);
+  const effectiveWorkingDepth = resolveEffectiveWorkingDepth(
+    normalizedPart,
+    normalizeServiceLocation(cutter.serviceLocation),
+    workingDepth,
+    workingDepthMode,
+    workingDepthEndOffset,
+  );
   const profileBounds = getProfileBounds(cutter.shape, normalizedProfilePoints, workingDiameter);
   return {
     part: normalizedPart,
@@ -29,6 +38,9 @@ export function normalizeServiceTypePreviewSceneInput(source) {
       shape: normalizeSubtractionShape(cutter.shape),
       workingDiameter,
       workingDepth,
+      workingDepthMode,
+      workingDepthEndOffset,
+      effectiveWorkingDepth,
       axisAligned: Math.max(0, Number(cutter.axisAligned) || 0),
       axisOpposite: Math.max(0, Number(cutter.axisOpposite) || 0),
       profilePoints: normalizedProfilePoints,
@@ -62,6 +74,18 @@ function normalizeSubtractionShape(value) {
   const text = String(value || "").trim().toLowerCase();
   if (text === "triangle" || text === "rectangle") return text;
   return "circle";
+}
+
+function normalizeWorkingDepthMode(value) {
+  return String(value || "").trim().toLowerCase() === "to_end" ? "to_end" : "fixed";
+}
+
+function resolveEffectiveWorkingDepth(part, serviceLocation, workingDepth, workingDepthMode, endOffset) {
+  if (workingDepthMode !== "to_end") return workingDepth;
+  const pathExtent = serviceLocation === "thickness"
+    ? Math.max(0, Number(part?.length) || 0)
+    : Math.max(0, Number(part?.thickness) || 0);
+  return Math.max(0, pathExtent - Math.max(0, Number(endOffset) || 0));
 }
 
 function getProfileBounds(shape, profilePoints, workingDiameter) {
@@ -106,7 +130,7 @@ function getProfileBounds(shape, profilePoints, workingDiameter) {
 function buildTopBottomProjection(scene, rect) {
   if (!rect) return { primaryShape: null, traceShape: null };
   const { part, cutter } = scene;
-  if (!cutter.hasVisibleSubtraction || cutter.workingDepth <= 0) {
+  if (!cutter.hasVisibleSubtraction || cutter.effectiveWorkingDepth <= 0) {
     return { primaryShape: null, traceShape: null };
   }
   if (cutter.serviceLocation === "thickness") {
@@ -114,7 +138,7 @@ function buildTopBottomProjection(scene, rect) {
     const xMin = xCenter + cutter.profileBounds.minX;
     const xMax = xCenter + cutter.profileBounds.maxX;
     const zStart = -part.length / 2;
-    const zEnd = Math.min(part.length / 2, zStart + cutter.workingDepth);
+    const zEnd = Math.min(part.length / 2, zStart + cutter.effectiveWorkingDepth);
     return {
       primaryShape: buildProjectedRect(
         rect,
@@ -151,7 +175,7 @@ function buildTopBottomProjection(scene, rect) {
 function buildSideProjection(scene, rect) {
   if (!rect) return { primaryShape: null, traceShape: null };
   const { part, cutter } = scene;
-  if (!cutter.hasVisibleSubtraction || cutter.workingDepth <= 0) {
+  if (!cutter.hasVisibleSubtraction || cutter.effectiveWorkingDepth <= 0) {
     return { primaryShape: null, traceShape: null };
   }
   if (cutter.serviceLocation === "thickness") {
@@ -177,7 +201,7 @@ function buildSideProjection(scene, rect) {
   const xCenter = (-part.width / 2) + cutter.axisAligned;
   const xMin = xCenter + cutter.profileBounds.minX;
   const xMax = xCenter + cutter.profileBounds.maxX;
-  const visibleDepth = Math.min(part.thickness, cutter.workingDepth);
+  const visibleDepth = Math.min(part.thickness, cutter.effectiveWorkingDepth);
   const yMin = cutter.serviceLocation === "back"
     ? -part.thickness / 2
     : (part.thickness / 2) - visibleDepth;

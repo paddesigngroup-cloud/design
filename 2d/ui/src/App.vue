@@ -8888,13 +8888,19 @@ const SERVICE_TYPE_MEASUREMENT_FIELDS = [
   "axis_to_aligned_edge_distance",
   "working_diameter",
   "working_depth",
+  "working_depth_end_offset",
 ];
 const SERVICE_TYPE_PREVIEW_DIMENSION_FIELDS = ["length", "width", "thickness"];
 const DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM = Object.freeze({
-  length: 100,
-  width: 100,
+  length: 400,
+  width: 150,
   thickness: 16,
 });
+
+const SERVICE_TYPE_WORKING_DEPTH_MODE_OPTIONS = [
+  { value: "fixed", label: "عمق ثابت" },
+  { value: "to_end", label: "تا انتها" },
+];
 
 function normalizeServiceTypeMeasurement(value) {
   if (value === "" || value == null) return 0;
@@ -8992,9 +8998,25 @@ function normalizeServiceTypePayload(item) {
     axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance),
     working_diameter: normalizeServiceTypeMeasurement(item.working_diameter),
     working_depth: normalizeServiceTypeMeasurement(item.working_depth),
+    working_depth_mode: normalizeServiceTypeWorkingDepthMode(item.working_depth_mode),
+    working_depth_end_offset: normalizeServiceTypeWorkingDepthMode(item.working_depth_mode) === "to_end"
+      ? normalizeServiceTypeMeasurement(item.working_depth_end_offset)
+      : 0,
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
     is_system: !!item.is_system,
   };
+}
+
+function normalizeServiceTypeWorkingDepthMode(value) {
+  return String(value || "").trim().toLowerCase() === "to_end" ? "to_end" : "fixed";
+}
+
+function getServiceTypeWorkingDepthSummary(item) {
+  const mode = normalizeServiceTypeWorkingDepthMode(item?.working_depth_mode);
+  if (mode !== "to_end") return getServiceTypeMeasurementDisplayText(item?.working_depth);
+  const offset = normalizeServiceTypeMeasurement(item?.working_depth_end_offset);
+  if (offset <= 0) return "تا انتها";
+  return `تا انتها - ${getServiceTypeMeasurementDisplayText(offset)}`;
 }
 
 function normalizeInteriorInstanceRecord(item) {
@@ -9114,6 +9136,8 @@ function normalizeEditableServiceTypeRecord(item) {
     axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance),
     working_diameter: normalizeServiceTypeMeasurement(item.working_diameter),
     working_depth: normalizeServiceTypeMeasurement(item.working_depth),
+    working_depth_mode: normalizeServiceTypeWorkingDepthMode(item.working_depth_mode),
+    working_depth_end_offset: normalizeServiceTypeMeasurement(item.working_depth_end_offset),
     sort_order: Number(item.sort_order) || 0,
     is_system: !!item.is_system,
   }));
@@ -10134,6 +10158,8 @@ const serviceTypeEditorPreviewState = computed(() => {
   const safeLocation = draft ? normalizeServiceLocation(draft.service_location) : "front";
   const safeShape = draft ? normalizeSubtractionShape(draft.subtraction_shape) : "circle";
   const workingDepth = Math.max(0, Number(draft?.working_depth) || 0);
+  const workingDepthMode = normalizeServiceTypeWorkingDepthMode(draft?.working_depth_mode);
+  const workingDepthEndOffset = Math.max(0, Number(draft?.working_depth_end_offset) || 0);
   const workingDiameter = Math.max(0, Number(draft?.working_diameter) || 0);
   const hasVisibleSubtraction = workingDiameter > 0;
   const axisAligned = Math.max(0, Number(draft?.axis_to_aligned_edge_distance) || 0);
@@ -10173,6 +10199,8 @@ const serviceTypeEditorPreviewState = computed(() => {
       axisAligned,
       axisOpposite,
       profilePoints: shapePreview.profilePoints,
+      workingDepthMode,
+      workingDepthEndOffset,
     },
   });
   const projectedViews = buildServiceTypeProjectionViews(previewSceneSpec, {
@@ -11381,6 +11409,8 @@ function buildNewServiceTypeDraft() {
     axis_to_aligned_edge_distance: 0,
     working_diameter: 0,
     working_depth: 0,
+    working_depth_mode: "fixed",
+    working_depth_end_offset: 0,
     _previewMirrorX: false,
     _previewMirrorY: false,
     sort_order: nextSort,
@@ -14202,6 +14232,8 @@ function openServiceTypeEditor(item = null) {
         axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance),
         working_diameter: normalizeServiceTypeMeasurement(item.working_diameter),
         working_depth: normalizeServiceTypeMeasurement(item.working_depth),
+        working_depth_mode: normalizeServiceTypeWorkingDepthMode(item.working_depth_mode),
+        working_depth_end_offset: normalizeServiceTypeMeasurement(item.working_depth_end_offset),
         _previewMirrorX: normalizeBooleanFlag(item._previewMirrorX || item.previewMirrorX || item.preview_mirror_x, false),
         _previewMirrorY: normalizeBooleanFlag(item._previewMirrorY || item.previewMirrorY || item.preview_mirror_y, false),
         sort_order: Number(item.sort_order) || 0,
@@ -14253,6 +14285,16 @@ function onServiceTypeMeasurementChange(fieldName, value) {
   const parsed = parseServiceTypeMeasurementDisplayToMm(text);
   draft[fieldName] = parsed;
   draft[textKey] = formatServiceTypeMeasurementForDisplay(parsed);
+}
+
+function onServiceTypeWorkingDepthModeChange(value) {
+  const draft = serviceTypeEditorDraft.value;
+  if (!draft) return;
+  draft.working_depth_mode = normalizeServiceTypeWorkingDepthMode(value);
+  if (draft.working_depth_mode !== "to_end") {
+    draft.working_depth_end_offset = 0;
+    draft[getServiceTypeMeasurementDraftTextKey("working_depth_end_offset")] = formatServiceTypeMeasurementForDisplay(0);
+  }
 }
 
 function onServiceTypePreviewDimensionInput(fieldName, value) {
@@ -17075,6 +17117,8 @@ function validateConstructionServiceTypes() {
     const axisToAlignedEdgeDistance = normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance);
     const workingDiameter = normalizeServiceTypeMeasurement(item.working_diameter);
     const workingDepth = normalizeServiceTypeMeasurement(item.working_depth);
+    const workingDepthMode = normalizeServiceTypeWorkingDepthMode(item.working_depth_mode);
+    const workingDepthEndOffset = normalizeServiceTypeMeasurement(item.working_depth_end_offset);
     if (!serviceType) {
       showAlert("نوع خدمت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
       return false;
@@ -17091,7 +17135,8 @@ function validateConstructionServiceTypes() {
       (axisToOppositeEdgeDistance != null && axisToOppositeEdgeDistance < 0) ||
       (axisToAlignedEdgeDistance != null && axisToAlignedEdgeDistance < 0) ||
       (workingDiameter != null && workingDiameter < 0) ||
-      (workingDepth != null && workingDepth < 0)
+      (workingDepth != null && workingDepth < 0) ||
+      (workingDepthEndOffset != null && workingDepthEndOffset < 0)
     ) {
       showAlert("مقادیر ابعادی خدمت باید صفر یا بزرگ‌تر باشند.", { title: "اعتبارسنجی" });
       return false;
@@ -17108,6 +17153,10 @@ function validateConstructionServiceTypes() {
     const angleValidation = validateServiceTypeShapeAngles(subtractionShape, item.shape_angles);
     if (!angleValidation.ok) {
       showAlert(angleValidation.error || "زاویه‌های شکل سابترکشن معتبر نیستند.", { title: "اعتبارسنجی" });
+      return false;
+    }
+    if (!["fixed", "to_end"].includes(workingDepthMode)) {
+      showAlert("حالت عمق کارگیر معتبر نیست.", { title: "اعتبارسنجی" });
       return false;
     }
   }
@@ -17195,6 +17244,8 @@ async function saveServiceTypeEditor() {
   const axisToAlignedEdgeDistance = normalizeServiceTypeMeasurement(draft.axis_to_aligned_edge_distance);
   const workingDiameter = normalizeServiceTypeMeasurement(draft.working_diameter);
   const workingDepth = normalizeServiceTypeMeasurement(draft.working_depth);
+  const workingDepthMode = normalizeServiceTypeWorkingDepthMode(draft.working_depth_mode);
+  const workingDepthEndOffset = normalizeServiceTypeMeasurement(draft.working_depth_end_offset);
   if (!serviceType) {
     showAlert("نوع خدمت نمی‌تواند خالی باشد.", { title: "اعتبارسنجی" });
     return;
@@ -17237,7 +17288,8 @@ async function saveServiceTypeEditor() {
     (axisToOppositeEdgeDistance != null && axisToOppositeEdgeDistance < 0) ||
     (axisToAlignedEdgeDistance != null && axisToAlignedEdgeDistance < 0) ||
     (workingDiameter != null && workingDiameter < 0) ||
-    (workingDepth != null && workingDepth < 0)
+    (workingDepth != null && workingDepth < 0) ||
+    (workingDepthEndOffset != null && workingDepthEndOffset < 0)
   ) {
     showAlert("مقادیر ابعادی خدمت باید صفر یا بزرگ‌تر باشند.", { title: "اعتبارسنجی" });
     return;
@@ -17250,6 +17302,8 @@ async function saveServiceTypeEditor() {
   draft.axis_to_aligned_edge_distance = axisToAlignedEdgeDistance;
   draft.working_diameter = workingDiameter;
   draft.working_depth = workingDepth;
+  draft.working_depth_mode = workingDepthMode;
+  draft.working_depth_end_offset = workingDepthMode === "to_end" ? workingDepthEndOffset : 0;
   applyServiceTypeEditorRuleConstraints(draft);
   syncServiceTypeMeasurementDraftTexts(draft, true);
   const payload = normalizeServiceTypePayload(draft);
@@ -19187,6 +19241,8 @@ function getConstructionCsvHeaders() {
       "axis_to_aligned_edge_distance",
       "working_diameter",
       "working_depth",
+      "working_depth_mode",
+      "working_depth_end_offset",
       "admin_mode",
     ];
   }
@@ -19267,6 +19323,10 @@ function getConstructionCsvRows(items = null) {
       normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance) ?? "",
       normalizeServiceTypeMeasurement(item.working_diameter) ?? "",
       normalizeServiceTypeMeasurement(item.working_depth) ?? "",
+      normalizeServiceTypeWorkingDepthMode(item.working_depth_mode),
+      normalizeServiceTypeWorkingDepthMode(item.working_depth_mode) === "to_end"
+        ? (normalizeServiceTypeMeasurement(item.working_depth_end_offset) ?? "")
+        : "",
       item.admin_id === null ? "system" : "admin",
     ]);
   }
@@ -19581,7 +19641,7 @@ async function onConstructionImportFileChange(event) {
       });
     } else if (constructionStep.value === "service_types") {
       previewRows = rows.slice(1).map((row, index) => {
-        const adminMode = String(row[11] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const adminMode = String(row[13] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         const hasSubtraction = normalizeBooleanFlag(row[3], false);
         const subtractionShape = normalizeSubtractionShape(row[5]);
         return {
@@ -19597,6 +19657,8 @@ async function onConstructionImportFileChange(event) {
           axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(row[8]),
           working_diameter: normalizeServiceTypeMeasurement(row[9]),
           working_depth: normalizeServiceTypeMeasurement(row[10]),
+          working_depth_mode: normalizeServiceTypeWorkingDepthMode(row[11]),
+          working_depth_end_offset: normalizeServiceTypeMeasurement(row[12]),
           admin_mode: adminMode,
         };
       });
@@ -22929,6 +22991,8 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(row.axis_to_aligned_edge_distance),
       working_diameter: normalizeServiceTypeMeasurement(row.working_diameter),
       working_depth: normalizeServiceTypeMeasurement(row.working_depth),
+      working_depth_mode: normalizeServiceTypeWorkingDepthMode(row.working_depth_mode),
+      working_depth_end_offset: normalizeServiceTypeMeasurement(row.working_depth_end_offset),
       sort_order: index + 1,
       is_system: adminId === null,
     };
@@ -22953,6 +23017,8 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       normalizeServiceTypeMeasurement(existing.axis_to_aligned_edge_distance) !== nextPayload.axis_to_aligned_edge_distance ||
       normalizeServiceTypeMeasurement(existing.working_diameter) !== nextPayload.working_diameter ||
       normalizeServiceTypeMeasurement(existing.working_depth) !== nextPayload.working_depth ||
+      normalizeServiceTypeWorkingDepthMode(existing.working_depth_mode) !== nextPayload.working_depth_mode ||
+      normalizeServiceTypeMeasurement(existing.working_depth_end_offset) !== nextPayload.working_depth_end_offset ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system;
     return buildPartKindDraft(existing, {
@@ -27762,8 +27828,8 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">سابترکشن</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">محل خدمت</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">شکل</th>
-                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه ظلع مقابل</th>
-                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">فاصله آکس تا لبه ضلع موافق</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه مقابل طول</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">فاصله آکس تا لبه موافق عرض</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">قطر کارگیر</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">عمق کارگیر</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
@@ -27780,7 +27846,7 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">{{ getServiceTypeMeasurementDisplayText(row.axis_to_opposite_edge_distance) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">{{ getServiceTypeMeasurementDisplayText(row.axis_to_aligned_edge_distance) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">{{ getServiceTypeMeasurementDisplayText(row.working_diameter) }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">{{ getServiceTypeMeasurementDisplayText(row.working_depth) }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">{{ getServiceTypeWorkingDepthSummary(row) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "سیستم" : "ادمین" }}</td>
                     </tr>
                   </tbody>
@@ -27806,8 +27872,8 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('has_subtraction')">سابترکشن</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('service_location')">محل خدمت</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">شکل</th>
-                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه ظلع مقابل</th>
-                    <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">فاصله آکس تا لبه ضلع موافق</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه مقابل طول</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">فاصله آکس تا لبه موافق عرض</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">قطر کارگیر</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">عمق کارگیر</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceActions" :style="getConstructionServiceTypeColumnStyle('actions')">عملیات</th>
@@ -27852,7 +27918,7 @@ onBeforeUnmount(() => {
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getServiceTypeMeasurementDisplayText(item.working_diameter) }}</span>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">
-                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getServiceTypeMeasurementDisplayText(item.working_depth) }}</span>
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getServiceTypeWorkingDepthSummary(item) }}</span>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceActions" :style="getConstructionServiceTypeColumnStyle('actions')">
                       <div class="constructionDialog__actionsCell constructionDialog__actionsCell--partService">
@@ -29205,7 +29271,7 @@ onBeforeUnmount(() => {
         <section class="serviceTypeEditor__drillCard">
           <div class="serviceTypeEditor__sectionHead">
             <div class="serviceTypeEditor__sectionTitle">اطلاعات سوراخکاری</div>
-            <div class="serviceTypeEditor__sectionHint">وقتی سابترکشن فعال باشد، محل خدمت، نوع سوراخکاری، شکل و پیش‌نمایش در همین بخش مدیریت می‌شوند.</div>
+            <div class="serviceTypeEditor__sectionHint">وقتی سابترکشن فعال باشد، فاصله از ضلع مقابل روی طول و فاصله از ضلع موافق روی عرض تفسیر می‌شود.</div>
           </div>
 
           <div class="serviceTypeEditor__toggleRow">
@@ -29265,7 +29331,7 @@ onBeforeUnmount(() => {
 
               <div class="serviceTypeEditor__measureGrid">
                 <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-                  <span>{{ `فاصله آکس تا لبه ظلع مقابل (${getCurrentParamLengthUnitLabel()})` }}</span>
+                  <span>{{ `فاصله آکس تا لبه ضلع مقابل طول (${getCurrentParamLengthUnitLabel()})` }}</span>
                   <input
                     :value="serviceTypeEditorDraft._axis_to_opposite_edge_distance_display_text ?? ''"
                     class="constructionDialog__input constructionDialog__input--mono"
@@ -29277,7 +29343,7 @@ onBeforeUnmount(() => {
                   />
                 </label>
                 <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-                  <span>{{ `فاصله آکس تا لبه ضلع موافق (${getCurrentParamLengthUnitLabel()})` }}</span>
+                  <span>{{ `فاصله آکس تا لبه ضلع موافق عرض (${getCurrentParamLengthUnitLabel()})` }}</span>
                   <input
                     :value="serviceTypeEditorDraft._axis_to_aligned_edge_distance_display_text ?? ''"
                     class="constructionDialog__input constructionDialog__input--mono"
@@ -29300,8 +29366,23 @@ onBeforeUnmount(() => {
                     @blur="onServiceTypeMeasurementChange('working_diameter', $event.target.value)"
                   />
                 </label>
-                <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-                  <span>{{ `عمق کارگیر (${getCurrentParamLengthUnitLabel()})` }}</span>
+                <div class="serviceTypeEditor__fieldBlock serviceTypeEditor__fieldBlock--depthMode">
+                  <span class="serviceTypeEditor__label">حالت عمق کارگیر</span>
+                  <div class="serviceTypeEditor__segmented">
+                    <button
+                      v-for="option in SERVICE_TYPE_WORKING_DEPTH_MODE_OPTIONS"
+                      :key="option.value"
+                      type="button"
+                      class="serviceTypeEditor__segBtn"
+                      :class="{ 'is-active': normalizeServiceTypeWorkingDepthMode(serviceTypeEditorDraft.working_depth_mode) === option.value }"
+                      @click="onServiceTypeWorkingDepthModeChange(option.value)"
+                    >
+                      {{ option.label }}
+                    </button>
+                  </div>
+                </div>
+                <label v-if="normalizeServiceTypeWorkingDepthMode(serviceTypeEditorDraft.working_depth_mode) === 'fixed'" class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+                  <span>{{ `عمق کارگیر ثابت (${getCurrentParamLengthUnitLabel()})` }}</span>
                   <input
                     :value="serviceTypeEditorDraft._working_depth_display_text ?? ''"
                     class="constructionDialog__input constructionDialog__input--mono"
@@ -29310,6 +29391,18 @@ onBeforeUnmount(() => {
                     @input="onServiceTypeMeasurementInput('working_depth', $event.target.value)"
                     @change="onServiceTypeMeasurementChange('working_depth', $event.target.value)"
                     @blur="onServiceTypeMeasurementChange('working_depth', $event.target.value)"
+                  />
+                </label>
+                <label v-else class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+                  <span>{{ `فاصله باقی‌مانده تا انتها (${getCurrentParamLengthUnitLabel()})` }}</span>
+                  <input
+                    :value="serviceTypeEditorDraft._working_depth_end_offset_display_text ?? ''"
+                    class="constructionDialog__input constructionDialog__input--mono"
+                    type="text"
+                    inputmode="decimal"
+                    @input="onServiceTypeMeasurementInput('working_depth_end_offset', $event.target.value)"
+                    @change="onServiceTypeMeasurementChange('working_depth_end_offset', $event.target.value)"
+                    @blur="onServiceTypeMeasurementChange('working_depth_end_offset', $event.target.value)"
                   />
                 </label>
               </div>

@@ -78,6 +78,8 @@ def test_create_service_type_success_without_subtraction(monkeypatch: pytest.Mon
         axis_to_aligned_edge_distance=8,
         working_diameter=35,
         working_depth=14.25,
+        working_depth_mode="to_end",
+        working_depth_end_offset=2.5,
         sort_order=None,
         is_system=True,
     )
@@ -96,6 +98,8 @@ def test_create_service_type_success_without_subtraction(monkeypatch: pytest.Mon
     assert result.axis_to_aligned_edge_distance == 8
     assert result.working_diameter == 35
     assert result.working_depth == 14.2
+    assert result.working_depth_mode == "to_end"
+    assert result.working_depth_end_offset == 2.5
     assert result.sort_order == 4
     assert session.added is not None
 
@@ -121,6 +125,8 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
         axis_to_aligned_edge_distance=0,
         working_diameter=0,
         working_depth=0,
+        working_depth_mode="fixed",
+        working_depth_end_offset=0,
         sort_order=1,
         is_system=True,
     )
@@ -139,6 +145,8 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
         axis_to_aligned_edge_distance=6.5,
         working_diameter=12,
         working_depth=7,
+        working_depth_mode="to_end",
+        working_depth_end_offset=1.5,
         sort_order=8,
         is_system=False,
     )
@@ -157,6 +165,8 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
     assert existing.axis_to_aligned_edge_distance == 6.5
     assert existing.working_diameter == 12
     assert existing.working_depth == 7
+    assert existing.working_depth_mode == "to_end"
+    assert existing.working_depth_end_offset == 1.5
     assert existing.sort_order == 8
     assert existing.is_system is False
 
@@ -247,6 +257,8 @@ def test_delete_service_type_checks_access_scope(monkeypatch: pytest.MonkeyPatch
         axis_to_aligned_edge_distance=0,
         working_diameter=0,
         working_depth=0,
+        working_depth_mode="fixed",
+        working_depth_end_offset=0,
         sort_order=1,
         is_system=False,
     )
@@ -371,6 +383,8 @@ def test_delete_service_type_removes_owned_icon(monkeypatch: pytest.MonkeyPatch)
         axis_to_aligned_edge_distance=0,
         working_diameter=0,
         working_depth=0,
+        working_depth_mode="fixed",
+        working_depth_end_offset=0,
         sort_order=1,
         is_system=False,
     )
