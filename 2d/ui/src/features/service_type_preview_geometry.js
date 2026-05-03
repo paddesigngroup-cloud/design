@@ -163,14 +163,14 @@ function buildSideProjection(scene, rect) {
       primaryShape: cutter.shape === "circle"
         ? buildProjectedCircle(rect, part.width, part.thickness, center.x, center.y, cutter.workingDiameter / 2)
         : buildProjectedPolygon(
-          rect,
-          part.width,
-          part.thickness,
-          cutter.profilePoints.map((point) => ({
-            x: center.x + point.x,
-            y: center.y + point.y,
-          }))
-        ),
+        rect,
+        part.width,
+        part.thickness,
+        cutter.profilePoints.map((point) => ({
+          x: center.x + point.x,
+          y: center.y + point.y,
+        }))
+      ),
       traceShape: null,
     };
   }

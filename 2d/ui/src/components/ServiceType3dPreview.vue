@@ -154,7 +154,7 @@ function createOpeningOutline(sceneInput) {
       const cos = Math.cos(angle) * radius;
       const sin = Math.sin(angle) * radius;
       if (cutter.serviceLocation === "thickness") {
-        points.push(new THREE.Vector3(x0 + cos, y0 + sin, -lengthM * 0.5));
+        points.push(new THREE.Vector3(x0 + cos, y0 + sin, lengthM * 0.5));
       } else {
         const faceY = cutter.serviceLocation === "back" ? -thicknessM * 0.5 : thicknessM * 0.5;
         points.push(new THREE.Vector3(x0 + cos, faceY, z0 + sin));
@@ -168,7 +168,7 @@ function createOpeningOutline(sceneInput) {
   const points = profilePoints.map((point) => {
     const px = x0 + mmToM(point?.x);
     if (cutter.serviceLocation === "thickness") {
-      return new THREE.Vector3(px, y0 + mmToM(point?.y), -lengthM * 0.5);
+      return new THREE.Vector3(px, y0 + mmToM(point?.y), lengthM * 0.5);
     }
     const faceY = cutter.serviceLocation === "back" ? -thicknessM * 0.5 : thicknessM * 0.5;
     return new THREE.Vector3(px, faceY, z0 + mmToM(point?.y));
@@ -191,7 +191,7 @@ function createCircleCutter(sceneInput) {
   const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: "#fb923c" }));
   if (cutter.serviceLocation === "thickness") {
     const y = (-thicknessM * 0.5) + oppositeM;
-    const z = (-lengthM * 0.5) + (depth * 0.5);
+    const z = (lengthM * 0.5) - (depth * 0.5);
     mesh.rotation.x = Math.PI * 0.5;
     mesh.position.set(x, y, z);
   } else {
@@ -226,7 +226,7 @@ function createProfileCutter(sceneInput) {
   const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: "#fb923c" }));
   if (cutter.serviceLocation === "thickness") {
     const y = (-thicknessM * 0.5) + oppositeM;
-    const z = -lengthM * 0.5;
+    const z = (lengthM * 0.5) - depth;
     mesh.position.set(x, y, z);
   } else {
     const z = (-lengthM * 0.5) + oppositeM;
