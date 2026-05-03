@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from time import perf_counter
 
@@ -17,8 +18,11 @@ from designkp_backend.db.dependencies import get_db_session
 from designkp_backend.db.models.catalog import Category, SubCategory, SubCategoryDesign, SubCategoryDesignDoorInstance, SubCategoryDesignInteriorInstance, SubCategoryDesignPart, SubCategoryDesignSubtractorInstance
 from designkp_backend.services.admin_access import require_admin_if_present
 from designkp_backend.services.sub_category_designs import (
+    _round_number,
     _collect_controller_selection_boxes,
     _collect_controller_selection_boxes_by_formula_id,
+    build_design_execution_context,
+    build_part_viewer_payload,
     build_sub_category_param_display_snapshot,
     compose_sub_category_design_preview,
     door_instance_tables_ready,
@@ -28,8 +32,11 @@ from designkp_backend.services.sub_category_designs import (
     rebuild_design_snapshots,
     require_accessible_door_part_group,
     require_accessible_internal_part_group,
+    require_accessible_part_formulas,
     require_accessible_subtractor_part_group,
     require_accessible_sub_category,
+    resolve_base_formula_values_with_context,
+    resolve_part_formula_values,
     resolve_door_instance_preview,
     resolve_internal_instance_preview,
     serialize_resolved_part_snapshot,
@@ -180,6 +187,48 @@ class SubCategoryDesignPreviewResponse(BaseModel):
     interior_instances: list[SubCategoryDesignInteriorInstancePreviewItem]
     subtractor_instances: list[dict[str, object]] = Field(default_factory=list)
     door_instances: list[dict[str, object]] = Field(default_factory=list)
+
+
+class PartFormulaPreviewLwFrameMappingPayload(BaseModel):
+    l_axis: str = "horizontal"
+    w_axis: str = "vertical"
+
+
+class PartFormulaPreviewOverridesPayload(BaseModel):
+    formula_l: str | None = None
+    formula_w: str | None = None
+    formula_width: str | None = None
+    formula_depth: str | None = None
+    formula_height: str | None = None
+
+
+class PartFormulaPreviewRequest(BaseModel):
+    admin_id: uuid.UUID
+    sub_category_id: uuid.UUID
+    part_formula_id: int = Field(ge=1)
+    part_formula_overrides: PartFormulaPreviewOverridesPayload | None = None
+    lw_frame_mapping: PartFormulaPreviewLwFrameMappingPayload | None = None
+
+
+class PartFormulaPreviewDimensionsResponse(BaseModel):
+    formula_l: float
+    formula_w: float
+    formula_width: float
+    formula_depth: float
+    formula_height: float
+    length: float
+    width: float
+    thickness: float
+
+
+class PartFormulaPreviewResponse(BaseModel):
+    sub_category_id: uuid.UUID
+    part_formula_id: int
+    resolved_params: dict[str, str | None]
+    resolved_base_formulas: dict[str, float]
+    resolved_part_formulas: dict[str, float]
+    preview_part_dimensions: PartFormulaPreviewDimensionsResponse
+    viewer_payload: dict[str, object]
 
 
 class SubCategoryDesignItem(BaseModel):
@@ -1033,6 +1082,63 @@ async def preview_sub_category_design_draft(
     )
 
 
+@router.post("/part-formula-preview", response_model=PartFormulaPreviewResponse)
+async def preview_part_formula_for_sub_category(
+    payload: PartFormulaPreviewRequest,
+    session: AsyncSession = Depends(get_db_session),
+) -> PartFormulaPreviewResponse:
+    await require_admin_if_present(session, payload.admin_id)
+    sub_category = await require_accessible_sub_category(session, admin_id=payload.admin_id, sub_category_id=payload.sub_category_id)
+    context = await build_design_execution_context(
+        session,
+        admin_id=payload.admin_id,
+        sub_category=sub_category,
+        part_formula_ids={int(payload.part_formula_id)},
+    )
+    formulas = await require_accessible_part_formulas(
+        session,
+        admin_id=payload.admin_id,
+        part_formula_ids=[int(payload.part_formula_id)],
+    )
+    base_formula = formulas[0]
+    overrides = payload.part_formula_overrides
+    effective_formula = SimpleNamespace(
+        part_formula_id=int(base_formula.part_formula_id or payload.part_formula_id),
+        part_kind_id=int(base_formula.part_kind_id or 0),
+        part_code=str(base_formula.part_code or "").strip(),
+        part_title=str(base_formula.part_title or "").strip(),
+        formula_l=str((getattr(overrides, "formula_l", None) if overrides else None) or base_formula.formula_l or "").strip(),
+        formula_w=str((getattr(overrides, "formula_w", None) if overrides else None) or base_formula.formula_w or "").strip(),
+        formula_width=str((getattr(overrides, "formula_width", None) if overrides else None) or base_formula.formula_width or "").strip(),
+        formula_depth=str((getattr(overrides, "formula_depth", None) if overrides else None) or base_formula.formula_depth or "").strip(),
+        formula_height=str((getattr(overrides, "formula_height", None) if overrides else None) or base_formula.formula_height or "").strip(),
+        formula_cx=str(base_formula.formula_cx or "").strip(),
+        formula_cy=str(base_formula.formula_cy or "").strip(),
+        formula_cz=str(base_formula.formula_cz or "").strip(),
+    )
+    numeric_params = {
+        str(key): float(value)
+        for key, value in dict(context.sub_category_numeric_params).items()
+    }
+    resolved_base_formulas = resolve_base_formula_values_with_context(context, params=numeric_params)
+    resolved_part_formulas = resolve_part_formula_values(
+        effective_formula,
+        params=numeric_params,
+        base_formulas=resolved_base_formulas,
+        context=context,
+    )
+    preview_dimensions = _build_part_formula_preview_dimensions(resolved_part_formulas, payload.lw_frame_mapping)
+    return PartFormulaPreviewResponse(
+        sub_category_id=sub_category.id,
+        part_formula_id=int(payload.part_formula_id),
+        resolved_params=dict(context.sub_category_raw_params),
+        resolved_base_formulas={str(key): _round_number(float(value)) for key, value in resolved_base_formulas.items()},
+        resolved_part_formulas={str(key): _round_number(float(value)) for key, value in resolved_part_formulas.items()},
+        preview_part_dimensions=PartFormulaPreviewDimensionsResponse(**preview_dimensions),
+        viewer_payload=build_part_viewer_payload(effective_formula, resolved_part_formulas),
+    )
+
+
 @router.post("/{design_uuid}/parts/rebuild", response_model=SubCategoryDesignPreviewResponse)
 async def rebuild_sub_category_design_parts(design_uuid: uuid.UUID, session: AsyncSession = Depends(get_db_session)) -> SubCategoryDesignPreviewResponse:
     item = await _load_design(session, design_uuid)
@@ -1103,6 +1209,45 @@ def _normalize_subtractor_param_values(payload: dict[str, str | int | float | bo
         str(key): (None if value is None else str(value))
         for key, value in dict(payload or {}).items()
         if str(key or "").strip()
+    }
+
+
+def _normalize_part_formula_preview_lw_frame_mapping(
+    value: PartFormulaPreviewLwFrameMappingPayload | dict[str, object] | None,
+) -> dict[str, str]:
+    raw_l_axis = str(getattr(value, "l_axis", None) or (value or {}).get("l_axis") or "").strip().lower()
+    l_axis = "vertical" if raw_l_axis == "vertical" else "horizontal"
+    return {
+        "l_axis": l_axis,
+        "w_axis": "horizontal" if l_axis == "vertical" else "vertical",
+    }
+
+
+def _build_part_formula_preview_dimensions(
+    resolved_part_formulas: dict[str, float],
+    lw_frame_mapping: PartFormulaPreviewLwFrameMappingPayload | dict[str, object] | None,
+) -> dict[str, float]:
+    safe_mapping = _normalize_part_formula_preview_lw_frame_mapping(lw_frame_mapping)
+    formula_l = _round_number(float(resolved_part_formulas.get("formula_l", 0)))
+    formula_w = _round_number(float(resolved_part_formulas.get("formula_w", 0)))
+    formula_width = _round_number(float(resolved_part_formulas.get("formula_width", 0)))
+    formula_depth = _round_number(float(resolved_part_formulas.get("formula_depth", 0)))
+    formula_height = _round_number(float(resolved_part_formulas.get("formula_height", 0)))
+    if formula_width <= formula_depth and formula_width <= formula_height:
+        thickness = formula_width
+    elif formula_depth <= formula_height:
+        thickness = formula_depth
+    else:
+        thickness = formula_height
+    return {
+        "formula_l": formula_l,
+        "formula_w": formula_w,
+        "formula_width": formula_width,
+        "formula_depth": formula_depth,
+        "formula_height": formula_height,
+        "length": formula_l if safe_mapping["l_axis"] == "horizontal" else formula_w,
+        "width": formula_w if safe_mapping["l_axis"] == "horizontal" else formula_l,
+        "thickness": _round_number(thickness),
     }
 
 

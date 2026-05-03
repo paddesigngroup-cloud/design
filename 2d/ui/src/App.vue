@@ -964,6 +964,13 @@ const partFormulaFieldsDialogRowId = ref(null);
 const partFormulaModelEditorOpen = ref(false);
 const partFormulaModelEditorDraft = ref(null);
 const partFormulaModelEditorRowId = ref(null);
+const partFormulaModelEditorSelectedSideIndex = ref(null);
+const partFormulaModelEditorServiceTypeFilter = ref("");
+const partFormulaModelEditorPreviewSubCategoryId = ref("");
+const partFormulaModelEditorPreviewLoading = ref(false);
+const partFormulaModelEditorPreviewError = ref("");
+const partFormulaModelEditorResolvedPreviewPart = ref(null);
+const partFormulaModelEditorPreviewRequestSeq = ref(0);
 const constructionLoading = ref(false);
 const constructionSavingIds = ref([]);
 const constructionDeletingIds = ref([]);
@@ -8350,6 +8357,73 @@ const isPartFormulaFieldsDialogApplyDisabled = computed(() => !partFormulaFields
 const activePartFormulaModelEditorPartModel = computed(() =>
   constructionPartModelsById.value.get(String(partFormulaModelEditorDraft.value?.part_model_id || "").trim()) || null
 );
+const partFormulaModelEditorPreviewSubCategoryOptions = computed(() =>
+  constructionSubCategories.value.map((item) => ({
+    value: String(item.id || "").trim(),
+    label: String(item.sub_cat_title || item.title || `ساب‌کت ${item.sub_cat_id || ""}`).trim(),
+  }))
+);
+const partFormulaModelEditorServiceLibraryGroups = computed(() => {
+  const groups = new Map();
+  for (const item of constructionServiceTypes.value) {
+    const groupKey = String(item.service_type || "").trim();
+    if (!groupKey) continue;
+    if (!groups.has(groupKey)) {
+      const definition = constructionPartServiceDefinitionsByType.value.get(groupKey);
+      groups.set(groupKey, {
+        key: groupKey,
+        title: groupKey,
+        description: String(definition?.service_description || "").trim(),
+        sort_order: Number(definition?.sort_order) || Number.MAX_SAFE_INTEGER,
+        items: [],
+      });
+    }
+    groups.get(groupKey).items.push({
+      ...item,
+      id: String(item.id || "").trim(),
+      service_type: groupKey,
+      service_title: String(item.service_title || "").trim(),
+      short_code: String(item.short_code || "").trim(),
+      icon_path: normalizeIconFileName(item.icon_path) || "",
+      service_location: normalizeServiceLocation(item.service_location),
+      has_subtraction: normalizeBooleanFlag(item.has_subtraction, false),
+      is_common: normalizeBooleanFlag(item.is_common, false),
+      sort_order: Number(item.sort_order) || 0,
+    });
+  }
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      items: group.items.sort((a, b) =>
+        a.sort_order - b.sort_order
+        || a.service_location.localeCompare(b.service_location)
+        || a.service_title.localeCompare(b.service_title, "fa")
+      ),
+    }))
+    .sort((a, b) =>
+      a.sort_order - b.sort_order
+      || a.title.localeCompare(b.title, "fa")
+    );
+});
+const partFormulaModelEditorCommonServiceTypes = computed(() =>
+  constructionServiceTypes.value
+    .filter((item) => normalizeBooleanFlag(item.is_common, false))
+    .slice()
+    .sort((a, b) =>
+      (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+      || String(a.service_title || "").localeCompare(String(b.service_title || ""), "fa")
+    )
+);
+const partFormulaModelEditorFilteredServiceLibraryGroups = computed(() => {
+  const filterValue = String(partFormulaModelEditorServiceTypeFilter.value || "").trim();
+  if (!filterValue) return partFormulaModelEditorServiceLibraryGroups.value;
+  return partFormulaModelEditorServiceLibraryGroups.value.filter((group) => group.key === filterValue);
+});
+const selectedPartFormulaModelEditorServiceType = computed(() =>
+  constructionServiceTypesById.value.get(
+    getPartFormulaSideServiceValue(partFormulaModelEditorDraft.value, partFormulaModelEditorSelectedSideIndex.value)
+  ) || null
+);
 const constructionParamGroupDuplicateState = computed(() => buildDuplicateState(editableParamGroups.value, ["param_group_id", "param_group_code"]));
 const constructionParamDuplicateState = computed(() => buildDuplicateState(editableParams.value, ["param_id", "param_code"]));
 const constructionBaseFormulaDuplicateState = computed(() => buildDuplicateState(editableBaseFormulas.value, ["fo_id", "param_formula"]));
@@ -10085,6 +10159,101 @@ const partFormulaModelEditorPreviewState = computed(() => {
   };
 });
 
+const partFormulaModelEditorPreviewRequestPayload = computed(() => {
+  const draft = partFormulaModelEditorDraft.value;
+  const subCategoryId = String(partFormulaModelEditorPreviewSubCategoryId.value || "").trim();
+  const partFormulaId = Number(draft?.part_formula_id);
+  if (!draft || !subCategoryId || !Number.isInteger(partFormulaId) || partFormulaId < 1) return null;
+  return {
+    admin_id: currentAdminId.value,
+    sub_category_id: subCategoryId,
+    part_formula_id: partFormulaId,
+    lw_frame_mapping: normalizePartFormulaLwFrameMapping(draft.lw_frame_mapping),
+    part_formula_overrides: {
+      formula_l: String(draft.formula_l || "").trim(),
+      formula_w: String(draft.formula_w || "").trim(),
+      formula_width: String(draft.formula_width || "").trim(),
+      formula_depth: String(draft.formula_depth || "").trim(),
+      formula_height: String(draft.formula_height || "").trim(),
+    },
+  };
+});
+
+const partFormulaModelEditorScene3dState = computed(() => {
+  const previewPart = partFormulaModelEditorResolvedPreviewPart.value;
+  const service = selectedPartFormulaModelEditorServiceType.value;
+  const emptyScene = normalizeServiceTypePreviewSceneInput({
+    part: { width: 1, length: 1, thickness: 1 },
+    cutter: {
+      hasVisibleSubtraction: false,
+      serviceLocation: "front",
+      shape: "circle",
+      workingDiameter: 0,
+      workingWidth: 0,
+      workingHeight: 0,
+      workingDepth: 0,
+      axisAligned: 0,
+      axisOpposite: 0,
+      profilePoints: [],
+      workingDepthMode: "fixed",
+      workingDepthEndOffset: 0,
+    },
+  });
+  if (!previewPart) {
+    return {
+      available: false,
+      scene3d: emptyScene,
+      dimensions: null,
+      resolvedPartFormulas: null,
+      selectedService: service,
+    };
+  }
+  const resolvedWorkingDimensions = getServiceTypeResolvedWorkingDimensions(service || {});
+  const safeLocation = normalizeServiceLocation(service?.service_location);
+  const safeShape = normalizeSubtractionShape(service?.subtraction_shape);
+  const shapePreview = buildServiceTypeMirroredShapePreviewGeometry(
+    safeShape,
+    service?.shape_angles,
+    !!service?.preview_mirror_x,
+    !!service?.preview_mirror_y,
+    Math.max(resolvedWorkingDimensions.workingWidth, 1),
+    Math.max(resolvedWorkingDimensions.workingHeight, 1),
+  );
+  const hasVisibleSubtraction = !!service?.has_subtraction
+    && (
+      resolvedWorkingDimensions.workingDiameter > 0
+      || resolvedWorkingDimensions.workingWidth > 0
+      || resolvedWorkingDimensions.workingHeight > 0
+    );
+  return {
+    available: true,
+    selectedService: service,
+    dimensions: previewPart.preview_part_dimensions || null,
+    resolvedPartFormulas: previewPart.resolved_part_formulas || null,
+    scene3d: normalizeServiceTypePreviewSceneInput({
+      part: {
+        width: Math.max(1, Number(previewPart?.preview_part_dimensions?.width) || 0),
+        length: Math.max(1, Number(previewPart?.preview_part_dimensions?.length) || 0),
+        thickness: Math.max(1, Number(previewPart?.preview_part_dimensions?.thickness) || 0),
+      },
+      cutter: {
+        hasVisibleSubtraction,
+        serviceLocation: safeLocation,
+        shape: safeShape,
+        workingDiameter: resolvedWorkingDimensions.workingDiameter,
+        workingWidth: resolvedWorkingDimensions.workingWidth,
+        workingHeight: resolvedWorkingDimensions.workingHeight,
+        workingDepth: Math.max(0, Number(service?.working_depth) || 0),
+        axisAligned: Math.max(0, Number(service?.axis_to_aligned_edge_distance) || 0),
+        axisOpposite: Math.max(0, Number(service?.axis_to_opposite_edge_distance) || 0),
+        profilePoints: shapePreview.profilePoints,
+        workingDepthMode: normalizeServiceTypeWorkingDepthMode(service?.working_depth_mode),
+        workingDepthEndOffset: Math.max(0, Number(service?.working_depth_end_offset) || 0),
+      },
+    }),
+  };
+});
+
 function buildPreviewRect(widthMm, heightMm) {
   const frame = { x: 18, y: 18, width: 184, height: 116 };
   const safeWidth = Math.max(1, widthMm);
@@ -11048,7 +11217,14 @@ function openPartFormulaFieldsDialog(item) {
 function openPartFormulaModelEditor(item) {
   partFormulaModelEditorRowId.value = item?.id ?? null;
   partFormulaModelEditorDraft.value = sanitizePartFormulaModelEditorState(item);
+  partFormulaModelEditorSelectedSideIndex.value = null;
+  partFormulaModelEditorServiceTypeFilter.value = "";
+  partFormulaModelEditorPreviewSubCategoryId.value = String(constructionSubCategories.value[0]?.id || "").trim();
+  partFormulaModelEditorPreviewLoading.value = false;
+  partFormulaModelEditorPreviewError.value = "";
+  partFormulaModelEditorResolvedPreviewPart.value = null;
   partFormulaModelEditorOpen.value = true;
+  refreshPartFormulaModelEditorPreview();
 }
 
 async function closePartFormulaFieldsDialog() {
@@ -11131,6 +11307,12 @@ async function closePartFormulaModelEditor() {
   partFormulaModelEditorOpen.value = false;
   partFormulaModelEditorDraft.value = null;
   partFormulaModelEditorRowId.value = null;
+  partFormulaModelEditorSelectedSideIndex.value = null;
+  partFormulaModelEditorServiceTypeFilter.value = "";
+  partFormulaModelEditorPreviewSubCategoryId.value = "";
+  partFormulaModelEditorPreviewLoading.value = false;
+  partFormulaModelEditorPreviewError.value = "";
+  partFormulaModelEditorResolvedPreviewPart.value = null;
 }
 
 function applyPartFormulaModelEditor() {
@@ -11148,6 +11330,12 @@ function applyPartFormulaModelEditor() {
   partFormulaModelEditorOpen.value = false;
   partFormulaModelEditorDraft.value = null;
   partFormulaModelEditorRowId.value = null;
+  partFormulaModelEditorSelectedSideIndex.value = null;
+  partFormulaModelEditorServiceTypeFilter.value = "";
+  partFormulaModelEditorPreviewSubCategoryId.value = "";
+  partFormulaModelEditorPreviewLoading.value = false;
+  partFormulaModelEditorPreviewError.value = "";
+  partFormulaModelEditorResolvedPreviewPart.value = null;
 }
 
 function setPartFormulaFrameAxis(axis) {
@@ -11159,6 +11347,7 @@ function setPartFormulaFrameAxis(axis) {
 }
 
 function getPartFormulaSideServiceValue(draft, sideIndex) {
+  if (!Number.isInteger(Number(sideIndex))) return "";
   const row = normalizePartFormulaSideServices(draft?.part_model_side_services).find((entry) => Number(entry.side_index) === Number(sideIndex));
   return String(row?.service_type_id || "").trim();
 }
@@ -11177,6 +11366,61 @@ function setPartFormulaSideService(sideIndex, serviceTypeId) {
   nextRows.sort((a, b) => a.side_index - b.side_index);
   partFormulaModelEditorDraft.value.part_model_side_services = nextRows;
 }
+
+function selectPartFormulaModelEditorSide(sideIndex) {
+  const numericIndex = Number(sideIndex);
+  partFormulaModelEditorSelectedSideIndex.value = Number.isInteger(numericIndex) && numericIndex >= 0 ? numericIndex : null;
+}
+
+function assignPartFormulaModelEditorService(serviceTypeId) {
+  if (!Number.isInteger(Number(partFormulaModelEditorSelectedSideIndex.value))) return;
+  setPartFormulaSideService(Number(partFormulaModelEditorSelectedSideIndex.value), serviceTypeId);
+}
+
+async function refreshPartFormulaModelEditorPreview(payload = partFormulaModelEditorPreviewRequestPayload.value) {
+  if (!payload || !partFormulaModelEditorOpen.value) {
+    partFormulaModelEditorPreviewLoading.value = false;
+    partFormulaModelEditorPreviewError.value = "";
+    partFormulaModelEditorResolvedPreviewPart.value = null;
+    return;
+  }
+  const requestId = partFormulaModelEditorPreviewRequestSeq.value + 1;
+  partFormulaModelEditorPreviewRequestSeq.value = requestId;
+  partFormulaModelEditorPreviewLoading.value = true;
+  partFormulaModelEditorPreviewError.value = "";
+  try {
+    const responsePayload = await sendJson(
+      "/api/sub-category-designs/part-formula-preview",
+      "POST",
+      payload,
+      {
+        abortChannel: `construction:part-formula-model-preview:${payload.part_formula_id}`,
+      }
+    );
+    if (requestId !== partFormulaModelEditorPreviewRequestSeq.value) return;
+    partFormulaModelEditorResolvedPreviewPart.value = responsePayload || null;
+  } catch (error) {
+    if (requestId !== partFormulaModelEditorPreviewRequestSeq.value) return;
+    partFormulaModelEditorResolvedPreviewPart.value = null;
+    if (error?.name === "AbortError") return;
+    partFormulaModelEditorPreviewError.value = typeof error?.json === "function"
+      ? await readApiErrorMessage(error, "محاسبه پیش‌نمایش قطعه انجام نشد.")
+      : (error?.message || "محاسبه پیش‌نمایش قطعه انجام نشد.");
+  } finally {
+    if (requestId === partFormulaModelEditorPreviewRequestSeq.value) {
+      partFormulaModelEditorPreviewLoading.value = false;
+    }
+  }
+}
+
+watch(
+  partFormulaModelEditorPreviewRequestPayload,
+  (payload) => {
+    if (!partFormulaModelEditorOpen.value) return;
+    refreshPartFormulaModelEditorPreview(payload);
+  },
+  { deep: true }
+);
 
 function handlePartFormulaPartModelChange(item, nextPartModelId, options = {}) {
   const next = sanitizePartFormulaModelEditorState(createPartFormulaDraft(item, {
@@ -31977,7 +32221,7 @@ onBeforeUnmount(() => {
 
   <div v-if="partFormulaModelEditorOpen" class="appDialog" role="dialog" aria-modal="true">
     <div class="appDialog__backdrop" @click="closePartFormulaModelEditor"></div>
-    <div class="appDialog__card appDialog__card--builder" dir="rtl">
+    <div class="appDialog__card appDialog__card--partFormulaLandscape" dir="rtl">
       <div class="formulaBuilder__head">
         <div>
           <div class="constructionDialog__sectionTitle formulaBuilder__title">ویرایش مدل قطعه</div>
@@ -31988,94 +32232,189 @@ onBeforeUnmount(() => {
         <button type="button" class="constructionDialog__close formulaBuilder__close" title="بستن" @click="closePartFormulaModelEditor">×</button>
       </div>
       <div class="constructionDialog__sectionHint">
-        مستطیل بیرونی همان باکس مرجع L/W است. مدل قطعه داخل آن نمایش داده می‌شود و برای هر ضلع می‌توانید یک خدمت پیش‌فرض انتخاب کنید.
+        ابتدا یک ضلع را از نمای گرافیکی انتخاب کنید، سپس از کتابخانه خدمات سمت راست، خدمت مناسب را به همان ضلع نسبت دهید. پیش‌نمایش پایین بر اساس پیش‌فرض‌های ساب‌کت مرجع محاسبه می‌شود.
       </div>
 
-      <div v-if="partFormulaModelEditorDraft" class="partFormulaModelEditor">
-        <section class="partFormulaModelEditor__previewCard">
-          <div class="partFormulaModelEditor__sectionHead">
-            <div class="partFormulaModelEditor__sectionTitle">نمای گرافیکی قطعه</div>
-            <div class="partFormulaModelEditor__sectionHint">شماره هر ضلع روی شکل نشان داده شده است.</div>
-          </div>
-          <div class="partFormulaModelEditor__canvasWrap">
-            <svg :viewBox="partFormulaModelEditorPreviewState.viewBox" class="partFormulaModelEditor__svg" aria-hidden="true">
-              <rect
-                :x="partFormulaModelEditorPreviewState.frameRect.x"
-                :y="partFormulaModelEditorPreviewState.frameRect.y"
-                :width="partFormulaModelEditorPreviewState.frameRect.width"
-                :height="partFormulaModelEditorPreviewState.frameRect.height"
-                rx="20"
-                class="partFormulaModelEditor__frame"
-              />
-              <polygon :points="partFormulaModelEditorPreviewState.polygonPoints" class="partFormulaModelEditor__shape" />
-              <g v-for="side in partFormulaModelEditorPreviewState.sides" :key="`part-formula-side-${side.index}`" class="partFormulaModelEditor__side">
-                <line :x1="side.x1" :y1="side.y1" :x2="side.x2" :y2="side.y2" :class="['partFormulaModelEditor__sideLine', side.hasService ? 'has-service' : '']" />
-                <circle :cx="side.labelX" :cy="side.labelY" r="13" :class="['partFormulaModelEditor__sideBubble', side.hasService ? 'has-service' : '']" />
-                <text :x="side.labelX" :y="side.labelY + 1" class="partFormulaModelEditor__sideLabel">{{ toPersianDigits(side.index + 1) }}</text>
-              </g>
-              <g v-for="label in partFormulaModelEditorPreviewState.frameLabels" :key="label.key">
-                <circle :cx="label.x" :cy="label.y" r="12" :class="['partFormulaModelEditor__frameLabelBubble', label.tone]" />
-                <text :x="label.x" :y="label.y + 1" class="partFormulaModelEditor__frameLabel">{{ label.text }}</text>
-              </g>
-            </svg>
-          </div>
-          <div class="partFormulaModelEditor__axisSwitch">
-            <button
-              type="button"
-              class="partFormulaModelEditor__axisBtn"
-              :class="{ 'is-active': normalizePartFormulaLwFrameMapping(partFormulaModelEditorDraft.lw_frame_mapping).l_axis === 'horizontal' }"
-              @click="setPartFormulaFrameAxis('horizontal')"
-            >
-              L افقی / W عمودی
-            </button>
-            <button
-              type="button"
-              class="partFormulaModelEditor__axisBtn"
-              :class="{ 'is-active': normalizePartFormulaLwFrameMapping(partFormulaModelEditorDraft.lw_frame_mapping).l_axis === 'vertical' }"
-              @click="setPartFormulaFrameAxis('vertical')"
-            >
-              L عمودی / W افقی
-            </button>
-          </div>
-        </section>
-
-        <section class="partFormulaModelEditor__servicesCard">
-          <div class="partFormulaModelEditor__sectionHead">
-            <div class="partFormulaModelEditor__sectionTitle">خدمات پیش‌فرض اضلاع</div>
-            <div class="partFormulaModelEditor__sectionHint">انتخاب‌ها بر اساس نوع خدمات گروه‌بندی شده‌اند و سمت روی/پشت قطعه در هر گزینه مشخص است.</div>
-          </div>
-          <div v-if="activePartFormulaModelEditorPartModel" class="partFormulaModelEditor__servicesList">
-            <article v-for="sideIndex in activePartFormulaModelEditorPartModel.side_count" :key="`part-formula-service-${sideIndex - 1}`" class="partFormulaModelEditor__serviceRow">
-              <div class="partFormulaModelEditor__serviceMeta">
-                <div class="partFormulaModelEditor__serviceTitle">ضلع {{ toPersianDigits(sideIndex) }}</div>
-                <div class="partFormulaModelEditor__serviceCaption">پیش‌فرض خدمات این ضلع را انتخاب کنید</div>
-              </div>
-              <select
-                :value="getPartFormulaSideServiceValue(partFormulaModelEditorDraft, sideIndex - 1)"
-                class="constructionDialog__input partFormulaModelEditor__select"
-                @change="setPartFormulaSideService(sideIndex - 1, $event.target.value)"
+      <div v-if="partFormulaModelEditorDraft" class="partFormulaModelEditor partFormulaModelEditor--landscape">
+        <div class="partFormulaModelEditor__main">
+          <section class="partFormulaModelEditor__previewCard partFormulaModelEditor__previewCard--graphic">
+            <div class="partFormulaModelEditor__sectionHead">
+              <div class="partFormulaModelEditor__sectionTitle">نمای گرافیکی قطعه</div>
+              <div class="partFormulaModelEditor__sectionHint">شماره هر ضلع روی شکل نشان داده شده است. برای فعال شدن کتابخانه، یک ضلع را انتخاب کنید.</div>
+            </div>
+            <div class="partFormulaModelEditor__canvasWrap">
+              <svg :viewBox="partFormulaModelEditorPreviewState.viewBox" class="partFormulaModelEditor__svg" aria-hidden="true">
+                <rect
+                  :x="partFormulaModelEditorPreviewState.frameRect.x"
+                  :y="partFormulaModelEditorPreviewState.frameRect.y"
+                  :width="partFormulaModelEditorPreviewState.frameRect.width"
+                  :height="partFormulaModelEditorPreviewState.frameRect.height"
+                  rx="20"
+                  class="partFormulaModelEditor__frame"
+                />
+                <polygon :points="partFormulaModelEditorPreviewState.polygonPoints" class="partFormulaModelEditor__shape" />
+                <g
+                  v-for="side in partFormulaModelEditorPreviewState.sides"
+                  :key="`part-formula-side-${side.index}`"
+                  class="partFormulaModelEditor__side"
+                  :class="{ 'is-active': Number(partFormulaModelEditorSelectedSideIndex) === side.index }"
+                  @click="selectPartFormulaModelEditorSide(side.index)"
+                >
+                  <line :x1="side.x1" :y1="side.y1" :x2="side.x2" :y2="side.y2" :class="['partFormulaModelEditor__sideLine', side.hasService ? 'has-service' : '']" />
+                  <circle :cx="side.labelX" :cy="side.labelY" r="13" :class="['partFormulaModelEditor__sideBubble', side.hasService ? 'has-service' : '']" />
+                  <text :x="side.labelX" :y="side.labelY + 1" class="partFormulaModelEditor__sideLabel">{{ toPersianDigits(side.index + 1) }}</text>
+                </g>
+                <g v-for="label in partFormulaModelEditorPreviewState.frameLabels" :key="label.key">
+                  <circle :cx="label.x" :cy="label.y" r="12" :class="['partFormulaModelEditor__frameLabelBubble', label.tone]" />
+                  <text :x="label.x" :y="label.y + 1" class="partFormulaModelEditor__frameLabel">{{ label.text }}</text>
+                </g>
+              </svg>
+            </div>
+            <div class="partFormulaModelEditor__axisSwitch">
+              <button
+                type="button"
+                class="partFormulaModelEditor__axisBtn"
+                :class="{ 'is-active': normalizePartFormulaLwFrameMapping(partFormulaModelEditorDraft.lw_frame_mapping).l_axis === 'horizontal' }"
+                @click="setPartFormulaFrameAxis('horizontal')"
               >
-                <option value="">بدون خدمت پیش‌فرض</option>
-                <optgroup v-for="group in constructionGroupedServiceTypeChoices" :key="group.key" :label="group.title">
-                  <option v-for="service in group.items" :key="service.id" :value="service.id">
-                    {{ `${service.service_title} - ${getServiceLocationLabel(service.service_location)}${service.short_code ? ` (${service.short_code})` : ""}` }}
-                  </option>
-                </optgroup>
-              </select>
-              <div class="partFormulaModelEditor__selectedInfo">
-                <template v-if="constructionServiceTypesById.get(getPartFormulaSideServiceValue(partFormulaModelEditorDraft, sideIndex - 1))">
-                  <span class="constructionDialog__pill">
-                    {{ constructionServiceTypesById.get(getPartFormulaSideServiceValue(partFormulaModelEditorDraft, sideIndex - 1)).service_title }}
-                  </span>
-                  <span class="constructionDialog__pill constructionDialog__pill--mono">
-                    {{ getServiceLocationLabel(constructionServiceTypesById.get(getPartFormulaSideServiceValue(partFormulaModelEditorDraft, sideIndex - 1)).service_location) }}
-                  </span>
-                </template>
-                <span v-else class="partFormulaModelEditor__selectedEmpty">خدمتی انتخاب نشده است.</span>
+                L افقی / W عمودی
+              </button>
+              <button
+                type="button"
+                class="partFormulaModelEditor__axisBtn"
+                :class="{ 'is-active': normalizePartFormulaLwFrameMapping(partFormulaModelEditorDraft.lw_frame_mapping).l_axis === 'vertical' }"
+                @click="setPartFormulaFrameAxis('vertical')"
+              >
+                L عمودی / W افقی
+              </button>
+            </div>
+            <div class="partFormulaModelEditor__selectedInfo">
+              <span class="constructionDialog__pill">
+                {{ Number.isInteger(Number(partFormulaModelEditorSelectedSideIndex)) ? `ضلع ${toPersianDigits(Number(partFormulaModelEditorSelectedSideIndex) + 1)}` : "هیچ ضلعی انتخاب نشده" }}
+              </span>
+              <template v-if="selectedPartFormulaModelEditorServiceType">
+                <span class="constructionDialog__pill">{{ selectedPartFormulaModelEditorServiceType.service_title }}</span>
+                <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getServiceLocationLabel(selectedPartFormulaModelEditorServiceType.service_location) }}</span>
+              </template>
+            </div>
+          </section>
+
+          <section class="partFormulaModelEditor__previewCard partFormulaModelEditor__previewCard--scene">
+            <div class="partFormulaModelEditor__sectionHead partFormulaModelEditor__sectionHead--row">
+              <div>
+                <div class="partFormulaModelEditor__sectionTitle">پیش‌نمایش سه‌بعدی قطعه</div>
+                <div class="partFormulaModelEditor__sectionHint">ابعاد preview از فرمول‌های همین قطعه و پیش‌فرض‌های ساب‌کت مرجع ساخته می‌شود.</div>
               </div>
-            </article>
-          </div>
-        </section>
+              <label class="partFormulaModelEditor__subCategoryPicker">
+                <span>ساب‌کت مرجع</span>
+                <select v-model="partFormulaModelEditorPreviewSubCategoryId" class="constructionDialog__input">
+                  <option v-for="option in partFormulaModelEditorPreviewSubCategoryOptions" :key="`part-formula-preview-subcat-${option.value}`" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+            </div>
+            <div v-if="partFormulaModelEditorPreviewLoading" class="designMenu__cabinetState">در حال محاسبه پیش‌نمایش قطعه...</div>
+            <div v-else-if="partFormulaModelEditorPreviewError" class="designMenu__cabinetState">{{ partFormulaModelEditorPreviewError }}</div>
+            <template v-else-if="partFormulaModelEditorScene3dState.available">
+              <div class="partFormulaModelEditor__selectedInfo">
+                <span class="constructionDialog__pill">
+                  {{ `${formatServiceTypeMeasurementForDisplay(partFormulaModelEditorScene3dState.dimensions?.length || 0)} × ${formatServiceTypeMeasurementForDisplay(partFormulaModelEditorScene3dState.dimensions?.width || 0)} × ${formatServiceTypeMeasurementForDisplay(partFormulaModelEditorScene3dState.dimensions?.thickness || 0)}` }}
+                </span>
+                <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getCurrentParamLengthUnitLabel() }}</span>
+              </div>
+              <div class="partFormulaModelEditor__formulaPills">
+                <span class="constructionDialog__pill">{{ `L: ${formatServiceTypeMeasurementForDisplay(partFormulaModelEditorScene3dState.resolvedPartFormulas?.formula_l || 0)}` }}</span>
+                <span class="constructionDialog__pill">{{ `W: ${formatServiceTypeMeasurementForDisplay(partFormulaModelEditorScene3dState.resolvedPartFormulas?.formula_w || 0)}` }}</span>
+                <span class="constructionDialog__pill">{{ `Width: ${formatServiceTypeMeasurementForDisplay(partFormulaModelEditorScene3dState.resolvedPartFormulas?.formula_width || 0)}` }}</span>
+                <span class="constructionDialog__pill">{{ `Depth: ${formatServiceTypeMeasurementForDisplay(partFormulaModelEditorScene3dState.resolvedPartFormulas?.formula_depth || 0)}` }}</span>
+                <span class="constructionDialog__pill">{{ `Height: ${formatServiceTypeMeasurementForDisplay(partFormulaModelEditorScene3dState.resolvedPartFormulas?.formula_height || 0)}` }}</span>
+              </div>
+              <div class="partFormulaModelEditor__threeWrap">
+                <ServiceType3dPreview :scene="partFormulaModelEditorScene3dState.scene3d" />
+              </div>
+            </template>
+            <div v-else class="designMenu__cabinetState">برای این قطعه هنوز پیش‌نمایش قابل محاسبه نیست.</div>
+          </section>
+        </div>
+
+        <aside class="partFormulaModelEditor__library">
+          <section class="partFormulaModelEditor__servicesCard">
+            <div class="partFormulaModelEditor__sectionHead">
+              <div class="partFormulaModelEditor__sectionTitle">خدمات قطعات پرکاربرد</div>
+              <div class="partFormulaModelEditor__sectionHint">این نوار از رکوردهای پرکاربرد همان جدول خدمات قطعات خوانده می‌شود.</div>
+            </div>
+            <div v-if="partFormulaModelEditorCommonServiceTypes.length" class="partFormulaModelEditor__commonRail">
+              <button
+                v-for="service in partFormulaModelEditorCommonServiceTypes"
+                :key="`part-formula-common-service-${service.id}`"
+                type="button"
+                class="partFormulaModelEditor__commonCard"
+                :class="{ 'is-selected': selectedPartFormulaModelEditorServiceType?.id === service.id }"
+                :disabled="!Number.isInteger(Number(partFormulaModelEditorSelectedSideIndex))"
+                @click="assignPartFormulaModelEditorService(service.id)"
+              >
+                <span class="partFormulaModelEditor__serviceIconBox" :class="{ 'is-empty': !hasConstructionItemIcon(service) }">
+                  <img v-if="hasConstructionItemIcon(service)" :src="getAdminStorageIconUrl(service.icon_path)" :alt="service.service_title" class="partFormulaModelEditor__serviceIcon" />
+                  <span v-else class="partFormulaModelEditor__serviceIconFallback">{{ toPersianDigits(service.service_title.slice(0, 1) || "•") }}</span>
+                </span>
+                <span class="partFormulaModelEditor__commonTitle">{{ service.service_title }}</span>
+                <span class="partFormulaModelEditor__commonCaption">{{ getServiceLocationLabel(service.service_location) }}</span>
+              </button>
+            </div>
+            <div v-else class="designMenu__cabinetState">هنوز خدمت پرکاربردی ثبت نشده است.</div>
+          </section>
+
+          <section class="partFormulaModelEditor__servicesCard" :class="{ 'is-disabled': !Number.isInteger(Number(partFormulaModelEditorSelectedSideIndex)) }">
+            <div class="partFormulaModelEditor__sectionHead">
+              <div class="partFormulaModelEditor__sectionTitle">کتابخانه خدمات قطعات</div>
+              <div class="partFormulaModelEditor__sectionHint">پس از انتخاب ضلع، یک خدمت را از این ستون به همان ضلع نسبت دهید.</div>
+            </div>
+            <select v-model="partFormulaModelEditorServiceTypeFilter" class="constructionDialog__input">
+              <option value="">همه انواع خدمات</option>
+              <option v-for="group in partFormulaModelEditorServiceLibraryGroups" :key="`part-formula-service-filter-${group.key}`" :value="group.key">{{ group.title }}</option>
+            </select>
+            <div v-if="Number.isInteger(Number(partFormulaModelEditorSelectedSideIndex))" class="partFormulaModelEditor__selectedInfo">
+              <button type="button" class="constructionDialog__textBtn constructionDialog__textBtn--compact" @click="assignPartFormulaModelEditorService('')">بدون خدمت پیش‌فرض</button>
+              <span class="constructionDialog__pill">{{ `ضلع ${toPersianDigits(Number(partFormulaModelEditorSelectedSideIndex) + 1)}` }}</span>
+            </div>
+            <div class="partFormulaModelEditor__libraryGroups">
+              <template v-if="partFormulaModelEditorFilteredServiceLibraryGroups.length">
+                <section v-for="group in partFormulaModelEditorFilteredServiceLibraryGroups" :key="`part-formula-service-group-${group.key}`" class="partFormulaModelEditor__libraryGroup">
+                  <div class="partFormulaModelEditor__libraryGroupHead">
+                    <div class="partFormulaModelEditor__serviceTitle">{{ group.title }}</div>
+                    <div v-if="group.description" class="partFormulaModelEditor__serviceCaption">{{ group.description }}</div>
+                  </div>
+                  <button
+                    v-for="service in group.items"
+                    :key="`part-formula-service-card-${service.id}`"
+                    type="button"
+                    class="partFormulaModelEditor__libraryCard"
+                    :class="{ 'is-selected': selectedPartFormulaModelEditorServiceType?.id === service.id }"
+                    :disabled="!Number.isInteger(Number(partFormulaModelEditorSelectedSideIndex))"
+                    @click="assignPartFormulaModelEditorService(service.id)"
+                  >
+                    <span class="partFormulaModelEditor__serviceIconBox" :class="{ 'is-empty': !hasConstructionItemIcon(service) }">
+                      <img v-if="hasConstructionItemIcon(service)" :src="getAdminStorageIconUrl(service.icon_path)" :alt="service.service_title" class="partFormulaModelEditor__serviceIcon" />
+                      <span v-else class="partFormulaModelEditor__serviceIconFallback">{{ toPersianDigits(service.service_title.slice(0, 1) || "•") }}</span>
+                    </span>
+                    <span class="partFormulaModelEditor__libraryMeta">
+                      <span class="partFormulaModelEditor__serviceTitle">{{ service.service_title }}</span>
+                      <span class="partFormulaModelEditor__serviceCaption">
+                        {{ `${getServiceLocationLabel(service.service_location)}${service.short_code ? ` • ${service.short_code}` : ""}` }}
+                      </span>
+                    </span>
+                    <span class="partFormulaModelEditor__libraryBadge">{{ service.has_subtraction ? "سوراخکاری" : "بدون برش" }}</span>
+                  </button>
+                </section>
+              </template>
+              <div v-else class="designMenu__cabinetState">برای این فیلتر، خدمتی پیدا نشد.</div>
+            </div>
+            <div v-if="!Number.isInteger(Number(partFormulaModelEditorSelectedSideIndex))" class="partFormulaModelEditor__disabledOverlay">
+              ابتدا از نمای گرافیکی سمت چپ، یک ضلع را انتخاب کنید.
+            </div>
+          </section>
+        </aside>
 
         <div v-if="partFormulaModelEditorValidationErrors.length" class="formulaBuilder__errors">
           <div v-for="error in partFormulaModelEditorValidationErrors" :key="error" class="formulaBuilder__error">{{ error }}</div>
@@ -34422,7 +34761,24 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.14);
 }
 
+.appDialog__card--partFormulaLandscape {
+  width: min(1320px, calc(100vw - 36px));
+  max-width: min(1320px, calc(100vw - 36px));
+  min-height: min(860px, calc(100vh - 36px));
+}
+
 .partFormulaModelEditor {
+  display: grid;
+  gap: 16px;
+}
+
+.partFormulaModelEditor--landscape {
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.9fr);
+  align-items: start;
+}
+
+.partFormulaModelEditor__main,
+.partFormulaModelEditor__library {
   display: grid;
   gap: 16px;
 }
@@ -34434,7 +34790,13 @@ onBeforeUnmount(() => {
   padding: 16px;
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 18px;
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.96));
+  background:
+    radial-gradient(circle at top right, rgba(20, 184, 166, 0.06), transparent 35%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.96));
+}
+
+.partFormulaModelEditor__previewCard--scene {
+  align-content: start;
 }
 
 .partFormulaModelEditor__sectionHead {
@@ -34442,7 +34804,14 @@ onBeforeUnmount(() => {
   gap: 4px;
 }
 
-.partFormulaModelEditor__sectionTitle {
+.partFormulaModelEditor__sectionHead--row {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  align-items: start;
+  gap: 12px;
+}
+
+.partFormulaModelEditor__sectionTitle,
+.partFormulaModelEditor__serviceTitle {
   font-size: 14px;
   font-weight: 700;
   color: #0f172a;
@@ -34450,9 +34819,17 @@ onBeforeUnmount(() => {
 
 .partFormulaModelEditor__sectionHint,
 .partFormulaModelEditor__serviceCaption,
-.partFormulaModelEditor__selectedEmpty {
+.partFormulaModelEditor__selectedEmpty,
+.partFormulaModelEditor__commonCaption {
   font-size: 12px;
   color: #64748b;
+}
+
+.partFormulaModelEditor__subCategoryPicker {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
 }
 
 .partFormulaModelEditor__canvasWrap {
@@ -34461,7 +34838,7 @@ onBeforeUnmount(() => {
 }
 
 .partFormulaModelEditor__svg {
-  width: min(100%, 420px);
+  width: min(100%, 460px);
   height: auto;
   overflow: visible;
 }
@@ -34480,25 +34857,43 @@ onBeforeUnmount(() => {
   stroke-linejoin: round;
 }
 
+.partFormulaModelEditor__side {
+  cursor: pointer;
+}
+
 .partFormulaModelEditor__sideLine {
   stroke: rgba(71, 85, 105, 0.65);
   stroke-width: 3;
   stroke-linecap: round;
+  transition: stroke 160ms ease, stroke-width 160ms ease;
 }
 
 .partFormulaModelEditor__sideLine.has-service {
   stroke: #0f766e;
 }
 
+.partFormulaModelEditor__side.is-active .partFormulaModelEditor__sideLine {
+  stroke: #ea580c;
+  stroke-width: 4;
+}
+
 .partFormulaModelEditor__sideBubble {
   fill: rgba(255, 255, 255, 0.96);
   stroke: rgba(100, 116, 139, 0.5);
   stroke-width: 1.5;
+  transition: fill 160ms ease, stroke 160ms ease, transform 160ms ease;
 }
 
 .partFormulaModelEditor__sideBubble.has-service {
   fill: #ecfeff;
   stroke: #0f766e;
+}
+
+.partFormulaModelEditor__side.is-active .partFormulaModelEditor__sideBubble {
+  fill: #fff7ed;
+  stroke: #ea580c;
+  transform: scale(1.04);
+  transform-origin: center;
 }
 
 .partFormulaModelEditor__sideLabel,
@@ -34551,40 +34946,158 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
 }
 
-.partFormulaModelEditor__servicesList {
-  display: grid;
-  gap: 12px;
+.partFormulaModelEditor__selectedInfo,
+.partFormulaModelEditor__formulaPills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
-.partFormulaModelEditor__serviceRow {
+.partFormulaModelEditor__threeWrap {
+  min-height: 280px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.94));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.partFormulaModelEditor__commonRail {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(148px, 184px);
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.partFormulaModelEditor__commonCard,
+.partFormulaModelEditor__libraryCard {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(255, 255, 255, 0.86);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.partFormulaModelEditor__commonCard {
   display: grid;
   gap: 8px;
-  padding: 14px;
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(255, 255, 255, 0.78);
+  padding: 12px;
+  text-align: right;
 }
 
-.partFormulaModelEditor__serviceMeta {
-  display: grid;
-  gap: 4px;
+.partFormulaModelEditor__commonCard:hover,
+.partFormulaModelEditor__libraryCard:hover {
+  border-color: rgba(15, 118, 110, 0.42);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
 }
 
-.partFormulaModelEditor__serviceTitle {
+.partFormulaModelEditor__commonCard.is-selected,
+.partFormulaModelEditor__libraryCard.is-selected {
+  border-color: #0f766e;
+  background: #ecfeff;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+.partFormulaModelEditor__commonCard:disabled,
+.partFormulaModelEditor__libraryCard:disabled {
+  opacity: 0.56;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.partFormulaModelEditor__commonTitle {
   font-size: 13px;
   font-weight: 700;
   color: #0f172a;
 }
 
-.partFormulaModelEditor__select {
-  width: 100%;
+.partFormulaModelEditor__serviceIconBox {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(241, 245, 249, 0.94));
+  border: 1px solid rgba(148, 163, 184, 0.24);
 }
 
-.partFormulaModelEditor__selectedInfo {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.partFormulaModelEditor__serviceIconBox.is-empty {
+  color: #475569;
+}
+
+.partFormulaModelEditor__serviceIcon {
+  max-width: 36px;
+  max-height: 36px;
+  object-fit: contain;
+}
+
+.partFormulaModelEditor__serviceIconFallback {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.partFormulaModelEditor__servicesCard.is-disabled {
+  position: relative;
+}
+
+.partFormulaModelEditor__libraryGroups {
+  display: grid;
+  gap: 14px;
+  max-height: 520px;
+  overflow: auto;
+  padding-left: 2px;
+}
+
+.partFormulaModelEditor__libraryGroup {
+  display: grid;
+  gap: 10px;
+}
+
+.partFormulaModelEditor__libraryGroupHead {
+  display: grid;
+  gap: 4px;
+}
+
+.partFormulaModelEditor__libraryCard {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
   align-items: center;
+  padding: 12px;
+  text-align: right;
+}
+
+.partFormulaModelEditor__libraryMeta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.partFormulaModelEditor__libraryBadge {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.05);
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.partFormulaModelEditor__disabledOverlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+  background: rgba(248, 250, 252, 0.72);
+  border-radius: 18px;
+  backdrop-filter: blur(1px);
 }
 
 .serviceTypeEditor {
@@ -34944,8 +35457,23 @@ onBeforeUnmount(() => {
     min-height: 240px;
   }
 
+  .appDialog__card--partFormulaLandscape {
+    width: min(100vw - 18px, 1320px);
+    max-width: min(100vw - 18px, 1320px);
+    min-height: auto;
+  }
+
+  .partFormulaModelEditor--landscape,
+  .partFormulaModelEditor__sectionHead--row {
+    grid-template-columns: 1fr;
+  }
+
   .partFormulaModelEditor__axisSwitch {
     flex-direction: column;
+  }
+
+  .partFormulaModelEditor__commonRail {
+    grid-auto-columns: minmax(138px, 1fr);
   }
 
   .serviceTypeEditor__drillGrid,
