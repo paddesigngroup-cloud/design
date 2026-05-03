@@ -38,6 +38,8 @@ class ServiceTypeItem(BaseModel):
     axis_to_opposite_edge_distance: float
     axis_to_aligned_edge_distance: float
     working_diameter: float
+    working_width: float
+    working_height: float
     working_depth: float
     working_depth_mode: str
     working_depth_end_offset: float
@@ -62,6 +64,8 @@ class ServiceTypeCreate(BaseModel):
     axis_to_opposite_edge_distance: float = Field(default=0, ge=0)
     axis_to_aligned_edge_distance: float = Field(default=0, ge=0)
     working_diameter: float = Field(default=0, ge=0)
+    working_width: float = Field(default=0, ge=0)
+    working_height: float = Field(default=0, ge=0)
     working_depth: float = Field(default=0, ge=0)
     working_depth_mode: str = Field(default="fixed", min_length=1, max_length=16)
     working_depth_end_offset: float = Field(default=0, ge=0)
@@ -84,6 +88,8 @@ class ServiceTypeUpdate(BaseModel):
     axis_to_opposite_edge_distance: float = Field(default=0, ge=0)
     axis_to_aligned_edge_distance: float = Field(default=0, ge=0)
     working_diameter: float = Field(default=0, ge=0)
+    working_width: float = Field(default=0, ge=0)
+    working_height: float = Field(default=0, ge=0)
     working_depth: float = Field(default=0, ge=0)
     working_depth_mode: str = Field(default="fixed", min_length=1, max_length=16)
     working_depth_end_offset: float = Field(default=0, ge=0)
@@ -205,6 +211,8 @@ def _normalize_subtraction_payload(payload: ServiceTypeCreate | ServiceTypeUpdat
     axis_to_opposite_edge_distance = _normalize_optional_measurement(payload.axis_to_opposite_edge_distance)
     axis_to_aligned_edge_distance = _normalize_optional_measurement(payload.axis_to_aligned_edge_distance)
     working_diameter = _normalize_optional_measurement(payload.working_diameter)
+    working_width = _normalize_optional_measurement(payload.working_width)
+    working_height = _normalize_optional_measurement(payload.working_height)
     working_depth = _normalize_optional_measurement(payload.working_depth)
     working_depth_mode = _normalize_working_depth_mode(payload.working_depth_mode)
     working_depth_end_offset = _normalize_optional_measurement(payload.working_depth_end_offset)
@@ -217,6 +225,8 @@ def _normalize_subtraction_payload(payload: ServiceTypeCreate | ServiceTypeUpdat
             "axis_to_opposite_edge_distance": axis_to_opposite_edge_distance,
             "axis_to_aligned_edge_distance": axis_to_aligned_edge_distance,
             "working_diameter": working_diameter,
+            "working_width": working_width,
+            "working_height": working_height,
             "working_depth": working_depth,
             "working_depth_mode": working_depth_mode,
             "working_depth_end_offset": 0.0 if working_depth_mode != "to_end" else working_depth_end_offset,
@@ -238,6 +248,8 @@ def _normalize_subtraction_payload(payload: ServiceTypeCreate | ServiceTypeUpdat
         "axis_to_opposite_edge_distance": axis_to_opposite_edge_distance,
         "axis_to_aligned_edge_distance": axis_to_aligned_edge_distance,
         "working_diameter": working_diameter,
+        "working_width": working_width,
+        "working_height": working_height,
         "working_depth": working_depth,
         "working_depth_mode": working_depth_mode,
         "working_depth_end_offset": 0.0 if working_depth_mode != "to_end" else working_depth_end_offset,
@@ -328,6 +340,8 @@ async def create_service_type(payload: ServiceTypeCreate, session: AsyncSession 
         axis_to_opposite_edge_distance=subtraction_payload["axis_to_opposite_edge_distance"],
         axis_to_aligned_edge_distance=subtraction_payload["axis_to_aligned_edge_distance"],
         working_diameter=subtraction_payload["working_diameter"],
+        working_width=subtraction_payload["working_width"],
+        working_height=subtraction_payload["working_height"],
         working_depth=subtraction_payload["working_depth"],
         working_depth_mode=subtraction_payload["working_depth_mode"],
         working_depth_end_offset=subtraction_payload["working_depth_end_offset"],
@@ -396,6 +410,8 @@ async def update_service_type(
     item.axis_to_opposite_edge_distance = subtraction_payload["axis_to_opposite_edge_distance"]
     item.axis_to_aligned_edge_distance = subtraction_payload["axis_to_aligned_edge_distance"]
     item.working_diameter = subtraction_payload["working_diameter"]
+    item.working_width = subtraction_payload["working_width"]
+    item.working_height = subtraction_payload["working_height"]
     item.working_depth = subtraction_payload["working_depth"]
     item.working_depth_mode = subtraction_payload["working_depth_mode"]
     item.working_depth_end_offset = subtraction_payload["working_depth_end_offset"]

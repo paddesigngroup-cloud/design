@@ -193,6 +193,8 @@ class PartServiceType(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Vers
     axis_to_opposite_edge_distance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
     axis_to_aligned_edge_distance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
     working_diameter: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    working_width: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    working_height: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
     working_depth: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
     working_depth_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="fixed", server_default="fixed")
     working_depth_end_offset: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")

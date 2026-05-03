@@ -8405,7 +8405,7 @@ const constructionServiceTypeColumnWidths = computed(() => {
     subtraction_shape: getMaxColumnLength(rows.map((item) => getSubtractionShapeLabel(item.subtraction_shape)), 4),
     axis_to_opposite_edge_distance: getMaxColumnLength(rows.map((item) => getServiceTypeMeasurementDisplayText(item.axis_to_opposite_edge_distance)), 3),
     axis_to_aligned_edge_distance: getMaxColumnLength(rows.map((item) => getServiceTypeMeasurementDisplayText(item.axis_to_aligned_edge_distance)), 3),
-    working_diameter: getMaxColumnLength(rows.map((item) => getServiceTypeMeasurementDisplayText(item.working_diameter)), 3),
+    working_size: getMaxColumnLength(rows.map((item) => getServiceTypeWorkingSizeSummary(item)), 7),
     working_depth: getMaxColumnLength(rows.map((item) => getServiceTypeMeasurementDisplayText(item.working_depth)), 3),
     actions: getMaxColumnLength(["ویرایش"], 6),
   };
@@ -8887,6 +8887,8 @@ const SERVICE_TYPE_MEASUREMENT_FIELDS = [
   "axis_to_opposite_edge_distance",
   "axis_to_aligned_edge_distance",
   "working_diameter",
+  "working_width",
+  "working_height",
   "working_depth",
   "working_depth_end_offset",
 ];
@@ -8945,6 +8947,36 @@ function getServiceTypeMeasurementDisplayText(valueMm) {
   return text || "0";
 }
 
+function getServiceTypeResolvedWorkingDimensions(source) {
+  const shape = normalizeSubtractionShape(source?.subtraction_shape);
+  const workingDiameter = normalizeServiceTypeMeasurement(source?.working_diameter);
+  const workingWidth = normalizeServiceTypeMeasurement(source?.working_width);
+  const workingHeight = normalizeServiceTypeMeasurement(source?.working_height);
+  if (shape === "circle") {
+    const diameter = workingDiameter > 0 ? workingDiameter : Math.max(workingWidth, workingHeight);
+    return {
+      shape,
+      workingDiameter: diameter,
+      workingWidth: diameter,
+      workingHeight: diameter,
+    };
+  }
+  return {
+    shape,
+    workingDiameter: workingDiameter > 0 ? workingDiameter : Math.max(workingWidth, workingHeight),
+    workingWidth: workingWidth > 0 ? workingWidth : workingDiameter,
+    workingHeight: workingHeight > 0 ? workingHeight : workingDiameter,
+  };
+}
+
+function getServiceTypeWorkingSizeSummary(source) {
+  const resolved = getServiceTypeResolvedWorkingDimensions(source);
+  if (resolved.shape === "circle") {
+    return getServiceTypeMeasurementDisplayText(resolved.workingDiameter);
+  }
+  return `${getServiceTypeMeasurementDisplayText(resolved.workingWidth)} × ${getServiceTypeMeasurementDisplayText(resolved.workingHeight)}`;
+}
+
 function buildServiceTypePreviewPartDraft() {
   return syncServiceTypePreviewPartDraftTexts({
     length: DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM.length,
@@ -8984,6 +9016,7 @@ function normalizePartModelPayload(item) {
 }
 
 function normalizeServiceTypePayload(item) {
+  const resolvedWorkingDimensions = getServiceTypeResolvedWorkingDimensions(item);
   return {
     admin_id: item.admin_id,
     service_type: String(item.service_type || "").trim(),
@@ -8998,7 +9031,9 @@ function normalizeServiceTypePayload(item) {
       : null,
     axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance),
     axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance),
-    working_diameter: normalizeServiceTypeMeasurement(item.working_diameter),
+    working_diameter: resolvedWorkingDimensions.workingDiameter,
+    working_width: resolvedWorkingDimensions.workingWidth,
+    working_height: resolvedWorkingDimensions.workingHeight,
     working_depth: normalizeServiceTypeMeasurement(item.working_depth),
     working_depth_mode: normalizeServiceTypeWorkingDepthMode(item.working_depth_mode),
     working_depth_end_offset: normalizeServiceTypeWorkingDepthMode(item.working_depth_mode) === "to_end"
@@ -9141,6 +9176,8 @@ function normalizeEditableServiceTypeRecord(item) {
     axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance),
     axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance),
     working_diameter: normalizeServiceTypeMeasurement(item.working_diameter),
+    working_width: normalizeServiceTypeMeasurement(item.working_width),
+    working_height: normalizeServiceTypeMeasurement(item.working_height),
     working_depth: normalizeServiceTypeMeasurement(item.working_depth),
     working_depth_mode: normalizeServiceTypeWorkingDepthMode(item.working_depth_mode),
     working_depth_end_offset: normalizeServiceTypeMeasurement(item.working_depth_end_offset),
@@ -10081,7 +10118,22 @@ function buildServiceTypeShapeProfilePointsFromVertices(vertices, center, target
   }));
 }
 
-function buildServiceTypeMirroredShapePreviewGeometry(shape, shapeAngles, mirrorX = false, mirrorY = false, targetSizeMm = 1) {
+function scaleServiceTypeShapeProfilePoints(profilePoints, targetWidthMm = 1, targetHeightMm = 1) {
+  const sourcePoints = Array.isArray(profilePoints) ? profilePoints : [];
+  if (!sourcePoints.length) return [];
+  const safeWidth = Math.max(1, Number(targetWidthMm) || 0);
+  const safeHeight = Math.max(1, Number(targetHeightMm) || 0);
+  const xs = sourcePoints.map((point) => Number(point?.x) || 0);
+  const ys = sourcePoints.map((point) => Number(point?.y) || 0);
+  const currentWidth = Math.max(1, Math.max(...xs) - Math.min(...xs));
+  const currentHeight = Math.max(1, Math.max(...ys) - Math.min(...ys));
+  return sourcePoints.map((point) => ({
+    x: (Number(point?.x) || 0) * (safeWidth / currentWidth),
+    y: (Number(point?.y) || 0) * (safeHeight / currentHeight),
+  }));
+}
+
+function buildServiceTypeMirroredShapePreviewGeometry(shape, shapeAngles, mirrorX = false, mirrorY = false, targetWidthMm = 1, targetHeightMm = targetWidthMm) {
   const safeShape = normalizeSubtractionShape(shape);
   if (safeShape === "circle") {
     return {
@@ -10121,7 +10173,11 @@ function buildServiceTypeMirroredShapePreviewGeometry(shape, shapeAngles, mirror
     mirroredCenter,
     mirroredShapeAngles,
     normalizedAngles,
-    profilePoints: buildServiceTypeShapeProfilePointsFromVertices(mirroredVertices, mirroredCenter, targetSizeMm),
+    profilePoints: scaleServiceTypeShapeProfilePoints(
+      buildServiceTypeShapeProfilePointsFromVertices(mirroredVertices, mirroredCenter, 1),
+      targetWidthMm,
+      targetHeightMm,
+    ),
   };
 }
 
@@ -10165,11 +10221,14 @@ const serviceTypeEditorPreviewState = computed(() => {
   const viewBox = "0 0 220 168";
   const safeLocation = draft ? normalizeServiceLocation(draft.service_location) : "front";
   const safeShape = draft ? normalizeSubtractionShape(draft.subtraction_shape) : "circle";
+  const resolvedWorkingDimensions = getServiceTypeResolvedWorkingDimensions(draft);
   const workingDepth = Math.max(0, Number(draft?.working_depth) || 0);
   const workingDepthMode = normalizeServiceTypeWorkingDepthMode(draft?.working_depth_mode);
   const workingDepthEndOffset = Math.max(0, Number(draft?.working_depth_end_offset) || 0);
-  const workingDiameter = Math.max(0, Number(draft?.working_diameter) || 0);
-  const hasVisibleSubtraction = workingDiameter > 0;
+  const workingDiameter = resolvedWorkingDimensions.workingDiameter;
+  const workingWidth = resolvedWorkingDimensions.workingWidth;
+  const workingHeight = resolvedWorkingDimensions.workingHeight;
+  const hasVisibleSubtraction = workingDiameter > 0 || workingWidth > 0 || workingHeight > 0;
   const axisAligned = Math.max(0, Number(draft?.axis_to_aligned_edge_distance) || 0);
   const axisOpposite = Math.max(0, Number(draft?.axis_to_opposite_edge_distance) || 0);
   const partLengthMm = Math.max(1, Number(previewPartDraft?.length) || DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM.length);
@@ -10186,7 +10245,8 @@ const serviceTypeEditorPreviewState = computed(() => {
     draft?.shape_angles,
     !!draft?._previewMirrorX,
     !!draft?._previewMirrorY,
-    Math.max(workingDiameter, 1),
+    Math.max(workingWidth, 1),
+    Math.max(workingHeight, 1),
   );
 
   const topRect = buildPreviewRect(partWidthMm, partLengthMm);
@@ -10203,6 +10263,8 @@ const serviceTypeEditorPreviewState = computed(() => {
       serviceLocation: safeLocation,
       shape: safeShape,
       workingDiameter,
+      workingWidth,
+      workingHeight,
       workingDepth,
       axisAligned,
       axisOpposite,
@@ -10297,17 +10359,31 @@ function canonicalizeServiceTypeRuleState(input) {
   };
 }
 
+function syncServiceTypeWorkingDimensionMode(draft, nextShape = draft?.subtraction_shape) {
+  if (!draft) return draft;
+  const safeShape = normalizeSubtractionShape(nextShape);
+  const workingDiameter = normalizeServiceTypeMeasurement(draft.working_diameter);
+  const workingWidth = normalizeServiceTypeMeasurement(draft.working_width);
+  const workingHeight = normalizeServiceTypeMeasurement(draft.working_height);
+  if (safeShape === "circle") {
+    const nextDiameter = workingDiameter > 0 ? workingDiameter : Math.max(workingWidth, workingHeight);
+    draft.working_diameter = nextDiameter;
+    if (workingWidth <= 0) draft.working_width = nextDiameter;
+    if (workingHeight <= 0) draft.working_height = nextDiameter;
+  } else {
+    if (workingWidth <= 0) draft.working_width = workingDiameter;
+    if (workingHeight <= 0) draft.working_height = workingDiameter;
+  }
+  return syncServiceTypeMeasurementDraftTexts(draft, true);
+}
+
 function applyServiceTypeEditorRuleConstraints(draft) {
   if (!draft || normalizeBooleanFlag(draft.has_subtraction, false) === false) return draft;
   const normalized = canonicalizeServiceTypeRuleState(draft);
   draft.service_location = normalized.service_location;
-  if (draft.subtraction_shape !== normalized.subtraction_shape) {
-    draft.subtraction_shape = normalized.subtraction_shape;
-    draft.shape_angles = normalizeServiceTypeShapeAngleDrafts(normalized.subtraction_shape, draft.shape_angles);
-  } else {
-    draft.subtraction_shape = normalized.subtraction_shape;
-    draft.shape_angles = normalizeServiceTypeShapeAngleDrafts(normalized.subtraction_shape, draft.shape_angles);
-  }
+  draft.subtraction_shape = normalized.subtraction_shape;
+  draft.shape_angles = normalizeServiceTypeShapeAngleDrafts(normalized.subtraction_shape, draft.shape_angles);
+  syncServiceTypeWorkingDimensionMode(draft, normalized.subtraction_shape);
   return draft;
 }
 
@@ -11418,6 +11494,8 @@ function buildNewServiceTypeDraft() {
     axis_to_opposite_edge_distance: 0,
     axis_to_aligned_edge_distance: 0,
     working_diameter: 0,
+    working_width: 0,
+    working_height: 0,
     working_depth: 0,
     working_depth_mode: "fixed",
     working_depth_end_offset: 0,
@@ -14251,6 +14329,8 @@ function openServiceTypeEditor(item = null) {
         axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance),
         axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance),
         working_diameter: normalizeServiceTypeMeasurement(item.working_diameter),
+        working_width: normalizeServiceTypeMeasurement(item.working_width),
+        working_height: normalizeServiceTypeMeasurement(item.working_height),
         working_depth: normalizeServiceTypeMeasurement(item.working_depth),
         working_depth_mode: normalizeServiceTypeWorkingDepthMode(item.working_depth_mode),
         working_depth_end_offset: normalizeServiceTypeMeasurement(item.working_depth_end_offset),
@@ -14273,6 +14353,7 @@ function onServiceTypeSubtractionShapeChange(value) {
   const shape = normalizeSubtractionShape(value);
   serviceTypeEditorDraft.value.subtraction_shape = shape;
   serviceTypeEditorDraft.value.shape_angles = normalizeServiceTypeShapeAngleDrafts(shape, serviceTypeEditorDraft.value.shape_angles);
+  syncServiceTypeWorkingDimensionMode(serviceTypeEditorDraft.value, shape);
 }
 
 function onServiceTypeLocationChange(value) {
@@ -17147,6 +17228,8 @@ function validateConstructionServiceTypes() {
     const axisToOppositeEdgeDistance = normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance);
     const axisToAlignedEdgeDistance = normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance);
     const workingDiameter = normalizeServiceTypeMeasurement(item.working_diameter);
+    const workingWidth = normalizeServiceTypeMeasurement(item.working_width);
+    const workingHeight = normalizeServiceTypeMeasurement(item.working_height);
     const workingDepth = normalizeServiceTypeMeasurement(item.working_depth);
     const workingDepthMode = normalizeServiceTypeWorkingDepthMode(item.working_depth_mode);
     const workingDepthEndOffset = normalizeServiceTypeMeasurement(item.working_depth_end_offset);
@@ -17166,6 +17249,8 @@ function validateConstructionServiceTypes() {
       (axisToOppositeEdgeDistance != null && axisToOppositeEdgeDistance < 0) ||
       (axisToAlignedEdgeDistance != null && axisToAlignedEdgeDistance < 0) ||
       (workingDiameter != null && workingDiameter < 0) ||
+      (workingWidth != null && workingWidth < 0) ||
+      (workingHeight != null && workingHeight < 0) ||
       (workingDepth != null && workingDepth < 0) ||
       (workingDepthEndOffset != null && workingDepthEndOffset < 0)
     ) {
@@ -17274,6 +17359,8 @@ async function saveServiceTypeEditor() {
   const axisToOppositeEdgeDistance = normalizeServiceTypeMeasurement(draft.axis_to_opposite_edge_distance);
   const axisToAlignedEdgeDistance = normalizeServiceTypeMeasurement(draft.axis_to_aligned_edge_distance);
   const workingDiameter = normalizeServiceTypeMeasurement(draft.working_diameter);
+  const workingWidth = normalizeServiceTypeMeasurement(draft.working_width);
+  const workingHeight = normalizeServiceTypeMeasurement(draft.working_height);
   const workingDepth = normalizeServiceTypeMeasurement(draft.working_depth);
   const workingDepthMode = normalizeServiceTypeWorkingDepthMode(draft.working_depth_mode);
   const workingDepthEndOffset = normalizeServiceTypeMeasurement(draft.working_depth_end_offset);
@@ -17319,6 +17406,8 @@ async function saveServiceTypeEditor() {
     (axisToOppositeEdgeDistance != null && axisToOppositeEdgeDistance < 0) ||
     (axisToAlignedEdgeDistance != null && axisToAlignedEdgeDistance < 0) ||
     (workingDiameter != null && workingDiameter < 0) ||
+    (workingWidth != null && workingWidth < 0) ||
+    (workingHeight != null && workingHeight < 0) ||
     (workingDepth != null && workingDepth < 0) ||
     (workingDepthEndOffset != null && workingDepthEndOffset < 0)
   ) {
@@ -17332,6 +17421,8 @@ async function saveServiceTypeEditor() {
   draft.axis_to_opposite_edge_distance = axisToOppositeEdgeDistance;
   draft.axis_to_aligned_edge_distance = axisToAlignedEdgeDistance;
   draft.working_diameter = workingDiameter;
+  draft.working_width = workingWidth;
+  draft.working_height = workingHeight;
   draft.working_depth = workingDepth;
   draft.working_depth_mode = workingDepthMode;
   draft.working_depth_end_offset = workingDepthMode === "to_end" ? workingDepthEndOffset : 0;
@@ -19271,6 +19362,8 @@ function getConstructionCsvHeaders() {
       "axis_to_opposite_edge_distance",
       "axis_to_aligned_edge_distance",
       "working_diameter",
+      "working_width",
+      "working_height",
       "working_depth",
       "working_depth_mode",
       "working_depth_end_offset",
@@ -19357,6 +19450,8 @@ function getConstructionCsvRows(items = null) {
       normalizeServiceTypeMeasurement(item.axis_to_opposite_edge_distance) ?? "",
       normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance) ?? "",
       normalizeServiceTypeMeasurement(item.working_diameter) ?? "",
+      normalizeServiceTypeMeasurement(item.working_width) ?? "",
+      normalizeServiceTypeMeasurement(item.working_height) ?? "",
       normalizeServiceTypeMeasurement(item.working_depth) ?? "",
       normalizeServiceTypeWorkingDepthMode(item.working_depth_mode),
       normalizeServiceTypeWorkingDepthMode(item.working_depth_mode) === "to_end"
@@ -19680,7 +19775,7 @@ async function onConstructionImportFileChange(event) {
       });
     } else if (constructionStep.value === "service_types") {
       previewRows = rows.slice(1).map((row, index) => {
-        const adminMode = String(row[15] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const adminMode = String(row[17] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         const hasSubtraction = normalizeBooleanFlag(row[3], false);
         const subtractionShape = normalizeSubtractionShape(row[5]);
         return {
@@ -19695,11 +19790,13 @@ async function onConstructionImportFileChange(event) {
           axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(row[7]),
           axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(row[8]),
           working_diameter: normalizeServiceTypeMeasurement(row[9]),
-          working_depth: normalizeServiceTypeMeasurement(row[10]),
-          working_depth_mode: normalizeServiceTypeWorkingDepthMode(row[11]),
-          working_depth_end_offset: normalizeServiceTypeMeasurement(row[12]),
-          preview_mirror_x: normalizeBooleanFlag(row[13], false),
-          preview_mirror_y: normalizeBooleanFlag(row[14], false),
+          working_width: normalizeServiceTypeMeasurement(row[10]),
+          working_height: normalizeServiceTypeMeasurement(row[11]),
+          working_depth: normalizeServiceTypeMeasurement(row[12]),
+          working_depth_mode: normalizeServiceTypeWorkingDepthMode(row[13]),
+          working_depth_end_offset: normalizeServiceTypeMeasurement(row[14]),
+          preview_mirror_x: normalizeBooleanFlag(row[15], false),
+          preview_mirror_y: normalizeBooleanFlag(row[16], false),
           admin_mode: adminMode,
         };
       });
@@ -19912,6 +20009,8 @@ async function onConstructionImportFileChange(event) {
             (row.axis_to_opposite_edge_distance != null && row.axis_to_opposite_edge_distance < 0) ||
             (row.axis_to_aligned_edge_distance != null && row.axis_to_aligned_edge_distance < 0) ||
             (row.working_diameter != null && row.working_diameter < 0) ||
+            (row.working_width != null && row.working_width < 0) ||
+            (row.working_height != null && row.working_height < 0) ||
             (row.working_depth != null && row.working_depth < 0)
         )
       : constructionStep.value === "templates"
@@ -23031,6 +23130,8 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       axis_to_opposite_edge_distance: normalizeServiceTypeMeasurement(row.axis_to_opposite_edge_distance),
       axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(row.axis_to_aligned_edge_distance),
       working_diameter: normalizeServiceTypeMeasurement(row.working_diameter),
+      working_width: normalizeServiceTypeMeasurement(row.working_width),
+      working_height: normalizeServiceTypeMeasurement(row.working_height),
       working_depth: normalizeServiceTypeMeasurement(row.working_depth),
       working_depth_mode: normalizeServiceTypeWorkingDepthMode(row.working_depth_mode),
       working_depth_end_offset: normalizeServiceTypeMeasurement(row.working_depth_end_offset),
@@ -23059,6 +23160,8 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       normalizeServiceTypeMeasurement(existing.axis_to_opposite_edge_distance) !== nextPayload.axis_to_opposite_edge_distance ||
       normalizeServiceTypeMeasurement(existing.axis_to_aligned_edge_distance) !== nextPayload.axis_to_aligned_edge_distance ||
       normalizeServiceTypeMeasurement(existing.working_diameter) !== nextPayload.working_diameter ||
+      normalizeServiceTypeMeasurement(existing.working_width) !== nextPayload.working_width ||
+      normalizeServiceTypeMeasurement(existing.working_height) !== nextPayload.working_height ||
       normalizeServiceTypeMeasurement(existing.working_depth) !== nextPayload.working_depth ||
       normalizeServiceTypeWorkingDepthMode(existing.working_depth_mode) !== nextPayload.working_depth_mode ||
       normalizeServiceTypeMeasurement(existing.working_depth_end_offset) !== nextPayload.working_depth_end_offset ||
@@ -27879,7 +27982,7 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">شکل</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه مقابل طول</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">فاصله آکس تا لبه موافق عرض</th>
-                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">قطر کارگیر</th>
+                      <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_size')">ابعاد کارگیر</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">عمق کارگیر</th>
                       <th class="constructionDialog__col constructionDialog__col--scope">نوع مالک</th>
                     </tr>
@@ -27894,7 +27997,7 @@ onBeforeUnmount(() => {
                       <td class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">{{ row.has_subtraction ? getSubtractionShapeLabel(row.subtraction_shape) : "-" }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">{{ getServiceTypeMeasurementDisplayText(row.axis_to_opposite_edge_distance) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">{{ getServiceTypeMeasurementDisplayText(row.axis_to_aligned_edge_distance) }}</td>
-                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">{{ getServiceTypeMeasurementDisplayText(row.working_diameter) }}</td>
+                      <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_size')">{{ getServiceTypeWorkingSizeSummary(row) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">{{ getServiceTypeWorkingDepthSummary(row) }}</td>
                       <td class="constructionDialog__col constructionDialog__col--scope">{{ row.admin_mode === "system" ? "سیستم" : "ادمین" }}</td>
                     </tr>
@@ -27923,7 +28026,7 @@ onBeforeUnmount(() => {
                       <th class="constructionDialog__col constructionDialog__col--partServiceSide" :style="getConstructionServiceTypeColumnStyle('subtraction_shape')">شکل</th>
                       <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_opposite_edge_distance')">فاصله آکس تا لبه مقابل طول</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">فاصله آکس تا لبه موافق عرض</th>
-                    <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">قطر کارگیر</th>
+                    <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_size')">ابعاد کارگیر</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">عمق کارگیر</th>
                     <th class="constructionDialog__col constructionDialog__col--partServiceActions" :style="getConstructionServiceTypeColumnStyle('actions')">عملیات</th>
                   </tr>
@@ -27963,8 +28066,8 @@ onBeforeUnmount(() => {
                     <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('axis_to_aligned_edge_distance')">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getServiceTypeMeasurementDisplayText(item.axis_to_aligned_edge_distance) }}</span>
                     </td>
-                    <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_diameter')">
-                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getServiceTypeMeasurementDisplayText(item.working_diameter) }}</span>
+                    <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_size')">
+                      <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getServiceTypeWorkingSizeSummary(item) }}</span>
                     </td>
                     <td class="constructionDialog__col constructionDialog__col--partServiceCode" :style="getConstructionServiceTypeColumnStyle('working_depth')">
                       <span class="constructionDialog__pill constructionDialog__pill--mono">{{ getServiceTypeWorkingDepthSummary(item) }}</span>
@@ -29403,7 +29506,7 @@ onBeforeUnmount(() => {
                     @blur="onServiceTypeMeasurementChange('axis_to_aligned_edge_distance', $event.target.value)"
                   />
                 </label>
-                <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+                <label v-if="normalizeSubtractionShape(serviceTypeEditorDraft.subtraction_shape) === 'circle'" class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
                   <span>{{ `قطر کارگیر (${getCurrentParamLengthUnitLabel()})` }}</span>
                   <input
                     :value="serviceTypeEditorDraft._working_diameter_display_text ?? ''"
@@ -29415,6 +29518,32 @@ onBeforeUnmount(() => {
                     @blur="onServiceTypeMeasurementChange('working_diameter', $event.target.value)"
                   />
                 </label>
+                <template v-else>
+                  <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+                    <span>{{ `عرض کارگیر (${getCurrentParamLengthUnitLabel()})` }}</span>
+                    <input
+                      :value="serviceTypeEditorDraft._working_width_display_text ?? ''"
+                      class="constructionDialog__input constructionDialog__input--mono"
+                      type="text"
+                      inputmode="decimal"
+                      @input="onServiceTypeMeasurementInput('working_width', $event.target.value)"
+                      @change="onServiceTypeMeasurementChange('working_width', $event.target.value)"
+                      @blur="onServiceTypeMeasurementChange('working_width', $event.target.value)"
+                    />
+                  </label>
+                  <label class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
+                    <span>{{ `ارتفاع کارگیر (${getCurrentParamLengthUnitLabel()})` }}</span>
+                    <input
+                      :value="serviceTypeEditorDraft._working_height_display_text ?? ''"
+                      class="constructionDialog__input constructionDialog__input--mono"
+                      type="text"
+                      inputmode="decimal"
+                      @input="onServiceTypeMeasurementInput('working_height', $event.target.value)"
+                      @change="onServiceTypeMeasurementChange('working_height', $event.target.value)"
+                      @blur="onServiceTypeMeasurementChange('working_height', $event.target.value)"
+                    />
+                  </label>
+                </template>
                 <div class="serviceTypeEditor__fieldBlock serviceTypeEditor__fieldBlock--depthMode">
                   <span class="serviceTypeEditor__label">روش تعیین عمق کارگیر</span>
                   <div class="serviceTypeEditor__segmented">

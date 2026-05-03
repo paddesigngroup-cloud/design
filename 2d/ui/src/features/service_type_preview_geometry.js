@@ -19,6 +19,8 @@ export function normalizeServiceTypePreviewSceneInput(source) {
       )
     : [];
   const workingDiameter = Math.max(0, Number(cutter.workingDiameter) || 0);
+  const workingWidth = Math.max(0, Number(cutter.workingWidth) || 0);
+  const workingHeight = Math.max(0, Number(cutter.workingHeight) || 0);
   const workingDepth = Math.max(0, Number(cutter.workingDepth) || 0);
   const workingDepthMode = normalizeWorkingDepthMode(cutter.workingDepthMode);
   const workingDepthEndOffset = Math.max(0, Number(cutter.workingDepthEndOffset) || 0);
@@ -29,14 +31,16 @@ export function normalizeServiceTypePreviewSceneInput(source) {
     workingDepthMode,
     workingDepthEndOffset,
   );
-  const profileBounds = getProfileBounds(cutter.shape, normalizedProfilePoints, workingDiameter);
+  const profileBounds = getProfileBounds(cutter.shape, normalizedProfilePoints, workingDiameter, workingWidth, workingHeight);
   return {
     part: normalizedPart,
     cutter: {
-      hasVisibleSubtraction: !!cutter.hasVisibleSubtraction && workingDiameter > 0,
+      hasVisibleSubtraction: !!cutter.hasVisibleSubtraction && (workingDiameter > 0 || workingWidth > 0 || workingHeight > 0),
       serviceLocation: normalizeServiceLocation(cutter.serviceLocation),
       shape: normalizeSubtractionShape(cutter.shape),
       workingDiameter,
+      workingWidth,
+      workingHeight,
       workingDepth,
       workingDepthMode,
       workingDepthEndOffset,
@@ -88,7 +92,7 @@ function resolveEffectiveWorkingDepth(part, serviceLocation, workingDepth, worki
   return Math.max(0, pathExtent - Math.max(0, Number(endOffset) || 0));
 }
 
-function getProfileBounds(shape, profilePoints, workingDiameter) {
+function getProfileBounds(shape, profilePoints, workingDiameter, workingWidth, workingHeight) {
   if (shape === "circle") {
     const diameter = Math.max(0, Number(workingDiameter) || 0);
     return {
@@ -102,13 +106,15 @@ function getProfileBounds(shape, profilePoints, workingDiameter) {
   }
   const points = Array.isArray(profilePoints) ? profilePoints : [];
   if (!points.length) {
+    const fallbackWidth = Math.max(0, Number(workingWidth) || Number(workingDiameter) || 0);
+    const fallbackHeight = Math.max(0, Number(workingHeight) || Number(workingDiameter) || 0);
     return {
-      minX: -workingDiameter / 2,
-      maxX: workingDiameter / 2,
-      minY: -workingDiameter / 2,
-      maxY: workingDiameter / 2,
-      width: Math.max(0, Number(workingDiameter) || 0),
-      height: Math.max(0, Number(workingDiameter) || 0),
+      minX: -fallbackWidth / 2,
+      maxX: fallbackWidth / 2,
+      minY: -fallbackHeight / 2,
+      maxY: fallbackHeight / 2,
+      width: fallbackWidth,
+      height: fallbackHeight,
     };
   }
   const xs = points.map((point) => point.x);
@@ -157,9 +163,9 @@ function buildTopBottomProjection(scene, rect) {
     z: (-part.length / 2) + cutter.axisOpposite,
   };
   return {
-    primaryShape: cutter.shape === "circle"
-      ? buildProjectedCircle(rect, part.width, part.length, center.x, center.z, cutter.workingDiameter / 2)
-      : buildProjectedPolygon(
+      primaryShape: cutter.shape === "circle"
+        ? buildProjectedCircle(rect, part.width, part.length, center.x, center.z, cutter.workingDiameter / 2)
+        : buildProjectedPolygon(
         rect,
         part.width,
         part.length,
