@@ -77,6 +77,8 @@ def test_create_part_model_success(monkeypatch: pytest.MonkeyPatch) -> None:
             {"index": 4, "angle_deg": 120},
             {"index": 5, "angle_deg": 120},
         ],
+        preview_mirror_x=True,
+        preview_mirror_y=False,
         sort_order=None,
         is_system=True,
     )
@@ -88,6 +90,8 @@ def test_create_part_model_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.interior_angle_sum == 720
     assert len(result.default_angles) == 6
     assert result.default_angles[0].angle_deg == 120
+    assert result.preview_mirror_x is True
+    assert result.preview_mirror_y is False
     assert result.sort_order == 7
     assert session.added is not None
 
@@ -118,6 +122,8 @@ def test_update_part_model_success(monkeypatch: pytest.MonkeyPatch) -> None:
         title="قدیمی",
         side_count=4,
         interior_angle_sum=360,
+        preview_mirror_x=False,
+        preview_mirror_y=False,
         sort_order=1,
         is_system=True,
     )
@@ -137,6 +143,8 @@ def test_update_part_model_success(monkeypatch: pytest.MonkeyPatch) -> None:
             {"index": 6, "angle_deg": 150},
             {"index": 7, "angle_deg": 150},
         ],
+        preview_mirror_x=True,
+        preview_mirror_y=True,
         sort_order=9,
         is_system=False,
     )
@@ -147,6 +155,8 @@ def test_update_part_model_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert existing.side_count == 8
     assert existing.interior_angle_sum == 1080
     assert len(existing.default_angles) == 8
+    assert existing.preview_mirror_x is True
+    assert existing.preview_mirror_y is True
     assert existing.sort_order == 9
     assert existing.is_system is False
 
@@ -280,6 +290,8 @@ def test_delete_part_model_checks_access_scope(monkeypatch: pytest.MonkeyPatch) 
             {"index": 3, "angle_deg": 90},
         ],
         sort_order=1,
+        preview_mirror_x=False,
+        preview_mirror_y=False,
         is_system=False,
     )
     session = FakeSession(item=existing)

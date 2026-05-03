@@ -30,6 +30,8 @@ class PartModelItem(BaseModel):
     side_count: int
     interior_angle_sum: int
     default_angles: list[PartModelAngleItem]
+    preview_mirror_x: bool
+    preview_mirror_y: bool
     sort_order: int
     is_system: bool
 
@@ -42,6 +44,8 @@ class PartModelCreate(BaseModel):
     side_count: int = Field(ge=3, le=1000)
     interior_angle_sum: int | None = Field(default=None, ge=180, le=360000)
     default_angles: list[PartModelAngleItem] | None = None
+    preview_mirror_x: bool = False
+    preview_mirror_y: bool = False
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
 
@@ -52,6 +56,8 @@ class PartModelUpdate(BaseModel):
     side_count: int = Field(ge=3, le=1000)
     interior_angle_sum: int | None = Field(default=None, ge=180, le=360000)
     default_angles: list[PartModelAngleItem] | None = None
+    preview_mirror_x: bool = False
+    preview_mirror_y: bool = False
     sort_order: int = Field(ge=0)
     is_system: bool
 
@@ -215,6 +221,8 @@ async def create_part_model(payload: PartModelCreate, session: AsyncSession = De
         side_count=payload.side_count,
         interior_angle_sum=interior_angle_sum,
         default_angles=default_angles,
+        preview_mirror_x=bool(payload.preview_mirror_x),
+        preview_mirror_y=bool(payload.preview_mirror_y),
         sort_order=payload.sort_order if payload.sort_order is not None else await _next_sort_order(session),
         is_system=payload.is_system,
     )
@@ -254,6 +262,8 @@ async def update_part_model(
     item.side_count = payload.side_count
     item.interior_angle_sum = interior_angle_sum
     item.default_angles = default_angles
+    item.preview_mirror_x = bool(payload.preview_mirror_x)
+    item.preview_mirror_y = bool(payload.preview_mirror_y)
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     try:

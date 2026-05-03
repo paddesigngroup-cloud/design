@@ -57,6 +57,8 @@ def test_export_service_types_returns_csv_and_snapshot(monkeypatch: pytest.Monke
                 working_depth=14,
                 working_depth_mode="to_end",
                 working_depth_end_offset=2,
+                preview_mirror_x=True,
+                preview_mirror_y=False,
                 sort_order=1,
                 id=uuid.uuid4(),
             )
@@ -68,7 +70,7 @@ def test_export_service_types_returns_csv_and_snapshot(monkeypatch: pytest.Monke
 
     assert response.headers["Content-Disposition"] == 'attachment; filename="part_services_excel_template.csv"'
     assert "service_type,service_title,short_code,has_subtraction,service_location,subtraction_shape,shape_angles" in body
-    assert "برش CNC,دورو,dr,1,front,triangle,\"60,60,60\",12,8,35,14,to_end,2,system" in body
+    assert "برش CNC,دورو,dr,1,front,triangle,\"60,60,60\",12,8,35,14,to_end,2,1,0,system" in body
     assert called["table_name"] == "service_types"
     assert called["headers"] == [
         "service_type",
@@ -84,6 +86,8 @@ def test_export_service_types_returns_csv_and_snapshot(monkeypatch: pytest.Monke
         "working_depth",
         "working_depth_mode",
         "working_depth_end_offset",
+        "preview_mirror_x",
+        "preview_mirror_y",
         "admin_mode",
     ]
     assert called["rows"] == [[
@@ -100,5 +104,7 @@ def test_export_service_types_returns_csv_and_snapshot(monkeypatch: pytest.Monke
         14,
         "to_end",
         2,
+        1,
+        0,
         "system",
     ]]

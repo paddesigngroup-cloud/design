@@ -8976,6 +8976,8 @@ function normalizePartModelPayload(item) {
     side_count: sideCount,
     interior_angle_sum: interiorAngleSum,
     default_angles: normalizePartModelAngleRecords(sideCount, item.default_angles, interiorAngleSum),
+    preview_mirror_x: normalizeBooleanFlag(item._previewMirrorX ?? item.preview_mirror_x ?? item.previewMirrorX, false),
+    preview_mirror_y: normalizeBooleanFlag(item._previewMirrorY ?? item.preview_mirror_y ?? item.previewMirrorY, false),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
     is_system: !!item.is_system,
   };
@@ -9002,6 +9004,8 @@ function normalizeServiceTypePayload(item) {
     working_depth_end_offset: normalizeServiceTypeWorkingDepthMode(item.working_depth_mode) === "to_end"
       ? normalizeServiceTypeMeasurement(item.working_depth_end_offset)
       : 0,
+    preview_mirror_x: normalizeBooleanFlag(item._previewMirrorX ?? item.preview_mirror_x ?? item.previewMirrorX, false),
+    preview_mirror_y: normalizeBooleanFlag(item._previewMirrorY ?? item.preview_mirror_y ?? item.previewMirrorY, false),
     sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
     is_system: !!item.is_system,
   };
@@ -9115,6 +9119,8 @@ function normalizeEditablePartModelRecord(item) {
     side_count: sideCount,
     interior_angle_sum: interiorAngleSum,
     default_angles: normalizePartModelAngleRecords(sideCount, item.default_angles, interiorAngleSum),
+    preview_mirror_x: normalizeBooleanFlag(item.preview_mirror_x ?? item.previewMirrorX ?? item._previewMirrorX, false),
+    preview_mirror_y: normalizeBooleanFlag(item.preview_mirror_y ?? item.previewMirrorY ?? item._previewMirrorY, false),
     sort_order: Number(item.sort_order) || 0,
     is_system: !!item.is_system,
   });
@@ -9138,6 +9144,8 @@ function normalizeEditableServiceTypeRecord(item) {
     working_depth: normalizeServiceTypeMeasurement(item.working_depth),
     working_depth_mode: normalizeServiceTypeWorkingDepthMode(item.working_depth_mode),
     working_depth_end_offset: normalizeServiceTypeMeasurement(item.working_depth_end_offset),
+    preview_mirror_x: normalizeBooleanFlag(item.preview_mirror_x ?? item.previewMirrorX ?? item._previewMirrorX, false),
+    preview_mirror_y: normalizeBooleanFlag(item.preview_mirror_y ?? item.previewMirrorY ?? item._previewMirrorY, false),
     sort_order: Number(item.sort_order) || 0,
     is_system: !!item.is_system,
   }));
@@ -11384,6 +11392,8 @@ function buildNewPartModelDraft() {
     side_count: sideCount,
     interior_angle_sum: interiorAngleSum,
     default_angles: buildEqualPartModelAngleDrafts(sideCount, null, interiorAngleSum),
+    preview_mirror_x: false,
+    preview_mirror_y: false,
     _previewMirrorX: false,
     _previewMirrorY: false,
     sort_order: nextSort,
@@ -11411,6 +11421,8 @@ function buildNewServiceTypeDraft() {
     working_depth: 0,
     working_depth_mode: "fixed",
     working_depth_end_offset: 0,
+    preview_mirror_x: false,
+    preview_mirror_y: false,
     _previewMirrorX: false,
     _previewMirrorY: false,
     sort_order: nextSort,
@@ -14091,8 +14103,10 @@ function openPartModelEditor(item = null) {
         side_count: sideCount,
         interior_angle_sum: interiorAngleSum,
         default_angles: buildPartModelAngleDrafts(sideCount, item.default_angles, interiorAngleSum),
-        _previewMirrorX: false,
-        _previewMirrorY: false,
+        preview_mirror_x: normalizeBooleanFlag(item.preview_mirror_x ?? item.previewMirrorX ?? item._previewMirrorX, false),
+        preview_mirror_y: normalizeBooleanFlag(item.preview_mirror_y ?? item.previewMirrorY ?? item._previewMirrorY, false),
+        _previewMirrorX: normalizeBooleanFlag(item.preview_mirror_x ?? item.previewMirrorX ?? item._previewMirrorX, false),
+        _previewMirrorY: normalizeBooleanFlag(item.preview_mirror_y ?? item.previewMirrorY ?? item._previewMirrorY, false),
         sort_order: Number(item.sort_order) || 0,
         is_system: !!item.is_system,
       }
@@ -14110,6 +14124,8 @@ function resetPartModelAnglesToDefault(sideCount) {
   draft.side_count = normalizedSideCount;
   draft.interior_angle_sum = interiorAngleSum;
   draft.default_angles = buildEqualPartModelAngleDrafts(normalizedSideCount, null, interiorAngleSum);
+  draft.preview_mirror_x = false;
+  draft.preview_mirror_y = false;
   draft._previewMirrorX = false;
   draft._previewMirrorY = false;
   selectedPartModelAngleIndex.value = 0;
@@ -14159,8 +14175,10 @@ function applyPartModelMirror(axis) {
   if (!draft) return;
   if (axis === "horizontal") {
     draft._previewMirrorY = !draft._previewMirrorY;
+    draft.preview_mirror_y = !!draft._previewMirrorY;
   } else {
     draft._previewMirrorX = !draft._previewMirrorX;
+    draft.preview_mirror_x = !!draft._previewMirrorX;
   }
 }
 
@@ -14169,8 +14187,10 @@ function applyServiceTypeMirror(axis) {
   if (!draft) return;
   if (axis === "horizontal") {
     draft._previewMirrorY = !draft._previewMirrorY;
+    draft.preview_mirror_y = !!draft._previewMirrorY;
   } else {
     draft._previewMirrorX = !draft._previewMirrorX;
+    draft.preview_mirror_x = !!draft._previewMirrorX;
   }
 }
 
@@ -14234,6 +14254,8 @@ function openServiceTypeEditor(item = null) {
         working_depth: normalizeServiceTypeMeasurement(item.working_depth),
         working_depth_mode: normalizeServiceTypeWorkingDepthMode(item.working_depth_mode),
         working_depth_end_offset: normalizeServiceTypeMeasurement(item.working_depth_end_offset),
+        preview_mirror_x: normalizeBooleanFlag(item.preview_mirror_x ?? item.previewMirrorX ?? item._previewMirrorX, false),
+        preview_mirror_y: normalizeBooleanFlag(item.preview_mirror_y ?? item.previewMirrorY ?? item._previewMirrorY, false),
         _previewMirrorX: normalizeBooleanFlag(item._previewMirrorX || item.previewMirrorX || item.preview_mirror_x, false),
         _previewMirrorY: normalizeBooleanFlag(item._previewMirrorY || item.previewMirrorY || item.preview_mirror_y, false),
         sort_order: Number(item.sort_order) || 0,
@@ -19232,7 +19254,7 @@ function validateConstructionPartKinds() {
 
 function getConstructionCsvHeaders() {
   if (constructionStep.value === "part_models") {
-    return ["title", "side_count", "interior_angle_sum", "default_angles", "admin_mode"];
+    return ["title", "side_count", "interior_angle_sum", "default_angles", "preview_mirror_x", "preview_mirror_y", "admin_mode"];
   }
   if (constructionStep.value === "part_services") {
     return ["service_type", "service_description", "service_code", "admin_mode"];
@@ -19252,6 +19274,8 @@ function getConstructionCsvHeaders() {
       "working_depth",
       "working_depth_mode",
       "working_depth_end_offset",
+      "preview_mirror_x",
+      "preview_mirror_y",
       "admin_mode",
     ];
   }
@@ -19304,6 +19328,8 @@ function getConstructionCsvRows(items = null) {
       Number(item.side_count) || "",
       Number(item.interior_angle_sum) || "",
       serializePartModelAnglesCsv(item.default_angles, Number(item.side_count), Number(item.interior_angle_sum)),
+      normalizeBooleanFlag(item.preview_mirror_x ?? item._previewMirrorX, false) ? 1 : 0,
+      normalizeBooleanFlag(item.preview_mirror_y ?? item._previewMirrorY, false) ? 1 : 0,
       item.admin_id === null ? "system" : "admin",
     ]);
   }
@@ -19336,6 +19362,8 @@ function getConstructionCsvRows(items = null) {
       normalizeServiceTypeWorkingDepthMode(item.working_depth_mode) === "to_end"
         ? (normalizeServiceTypeMeasurement(item.working_depth_end_offset) ?? "")
         : "",
+      normalizeBooleanFlag(item.preview_mirror_x ?? item._previewMirrorX, false) ? 1 : 0,
+      normalizeBooleanFlag(item.preview_mirror_y ?? item._previewMirrorY, false) ? 1 : 0,
       item.admin_id === null ? "system" : "admin",
     ]);
   }
@@ -19626,7 +19654,7 @@ async function onConstructionImportFileChange(event) {
         const sideCount = Number(row[1]);
         const defaultAngleSum = Number.isInteger(sideCount) && sideCount >= 3 ? (sideCount - 2) * 180 : Number(row[2]);
         const parsedAngles = parsePartModelAnglesCsv(row[3], sideCount, defaultAngleSum);
-        const adminMode = String(row[4] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const adminMode = String(row[6] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         return {
           lineNo: index + 2,
           title: String(row[0] || "").trim(),
@@ -19634,6 +19662,8 @@ async function onConstructionImportFileChange(event) {
           interior_angle_sum: Number(row[2]) || defaultAngleSum,
           default_angles: parsedAngles,
           default_angles_text: String(row[3] || "").trim(),
+          preview_mirror_x: normalizeBooleanFlag(row[4], false),
+          preview_mirror_y: normalizeBooleanFlag(row[5], false),
           admin_mode: adminMode,
         };
       });
@@ -19650,7 +19680,7 @@ async function onConstructionImportFileChange(event) {
       });
     } else if (constructionStep.value === "service_types") {
       previewRows = rows.slice(1).map((row, index) => {
-        const adminMode = String(row[13] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
+        const adminMode = String(row[15] || "admin").trim().toLowerCase() === "system" ? "system" : "admin";
         const hasSubtraction = normalizeBooleanFlag(row[3], false);
         const subtractionShape = normalizeSubtractionShape(row[5]);
         return {
@@ -19668,6 +19698,8 @@ async function onConstructionImportFileChange(event) {
           working_depth: normalizeServiceTypeMeasurement(row[10]),
           working_depth_mode: normalizeServiceTypeWorkingDepthMode(row[11]),
           working_depth_end_offset: normalizeServiceTypeMeasurement(row[12]),
+          preview_mirror_x: normalizeBooleanFlag(row[13], false),
+          preview_mirror_y: normalizeBooleanFlag(row[14], false),
           admin_mode: adminMode,
         };
       });
@@ -23002,6 +23034,8 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       working_depth: normalizeServiceTypeMeasurement(row.working_depth),
       working_depth_mode: normalizeServiceTypeWorkingDepthMode(row.working_depth_mode),
       working_depth_end_offset: normalizeServiceTypeMeasurement(row.working_depth_end_offset),
+      preview_mirror_x: normalizeBooleanFlag(row.preview_mirror_x, false),
+      preview_mirror_y: normalizeBooleanFlag(row.preview_mirror_y, false),
       sort_order: index + 1,
       is_system: adminId === null,
     };
@@ -23028,6 +23062,8 @@ function buildImportedConstructionServiceTypeDrafts(rows) {
       normalizeServiceTypeMeasurement(existing.working_depth) !== nextPayload.working_depth ||
       normalizeServiceTypeWorkingDepthMode(existing.working_depth_mode) !== nextPayload.working_depth_mode ||
       normalizeServiceTypeMeasurement(existing.working_depth_end_offset) !== nextPayload.working_depth_end_offset ||
+      normalizeBooleanFlag(existing.preview_mirror_x ?? existing._previewMirrorX, false) !== nextPayload.preview_mirror_x ||
+      normalizeBooleanFlag(existing.preview_mirror_y ?? existing._previewMirrorY, false) !== nextPayload.preview_mirror_y ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system;
     return buildPartKindDraft(existing, {
@@ -23064,6 +23100,8 @@ function buildImportedConstructionPartModelDrafts(rows) {
       side_count: sideCount,
       interior_angle_sum: Number(row.interior_angle_sum) || expectedAngleSum,
       default_angles: normalizedAngles,
+      preview_mirror_x: normalizeBooleanFlag(row.preview_mirror_x, false),
+      preview_mirror_y: normalizeBooleanFlag(row.preview_mirror_y, false),
       sort_order: index + 1,
       is_system: adminId === null,
     };
@@ -23081,6 +23119,8 @@ function buildImportedConstructionPartModelDrafts(rows) {
       Number(existing.interior_angle_sum) !== nextPayload.interior_angle_sum ||
       serializePartModelAnglesCsv(existing.default_angles, Number(existing.side_count), Number(existing.interior_angle_sum))
         !== serializePartModelAnglesCsv(nextPayload.default_angles, nextPayload.side_count, nextPayload.interior_angle_sum) ||
+      normalizeBooleanFlag(existing.preview_mirror_x ?? existing._previewMirrorX, false) !== nextPayload.preview_mirror_x ||
+      normalizeBooleanFlag(existing.preview_mirror_y ?? existing._previewMirrorY, false) !== nextPayload.preview_mirror_y ||
       Number(existing.sort_order) !== nextPayload.sort_order ||
       !!existing.is_system !== nextPayload.is_system;
     return buildPartKindDraft(existing, {

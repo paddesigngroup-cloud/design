@@ -57,6 +57,8 @@ def _service_type_headers() -> list[str]:
         "working_depth",
         "working_depth_mode",
         "working_depth_end_offset",
+        "preview_mirror_x",
+        "preview_mirror_y",
         "admin_mode",
     ]
 
@@ -76,6 +78,8 @@ def _part_model_headers() -> list[str]:
         "side_count",
         "interior_angle_sum",
         "default_angles",
+        "preview_mirror_x",
+        "preview_mirror_y",
         "admin_mode",
     ]
 
@@ -407,6 +411,8 @@ async def _service_type_rows(session: AsyncSession, admin_id: uuid.UUID) -> list
             row.working_depth if row.working_depth is not None else "",
             row.working_depth_mode or "fixed",
             row.working_depth_end_offset if row.working_depth_end_offset is not None else "",
+            1 if row.preview_mirror_x else 0,
+            1 if row.preview_mirror_y else 0,
             "system" if row.admin_id is None else "admin",
         ]
         for row in rows
@@ -446,6 +452,8 @@ async def _part_model_rows(session: AsyncSession, admin_id: uuid.UUID) -> list[l
             row.side_count,
             row.interior_angle_sum,
             ",".join(str(angle.get("angle_deg", "")) for angle in (row.default_angles or [])),
+            1 if row.preview_mirror_x else 0,
+            1 if row.preview_mirror_y else 0,
             "system" if row.admin_id is None else "admin",
         ]
         for row in rows

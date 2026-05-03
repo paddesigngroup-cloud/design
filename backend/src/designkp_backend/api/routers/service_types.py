@@ -41,6 +41,8 @@ class ServiceTypeItem(BaseModel):
     working_depth: float
     working_depth_mode: str
     working_depth_end_offset: float
+    preview_mirror_x: bool
+    preview_mirror_y: bool
     sort_order: int
     is_system: bool
 
@@ -63,6 +65,8 @@ class ServiceTypeCreate(BaseModel):
     working_depth: float = Field(default=0, ge=0)
     working_depth_mode: str = Field(default="fixed", min_length=1, max_length=16)
     working_depth_end_offset: float = Field(default=0, ge=0)
+    preview_mirror_x: bool = False
+    preview_mirror_y: bool = False
     sort_order: int | None = Field(default=None, ge=0)
     is_system: bool = False
 
@@ -83,6 +87,8 @@ class ServiceTypeUpdate(BaseModel):
     working_depth: float = Field(default=0, ge=0)
     working_depth_mode: str = Field(default="fixed", min_length=1, max_length=16)
     working_depth_end_offset: float = Field(default=0, ge=0)
+    preview_mirror_x: bool = False
+    preview_mirror_y: bool = False
     sort_order: int = Field(ge=0)
     is_system: bool
 
@@ -214,6 +220,8 @@ def _normalize_subtraction_payload(payload: ServiceTypeCreate | ServiceTypeUpdat
             "working_depth": working_depth,
             "working_depth_mode": working_depth_mode,
             "working_depth_end_offset": 0.0 if working_depth_mode != "to_end" else working_depth_end_offset,
+            "preview_mirror_x": bool(payload.preview_mirror_x),
+            "preview_mirror_y": bool(payload.preview_mirror_y),
         }
     service_location = _normalize_service_location(payload.service_location)
     subtraction_shape = _normalize_subtraction_shape(payload.subtraction_shape)
@@ -233,6 +241,8 @@ def _normalize_subtraction_payload(payload: ServiceTypeCreate | ServiceTypeUpdat
         "working_depth": working_depth,
         "working_depth_mode": working_depth_mode,
         "working_depth_end_offset": 0.0 if working_depth_mode != "to_end" else working_depth_end_offset,
+        "preview_mirror_x": bool(payload.preview_mirror_x),
+        "preview_mirror_y": bool(payload.preview_mirror_y),
     }
 
 
@@ -321,6 +331,8 @@ async def create_service_type(payload: ServiceTypeCreate, session: AsyncSession 
         working_depth=subtraction_payload["working_depth"],
         working_depth_mode=subtraction_payload["working_depth_mode"],
         working_depth_end_offset=subtraction_payload["working_depth_end_offset"],
+        preview_mirror_x=subtraction_payload["preview_mirror_x"],
+        preview_mirror_y=subtraction_payload["preview_mirror_y"],
         sort_order=payload.sort_order if payload.sort_order is not None else await _next_sort_order(session),
         is_system=payload.is_system,
     )
@@ -387,6 +399,8 @@ async def update_service_type(
     item.working_depth = subtraction_payload["working_depth"]
     item.working_depth_mode = subtraction_payload["working_depth_mode"]
     item.working_depth_end_offset = subtraction_payload["working_depth_end_offset"]
+    item.preview_mirror_x = subtraction_payload["preview_mirror_x"]
+    item.preview_mirror_y = subtraction_payload["preview_mirror_y"]
     item.sort_order = payload.sort_order
     item.is_system = payload.is_system
     try:

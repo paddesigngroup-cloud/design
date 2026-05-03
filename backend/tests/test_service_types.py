@@ -80,6 +80,8 @@ def test_create_service_type_success_without_subtraction(monkeypatch: pytest.Mon
         working_depth=14.25,
         working_depth_mode="to_end",
         working_depth_end_offset=2.5,
+        preview_mirror_x=True,
+        preview_mirror_y=False,
         sort_order=None,
         is_system=True,
     )
@@ -100,6 +102,8 @@ def test_create_service_type_success_without_subtraction(monkeypatch: pytest.Mon
     assert result.working_depth == 14.2
     assert result.working_depth_mode == "to_end"
     assert result.working_depth_end_offset == 2.5
+    assert result.preview_mirror_x is True
+    assert result.preview_mirror_y is False
     assert result.sort_order == 4
     assert session.added is not None
 
@@ -127,6 +131,8 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
         working_depth=0,
         working_depth_mode="fixed",
         working_depth_end_offset=0,
+        preview_mirror_x=False,
+        preview_mirror_y=False,
         sort_order=1,
         is_system=True,
     )
@@ -147,6 +153,8 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
         working_depth=7,
         working_depth_mode="to_end",
         working_depth_end_offset=1.5,
+        preview_mirror_x=True,
+        preview_mirror_y=True,
         sort_order=8,
         is_system=False,
     )
@@ -167,6 +175,8 @@ def test_update_service_type_success_with_circle_subtraction(monkeypatch: pytest
     assert existing.working_depth == 7
     assert existing.working_depth_mode == "to_end"
     assert existing.working_depth_end_offset == 1.5
+    assert existing.preview_mirror_x is True
+    assert existing.preview_mirror_y is True
     assert existing.sort_order == 8
     assert existing.is_system is False
 
@@ -259,6 +269,8 @@ def test_delete_service_type_checks_access_scope(monkeypatch: pytest.MonkeyPatch
         working_depth=0,
         working_depth_mode="fixed",
         working_depth_end_offset=0,
+        preview_mirror_x=False,
+        preview_mirror_y=False,
         sort_order=1,
         is_system=False,
     )

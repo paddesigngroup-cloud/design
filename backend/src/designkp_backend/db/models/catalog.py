@@ -196,6 +196,8 @@ class PartServiceType(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Vers
     working_depth: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
     working_depth_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="fixed", server_default="fixed")
     working_depth_end_offset: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    preview_mirror_x: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    preview_mirror_y: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
@@ -215,6 +217,8 @@ class PartModel(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, VersionMix
     side_count: Mapped[int] = mapped_column(Integer, nullable=False)
     interior_angle_sum: Mapped[int] = mapped_column(Integer, nullable=False)
     default_angles: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False, default=list)
+    preview_mirror_x: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    preview_mirror_y: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 

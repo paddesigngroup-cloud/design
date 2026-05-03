@@ -51,6 +51,8 @@ def test_export_part_models_returns_csv_and_snapshot(monkeypatch: pytest.MonkeyP
                     {"index": 4, "angle_deg": 120},
                     {"index": 5, "angle_deg": 120},
                 ],
+                preview_mirror_x=True,
+                preview_mirror_y=False,
                 sort_order=1,
                 id=uuid.uuid4(),
             )
@@ -61,8 +63,8 @@ def test_export_part_models_returns_csv_and_snapshot(monkeypatch: pytest.MonkeyP
     body = response.body.decode("utf-8-sig")
 
     assert response.headers["Content-Disposition"] == 'attachment; filename="part_models_excel_template.csv"'
-    assert "title,side_count,interior_angle_sum,default_angles,admin_mode" in body
-    assert "شش ضلعی,6,720,\"120,120,120,120,120,120\",system" in body
+    assert "title,side_count,interior_angle_sum,default_angles,preview_mirror_x,preview_mirror_y,admin_mode" in body
+    assert "شش ضلعی,6,720,\"120,120,120,120,120,120\",1,0,system" in body
     assert called["table_name"] == "part_models"
-    assert called["headers"] == ["title", "side_count", "interior_angle_sum", "default_angles", "admin_mode"]
-    assert called["rows"] == [["شش ضلعی", 6, 720, "120,120,120,120,120,120", "system"]]
+    assert called["headers"] == ["title", "side_count", "interior_angle_sum", "default_angles", "preview_mirror_x", "preview_mirror_y", "admin_mode"]
+    assert called["rows"] == [["شش ضلعی", 6, 720, "120,120,120,120,120,120", 1, 0, "system"]]
