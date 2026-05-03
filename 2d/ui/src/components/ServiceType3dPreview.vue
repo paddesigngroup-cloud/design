@@ -58,6 +58,10 @@ function mmToM(value) {
   return (Number(value) || 0) * 0.001;
 }
 
+function resolveFrontBackZFromOpposite(lengthM, oppositeM) {
+  return (lengthM * 0.5) - oppositeM;
+}
+
 function getRendererViewportSize() {
   if (!renderer || !hostEl.value) return new THREE.Vector2(1, 1);
   const rect = hostEl.value.getBoundingClientRect();
@@ -134,7 +138,7 @@ function createOpeningOutline(sceneInput) {
   const lengthM = mmToM(part.length);
   const x0 = (-widthM * 0.5) + mmToM(cutter.axisAligned);
   const y0 = (-thicknessM * 0.5) + mmToM(cutter.axisOpposite);
-  const z0 = (-lengthM * 0.5) + mmToM(cutter.axisOpposite);
+  const z0 = resolveFrontBackZFromOpposite(lengthM, mmToM(cutter.axisOpposite));
   const segments = [];
 
   const addLoop = (points) => {
@@ -196,7 +200,7 @@ function createCircleCutter(sceneInput) {
     mesh.rotation.x = Math.PI * 0.5;
     mesh.position.set(x, y, z);
   } else {
-    const z = (-lengthM * 0.5) + oppositeM;
+    const z = resolveFrontBackZFromOpposite(lengthM, oppositeM);
     const y = cutter.serviceLocation === "back"
       ? (-thicknessM * 0.5) + (depth * 0.5)
       : (thicknessM * 0.5) - (depth * 0.5);
@@ -230,7 +234,7 @@ function createProfileCutter(sceneInput) {
     const z = (lengthM * 0.5) - depth;
     mesh.position.set(x, y, z);
   } else {
-    const z = (-lengthM * 0.5) + oppositeM;
+    const z = resolveFrontBackZFromOpposite(lengthM, oppositeM);
     if (cutter.serviceLocation === "back") {
       mesh.rotation.x = -Math.PI * 0.5;
       mesh.position.set(x, -thicknessM * 0.5, z);
