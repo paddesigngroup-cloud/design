@@ -10013,6 +10013,120 @@ const partFormulaModelEditorPreviewState = computed(() => {
   };
 });
 
+function buildPreviewRect(widthMm, heightMm) {
+  const frame = { x: 18, y: 18, width: 184, height: 116 };
+  const safeWidth = Math.max(1, widthMm);
+  const safeHeight = Math.max(1, heightMm);
+  const scale = Math.min((frame.width - 20) / safeWidth, (frame.height - 20) / safeHeight);
+  const drawWidth = safeWidth * scale;
+  const drawHeight = safeHeight * scale;
+  return {
+    x: frame.x + ((frame.width - drawWidth) / 2),
+    y: frame.y + ((frame.height - drawHeight) / 2),
+    width: drawWidth,
+    height: drawHeight,
+    scale,
+  };
+}
+
+function buildServiceTypeShapeProfilePointsFromVertices(vertices, center, targetSizeMm) {
+  const sourceVertices = Array.isArray(vertices) ? vertices : [];
+  if (!sourceVertices.length) return [];
+  const centerX = Number(center?.x) || 0;
+  const centerY = Number(center?.y) || 0;
+  const localVertices = sourceVertices.map((point) => ({
+    x: (Number(point?.x) || 0) - centerX,
+    y: centerY - (Number(point?.y) || 0),
+  }));
+  const xs = localVertices.map((point) => point.x);
+  const ys = localVertices.map((point) => point.y);
+  const width = Math.max(1, Math.max(...xs) - Math.min(...xs));
+  const height = Math.max(1, Math.max(...ys) - Math.min(...ys));
+  const scale = Math.max(0.01, targetSizeMm / Math.max(width, height));
+  return localVertices.map((point) => ({
+    x: point.x * scale,
+    y: point.y * scale,
+  }));
+}
+
+function buildServiceTypeMirroredShapePreviewGeometry(shape, shapeAngles, mirrorX = false, mirrorY = false, targetSizeMm = 1) {
+  const safeShape = normalizeSubtractionShape(shape);
+  if (safeShape === "circle") {
+    return {
+      baseVertices: [],
+      mirroredVertices: [],
+      mirroredCenter: { x: 0, y: 0 },
+      mirroredShapeAngles: [],
+      normalizedAngles: [],
+      profilePoints: [],
+    };
+  }
+  const sideCount = Math.max(3, getServiceTypeShapeSideCount(safeShape) || 4);
+  const normalizedAngles = normalizeServiceTypeShapeAngles(safeShape, shapeAngles);
+  const geometry = normalizePartModelPreviewGeometry(sideCount, normalizedAngles);
+  const baseVertices = Array.isArray(geometry.vertices)
+    ? geometry.vertices.map((point) => ({ x: Number(point?.x) || 0, y: Number(point?.y) || 0 }))
+    : [];
+  const mirroredVertices = applyPartModelPreviewMirrorState(
+    baseVertices,
+    geometry.center,
+    mirrorX,
+    mirrorY,
+  );
+  const mirroredCenter = mirroredVertices.reduce(
+    (acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }),
+    { x: 0, y: 0 }
+  );
+  mirroredCenter.x /= mirroredVertices.length || 1;
+  mirroredCenter.y /= mirroredVertices.length || 1;
+  const mirroredShapeAngles = buildPartModelAnglePreviewRecords(sideCount, normalizedAngles, mirroredVertices).map((item) => ({
+    ...item,
+    value: normalizedAngles.find((entry) => Number(entry?.index) === item.index)?.angle_deg,
+  }));
+  return {
+    baseVertices,
+    mirroredVertices,
+    mirroredCenter,
+    mirroredShapeAngles,
+    normalizedAngles,
+    profilePoints: buildServiceTypeShapeProfilePointsFromVertices(mirroredVertices, mirroredCenter, targetSizeMm),
+  };
+}
+
+const serviceTypeEditorShapeAngleFields = computed(() => {
+  const draft = serviceTypeEditorDraft.value;
+  if (!draft) return [];
+  const safeShape = normalizeSubtractionShape(draft.subtraction_shape);
+  const baseAngles = Array.isArray(draft.shape_angles) ? draft.shape_angles : [];
+  if (safeShape === "circle") return [];
+  const shapePreview = buildServiceTypeMirroredShapePreviewGeometry(
+    safeShape,
+    baseAngles,
+    !!draft._previewMirrorX,
+    !!draft._previewMirrorY,
+    1,
+  );
+  if (!Array.isArray(shapePreview.mirroredShapeAngles) || !shapePreview.mirroredShapeAngles.length) {
+    return baseAngles.map((angle, index) => ({
+      ...angle,
+      sourceIndex: Number.isInteger(Number(angle?.index)) ? Number(angle.index) : index,
+      displayIndex: index,
+    }));
+  }
+  return shapePreview.mirroredShapeAngles.map((angle, displayIndex) => {
+    const sourceIndex = Number.isInteger(Number(angle?.index)) ? Number(angle.index) : displayIndex;
+    const sourceDraft = baseAngles.find((item) => Number(item?.index) === sourceIndex) || baseAngles[displayIndex] || {};
+    return {
+      ...sourceDraft,
+      index: sourceIndex,
+      sourceIndex,
+      displayIndex,
+      angle_deg: roundPartModelAngle(sourceDraft?.angle_deg ?? angle?.value),
+      _draft_text: String(sourceDraft?._draft_text ?? formatPartModelAngleNumber(sourceDraft?.angle_deg ?? angle?.value)),
+    };
+  });
+});
+
 const serviceTypeEditorPreviewState = computed(() => {
   const draft = serviceTypeEditorDraft.value;
   const previewPartDraft = serviceTypeEditorPreviewPartDraft.value || buildServiceTypePreviewPartDraft();
@@ -10027,58 +10141,23 @@ const serviceTypeEditorPreviewState = computed(() => {
   const partLengthMm = Math.max(1, Number(previewPartDraft?.length) || DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM.length);
   const partWidthMm = Math.max(1, Number(previewPartDraft?.width) || DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM.width);
   const partThicknessMm = Math.max(1, Number(previewPartDraft?.thickness) || DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM.thickness);
-  const geometry = normalizePartModelPreviewGeometry(
-    Math.max(3, getServiceTypeShapeSideCount(safeShape) || 4),
-    safeShape === "circle" ? null : normalizeServiceTypeShapeAngles(safeShape, draft?.shape_angles)
-  );
   const previewSizeLabel = [
     formatServiceTypeMeasurementForDisplay(partLengthMm),
     formatServiceTypeMeasurementForDisplay(partWidthMm),
     formatServiceTypeMeasurementForDisplay(partThicknessMm),
   ].join(" × ");
   const previewSizeUnitLabel = getCurrentParamLengthUnitLabel();
-
-  function buildPreviewRect(widthMm, heightMm) {
-    const frame = { x: 18, y: 18, width: 184, height: 116 };
-    const safeWidth = Math.max(1, widthMm);
-    const safeHeight = Math.max(1, heightMm);
-    const scale = Math.min((frame.width - 20) / safeWidth, (frame.height - 20) / safeHeight);
-    const drawWidth = safeWidth * scale;
-    const drawHeight = safeHeight * scale;
-    return {
-      x: frame.x + ((frame.width - drawWidth) / 2),
-      y: frame.y + ((frame.height - drawHeight) / 2),
-      width: drawWidth,
-      height: drawHeight,
-      scale,
-    };
-  }
-
-  function buildShapeProfilePoints(targetSizeMm) {
-    if (safeShape === "circle") return [];
-    const sourceVertices = Array.isArray(geometry.vertices) ? geometry.vertices : [];
-    if (!sourceVertices.length) return [];
-    const centerX = Number(geometry.center?.x) || 0;
-    const centerY = Number(geometry.center?.y) || 0;
-    const localVertices = sourceVertices.map((point) => ({
-      x: (Number(point.x) || 0) - centerX,
-      y: centerY - (Number(point.y) || 0),
-    }));
-    const xs = localVertices.map((point) => point.x);
-    const ys = localVertices.map((point) => point.y);
-    const width = Math.max(1, Math.max(...xs) - Math.min(...xs));
-    const height = Math.max(1, Math.max(...ys) - Math.min(...ys));
-    const scale = Math.max(0.01, targetSizeMm / Math.max(width, height));
-    return localVertices.map((point) => ({
-      x: point.x * scale,
-      y: point.y * scale,
-    }));
-  }
+  const shapePreview = buildServiceTypeMirroredShapePreviewGeometry(
+    safeShape,
+    draft?.shape_angles,
+    !!draft?._previewMirrorX,
+    !!draft?._previewMirrorY,
+    Math.max(workingDiameter, 1),
+  );
 
   const topRect = buildPreviewRect(partWidthMm, partLengthMm);
   const bottomRect = buildPreviewRect(partWidthMm, partLengthMm);
   const sideRect = buildPreviewRect(partWidthMm, partThicknessMm);
-  const shapeProfilePoints = buildShapeProfilePoints(Math.max(workingDiameter, 1));
   const previewSceneSpec = normalizeServiceTypePreviewSceneInput({
     part: {
       width: partWidthMm,
@@ -10093,7 +10172,7 @@ const serviceTypeEditorPreviewState = computed(() => {
       workingDepth,
       axisAligned,
       axisOpposite,
-      profilePoints: shapeProfilePoints,
+      profilePoints: shapePreview.profilePoints,
     },
   });
   const projectedViews = buildServiceTypeProjectionViews(previewSceneSpec, {
@@ -11302,6 +11381,8 @@ function buildNewServiceTypeDraft() {
     axis_to_aligned_edge_distance: 0,
     working_diameter: 0,
     working_depth: 0,
+    _previewMirrorX: false,
+    _previewMirrorY: false,
     sort_order: nextSort,
     is_system: true,
   }, true);
@@ -14053,6 +14134,16 @@ function applyPartModelMirror(axis) {
   }
 }
 
+function applyServiceTypeMirror(axis) {
+  const draft = serviceTypeEditorDraft.value;
+  if (!draft) return;
+  if (axis === "horizontal") {
+    draft._previewMirrorY = !draft._previewMirrorY;
+  } else {
+    draft._previewMirrorX = !draft._previewMirrorX;
+  }
+}
+
 function onPartModelAngleInput(angleIndex, value) {
   const draft = partModelEditorDraft.value;
   if (!draft) return;
@@ -14111,6 +14202,8 @@ function openServiceTypeEditor(item = null) {
         axis_to_aligned_edge_distance: normalizeServiceTypeMeasurement(item.axis_to_aligned_edge_distance),
         working_diameter: normalizeServiceTypeMeasurement(item.working_diameter),
         working_depth: normalizeServiceTypeMeasurement(item.working_depth),
+        _previewMirrorX: normalizeBooleanFlag(item._previewMirrorX || item.previewMirrorX || item.preview_mirror_x, false),
+        _previewMirrorY: normalizeBooleanFlag(item._previewMirrorY || item.previewMirrorY || item.preview_mirror_y, false),
         sort_order: Number(item.sort_order) || 0,
         is_system: !!item.is_system,
       }
@@ -29270,19 +29363,19 @@ onBeforeUnmount(() => {
                 <div class="serviceTypeEditor__label">زاویه‌های شکل</div>
                 <div class="serviceTypeEditor__angleFields">
                   <label
-                    v-for="angle in serviceTypeEditorDraft.shape_angles"
-                    :key="`service-type-angle-${angle.index}`"
+                    v-for="angle in serviceTypeEditorShapeAngleFields"
+                    :key="`service-type-angle-${angle.sourceIndex ?? angle.index}`"
                     class="serviceTypeEditor__angleField"
                   >
-                    <span>{{ `زاویه ${toPersianDigits(angle.index + 1)}` }}</span>
+                    <span>{{ `زاویه ${toPersianDigits((angle.displayIndex ?? angle.index ?? 0) + 1)}` }}</span>
                     <input
                       :value="angle._draft_text ?? formatPartModelAngleNumber(angle.angle_deg)"
                       class="constructionDialog__input constructionDialog__input--mono"
                       type="text"
                       inputmode="decimal"
-                      @input="onServiceTypeShapeAngleInput(angle.index, $event.target.value)"
-                      @change="onServiceTypeShapeAngleChange(angle.index, $event.target.value)"
-                      @blur="onServiceTypeShapeAngleChange(angle.index, $event.target.value)"
+                      @input="onServiceTypeShapeAngleInput(angle.sourceIndex ?? angle.index, $event.target.value)"
+                      @change="onServiceTypeShapeAngleChange(angle.sourceIndex ?? angle.index, $event.target.value)"
+                      @blur="onServiceTypeShapeAngleChange(angle.sourceIndex ?? angle.index, $event.target.value)"
                     />
                   </label>
                 </div>
@@ -29291,7 +29384,29 @@ onBeforeUnmount(() => {
               <div class="serviceTypeEditor__previewPanel">
                 <div class="serviceTypeEditor__previewPanelHead">
                   <div class="serviceTypeEditor__sectionTitle">پیش‌نمایش استاندارد قطعه</div>
-                  <div class="serviceTypeEditor__previewSize">{{ `${serviceTypeEditorPreviewState.sizeLabel} ${serviceTypeEditorPreviewState.sizeUnitLabel}` }}</div>
+                  <div class="serviceTypeEditor__previewActions">
+                    <button type="button" class="partModelPreview__mirrorBtn" title="قرینه عمودی" @click="applyServiceTypeMirror('horizontal')">
+                      <svg viewBox="0 0 24 24" class="partModelPreview__mirrorSvg" aria-hidden="true">
+                        <line x1="3" y1="12" x2="21" y2="12" class="partModelPreview__mirrorAxis" />
+                        <circle cx="12" cy="7" r="2.4" class="partModelPreview__mirrorDot" />
+                        <circle cx="12" cy="17" r="2.4" class="partModelPreview__mirrorDot" />
+                        <path d="M 9.5 9.5 L 11.5 11.5 L 13.5 9.5" class="partModelPreview__mirrorArrow" />
+                        <path d="M 9.5 14.5 L 11.5 12.5 L 13.5 14.5" class="partModelPreview__mirrorArrow" />
+                      </svg>
+                      <span>قرینه عمودی</span>
+                    </button>
+                    <button type="button" class="partModelPreview__mirrorBtn" title="قرینه افقی" @click="applyServiceTypeMirror('vertical')">
+                      <svg viewBox="0 0 24 24" class="partModelPreview__mirrorSvg" aria-hidden="true">
+                        <line x1="12" y1="3" x2="12" y2="21" class="partModelPreview__mirrorAxis" />
+                        <circle cx="7" cy="12" r="2.4" class="partModelPreview__mirrorDot" />
+                        <circle cx="17" cy="12" r="2.4" class="partModelPreview__mirrorDot" />
+                        <path d="M 9.5 9.5 L 11.5 11.5 L 9.5 13.5" class="partModelPreview__mirrorArrow" />
+                        <path d="M 14.5 9.5 L 12.5 11.5 L 14.5 13.5" class="partModelPreview__mirrorArrow" />
+                      </svg>
+                      <span>قرینه افقی</span>
+                    </button>
+                    <div class="serviceTypeEditor__previewSize">{{ `${serviceTypeEditorPreviewState.sizeLabel} ${serviceTypeEditorPreviewState.sizeUnitLabel}` }}</div>
+                  </div>
                 </div>
                 <div class="serviceTypeEditor__previewGrid">
                   <article
@@ -34418,6 +34533,13 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 999px;
   padding: 6px 10px;
+}
+
+.serviceTypeEditor__previewActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .serviceTypeEditor__previewGrid {
