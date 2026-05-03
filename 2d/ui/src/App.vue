@@ -8898,8 +8898,8 @@ const DEFAULT_SERVICE_TYPE_PREVIEW_PART_MM = Object.freeze({
 });
 
 const SERVICE_TYPE_WORKING_DEPTH_MODE_OPTIONS = [
-  { value: "fixed", label: "عمق ثابت" },
-  { value: "to_end", label: "تا انتها" },
+  { value: "fixed", label: "عمق مستقیم" },
+  { value: "to_end", label: "عمق ثابت" },
 ];
 
 function normalizeServiceTypeMeasurement(value) {
@@ -9016,7 +9016,7 @@ function getServiceTypeWorkingDepthSummary(item) {
   if (mode !== "to_end") return getServiceTypeMeasurementDisplayText(item?.working_depth);
   const offset = normalizeServiceTypeMeasurement(item?.working_depth_end_offset);
   if (offset <= 0) return "تا انتها";
-  return `تا انتها - ${getServiceTypeMeasurementDisplayText(offset)}`;
+  return `عمق ثابت تا انتها: ${getServiceTypeMeasurementDisplayText(offset)}`;
 }
 
 function normalizeInteriorInstanceRecord(item) {
@@ -14290,7 +14290,16 @@ function onServiceTypeMeasurementChange(fieldName, value) {
 function onServiceTypeWorkingDepthModeChange(value) {
   const draft = serviceTypeEditorDraft.value;
   if (!draft) return;
-  draft.working_depth_mode = normalizeServiceTypeWorkingDepthMode(value);
+  const nextMode = normalizeServiceTypeWorkingDepthMode(value);
+  if (nextMode === "to_end") {
+    const normalizedWorkingDepth = normalizeServiceTypeMeasurement(draft.working_depth);
+    const normalizedEndOffset = normalizeServiceTypeMeasurement(draft.working_depth_end_offset);
+    if ((normalizedEndOffset <= 0) && normalizedWorkingDepth > 0) {
+      draft.working_depth_end_offset = normalizedWorkingDepth;
+      draft[getServiceTypeMeasurementDraftTextKey("working_depth_end_offset")] = formatServiceTypeMeasurementForDisplay(normalizedWorkingDepth);
+    }
+  }
+  draft.working_depth_mode = nextMode;
   if (draft.working_depth_mode !== "to_end") {
     draft.working_depth_end_offset = 0;
     draft[getServiceTypeMeasurementDraftTextKey("working_depth_end_offset")] = formatServiceTypeMeasurementForDisplay(0);
@@ -29367,7 +29376,7 @@ onBeforeUnmount(() => {
                   />
                 </label>
                 <div class="serviceTypeEditor__fieldBlock serviceTypeEditor__fieldBlock--depthMode">
-                  <span class="serviceTypeEditor__label">حالت عمق کارگیر</span>
+                  <span class="serviceTypeEditor__label">روش تعیین عمق کارگیر</span>
                   <div class="serviceTypeEditor__segmented">
                     <button
                       v-for="option in SERVICE_TYPE_WORKING_DEPTH_MODE_OPTIONS"
@@ -29382,7 +29391,7 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
                 <label v-if="normalizeServiceTypeWorkingDepthMode(serviceTypeEditorDraft.working_depth_mode) === 'fixed'" class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-                  <span>{{ `عمق کارگیر ثابت (${getCurrentParamLengthUnitLabel()})` }}</span>
+                  <span>{{ `عمق مستقیم کارگیر (${getCurrentParamLengthUnitLabel()})` }}</span>
                   <input
                     :value="serviceTypeEditorDraft._working_depth_display_text ?? ''"
                     class="constructionDialog__input constructionDialog__input--mono"
@@ -29394,7 +29403,7 @@ onBeforeUnmount(() => {
                   />
                 </label>
                 <label v-else class="subCategoryDesignEditor__field subCategoryDesignEditor__field--compact">
-                  <span>{{ `فاصله باقی‌مانده تا انتها (${getCurrentParamLengthUnitLabel()})` }}</span>
+                  <span>{{ `مقدار ثابت تا انتها (${getCurrentParamLengthUnitLabel()})` }}</span>
                   <input
                     :value="serviceTypeEditorDraft._working_depth_end_offset_display_text ?? ''"
                     class="constructionDialog__input constructionDialog__input--mono"
